@@ -16,7 +16,7 @@ describe('Auth', () => {
         }),
       });
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.tokens.accessToken).toBeDefined();
       expect(body.tokens.refreshToken).toBeDefined();
       expect(body.user.email).toBe('test@example.com');
@@ -55,7 +55,7 @@ describe('Auth', () => {
         body: JSON.stringify({ email: 'login@example.com', password: 'mypassword' }),
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.tokens.accessToken).toBeDefined();
     });
 
@@ -96,7 +96,7 @@ describe('Auth', () => {
         body: JSON.stringify({ refreshToken }),
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.tokens.accessToken).toBeDefined();
       expect(body.tokens.refreshToken).toBeDefined();
     });
@@ -118,7 +118,7 @@ describe('Auth', () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.email).toBe('me@example.com');
     });
 
@@ -135,7 +135,7 @@ describe('Auth', () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(Array.isArray(body)).toBe(true);
       expect(body.length).toBeGreaterThanOrEqual(1);
     });
@@ -147,7 +147,7 @@ describe('Auth', () => {
         method: 'POST',
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.message).toBe('Logged out successfully');
     });
   });

@@ -19,7 +19,7 @@ describe('Nodes', () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.node.hostname).toBe('node-1');
     expect(body.joinToken).toBe('worker-token');
   });
@@ -44,7 +44,7 @@ describe('Nodes', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBeGreaterThanOrEqual(1);
   });
@@ -63,13 +63,13 @@ describe('Nodes', () => {
         role: 'worker',
       }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/nodes/${created.node.id}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.hostname).toBe('detail-node');
   });
 
@@ -87,7 +87,7 @@ describe('Nodes', () => {
         role: 'worker',
       }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/nodes/${created.node.id}`, {
       method: 'PATCH',
@@ -116,14 +116,14 @@ describe('Nodes', () => {
         role: 'worker',
       }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/nodes/${created.node.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.message).toContain('removed');
   });
 

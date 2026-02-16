@@ -10,7 +10,7 @@ describe('Admin', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.accounts).toBeDefined();
     expect(body.users).toBeDefined();
     expect(body.services).toBeDefined();
@@ -30,7 +30,7 @@ describe('Admin', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.data).toBeDefined();
     expect(Array.isArray(body.data)).toBe(true);
     expect(body.pagination).toBeDefined();
@@ -41,7 +41,7 @@ describe('Admin', () => {
     const res = await app.request('/api/v1/admin/users', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const body = await res.json();
+    const body = await res.json() as any;
     for (const user of body.data) {
       expect(user.passwordHash).toBeUndefined();
     }
@@ -53,7 +53,7 @@ describe('Admin', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.data).toBeDefined();
     expect(Array.isArray(body.data)).toBe(true);
     expect(body.pagination).toBeDefined();
@@ -68,7 +68,7 @@ describe('Admin', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.isSuper).toBe(true);
   });
 
@@ -96,7 +96,7 @@ describe('Admin', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.data).toBeDefined();
     expect(Array.isArray(body.data)).toBe(true);
   });
@@ -107,7 +107,7 @@ describe('Admin', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.data).toBeDefined();
     expect(Array.isArray(body.data)).toBe(true);
   });

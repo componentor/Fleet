@@ -20,7 +20,7 @@ describe('Services', () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.name).toBe('my-app');
     expect(body.status).toBe('running');
   });
@@ -48,7 +48,7 @@ describe('Services', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBeGreaterThanOrEqual(1);
   });
@@ -68,7 +68,7 @@ describe('Services', () => {
         image: 'nginx:latest',
       }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/services/${created.id}`, {
       headers: {
@@ -77,7 +77,7 @@ describe('Services', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.name).toBe('detail-test');
   });
 
@@ -95,7 +95,7 @@ describe('Services', () => {
         image: 'nginx:latest',
       }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/services/${created.id}`, {
       method: 'PATCH',
@@ -109,7 +109,7 @@ describe('Services', () => {
       }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.replicas).toBe(3);
   });
 
@@ -127,7 +127,7 @@ describe('Services', () => {
         image: 'nginx:latest',
       }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/services/${created.id}`, {
       method: 'DELETE',
@@ -137,7 +137,7 @@ describe('Services', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.message).toContain('destroyed');
   });
 

@@ -557,7 +557,7 @@ vi.mock('nodemailer', () => ({
 
 // ── Helper functions for insertReturning/updateReturning/deleteReturning ──
 const insertReturning = async (table: any, values: Record<string, unknown>): Promise<any[]> => {
-  return testDb.insert(table).values(values).returning();
+  return testDb.insert(table).values(values).returning() as Promise<any[]>;
 };
 
 const updateReturning = async (
@@ -565,11 +565,11 @@ const updateReturning = async (
   set: Record<string, unknown>,
   condition: any,
 ): Promise<any[]> => {
-  return testDb.update(table).set(set).where(condition).returning();
+  return testDb.update(table).set(set).where(condition).returning() as Promise<any[]>;
 };
 
 const deleteReturning = async (table: any, condition: any): Promise<any[]> => {
-  return testDb.delete(table).where(condition).returning();
+  return testDb.delete(table).where(condition).returning() as Promise<any[]>;
 };
 
 const upsert = async (

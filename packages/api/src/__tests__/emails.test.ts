@@ -13,7 +13,7 @@ describe('Email Templates', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(Array.isArray(body)).toBe(true);
     // Should include the default templates from mock
     expect(body.length).toBeGreaterThanOrEqual(1);
@@ -28,7 +28,7 @@ describe('Email Templates', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.slug).toBe('welcome');
     expect(body.isDefault).toBe(true);
   });
@@ -48,7 +48,7 @@ describe('Email Templates', () => {
       }),
     });
     expect([200, 201]).toContain(res.status);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.subject).toBe('Custom Welcome');
   });
 
@@ -81,7 +81,7 @@ describe('Email Templates', () => {
       }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.subject).toBe('Second Override');
   });
 

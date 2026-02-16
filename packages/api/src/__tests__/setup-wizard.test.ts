@@ -8,7 +8,7 @@ describe('Setup API', () => {
   describe('GET /api/v1/setup/status', () => {
     it('should return needsSetup: true when no users exist', async () => {
       const res = await app.request('/api/v1/setup/status');
-      const data = await res.json();
+      const data = await res.json() as any;
 
       expect(res.status).toBe(200);
       expect(data.needsSetup).toBe(true);
@@ -18,7 +18,7 @@ describe('Setup API', () => {
       await createTestUser();
 
       const res = await app.request('/api/v1/setup/status');
-      const data = await res.json();
+      const data = await res.json() as any;
 
       expect(res.status).toBe(200);
       expect(data.needsSetup).toBe(false);
@@ -39,7 +39,7 @@ describe('Setup API', () => {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as any;
 
       expect(res.status).toBe(201);
       expect(data.tokens).toBeDefined();
@@ -62,7 +62,7 @@ describe('Setup API', () => {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as any;
 
       expect(res.status).toBe(201);
       expect(data.tokens.accessToken).toBeDefined();
@@ -82,7 +82,7 @@ describe('Setup API', () => {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as any;
 
       expect(res.status).toBe(403);
       expect(data.error).toBe('Setup has already been completed');
@@ -140,7 +140,7 @@ describe('Setup API', () => {
 
       // Check status
       const res = await app.request('/api/v1/setup/status');
-      const data = await res.json();
+      const data = await res.json() as any;
 
       expect(res.status).toBe(200);
       expect(data.needsSetup).toBe(false);

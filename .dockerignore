@@ -1,0 +1,14 @@
+node_modules
+.git
+.turbo
+.vscode
+.idea
+*.log
+coverage
+.env
+.env.*
+!env.example
+*.md
+*.test.ts
+__tests__
+.github

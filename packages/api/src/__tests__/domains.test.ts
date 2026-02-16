@@ -18,7 +18,7 @@ describe('DNS', () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.domain).toBe('example.com');
     expect(body.verificationToken).toBeDefined();
   });
@@ -43,7 +43,7 @@ describe('DNS', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBeGreaterThanOrEqual(1);
   });
@@ -59,7 +59,7 @@ describe('DNS', () => {
       },
       body: JSON.stringify({ domain: 'detail-test.com' }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/dns/zones/${created.id}`, {
       headers: {
@@ -68,7 +68,7 @@ describe('DNS', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.domain).toBe('detail-test.com');
   });
 
@@ -83,7 +83,7 @@ describe('DNS', () => {
       },
       body: JSON.stringify({ domain: 'delete-test.com' }),
     });
-    const created = await createRes.json();
+    const created = await createRes.json() as any;
 
     const res = await app.request(`/api/v1/dns/zones/${created.id}`, {
       method: 'DELETE',
@@ -93,7 +93,7 @@ describe('DNS', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.message).toContain('deleted');
   });
 
@@ -147,7 +147,7 @@ describe('DNS', () => {
         },
         body: JSON.stringify({ domain: 'records-test.com' }),
       });
-      const zone = await createRes.json();
+      const zone = await createRes.json() as any;
 
       const res = await app.request(`/api/v1/dns/zones/${zone.id}/records`, {
         method: 'POST',
@@ -164,7 +164,7 @@ describe('DNS', () => {
         }),
       });
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.type).toBe('A');
       expect(body.content).toBe('1.2.3.4');
     });
@@ -180,7 +180,7 @@ describe('DNS', () => {
         },
         body: JSON.stringify({ domain: 'list-records.com' }),
       });
-      const zone = await createRes.json();
+      const zone = await createRes.json() as any;
 
       const res = await app.request(`/api/v1/dns/zones/${zone.id}/records`, {
         headers: {
@@ -189,7 +189,7 @@ describe('DNS', () => {
         },
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(Array.isArray(body)).toBe(true);
     });
   });

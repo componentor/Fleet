@@ -179,6 +179,12 @@ const routes: RouteRecordRaw[] = [
   ...superRoutes,
   ...panelRoutes,
   ...setupRoutes,
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/pages/NotFound.vue'),
+    meta: { public: true },
+  },
 ]
 
 export const router = createRouter({

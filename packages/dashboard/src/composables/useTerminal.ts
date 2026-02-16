@@ -3,11 +3,22 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+
 export function useTerminal() {
   const terminalRef = ref<HTMLElement | null>(null)
+  const connectionState = ref<ConnectionState>('disconnected')
+
   let terminal: Terminal | null = null
   let fitAddon: FitAddon | null = null
   let ws: WebSocket | null = null
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectAttempts = 0
+  let currentServiceId: string | null = null
+  let intentionalClose = false
+
+  const MAX_RECONNECT_ATTEMPTS = 5
+  const BASE_DELAY_MS = 1000
 
   function createTerminal(container: HTMLElement) {
     terminal = new Terminal({
@@ -29,7 +40,6 @@ export function useTerminal() {
     terminal.open(container)
     fitAddon.fit()
 
-    // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       fitAddon?.fit()
     })
@@ -41,15 +51,33 @@ export function useTerminal() {
   function connect(serviceId: string) {
     if (!terminal) return
 
+    intentionalClose = false
+    currentServiceId = serviceId
+    reconnectAttempts = 0
+    doConnect(serviceId)
+  }
+
+  function doConnect(serviceId: string) {
+    if (!terminal) return
+
+    connectionState.value = reconnectAttempts > 0 ? 'reconnecting' : 'connecting'
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}`
-
     const token = localStorage.getItem('fleet_token')
+
     ws = new WebSocket(`${wsUrl}?token=${token}`)
 
     ws.onopen = () => {
-      terminal?.writeln('Connected to terminal...')
-      // Send initial resize
+      connectionState.value = 'connected'
+      reconnectAttempts = 0
+
+      if (reconnectAttempts === 0) {
+        terminal?.writeln('Connected to terminal...')
+      } else {
+        terminal?.writeln('\r\nReconnected.')
+      }
+
       if (terminal && fitAddon) {
         ws?.send(
           JSON.stringify({
@@ -66,21 +94,33 @@ export function useTerminal() {
     }
 
     ws.onerror = () => {
-      terminal?.writeln('\r\nConnection error.')
+      // onerror is always followed by onclose, handle reconnection there
     }
 
     ws.onclose = () => {
-      terminal?.writeln('\r\nConnection closed.')
+      connectionState.value = 'disconnected'
+
+      if (intentionalClose) return
+
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        const delay = BASE_DELAY_MS * Math.pow(2, reconnectAttempts)
+        reconnectAttempts++
+        terminal?.writeln(`\r\nConnection lost. Reconnecting in ${delay / 1000}s... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
+        connectionState.value = 'reconnecting'
+        reconnectTimer = setTimeout(() => {
+          if (currentServiceId) doConnect(currentServiceId)
+        }, delay)
+      } else {
+        terminal?.writeln('\r\nConnection closed. Max reconnection attempts reached.')
+      }
     }
 
-    // Send input to server
     terminal.onData((data) => {
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'input', data }))
       }
     })
 
-    // Send resize events
     terminal.onResize(({ cols, rows }) => {
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
@@ -89,8 +129,15 @@ export function useTerminal() {
   }
 
   function disconnect() {
+    intentionalClose = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     ws?.close()
     ws = null
+    currentServiceId = null
+    connectionState.value = 'disconnected'
   }
 
   function dispose() {
@@ -106,6 +153,7 @@ export function useTerminal() {
 
   return {
     terminalRef,
+    connectionState,
     createTerminal,
     connect,
     disconnect,

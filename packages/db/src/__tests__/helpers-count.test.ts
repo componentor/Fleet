@@ -15,7 +15,7 @@ describe('countSql', () => {
       .select({ count: countSql() })
       .from(schema.accounts);
 
-    expect(result.count).toBe(0);
+    expect(result!.count).toBe(0);
   });
 
   it('returns correct count after inserting rows', async () => {
@@ -27,6 +27,6 @@ describe('countSql', () => {
       .select({ count: countSql() })
       .from(schema.accounts);
 
-    expect(result.count).toBe(3);
+    expect(result!.count).toBe(3);
   });
 });

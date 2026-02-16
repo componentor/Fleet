@@ -23,8 +23,7 @@ async function main() {
   const shutdown = () => {
     console.log('[agent] Shutting down...')
     monitor.stop()
-    // Let the event loop drain naturally instead of forcing exit
-    setTimeout(() => process.exit(0), 1000).unref()
+    process.exit(0)
   }
 
   process.on('SIGTERM', shutdown)

@@ -10,7 +10,7 @@ describe('Accounts', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBeGreaterThanOrEqual(1);
   });
@@ -23,7 +23,7 @@ describe('Accounts', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -42,7 +42,7 @@ describe('Accounts', () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.name).toBe('Sub Account');
     expect(body.parentId).toBe(account.id);
   });
@@ -56,7 +56,7 @@ describe('Accounts', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.id).toBe(account.id);
   });
 
@@ -72,7 +72,7 @@ describe('Accounts', () => {
       body: JSON.stringify({ name: 'Updated Name' }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.name).toBe('Updated Name');
   });
 
@@ -86,7 +86,7 @@ describe('Accounts', () => {
       },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.message).toContain('deleted');
   });
 
@@ -105,7 +105,7 @@ describe('Accounts', () => {
         },
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(Array.isArray(body)).toBe(true);
       expect(body.length).toBeGreaterThanOrEqual(1);
     });
@@ -128,7 +128,7 @@ describe('Accounts', () => {
         }),
       });
       expect(res.status).toBe(201);
-      const body = await res.json();
+      const body = await res.json() as any;
       expect(body.email).toBe('invitee@example.com');
     });
   });
