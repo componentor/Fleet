@@ -1,0 +1,64 @@
+slug: ghost
+name: Ghost
+description: Professional publishing platform for bloggers and journalists. Includes Ghost and MySQL database.
+icon_url: https://ghost.org/images/logos/ghost-logo-orb.png
+category: cms
+
+variables:
+  - name: GHOST_URL
+    label: Site URL
+    type: string
+    required: true
+    default: http://localhost:2368
+  - name: MYSQL_ROOT_PASSWORD
+    label: MySQL Root Password
+    type: password
+    required: true
+    generate: true
+  - name: MYSQL_DATABASE
+    label: Database Name
+    type: string
+    default: ghost
+  - name: MYSQL_USER
+    label: Database User
+    type: string
+    default: ghost
+  - name: MYSQL_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: ghost
+    image: ghost:5.101-alpine
+    ports:
+      - target: 2368
+        published: 2368
+    env:
+      url: "{{GHOST_URL}}"
+      database__client: mysql
+      database__connection__host: "{{service:ghost-db}}"
+      database__connection__database: "{{MYSQL_DATABASE}}"
+      database__connection__user: "{{MYSQL_USER}}"
+      database__connection__password: "{{MYSQL_PASSWORD}}"
+      NODE_ENV: production
+    volumes:
+      - source: ghost_content
+        target: /var/lib/ghost/content
+    domain: "{{GHOST_URL}}"
+
+  - name: ghost-db
+    image: mysql:8.4
+    env:
+      MYSQL_ROOT_PASSWORD: "{{MYSQL_ROOT_PASSWORD}}"
+      MYSQL_DATABASE: "{{MYSQL_DATABASE}}"
+      MYSQL_USER: "{{MYSQL_USER}}"
+      MYSQL_PASSWORD: "{{MYSQL_PASSWORD}}"
+    volumes:
+      - source: ghost_db_data
+        target: /var/lib/mysql
+
+volumes:
+  - ghost_content
+  - ghost_db_data

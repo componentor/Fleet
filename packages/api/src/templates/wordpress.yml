@@ -1,0 +1,60 @@
+slug: wordpress
+name: WordPress
+description: The world's most popular CMS. Includes WordPress and MySQL database.
+icon_url: https://s.w.org/style/images/about/WordPress-logotype-wmark.png
+category: cms
+
+variables:
+  - name: MYSQL_ROOT_PASSWORD
+    label: MySQL Root Password
+    type: password
+    required: true
+    generate: true
+  - name: MYSQL_DATABASE
+    label: Database Name
+    type: string
+    default: wordpress
+  - name: MYSQL_USER
+    label: Database User
+    type: string
+    default: wordpress
+  - name: MYSQL_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: WORDPRESS_DOMAIN
+    label: Domain
+    type: string
+    required: false
+
+services:
+  - name: wordpress
+    image: wordpress:6.7-apache
+    ports:
+      - target: 80
+        published: 8080
+    env:
+      WORDPRESS_DB_HOST: "{{service:wordpress-db}}:3306"
+      WORDPRESS_DB_NAME: "{{MYSQL_DATABASE}}"
+      WORDPRESS_DB_USER: "{{MYSQL_USER}}"
+      WORDPRESS_DB_PASSWORD: "{{MYSQL_PASSWORD}}"
+    volumes:
+      - source: wordpress_data
+        target: /var/www/html
+    domain: "{{WORDPRESS_DOMAIN}}"
+
+  - name: wordpress-db
+    image: mysql:8.4
+    env:
+      MYSQL_ROOT_PASSWORD: "{{MYSQL_ROOT_PASSWORD}}"
+      MYSQL_DATABASE: "{{MYSQL_DATABASE}}"
+      MYSQL_USER: "{{MYSQL_USER}}"
+      MYSQL_PASSWORD: "{{MYSQL_PASSWORD}}"
+    volumes:
+      - source: wordpress_db_data
+        target: /var/lib/mysql
+
+volumes:
+  - wordpress_data
+  - wordpress_db_data

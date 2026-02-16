@@ -1,0 +1,95 @@
+slug: directus
+name: Directus
+description: Open-source headless CMS and data platform with a powerful REST and GraphQL API.
+icon_url: https://directus.io/favicon.ico
+category: cms
+
+variables:
+  - name: DIRECTUS_SECRET
+    label: Secret Key
+    type: password
+    required: true
+    generate: true
+  - name: ADMIN_EMAIL
+    label: Admin Email
+    type: string
+    required: true
+    default: admin@example.com
+  - name: ADMIN_PASSWORD
+    label: Admin Password
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_USER
+    label: Database User
+    type: string
+    default: directus
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_DB
+    label: Database Name
+    type: string
+    default: directus
+  - name: REDIS_PASSWORD
+    label: Redis Password
+    type: password
+    required: true
+    generate: true
+  - name: DIRECTUS_DOMAIN
+    label: Domain
+    type: string
+    required: false
+
+services:
+  - name: directus
+    image: directus/directus:11.3
+    ports:
+      - target: 8055
+        published: 8055
+    env:
+      SECRET: "{{DIRECTUS_SECRET}}"
+      ADMIN_EMAIL: "{{ADMIN_EMAIL}}"
+      ADMIN_PASSWORD: "{{ADMIN_PASSWORD}}"
+      DB_CLIENT: pg
+      DB_HOST: "{{service:directus-db}}"
+      DB_PORT: "5432"
+      DB_DATABASE: "{{POSTGRES_DB}}"
+      DB_USER: "{{POSTGRES_USER}}"
+      DB_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      REDIS: "redis://default:{{REDIS_PASSWORD}}@{{service:directus-redis}}:6379"
+      PUBLIC_URL: "http://{{DIRECTUS_DOMAIN}}:8055"
+    volumes:
+      - source: directus_uploads
+        target: /directus/uploads
+      - source: directus_extensions
+        target: /directus/extensions
+    domain: "{{DIRECTUS_DOMAIN}}"
+
+  - name: directus-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: "{{POSTGRES_USER}}"
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: "{{POSTGRES_DB}}"
+    volumes:
+      - source: directus_db_data
+        target: /var/lib/postgresql/data
+
+  - name: directus-redis
+    image: valkey/valkey:8.0-alpine
+    env:
+      VALKEY_EXTRA_FLAGS: "--requirepass {{REDIS_PASSWORD}}"
+    volumes:
+      - source: directus_redis_data
+        target: /data
+
+volumes:
+  - directus_uploads
+  - directus_extensions
+  - directus_db_data
+  - directus_redis_data

@@ -1,0 +1,43 @@
+slug: mysql
+name: MySQL
+description: The world's most popular open-source relational database management system.
+icon_url: https://labs.mysql.com/common/logos/mysql-logo.svg
+category: database
+
+variables:
+  - name: MYSQL_ROOT_PASSWORD
+    label: Root Password
+    type: password
+    required: true
+    generate: true
+  - name: MYSQL_DATABASE
+    label: Database Name
+    type: string
+    default: mydb
+  - name: MYSQL_USER
+    label: Database User
+    type: string
+    default: myuser
+  - name: MYSQL_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: mysql
+    image: mysql:8.4
+    ports:
+      - target: 3306
+        published: 3306
+    env:
+      MYSQL_ROOT_PASSWORD: "{{MYSQL_ROOT_PASSWORD}}"
+      MYSQL_DATABASE: "{{MYSQL_DATABASE}}"
+      MYSQL_USER: "{{MYSQL_USER}}"
+      MYSQL_PASSWORD: "{{MYSQL_PASSWORD}}"
+    volumes:
+      - source: mysql_data
+        target: /var/lib/mysql
+
+volumes:
+  - mysql_data

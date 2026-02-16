@@ -1,0 +1,65 @@
+slug: n8n
+name: n8n
+description: Workflow automation tool with 400+ integrations for connecting apps and services.
+icon_url: https://n8n.io/favicon.ico
+category: other
+
+variables:
+  - name: N8N_ENCRYPTION_KEY
+    label: Encryption Key
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_USER
+    label: Database User
+    type: string
+    default: n8n
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_DB
+    label: Database Name
+    type: string
+    default: n8n
+  - name: N8N_DOMAIN
+    label: Domain
+    type: string
+    required: false
+    default: localhost
+
+services:
+  - name: n8n
+    image: n8nio/n8n:1.76
+    ports:
+      - target: 5678
+        published: 5678
+    env:
+      N8N_ENCRYPTION_KEY: "{{N8N_ENCRYPTION_KEY}}"
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: "{{service:n8n-db}}"
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: "{{POSTGRES_DB}}"
+      DB_POSTGRESDB_USER: "{{POSTGRES_USER}}"
+      DB_POSTGRESDB_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      N8N_HOST: "{{N8N_DOMAIN}}"
+      WEBHOOK_URL: "http://{{N8N_DOMAIN}}:5678/"
+    volumes:
+      - source: n8n_data
+        target: /home/node/.n8n
+    domain: "{{N8N_DOMAIN}}"
+
+  - name: n8n-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: "{{POSTGRES_USER}}"
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: "{{POSTGRES_DB}}"
+    volumes:
+      - source: n8n_db_data
+        target: /var/lib/postgresql/data
+
+volumes:
+  - n8n_data
+  - n8n_db_data

@@ -1,0 +1,40 @@
+slug: minio
+name: MinIO
+description: High-performance S3-compatible object storage for cloud-native workloads.
+icon_url: https://min.io/resources/img/logo/MINIO_Bird.png
+category: storage
+
+variables:
+  - name: MINIO_ROOT_USER
+    label: Root User (Access Key)
+    type: string
+    default: minioadmin
+  - name: MINIO_ROOT_PASSWORD
+    label: Root Password (Secret Key)
+    type: password
+    required: true
+    generate: true
+  - name: MINIO_DOMAIN
+    label: Domain
+    type: string
+    required: false
+
+services:
+  - name: minio
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    ports:
+      - target: 9000
+        published: 9000
+      - target: 9001
+        published: 9001
+    env:
+      MINIO_ROOT_USER: "{{MINIO_ROOT_USER}}"
+      MINIO_ROOT_PASSWORD: "{{MINIO_ROOT_PASSWORD}}"
+      MINIO_BROWSER_REDIRECT_URL: "http://{{MINIO_DOMAIN}}:9001"
+    volumes:
+      - source: minio_data
+        target: /data
+    domain: "{{MINIO_DOMAIN}}"
+
+volumes:
+  - minio_data

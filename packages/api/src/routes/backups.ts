@@ -1,0 +1,287 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { backupService } from '../services/backup.service.js';
+
+const backupRoutes = new Hono<{
+  Variables: {
+    user: AuthUser;
+    account: AccountContext | null;
+    accountId: string | null;
+  };
+}>();
+
+backupRoutes.use('*', authMiddleware);
+backupRoutes.use('*', tenantMiddleware);
+
+// GET / — list backups for account
+backupRoutes.get('/', async (c) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const serviceId = c.req.query('serviceId');
+
+  const result = await backupService.listBackups(
+    accountId,
+    serviceId ?? undefined,
+  );
+
+  return c.json(result);
+});
+
+// POST / — create manual backup
+const createBackupSchema = z.object({
+  serviceId: z.string().uuid().optional(),
+  storageBackend: z.enum(['nfs', 'local']).default('nfs'),
+});
+
+backupRoutes.post('/', async (c) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = createBackupSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  try {
+    const backup = await backupService.createBackup(
+      accountId,
+      parsed.data.serviceId,
+      parsed.data.storageBackend,
+    );
+
+    return c.json({
+      id: backup.id,
+      status: backup.status,
+      storagePath: backup.storagePath,
+      sizeBytes: backup.sizeBytes.toString(),
+    }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Backup creation failed:', err);
+    return c.json({ error: 'Failed to create backup', details: message }, 500);
+  }
+});
+
+// GET /schedules — list backup schedules (placed before /:id to avoid conflict)
+backupRoutes.get('/schedules', async (c) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const schedules = await backupService.listSchedules(accountId);
+  return c.json(schedules);
+});
+
+// POST /schedules — create backup schedule
+const createScheduleSchema = z.object({
+  serviceId: z.string().uuid().optional(),
+  cron: z.string().min(1),
+  retentionDays: z.number().int().min(1).max(365).default(30),
+  retentionCount: z.number().int().min(1).max(100).default(10),
+  storageBackend: z.enum(['nfs', 'local']).default('nfs'),
+});
+
+backupRoutes.post('/schedules', async (c) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = createScheduleSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  try {
+    const schedule = await backupService.createSchedule({
+      accountId,
+      ...parsed.data,
+    });
+
+    return c.json(schedule, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Schedule creation failed:', err);
+    return c.json({ error: 'Failed to create schedule', details: message }, 500);
+  }
+});
+
+// PATCH /schedules/:id — update backup schedule
+const updateScheduleSchema = z.object({
+  cron: z.string().min(1).optional(),
+  retentionDays: z.number().int().min(1).max(365).optional(),
+  retentionCount: z.number().int().min(1).max(100).optional(),
+  storageBackend: z.enum(['nfs', 'local']).optional(),
+  enabled: z.boolean().optional(),
+});
+
+backupRoutes.patch('/schedules/:id', async (c) => {
+  const accountId = c.get('accountId');
+  const scheduleId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = updateScheduleSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  const updated = await backupService.updateSchedule(
+    scheduleId,
+    accountId,
+    parsed.data,
+  );
+
+  if (!updated) {
+    return c.json({ error: 'Schedule not found' }, 404);
+  }
+
+  return c.json(updated);
+});
+
+// DELETE /schedules/:id — delete backup schedule
+backupRoutes.delete('/schedules/:id', async (c) => {
+  const accountId = c.get('accountId');
+  const scheduleId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const deleted = await backupService.deleteSchedule(scheduleId, accountId);
+
+  if (!deleted) {
+    return c.json({ error: 'Schedule not found' }, 404);
+  }
+
+  return c.json({ message: 'Schedule deleted' });
+});
+
+// POST /schedules/:id/run — manually trigger a scheduled backup
+backupRoutes.post('/schedules/:id/run', async (c) => {
+  const accountId = c.get('accountId');
+  const scheduleId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  try {
+    const backup = await backupService.runScheduledBackup(scheduleId, accountId);
+    return c.json({
+      id: backup.id,
+      status: backup.status,
+      storagePath: backup.storagePath,
+      sizeBytes: backup.sizeBytes.toString(),
+    }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes('not found')) {
+      return c.json({ error: message }, 404);
+    }
+
+    console.error('Scheduled backup trigger failed:', err);
+    return c.json({ error: 'Failed to trigger backup', details: message }, 500);
+  }
+});
+
+// GET /:id — backup details
+backupRoutes.get('/:id', async (c) => {
+  const accountId = c.get('accountId');
+  const backupId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const backup = await backupService.getBackup(backupId, accountId);
+
+  if (!backup) {
+    return c.json({ error: 'Backup not found' }, 404);
+  }
+
+  return c.json({
+    ...backup,
+    sizeBytes: backup.sizeBytes?.toString() ?? '0',
+  });
+});
+
+// DELETE /:id — delete backup
+backupRoutes.delete('/:id', async (c) => {
+  const accountId = c.get('accountId');
+  const backupId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  // Verify ownership
+  const backup = await backupService.getBackup(backupId, accountId);
+  if (!backup) {
+    return c.json({ error: 'Backup not found' }, 404);
+  }
+
+  const deleted = await backupService.deleteBackup(backupId);
+
+  if (!deleted) {
+    return c.json({ error: 'Failed to delete backup' }, 500);
+  }
+
+  return c.json({ message: 'Backup deleted' });
+});
+
+// POST /:id/restore — restore from backup
+backupRoutes.post('/:id/restore', async (c) => {
+  const accountId = c.get('accountId');
+  const backupId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  // Verify ownership
+  const backup = await backupService.getBackup(backupId, accountId);
+  if (!backup) {
+    return c.json({ error: 'Backup not found' }, 404);
+  }
+
+  try {
+    const result = await backupService.restoreBackup(backupId);
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes('not found')) {
+      return c.json({ error: message }, 404);
+    }
+    if (message.includes('Cannot restore')) {
+      return c.json({ error: message }, 400);
+    }
+
+    console.error('Backup restore failed:', err);
+    return c.json({ error: 'Failed to restore backup', details: message }, 500);
+  }
+});
+
+export default backupRoutes;

@@ -1,0 +1,41 @@
+# Hoster PaaS — Per-Node Agent Deployment
+# Used on worker nodes that join the Swarm cluster.
+# Usage: docker compose -f docker-compose.agent.yml up -d
+
+services:
+  agent:
+    image: ghcr.io/componentor/hoster-agent:${HOSTER_VERSION:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/hoster/config/env
+    environment:
+      NODE_ROLE: worker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/hoster/nfs-exports:/opt/hoster/nfs-exports
+      - /opt/hoster/config:/opt/hoster/config:ro
+    networks:
+      - hoster_internal
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+        reservations:
+          memory: 64M
+          cpus: "0.1"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+networks:
+  hoster_internal:
+    external: true

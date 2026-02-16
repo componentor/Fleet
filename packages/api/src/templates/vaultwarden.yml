@@ -1,0 +1,41 @@
+slug: vaultwarden
+name: Vaultwarden
+description: Lightweight Bitwarden-compatible password manager server written in Rust.
+icon_url: https://raw.githubusercontent.com/dani-garcia/vaultwarden/main/resources/vaultwarden-icon.svg
+category: other
+
+variables:
+  - name: ADMIN_TOKEN
+    label: Admin Panel Token
+    type: password
+    required: true
+    generate: true
+  - name: VAULTWARDEN_DOMAIN
+    label: Domain
+    type: string
+    required: false
+    default: http://localhost:8080
+  - name: SIGNUPS_ALLOWED
+    label: Allow Signups
+    type: boolean
+    default: "true"
+
+services:
+  - name: vaultwarden
+    image: vaultwarden/server:1.32.7
+    ports:
+      - target: 80
+        published: 8080
+    env:
+      ADMIN_TOKEN: "{{ADMIN_TOKEN}}"
+      DOMAIN: "{{VAULTWARDEN_DOMAIN}}"
+      SIGNUPS_ALLOWED: "{{SIGNUPS_ALLOWED}}"
+      WEBSOCKET_ENABLED: "true"
+      LOG_LEVEL: info
+    volumes:
+      - source: vaultwarden_data
+        target: /data
+    domain: "{{VAULTWARDEN_DOMAIN}}"
+
+volumes:
+  - vaultwarden_data

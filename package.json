@@ -1,0 +1,34 @@
+{
+  "name": "hoster",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant PaaS hosting control panel on Docker Swarm",
+  "packageManager": "pnpm@10.4.1",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "cpu-features",
+      "esbuild",
+      "ssh2",
+      "protobufjs",
+      "vue-demi"
+    ]
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @hoster/db generate",
+    "db:migrate": "pnpm --filter @hoster/db migrate",
+    "db:push": "pnpm --filter @hoster/db push"
+  },
+  "devDependencies": {
+    "turbo": "^2.8.9",
+    "vitest": "^4.0.18"
+  }
+}

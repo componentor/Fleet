@@ -1,0 +1,87 @@
+slug: strapi
+name: Strapi
+description: Leading open-source headless CMS with a customizable API and admin panel.
+icon_url: https://strapi.io/assets/favicon-32x32.png
+category: cms
+
+variables:
+  - name: APP_KEYS
+    label: App Keys
+    type: password
+    required: true
+    generate: true
+  - name: API_TOKEN_SALT
+    label: API Token Salt
+    type: password
+    required: true
+    generate: true
+  - name: ADMIN_JWT_SECRET
+    label: Admin JWT Secret
+    type: password
+    required: true
+    generate: true
+  - name: TRANSFER_TOKEN_SALT
+    label: Transfer Token Salt
+    type: password
+    required: true
+    generate: true
+  - name: JWT_SECRET
+    label: JWT Secret
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_USER
+    label: Database User
+    type: string
+    default: strapi
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_DB
+    label: Database Name
+    type: string
+    default: strapi
+  - name: STRAPI_DOMAIN
+    label: Domain
+    type: string
+    required: false
+
+services:
+  - name: strapi
+    image: strapi/strapi:4.25-alpine
+    ports:
+      - target: 1337
+        published: 1337
+    env:
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: "{{service:strapi-db}}"
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: "{{POSTGRES_DB}}"
+      DATABASE_USERNAME: "{{POSTGRES_USER}}"
+      DATABASE_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      APP_KEYS: "{{APP_KEYS}}"
+      API_TOKEN_SALT: "{{API_TOKEN_SALT}}"
+      ADMIN_JWT_SECRET: "{{ADMIN_JWT_SECRET}}"
+      TRANSFER_TOKEN_SALT: "{{TRANSFER_TOKEN_SALT}}"
+      JWT_SECRET: "{{JWT_SECRET}}"
+      NODE_ENV: production
+    volumes:
+      - source: strapi_uploads
+        target: /opt/app/public/uploads
+    domain: "{{STRAPI_DOMAIN}}"
+
+  - name: strapi-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: "{{POSTGRES_USER}}"
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: "{{POSTGRES_DB}}"
+    volumes:
+      - source: strapi_db_data
+        target: /var/lib/postgresql/data
+
+volumes:
+  - strapi_uploads
+  - strapi_db_data

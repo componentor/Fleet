@@ -1,0 +1,80 @@
+slug: nextcloud
+name: Nextcloud
+description: Self-hosted productivity platform with file sync, collaboration, and office suite.
+icon_url: https://nextcloud.com/wp-content/uploads/2022/10/nextcloud-logo.png
+category: storage
+
+variables:
+  - name: NEXTCLOUD_ADMIN_USER
+    label: Admin Username
+    type: string
+    default: admin
+  - name: NEXTCLOUD_ADMIN_PASSWORD
+    label: Admin Password
+    type: password
+    required: true
+    generate: true
+  - name: MYSQL_ROOT_PASSWORD
+    label: MySQL Root Password
+    type: password
+    required: true
+    generate: true
+  - name: MYSQL_DATABASE
+    label: Database Name
+    type: string
+    default: nextcloud
+  - name: MYSQL_USER
+    label: Database User
+    type: string
+    default: nextcloud
+  - name: MYSQL_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: NEXTCLOUD_DOMAIN
+    label: Domain
+    type: string
+    required: false
+
+services:
+  - name: nextcloud
+    image: nextcloud:30.0-apache
+    ports:
+      - target: 80
+        published: 8080
+    env:
+      NEXTCLOUD_ADMIN_USER: "{{NEXTCLOUD_ADMIN_USER}}"
+      NEXTCLOUD_ADMIN_PASSWORD: "{{NEXTCLOUD_ADMIN_PASSWORD}}"
+      MYSQL_HOST: "{{service:nextcloud-db}}"
+      MYSQL_DATABASE: "{{MYSQL_DATABASE}}"
+      MYSQL_USER: "{{MYSQL_USER}}"
+      MYSQL_PASSWORD: "{{MYSQL_PASSWORD}}"
+      NEXTCLOUD_TRUSTED_DOMAINS: "{{NEXTCLOUD_DOMAIN}}"
+      REDIS_HOST: "{{service:nextcloud-redis}}"
+    volumes:
+      - source: nextcloud_data
+        target: /var/www/html
+    domain: "{{NEXTCLOUD_DOMAIN}}"
+
+  - name: nextcloud-db
+    image: mariadb:11.4
+    env:
+      MYSQL_ROOT_PASSWORD: "{{MYSQL_ROOT_PASSWORD}}"
+      MYSQL_DATABASE: "{{MYSQL_DATABASE}}"
+      MYSQL_USER: "{{MYSQL_USER}}"
+      MYSQL_PASSWORD: "{{MYSQL_PASSWORD}}"
+    volumes:
+      - source: nextcloud_db_data
+        target: /var/lib/mysql
+
+  - name: nextcloud-redis
+    image: valkey/valkey:8.0-alpine
+    volumes:
+      - source: nextcloud_redis_data
+        target: /data
+
+volumes:
+  - nextcloud_data
+  - nextcloud_db_data
+  - nextcloud_redis_data

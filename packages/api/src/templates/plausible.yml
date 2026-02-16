@@ -1,0 +1,72 @@
+slug: plausible
+name: Plausible Analytics
+description: Lightweight, privacy-friendly web analytics. No cookies, fully GDPR compliant.
+icon_url: https://plausible.io/images/icon/plausible_favicon.png
+category: monitoring
+
+variables:
+  - name: BASE_URL
+    label: Base URL
+    type: string
+    required: true
+    default: http://localhost:8000
+  - name: SECRET_KEY_BASE
+    label: Secret Key Base
+    type: password
+    required: true
+    generate: true
+  - name: TOTP_VAULT_KEY
+    label: TOTP Vault Key
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: CLICKHOUSE_PASSWORD
+    label: ClickHouse Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: plausible
+    image: ghcr.io/plausible/community-edition:v2.1
+    ports:
+      - target: 8000
+        published: 8000
+    env:
+      BASE_URL: "{{BASE_URL}}"
+      SECRET_KEY_BASE: "{{SECRET_KEY_BASE}}"
+      TOTP_VAULT_KEY: "{{TOTP_VAULT_KEY}}"
+      DATABASE_URL: "postgres://plausible:{{POSTGRES_PASSWORD}}@{{service:plausible-db}}:5432/plausible"
+      CLICKHOUSE_DATABASE_URL: "http://{{service:plausible-events}}:8123/plausible_events"
+
+  - name: plausible-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: plausible
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: plausible
+    volumes:
+      - source: plausible_db_data
+        target: /var/lib/postgresql/data
+
+  - name: plausible-events
+    image: clickhouse/clickhouse-server:24.8-alpine
+    env:
+      CLICKHOUSE_DB: plausible_events
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: "{{CLICKHOUSE_PASSWORD}}"
+    volumes:
+      - source: plausible_events_data
+        target: /var/lib/clickhouse
+      - source: plausible_events_logs
+        target: /var/log/clickhouse-server
+
+volumes:
+  - plausible_db_data
+  - plausible_events_data
+  - plausible_events_logs

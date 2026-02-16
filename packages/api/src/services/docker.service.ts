@@ -1,0 +1,318 @@
+import Dockerode from 'dockerode';
+
+const docker = new Dockerode({ socketPath: '/var/run/docker.sock' });
+
+export interface CreateSwarmServiceOptions {
+  name: string;
+  image: string;
+  replicas: number;
+  env: Record<string, string>;
+  ports: Array<{ target: number; published: number; protocol?: string }>;
+  volumes: Array<{ source: string; target: string; readonly?: boolean }>;
+  labels: Record<string, string>;
+  constraints: string[];
+  healthCheck?: {
+    cmd: string;
+    interval: number;
+    timeout: number;
+    retries: number;
+  };
+  updateParallelism: number;
+  updateDelay: string;
+  rollbackOnFailure: boolean;
+  networkId?: string;
+}
+
+export interface ServiceTaskInfo {
+  id: string;
+  nodeId: string;
+  status: string;
+  desiredState: string;
+  message: string;
+  containerStatus?: {
+    containerId: string;
+    pid: number;
+  };
+  createdAt: string;
+}
+
+export class DockerService {
+  async createService(opts: CreateSwarmServiceOptions): Promise<{ id: string }> {
+    const envArray = Object.entries(opts.env).map(([k, v]) => `${k}=${v}`);
+
+    const serviceSpec: Dockerode.CreateServiceOptions = {
+      Name: opts.name,
+      Labels: opts.labels,
+      TaskTemplate: {
+        ContainerSpec: {
+          Image: opts.image,
+          Env: envArray,
+          Mounts: opts.volumes.map((v) => ({
+            Source: v.source,
+            Target: v.target,
+            Type: 'volume' as const,
+            ReadOnly: v.readonly ?? false,
+          })),
+          HealthCheck: opts.healthCheck
+            ? {
+                Test: ['CMD-SHELL', opts.healthCheck.cmd],
+                Interval: opts.healthCheck.interval * 1_000_000_000,
+                Timeout: opts.healthCheck.timeout * 1_000_000_000,
+                Retries: opts.healthCheck.retries,
+              }
+            : undefined,
+          // Security hardening
+          ReadOnly: true,
+          User: '1000',
+        },
+        Resources: {},
+        RestartPolicy: {
+          Condition: 'on-failure',
+          MaxAttempts: 3,
+        },
+        Placement: {
+          Constraints: opts.constraints,
+        },
+        Networks: opts.networkId
+          ? [{ Target: opts.networkId }]
+          : undefined,
+      },
+      Mode: {
+        Replicated: {
+          Replicas: opts.replicas,
+        },
+      },
+      UpdateConfig: {
+        Parallelism: opts.updateParallelism,
+        Delay: parseDelay(opts.updateDelay),
+        FailureAction: opts.rollbackOnFailure ? 'rollback' : 'pause',
+        Order: 'start-first',
+      },
+      RollbackConfig: {
+        Parallelism: 1,
+        Delay: 5_000_000_000,
+        FailureAction: 'pause',
+        Order: 'stop-first',
+      },
+      EndpointSpec: {
+        Ports: opts.ports.map((p) => ({
+          TargetPort: p.target,
+          PublishedPort: p.published,
+          Protocol: (p.protocol ?? 'tcp') as 'tcp' | 'udp' | 'sctp',
+          PublishMode: 'ingress' as const,
+        })),
+      },
+    };
+
+    const service = await docker.createService(serviceSpec);
+    return { id: service.id };
+  }
+
+  async updateService(
+    dockerServiceId: string,
+    opts: Partial<CreateSwarmServiceOptions>,
+  ): Promise<void> {
+    const service = docker.getService(dockerServiceId);
+    const info = await service.inspect();
+    const version = info.Version.Index;
+    const spec = info.Spec;
+
+    if (opts.image) {
+      spec.TaskTemplate.ContainerSpec.Image = opts.image;
+    }
+
+    if (opts.env) {
+      spec.TaskTemplate.ContainerSpec.Env = Object.entries(opts.env).map(
+        ([k, v]) => `${k}=${v}`,
+      );
+    }
+
+    if (opts.replicas !== undefined) {
+      spec.Mode.Replicated = { Replicas: opts.replicas };
+    }
+
+    if (opts.labels) {
+      spec.Labels = { ...spec.Labels, ...opts.labels };
+    }
+
+    if (opts.constraints) {
+      spec.TaskTemplate.Placement = { Constraints: opts.constraints };
+    }
+
+    if (opts.ports) {
+      spec.EndpointSpec = {
+        Ports: opts.ports.map((p) => ({
+          TargetPort: p.target,
+          PublishedPort: p.published,
+          Protocol: (p.protocol ?? 'tcp') as 'tcp' | 'udp' | 'sctp',
+          PublishMode: 'ingress' as const,
+        })),
+      };
+    }
+
+    await service.update({ version, ...spec });
+  }
+
+  async removeService(dockerServiceId: string): Promise<void> {
+    const service = docker.getService(dockerServiceId);
+    await service.remove();
+  }
+
+  async inspectService(dockerServiceId: string) {
+    const service = docker.getService(dockerServiceId);
+    return service.inspect();
+  }
+
+  async listServices(filters?: Record<string, string[]>) {
+    return docker.listServices({ filters });
+  }
+
+  async getServiceLogs(
+    dockerServiceId: string,
+    opts: { tail?: number; since?: number; follow?: boolean } = {},
+  ): Promise<NodeJS.ReadableStream> {
+    const service = docker.getService(dockerServiceId);
+    return service.logs({
+      stdout: true,
+      stderr: true,
+      tail: opts.tail ?? 100,
+      since: opts.since ?? 0,
+      follow: opts.follow ?? false,
+      timestamps: true,
+    }) as Promise<NodeJS.ReadableStream>;
+  }
+
+  async getServiceTasks(dockerServiceId: string): Promise<ServiceTaskInfo[]> {
+    const tasks = await docker.listTasks({
+      filters: { service: [dockerServiceId] },
+    });
+
+    return tasks.map((t) => ({
+      id: t.ID,
+      nodeId: t.NodeID,
+      status: t.Status.State,
+      desiredState: t.DesiredState,
+      message: t.Status.Message ?? '',
+      containerStatus: t.Status.ContainerStatus
+        ? {
+            containerId: t.Status.ContainerStatus.ContainerID,
+            pid: t.Status.ContainerStatus.PID,
+          }
+        : undefined,
+      createdAt: t.CreatedAt,
+    }));
+  }
+
+  async scaleService(dockerServiceId: string, replicas: number): Promise<void> {
+    await this.updateService(dockerServiceId, { replicas });
+  }
+
+  // Node management
+  async listNodes() {
+    return docker.listNodes();
+  }
+
+  async inspectNode(nodeId: string) {
+    const node = docker.getNode(nodeId);
+    return node.inspect();
+  }
+
+  async updateNode(
+    nodeId: string,
+    opts: { availability?: 'active' | 'pause' | 'drain'; role?: 'manager' | 'worker'; labels?: Record<string, string> },
+  ): Promise<void> {
+    const node = docker.getNode(nodeId);
+    const info = await node.inspect();
+    const version = info.Version.Index;
+
+    const spec = { ...info.Spec };
+
+    if (opts.availability) {
+      spec.Availability = opts.availability;
+    }
+    if (opts.role) {
+      spec.Role = opts.role;
+    }
+    if (opts.labels) {
+      spec.Labels = { ...spec.Labels, ...opts.labels };
+    }
+
+    await node.update({ version, ...spec });
+  }
+
+  async drainNode(nodeId: string): Promise<void> {
+    await this.updateNode(nodeId, { availability: 'drain' });
+  }
+
+  async activateNode(nodeId: string): Promise<void> {
+    await this.updateNode(nodeId, { availability: 'active' });
+  }
+
+  async removeNode(nodeId: string, force = false): Promise<void> {
+    const node = docker.getNode(nodeId);
+    await node.remove({ force });
+  }
+
+  async getSwarmInfo() {
+    return docker.swarmInspect();
+  }
+
+  async getSwarmJoinToken(): Promise<{ worker: string; manager: string }> {
+    const info = await docker.swarmInspect();
+    return {
+      worker: info.JoinTokens.Worker,
+      manager: info.JoinTokens.Manager,
+    };
+  }
+
+  // Network management for account isolation
+  async createNetwork(name: string, labels: Record<string, string> = {}): Promise<string> {
+    const network = await docker.createNetwork({
+      Name: name,
+      Driver: 'overlay',
+      Attachable: true,
+      Labels: labels,
+    });
+    return network.id;
+  }
+
+  async removeNetwork(networkId: string): Promise<void> {
+    const network = docker.getNetwork(networkId);
+    await network.remove();
+  }
+
+  // Container exec for terminal
+  async execInContainer(
+    containerId: string,
+    cmd: string[] = ['/bin/sh'],
+  ) {
+    const container = docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+    });
+    return exec.start({ hijack: true, stdin: true, Tty: true });
+  }
+}
+
+function parseDelay(delay: string): number {
+  const match = delay.match(/^(\d+)(ms|s|m|h)?$/);
+  if (!match) return 10_000_000_000; // default 10s in nanoseconds
+
+  const value = parseInt(match[1]!, 10);
+  const unit = match[2] ?? 's';
+
+  const multipliers: Record<string, number> = {
+    ms: 1_000_000,
+    s: 1_000_000_000,
+    m: 60_000_000_000,
+    h: 3_600_000_000_000,
+  };
+
+  return value * (multipliers[unit] ?? 1_000_000_000);
+}
+
+export const dockerService = new DockerService();

@@ -1,0 +1,220 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { templateService } from '../services/template.service.js';
+
+const marketplace = new Hono<{
+  Variables: {
+    user: AuthUser;
+    account: AccountContext | null;
+    accountId: string | null;
+  };
+}>();
+
+marketplace.use('*', authMiddleware);
+marketplace.use('*', tenantMiddleware);
+
+// GET /templates — list all available templates
+marketplace.get('/templates', async (c) => {
+  const accountId = c.get('accountId');
+  const category = c.req.query('category');
+
+  const templates = await templateService.listTemplates({
+    category: category ?? undefined,
+    accountId: accountId ?? undefined,
+  });
+
+  return c.json(templates);
+});
+
+// GET /templates/categories — list template categories
+marketplace.get('/templates/categories', async (c) => {
+  const categories = await templateService.getCategories();
+  return c.json(categories);
+});
+
+// GET /templates/:slug — get template details with variable schema
+marketplace.get('/templates/:slug', async (c) => {
+  const slug = c.req.param('slug');
+
+  const template = await templateService.getTemplate(slug);
+
+  if (!template) {
+    return c.json({ error: 'Template not found' }, 404);
+  }
+
+  // Parse the compose template to get full service definitions for the response
+  const parsed = templateService.parseTemplate(template.composeTemplate);
+
+  return c.json({
+    ...template,
+    serviceDefinitions: parsed.services,
+    volumes: parsed.volumes,
+  });
+});
+
+// POST /deploy — deploy a template
+const deploySchema = z.object({
+  slug: z.string().min(1),
+  config: z.record(z.string()).default({}),
+});
+
+marketplace.post('/deploy', async (c) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = deploySchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  const { slug, config } = parsed.data;
+
+  try {
+    const result = await templateService.deployTemplate(slug, accountId, config);
+    return c.json(result, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes('not found')) {
+      return c.json({ error: message }, 404);
+    }
+    if (message.includes('Missing required variable')) {
+      return c.json({ error: message }, 400);
+    }
+
+    console.error('Template deployment failed:', err);
+    return c.json({ error: 'Failed to deploy template', details: message }, 500);
+  }
+});
+
+// POST /templates — create a custom template (admin or account-scoped)
+const createTemplateSchema = z.object({
+  slug: z.string().min(1).max(255),
+  name: z.string().min(1).max(255),
+  description: z.string().optional(),
+  iconUrl: z.string().url().optional(),
+  category: z.string().optional(),
+  composeTemplate: z.string().min(1),
+  isBuiltin: z.boolean().optional(),
+});
+
+marketplace.post('/templates', async (c) => {
+  const user = c.get('user');
+  const accountId = c.get('accountId');
+
+  // Only super users can create builtin templates
+  const body = await c.req.json();
+  const parsed = createTemplateSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  if (parsed.data.isBuiltin && !user.isSuper) {
+    return c.json({ error: 'Only super users can create builtin templates' }, 403);
+  }
+
+  try {
+    const template = await templateService.createTemplate({
+      ...parsed.data,
+      accountId: parsed.data.isBuiltin ? undefined : (accountId ?? undefined),
+    });
+
+    return c.json(template, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Template creation failed:', err);
+    return c.json({ error: 'Failed to create template', details: message }, 500);
+  }
+});
+
+// PATCH /templates/:slug — update a template
+const updateTemplateSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  description: z.string().optional(),
+  iconUrl: z.string().url().optional(),
+  category: z.string().optional(),
+  composeTemplate: z.string().min(1).optional(),
+});
+
+marketplace.patch('/templates/:slug', async (c) => {
+  const user = c.get('user');
+  const slug = c.req.param('slug');
+
+  const template = await templateService.getTemplate(slug);
+
+  if (!template) {
+    return c.json({ error: 'Template not found' }, 404);
+  }
+
+  // Only super users can update builtin templates
+  if (template.isBuiltin && !user.isSuper) {
+    return c.json({ error: 'Only super users can update builtin templates' }, 403);
+  }
+
+  const body = await c.req.json();
+  const parsed = updateTemplateSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  try {
+    const updated = await templateService.updateTemplate(template.id, parsed.data);
+    return c.json(updated);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Template update failed:', err);
+    return c.json({ error: 'Failed to update template', details: message }, 500);
+  }
+});
+
+// DELETE /templates/:slug — delete a template
+marketplace.delete('/templates/:slug', async (c) => {
+  const user = c.get('user');
+  const slug = c.req.param('slug');
+
+  const template = await templateService.getTemplate(slug);
+
+  if (!template) {
+    return c.json({ error: 'Template not found' }, 404);
+  }
+
+  if (template.isBuiltin && !user.isSuper) {
+    return c.json({ error: 'Only super users can delete builtin templates' }, 403);
+  }
+
+  const deleted = await templateService.deleteTemplate(template.id);
+
+  if (!deleted) {
+    return c.json({ error: 'Failed to delete template' }, 500);
+  }
+
+  return c.json({ message: 'Template deleted' });
+});
+
+// POST /sync — sync builtin templates from disk (admin only)
+marketplace.post('/sync', async (c) => {
+  const user = c.get('user');
+
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super users can sync templates' }, 403);
+  }
+
+  try {
+    await templateService.syncBuiltinTemplates();
+    return c.json({ message: 'Templates synced successfully' });
+  } catch (err) {
+    console.error('Template sync failed:', err);
+    return c.json({ error: 'Failed to sync templates' }, 500);
+  }
+});
+
+export default marketplace;

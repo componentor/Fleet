@@ -1,0 +1,27 @@
+slug: uptime-kuma
+name: Uptime Kuma
+description: Self-hosted monitoring tool with a beautiful UI. Supports HTTP, TCP, DNS, and more.
+icon_url: https://uptime.kuma.pet/img/icon.svg
+category: monitoring
+
+variables:
+  - name: UPTIME_KUMA_DOMAIN
+    label: Domain
+    type: string
+    required: false
+
+services:
+  - name: uptime-kuma
+    image: louislam/uptime-kuma:1.23
+    ports:
+      - target: 3001
+        published: 3001
+    env:
+      UPTIME_KUMA_PORT: "3001"
+    volumes:
+      - source: uptime_kuma_data
+        target: /app/data
+    domain: "{{UPTIME_KUMA_DOMAIN}}"
+
+volumes:
+  - uptime_kuma_data

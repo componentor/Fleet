@@ -1,0 +1,69 @@
+import {
+  pgTable,
+  uuid,
+  varchar,
+  boolean,
+  integer,
+  bigint,
+  jsonb,
+  timestamp,
+} from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
+import { accounts } from './accounts.js';
+import { services } from './services.js';
+
+export const backups = pgTable('backups', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  accountId: uuid('account_id')
+    .references(() => accounts.id)
+    .notNull(),
+  serviceId: uuid('service_id').references(() => services.id),
+  type: varchar('type').default('manual'),
+  status: varchar('status').default('pending'),
+  storagePath: varchar('storage_path'),
+  storageBackend: varchar('storage_backend').default('nfs'),
+  sizeBytes: bigint('size_bytes', { mode: 'bigint' }).default(sql`0`),
+  contents: jsonb('contents').default([]),
+  createdAt: timestamp('created_at').defaultNow(),
+  expiresAt: timestamp('expires_at'),
+});
+
+export const backupSchedules = pgTable('backup_schedules', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  accountId: uuid('account_id')
+    .references(() => accounts.id)
+    .notNull(),
+  serviceId: uuid('service_id').references(() => services.id),
+  cron: varchar('cron').notNull(),
+  retentionDays: integer('retention_days').default(30),
+  retentionCount: integer('retention_count').default(10),
+  storageBackend: varchar('storage_backend').default('nfs'),
+  enabled: boolean('enabled').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const backupsRelations = relations(backups, ({ one }) => ({
+  account: one(accounts, {
+    fields: [backups.accountId],
+    references: [accounts.id],
+  }),
+  service: one(services, {
+    fields: [backups.serviceId],
+    references: [services.id],
+  }),
+}));
+
+export const backupSchedulesRelations = relations(
+  backupSchedules,
+  ({ one }) => ({
+    account: one(accounts, {
+      fields: [backupSchedules.accountId],
+      references: [accounts.id],
+    }),
+    service: one(services, {
+      fields: [backupSchedules.serviceId],
+      references: [services.id],
+    }),
+  }),
+);

@@ -1,0 +1,25 @@
+import {
+  pgTable,
+  uuid,
+  varchar,
+  boolean,
+  jsonb,
+  timestamp,
+} from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
+
+export const nodes = pgTable('nodes', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  hostname: varchar('hostname').notNull(),
+  ipAddress: varchar('ip_address').notNull(),
+  dockerNodeId: varchar('docker_node_id'),
+  role: varchar('role').default('worker'),
+  status: varchar('status').default('active'),
+  labels: jsonb('labels').default({}),
+  nfsServer: boolean('nfs_server').default(false),
+  lastHeartbeat: timestamp('last_heartbeat'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const nodesRelations = relations(nodes, () => ({}));

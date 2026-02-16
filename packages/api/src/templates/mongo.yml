@@ -1,0 +1,40 @@
+slug: mongo
+name: MongoDB
+description: Document-oriented NoSQL database for modern applications.
+icon_url: https://www.mongodb.com/assets/images/global/leaf.png
+category: database
+
+variables:
+  - name: MONGO_INITDB_ROOT_USERNAME
+    label: Root Username
+    type: string
+    default: mongoadmin
+  - name: MONGO_INITDB_ROOT_PASSWORD
+    label: Root Password
+    type: password
+    required: true
+    generate: true
+  - name: MONGO_INITDB_DATABASE
+    label: Initial Database
+    type: string
+    default: appdb
+
+services:
+  - name: mongo
+    image: mongo:7.0
+    ports:
+      - target: 27017
+        published: 27017
+    env:
+      MONGO_INITDB_ROOT_USERNAME: "{{MONGO_INITDB_ROOT_USERNAME}}"
+      MONGO_INITDB_ROOT_PASSWORD: "{{MONGO_INITDB_ROOT_PASSWORD}}"
+      MONGO_INITDB_DATABASE: "{{MONGO_INITDB_DATABASE}}"
+    volumes:
+      - source: mongo_data
+        target: /data/db
+      - source: mongo_config
+        target: /data/configdb
+
+volumes:
+  - mongo_data
+  - mongo_config

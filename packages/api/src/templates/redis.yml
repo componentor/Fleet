@@ -1,0 +1,27 @@
+slug: redis
+name: Redis
+description: In-memory data store used as database, cache, and message broker.
+icon_url: https://redis.io/images/redis-white.png
+category: database
+
+variables:
+  - name: REDIS_PASSWORD
+    label: Redis Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: redis
+    image: valkey/valkey:8.0-alpine
+    ports:
+      - target: 6379
+        published: 6379
+    env:
+      VALKEY_EXTRA_FLAGS: "--requirepass {{REDIS_PASSWORD}}"
+    volumes:
+      - source: redis_data
+        target: /data
+
+volumes:
+  - redis_data
