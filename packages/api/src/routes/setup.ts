@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'argon2';
 import { SignJWT } from 'jose';
-import { db, users, accounts, userAccounts, platformSettings, insertReturning, upsert, countSql } from '@hoster/db';
+import { db, users, accounts, userAccounts, platformSettings, insertReturning, upsert, countSql } from '@fleet/db';
+import { dockerService } from '../services/docker.service.js';
 
 const setup = new Hono();
 
@@ -22,10 +23,92 @@ async function isSetupComplete(): Promise<boolean> {
   return (result?.count ?? 0) > 0;
 }
 
-// GET /status — check if first-run setup is needed
+// Detect Docker and Swarm state
+async function detectDocker(): Promise<{
+  available: boolean;
+  version?: string;
+  swarm: 'active' | 'inactive' | 'pending' | 'error';
+  role?: 'manager' | 'worker';
+  nodeId?: string;
+  managerAddress?: string;
+}> {
+  try {
+    const info = await dockerService.getSwarmInfo();
+    // If swarmInspect succeeds, Swarm is active and we're a manager
+    return {
+      available: true,
+      swarm: 'active',
+      role: 'manager',
+      nodeId: (info as any).NodeID,
+      managerAddress: (info as any).JoinTokens
+        ? undefined // We're already in the swarm
+        : undefined,
+    };
+  } catch (err: any) {
+    // swarmInspect fails if not in swarm or not a manager
+    // Try a basic docker ping to see if Docker is available
+    try {
+      // Use listNodes as a lighter check — if it throws "not a swarm", Docker is there but no swarm
+      await dockerService.listNodes();
+      // If this succeeds, swarm is active
+      return { available: true, swarm: 'active', role: 'manager' };
+    } catch (innerErr: any) {
+      const msg = String(innerErr?.message ?? innerErr ?? '');
+      if (msg.includes('not a swarm') || msg.includes('This node is not a swarm manager')) {
+        return { available: true, swarm: 'inactive' };
+      }
+      if (msg.includes('ENOENT') || msg.includes('ECONNREFUSED') || msg.includes('socket')) {
+        return { available: false, swarm: 'inactive' };
+      }
+      // Docker is there but something else went wrong
+      return { available: true, swarm: 'error' };
+    }
+  }
+}
+
+// GET /status — check if first-run setup is needed + Docker state
 setup.get('/status', async (c) => {
   const done = await isSetupComplete();
-  return c.json({ needsSetup: !done });
+  const docker = await detectDocker();
+  return c.json({ needsSetup: !done, docker });
+});
+
+// POST /swarm-init — initialize Docker Swarm on this node
+setup.post('/swarm-init', async (c) => {
+  if (await isSetupComplete()) {
+    return c.json({ error: 'Setup has already been completed' }, 403);
+  }
+
+  const docker = await detectDocker();
+  if (!docker.available) {
+    return c.json({ error: 'Docker is not available. Install Docker first.' }, 400);
+  }
+  if (docker.swarm === 'active') {
+    return c.json({ error: 'Swarm is already active' }, 400);
+  }
+
+  try {
+    // Dynamically import dockerode to call swarmInit directly
+    const Dockerode = (await import('dockerode')).default;
+    const dockerClient = new Dockerode({ socketPath: '/var/run/docker.sock' });
+    await dockerClient.swarmInit({
+      ListenAddr: '0.0.0.0:2377',
+      AdvertiseAddr: '0.0.0.0:2377',
+      ForceNewCluster: false,
+    });
+
+    // Create the default overlay network for Fleet services
+    try {
+      await dockerService.createNetwork('fleet-net', { 'com.fleet.managed': 'true' });
+    } catch {
+      // Network may already exist
+    }
+
+    const updatedDocker = await detectDocker();
+    return c.json({ ok: true, docker: updatedDocker }, 201);
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to initialize Swarm' }, 500);
+  }
 });
 
 // POST / — perform first-run setup

@@ -10,7 +10,7 @@ export function useTheme() {
       light: 'light',
       dark: 'dark',
     },
-    storageKey: 'hoster_theme',
+    storageKey: 'fleet_theme',
     initialValue: 'system',
   })
 

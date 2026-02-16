@@ -19,7 +19,7 @@ providers:
   docker:
     swarmMode: true
     exposedByDefault: false
-    network: hoster_public
+    network: fleet_public
 
 certificatesResolvers:
   letsencrypt:

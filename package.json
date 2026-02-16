@@ -1,5 +1,5 @@
 {
-  "name": "hoster",
+  "name": "fleet",
   "private": true,
   "version": "0.1.0",
   "description": "Multi-tenant PaaS hosting control panel on Docker Swarm",
@@ -23,9 +23,9 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "db:generate": "pnpm --filter @hoster/db generate",
-    "db:migrate": "pnpm --filter @hoster/db migrate",
-    "db:push": "pnpm --filter @hoster/db push"
+    "db:generate": "pnpm --filter @fleet/db generate",
+    "db:migrate": "pnpm --filter @fleet/db migrate",
+    "db:push": "pnpm --filter @fleet/db push"
   },
   "devDependencies": {
     "turbo": "^2.8.9",

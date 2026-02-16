@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, services, sshAccessRules, eq, and } from '@hoster/db';
+import { db, services, sshAccessRules, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';

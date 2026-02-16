@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Hoster — Single-line installer for the first node
-# Usage: curl -fsSL https://raw.githubusercontent.com/componentor/hoster/main/install/install.sh | bash
+# Fleet — Single-line installer for the first node
+# Usage: curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | bash
 
-HOSTER_VERSION="${HOSTER_VERSION:-latest}"
-HOSTER_DIR="/opt/hoster"
+FLEET_VERSION="${FLEET_VERSION:-latest}"
+FLEET_DIR="/opt/fleet"
 
 # Colors
 RED='\033[0;31m'
@@ -14,9 +14,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log()  { echo -e "${GREEN}[hoster]${NC} $1"; }
-warn() { echo -e "${YELLOW}[hoster]${NC} $1"; }
-err()  { echo -e "${RED}[hoster]${NC} $1"; exit 1; }
+log()  { echo -e "${GREEN}[fleet]${NC} $1"; }
+warn() { echo -e "${YELLOW}[fleet]${NC} $1"; }
+err()  { echo -e "${RED}[fleet]${NC} $1"; exit 1; }
 
 # ─── Check root ──────────────────────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
@@ -138,13 +138,13 @@ init_swarm() {
 
 # ─── Create directories ──────────────────────────────────────────────
 setup_dirs() {
-  log "Creating Hoster directories..."
-  mkdir -p "$HOSTER_DIR"/{data,certs,backups,nfs-exports,config}
-  mkdir -p "$HOSTER_DIR"/nfs-exports/volumes
+  log "Creating Fleet directories..."
+  mkdir -p "$FLEET_DIR"/{data,certs,backups,nfs-exports,config}
+  mkdir -p "$FLEET_DIR"/nfs-exports/volumes
 
   # Setup NFS export
-  if ! grep -q "$HOSTER_DIR/nfs-exports" /etc/exports 2>/dev/null; then
-    echo "$HOSTER_DIR/nfs-exports *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+  if ! grep -q "$FLEET_DIR/nfs-exports" /etc/exports 2>/dev/null; then
+    echo "$FLEET_DIR/nfs-exports *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
     exportfs -ra 2>/dev/null || true
   fi
   log "Directories created"
@@ -166,8 +166,8 @@ collect_config() {
   VALKEY_PASSWORD=$(openssl rand -hex 16)
 
   # Save config
-  cat > "$HOSTER_DIR/config/env" <<EOF
-DATABASE_URL=postgresql://hoster:${DB_PASSWORD}@postgres:5432/hoster
+  cat > "$FLEET_DIR/config/env" <<EOF
+DATABASE_URL=postgresql://fleet:${DB_PASSWORD}@postgres:5432/fleet
 VALKEY_URL=redis://:${VALKEY_PASSWORD}@valkey:6379
 JWT_SECRET=${JWT_SECRET}
 ADMIN_EMAIL=${ADMIN_EMAIL}
@@ -178,14 +178,14 @@ NODE_ENV=production
 PORT=3000
 EOF
 
-  log "Configuration saved to $HOSTER_DIR/config/env"
+  log "Configuration saved to $FLEET_DIR/config/env"
 }
 
 # ─── Create Docker networks ──────────────────────────────────────────
 create_networks() {
   log "Creating overlay networks..."
-  docker network create --driver overlay --attachable hoster_public 2>/dev/null || true
-  docker network create --driver overlay --attachable hoster_internal 2>/dev/null || true
+  docker network create --driver overlay --attachable fleet_public 2>/dev/null || true
+  docker network create --driver overlay --attachable fleet_internal 2>/dev/null || true
   log "Networks ready"
 }
 
@@ -193,11 +193,11 @@ create_networks() {
 create_seccomp_profile() {
   log "Creating seccomp profile for customer containers..."
 
-  cat > "$HOSTER_DIR/config/seccomp-default.json" <<'SECCOMP'
+  cat > "$FLEET_DIR/config/seccomp-default.json" <<'SECCOMP'
 {
   "defaultAction": "SCMP_ACT_ERRNO",
   "defaultErrnoRet": 1,
-  "comment": "Hoster PaaS restrictive seccomp profile for customer containers",
+  "comment": "Fleet PaaS restrictive seccomp profile for customer containers",
   "archMap": [
     {
       "architecture": "SCMP_ARCH_X86_64",
@@ -631,18 +631,18 @@ create_seccomp_profile() {
 }
 SECCOMP
 
-  chmod 0644 "$HOSTER_DIR/config/seccomp-default.json"
-  log "Seccomp profile created at $HOSTER_DIR/config/seccomp-default.json"
+  chmod 0644 "$FLEET_DIR/config/seccomp-default.json"
+  log "Seccomp profile created at $FLEET_DIR/config/seccomp-default.json"
 }
 
 # ─── Deploy stack ────────────────────────────────────────────────────
 deploy_stack() {
-  log "Deploying Hoster stack..."
+  log "Deploying Fleet stack..."
 
-  local STACK_URL="https://raw.githubusercontent.com/componentor/hoster/${HOSTER_VERSION}/docker/docker-stack.yml"
-  local TRAEFIK_URL="https://raw.githubusercontent.com/componentor/hoster/${HOSTER_VERSION}/docker/traefik/traefik.yml"
-  local STACK_DIR="$HOSTER_DIR"
-  local TRAEFIK_DIR="$HOSTER_DIR/traefik"
+  local STACK_URL="https://raw.githubusercontent.com/componentor/fleet/${FLEET_VERSION}/docker/docker-stack.yml"
+  local TRAEFIK_URL="https://raw.githubusercontent.com/componentor/fleet/${FLEET_VERSION}/docker/traefik/traefik.yml"
+  local STACK_DIR="$FLEET_DIR"
+  local TRAEFIK_DIR="$FLEET_DIR/traefik"
 
   mkdir -p "$TRAEFIK_DIR"
 
@@ -658,7 +658,7 @@ deploy_stack() {
   # Source the env file to get variables for substitution
   set -a
   # shellcheck disable=SC1091
-  source "$HOSTER_DIR/config/env"
+  source "$FLEET_DIR/config/env"
   set +a
 
   # Extract VALKEY_PASSWORD from the VALKEY_URL
@@ -673,27 +673,27 @@ deploy_stack() {
   sed -i "s|\${ACME_EMAIL}|${ACME_EMAIL}|g" "$TRAEFIK_DIR/traefik.yml"
 
   # Add additional env vars to config file for services
-  if ! grep -q "^POSTGRES_PASSWORD=" "$HOSTER_DIR/config/env"; then
-    DB_PASSWORD=$(echo "$DATABASE_URL" | sed -n 's|postgresql://hoster:\([^@]*\)@.*|\1|p')
-    cat >> "$HOSTER_DIR/config/env" <<EOF
-POSTGRES_USER=hoster
+  if ! grep -q "^POSTGRES_PASSWORD=" "$FLEET_DIR/config/env"; then
+    DB_PASSWORD=$(echo "$DATABASE_URL" | sed -n 's|postgresql://fleet:\([^@]*\)@.*|\1|p')
+    cat >> "$FLEET_DIR/config/env" <<EOF
+POSTGRES_USER=fleet
 POSTGRES_PASSWORD=${DB_PASSWORD}
-POSTGRES_DB=hoster
+POSTGRES_DB=fleet
 VALKEY_PASSWORD=${VALKEY_PASSWORD}
-HOSTER_VERSION=${HOSTER_VERSION}
+FLEET_VERSION=${FLEET_VERSION}
 EOF
   fi
 
   # Deploy the stack
   log "Deploying Docker Swarm stack..."
   cd "$STACK_DIR"
-  env HOSTER_VERSION="$HOSTER_VERSION" \
+  env FLEET_VERSION="$FLEET_VERSION" \
       PLATFORM_DOMAIN="$PLATFORM_DOMAIN" \
       VALKEY_PASSWORD="$VALKEY_PASSWORD" \
     docker stack deploy \
       -c docker-stack.yml \
       --with-registry-auth \
-      hoster
+      fleet
 
   # Wait for services to converge
   log "Waiting for services to start..."
@@ -707,11 +707,11 @@ EOF
 
     # Check how many services are fully replicated
     local TOTAL
-    TOTAL=$(docker stack services hoster --format "{{.Name}}" 2>/dev/null | wc -l | tr -d ' ')
+    TOTAL=$(docker stack services fleet --format "{{.Name}}" 2>/dev/null | wc -l | tr -d ' ')
     local READY
-    READY=$(docker stack services hoster --format "{{.Replicas}}" 2>/dev/null | grep -c '/' | tr -d ' ')
+    READY=$(docker stack services fleet --format "{{.Replicas}}" 2>/dev/null | grep -c '/' | tr -d ' ')
     local CONVERGED
-    CONVERGED=$(docker stack services hoster --format "{{.Replicas}}" 2>/dev/null | awk -F'/' '$1==$2 && $1>0' | wc -l | tr -d ' ')
+    CONVERGED=$(docker stack services fleet --format "{{.Replicas}}" 2>/dev/null | awk -F'/' '$1==$2 && $1>0' | wc -l | tr -d ' ')
 
     log "  Services: ${CONVERGED}/${TOTAL} ready (${WAITED}s elapsed)"
 
@@ -723,12 +723,12 @@ EOF
 
   if [ $WAITED -ge $MAX_WAIT ]; then
     warn "Some services may not have started within ${MAX_WAIT}s."
-    warn "Check status with: docker stack services hoster"
+    warn "Check status with: docker stack services fleet"
   fi
 
   # Show final service status
   log "Stack service status:"
-  docker stack services hoster 2>/dev/null || true
+  docker stack services fleet 2>/dev/null || true
 }
 
 # ─── Main ────────────────────────────────────────────────────────────
@@ -746,7 +746,7 @@ main() {
 
   echo ""
   echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}  ✅ Hoster installed successfully!${NC}"
+  echo -e "${GREEN}  ✅ Fleet installed successfully!${NC}"
   echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
   echo ""
   echo "  Platform:    https://${PLATFORM_DOMAIN}"
@@ -754,7 +754,7 @@ main() {
   echo "  Traefik:     http://$(hostname -I | awk '{print $1}'):8080"
   echo ""
   echo "  To add more nodes, run on each new server:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/componentor/hoster/main/install/join.sh | bash"
+  echo "  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | bash"
   echo ""
   echo "  Join token:"
   docker swarm join-token worker -q 2>/dev/null || echo "  (run 'docker swarm join-token worker' to get the token)"

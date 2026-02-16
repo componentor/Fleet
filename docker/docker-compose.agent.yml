@@ -1,21 +1,21 @@
-# Hoster PaaS — Per-Node Agent Deployment
+# Fleet PaaS — Per-Node Agent Deployment
 # Used on worker nodes that join the Swarm cluster.
 # Usage: docker compose -f docker-compose.agent.yml up -d
 
 services:
   agent:
-    image: ghcr.io/componentor/hoster-agent:${HOSTER_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-agent:${FLEET_VERSION:-latest}
     restart: unless-stopped
     env_file:
-      - /opt/hoster/config/env
+      - /opt/fleet/config/env
     environment:
       NODE_ROLE: worker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/hoster/nfs-exports:/opt/hoster/nfs-exports
-      - /opt/hoster/config:/opt/hoster/config:ro
+      - /opt/fleet/nfs-exports:/opt/fleet/nfs-exports
+      - /opt/fleet/config:/opt/fleet/config:ro
     networks:
-      - hoster_internal
+      - fleet_internal
     deploy:
       resources:
         limits:
@@ -37,5 +37,5 @@ services:
       start_period: 15s
 
 networks:
-  hoster_internal:
+  fleet_internal:
     external: true

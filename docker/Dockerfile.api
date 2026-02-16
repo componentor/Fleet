@@ -18,7 +18,7 @@ COPY packages/types ./packages/types
 COPY packages/db ./packages/db
 COPY packages/api ./packages/api
 COPY tsconfig.base.json ./
-RUN pnpm --filter @hoster/api build
+RUN pnpm --filter @fleet/api build
 
 FROM base AS runner
 ENV NODE_ENV=production

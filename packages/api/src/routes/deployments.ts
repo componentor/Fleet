@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, services, deployments, oauthProviders, insertReturning, eq, and } from '@hoster/db';
+import { db, services, deployments, oauthProviders, insertReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { githubService } from '../services/github.service.js';

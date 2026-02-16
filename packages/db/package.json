@@ -1,5 +1,5 @@
 {
-  "name": "@hoster/db",
+  "name": "@fleet/db",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -30,7 +30,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hoster/types": "workspace:*",
+    "@fleet/types": "workspace:*",
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.38.4",
     "mysql2": "^3.17.1",

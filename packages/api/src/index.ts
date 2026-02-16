@@ -14,7 +14,21 @@ const server = serve({
 
 injectWebSocket(server)
 
-console.log(`Hoster API running on port ${port}`)
+console.log(`Fleet API running on port ${port}`)
 
 // Start periodic update checker (checks GitHub every 6 hours)
 updateService.startPeriodicCheck()
+
+// Graceful shutdown
+function shutdown() {
+  console.log('Shutting down API server...')
+  updateService.stopPeriodicCheck()
+  server.close(() => {
+    process.exit(0)
+  })
+  // Force exit after 3s if server doesn't close
+  setTimeout(() => process.exit(0), 3000).unref()
+}
+
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

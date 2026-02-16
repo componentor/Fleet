@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, emailTemplates, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@hoster/db';
+import { db, emailTemplates, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';

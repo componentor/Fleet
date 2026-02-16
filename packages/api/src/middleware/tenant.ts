@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory';
-import { db, accounts, userAccounts, eq } from '@hoster/db';
+import { db, accounts, userAccounts, eq } from '@fleet/db';
 import type { AuthUser } from './auth.js';
 
 export interface AccountContext {

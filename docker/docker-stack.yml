@@ -1,6 +1,6 @@
-# Hoster PaaS — Production Docker Swarm Stack
+# Fleet PaaS — Production Docker Swarm Stack
 # Deployed by: install.sh -> deploy_stack()
-# Usage: docker stack deploy -c docker-stack.yml hoster
+# Usage: docker stack deploy -c docker-stack.yml fleet
 
 version: "3.9"
 
@@ -9,17 +9,17 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: hoster
+      POSTGRES_USER: fleet
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-      POSTGRES_DB: hoster
+      POSTGRES_DB: fleet
     env_file:
-      - /opt/hoster/config/env
+      - /opt/fleet/config/env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - hoster_internal
+      - fleet_internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hoster"]
+      test: ["CMD-SHELL", "pg_isready -U fleet"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -52,7 +52,7 @@ services:
     volumes:
       - valkey_data:/data
     networks:
-      - hoster_internal
+      - fleet_internal
     healthcheck:
       test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
       interval: 10s
@@ -77,12 +77,12 @@ services:
 
   # ─── API Server ──────────────────────────────────────────────────────
   api:
-    image: ghcr.io/componentor/hoster-api:${HOSTER_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-api:${FLEET_VERSION:-latest}
     env_file:
-      - /opt/hoster/config/env
+      - /opt/fleet/config/env
     networks:
-      - hoster_internal
-      - hoster_public
+      - fleet_internal
+      - fleet_public
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/health || exit 1"]
       interval: 15s
@@ -118,14 +118,14 @@ services:
         - "traefik.http.routers.api.tls.certresolver=letsencrypt"
         - "traefik.http.services.api.loadbalancer.server.port=3000"
         - "traefik.http.services.api.loadbalancer.sticky.cookie=true"
-        - "traefik.http.services.api.loadbalancer.sticky.cookie.name=hoster_api"
+        - "traefik.http.services.api.loadbalancer.sticky.cookie.name=fleet_api"
         - "traefik.http.services.api.loadbalancer.sticky.cookie.httpOnly=true"
 
   # ─── Dashboard (SPA) ────────────────────────────────────────────────
   dashboard:
-    image: ghcr.io/componentor/hoster-dashboard:${HOSTER_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-dashboard:${FLEET_VERSION:-latest}
     networks:
-      - hoster_public
+      - fleet_public
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:80/ || exit 1"]
       interval: 15s
@@ -180,12 +180,12 @@ services:
         mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /opt/hoster/certs:/certs
+      - /opt/fleet/certs:/certs
     configs:
       - source: traefik_config
         target: /etc/traefik/traefik.yml
     networks:
-      - hoster_public
+      - fleet_public
     deploy:
       mode: global
       placement:
@@ -206,17 +206,17 @@ services:
 
   # ─── SSH Gateway ────────────────────────────────────────────────────
   ssh-gateway:
-    image: ghcr.io/componentor/hoster-ssh-gateway:${HOSTER_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-ssh-gateway:${FLEET_VERSION:-latest}
     ports:
       - target: 2222
         published: 2222
         protocol: tcp
         mode: ingress
     env_file:
-      - /opt/hoster/config/env
+      - /opt/fleet/config/env
     networks:
-      - hoster_internal
-      - hoster_public
+      - fleet_internal
+      - fleet_public
     deploy:
       replicas: 3
       update_config:
@@ -242,15 +242,15 @@ services:
 
   # ─── Node Agent ─────────────────────────────────────────────────────
   agent:
-    image: ghcr.io/componentor/hoster-agent:${HOSTER_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-agent:${FLEET_VERSION:-latest}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/hoster/nfs-exports:/opt/hoster/nfs-exports
-      - /opt/hoster/config:/opt/hoster/config:ro
+      - /opt/fleet/nfs-exports:/opt/fleet/nfs-exports
+      - /opt/fleet/config:/opt/fleet/config:ro
     env_file:
-      - /opt/hoster/config/env
+      - /opt/fleet/config/env
     networks:
-      - hoster_internal
+      - fleet_internal
     deploy:
       mode: global
       restart_policy:
@@ -279,7 +279,7 @@ services:
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
     networks:
-      - hoster_internal
+      - fleet_internal
     deploy:
       replicas: 1
       placement:
@@ -300,10 +300,10 @@ services:
 
 # ─── Networks ──────────────────────────────────────────────────────────
 networks:
-  hoster_public:
+  fleet_public:
     driver: overlay
     attachable: true
-  hoster_internal:
+  fleet_internal:
     driver: overlay
 
 # ─── Volumes ──────────────────────────────────────────────────────────

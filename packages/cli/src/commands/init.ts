@@ -7,7 +7,7 @@ interface InitOptions {
 }
 
 export async function initCommand(options: InitOptions) {
-  console.log('🚀 Initializing Hoster platform...\n')
+  console.log('🚀 Initializing Fleet platform...\n')
 
   const domain = options.domain || 'localhost'
   const email = options.email || 'admin@localhost'
@@ -35,17 +35,17 @@ export async function initCommand(options: InitOptions) {
 
   console.log('3. Creating overlay networks...')
   try {
-    execSync('docker network create --driver overlay --attachable hoster_public', { stdio: 'ignore' })
-    execSync('docker network create --driver overlay --attachable hoster_internal', { stdio: 'ignore' })
+    execSync('docker network create --driver overlay --attachable fleet_public', { stdio: 'ignore' })
+    execSync('docker network create --driver overlay --attachable fleet_internal', { stdio: 'ignore' })
     console.log('   ✓ Networks created')
   } catch {
     console.log('   ✓ Networks already exist')
   }
 
-  console.log(`\n✅ Hoster initialized!`)
+  console.log(`\n✅ Fleet initialized!`)
   console.log(`   Domain: ${domain}`)
   console.log(`   Admin email: ${email}`)
   console.log(`   JWT Secret: ${jwtSecret.substring(0, 8)}...`)
   console.log(`   DB Password: ${dbPassword.substring(0, 8)}...`)
-  console.log(`\n   Deploy the stack with: docker stack deploy -c docker-compose.yml hoster`)
+  console.log(`\n   Deploy the stack with: docker stack deploy -c docker-compose.yml fleet`)
 }

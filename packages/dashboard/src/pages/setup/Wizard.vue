@@ -1,36 +1,51 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/auth'
-import { Sun, Moon, Monitor, UserPlus, Globe, CheckCircle2, ArrowRight, ArrowLeft, Loader2, Shield, Crown, Network } from 'lucide-vue-next'
+import {
+  Sun, Moon, Monitor, UserPlus, Globe, CheckCircle2, ArrowRight, ArrowLeft,
+  Loader2, Shield, Crown, Network, Container, AlertTriangle, RefreshCw,
+} from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const { theme, toggle } = useTheme()
 
-// Step 0 = choose mode, steps 1-3 = leader wizard
+// Step 0 = choose mode, 1 = Docker/Swarm, 2 = Admin Account, 3 = Platform, 4 = Complete
 const currentStep = ref(0)
-const totalSteps = 3
+const totalSteps = 4
 
-// Step 1: Admin account
+// Docker detection state
+interface DockerState {
+  available: boolean
+  swarm: 'active' | 'inactive' | 'pending' | 'error'
+  role?: 'manager' | 'worker'
+  nodeId?: string
+}
+const dockerState = ref<DockerState | null>(null)
+const dockerLoading = ref(false)
+const swarmInitLoading = ref(false)
+
+// Step 2: Admin account
 const name = ref('')
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 
-// Step 2: Platform config
+// Step 3: Platform config
 const domain = ref(window.location.hostname === 'localhost' ? '' : window.location.hostname)
-const platformName = ref('Hoster')
+const platformName = ref('Fleet')
 
 // State
 const loading = ref(false)
 const error = ref('')
 
 const steps = [
-  { number: 1, label: 'Admin Account', icon: UserPlus },
-  { number: 2, label: 'Platform', icon: Globe },
-  { number: 3, label: 'Complete', icon: CheckCircle2 },
+  { number: 1, label: 'Docker', icon: Container },
+  { number: 2, label: 'Admin Account', icon: UserPlus },
+  { number: 3, label: 'Platform', icon: Globe },
+  { number: 4, label: 'Complete', icon: CheckCircle2 },
 ]
 
 const passwordError = computed(() => {
@@ -49,6 +64,8 @@ const emailError = computed(() => {
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
+      return dockerState.value?.available && dockerState.value?.swarm === 'active'
+    case 2:
       return (
         name.value.length > 0 &&
         email.value.length > 0 &&
@@ -56,17 +73,49 @@ const canProceed = computed(() => {
         password.value.length >= 8 &&
         password.value === confirmPassword.value
       )
-    case 2:
-      return true
     case 3:
+      return true
+    case 4:
       return true
     default:
       return false
   }
 })
 
+async function detectDocker() {
+  dockerLoading.value = true
+  try {
+    const res = await fetch('/api/v1/setup/status')
+    const data = await res.json()
+    dockerState.value = data.docker ?? null
+  } catch {
+    dockerState.value = { available: false, swarm: 'inactive' }
+  } finally {
+    dockerLoading.value = false
+  }
+}
+
+async function initSwarm() {
+  swarmInitLoading.value = true
+  error.value = ''
+  try {
+    const res = await fetch('/api/v1/setup/swarm-init', { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) {
+      error.value = data.error || 'Failed to initialize Swarm'
+      return
+    }
+    dockerState.value = data.docker ?? { available: true, swarm: 'active', role: 'manager' }
+  } catch (e: any) {
+    error.value = e.message || 'Failed to initialize Swarm'
+  } finally {
+    swarmInitLoading.value = false
+  }
+}
+
 function chooseLeader() {
   currentStep.value = 1
+  detectDocker()
 }
 
 function chooseWorker() {
@@ -75,7 +124,7 @@ function chooseWorker() {
 
 function nextStep() {
   error.value = ''
-  if (currentStep.value === 2) {
+  if (currentStep.value === 3) {
     performSetup()
   } else if (currentStep.value < totalSteps) {
     currentStep.value++
@@ -116,9 +165,9 @@ async function performSetup() {
 
     // Store tokens (auto-login)
     authStore.setTokens(data.tokens)
-    localStorage.setItem('hoster_user', JSON.stringify(data.user))
-    localStorage.setItem('hoster_setup_done', 'true')
-    currentStep.value = 3
+    localStorage.setItem('fleet_user', JSON.stringify(data.user))
+    localStorage.setItem('fleet_setup_done', 'true')
+    currentStep.value = 4
   } catch (e: any) {
     error.value = e.message || 'Setup failed'
   } finally {
@@ -150,7 +199,7 @@ async function goToDashboard() {
       <div class="max-w-3xl mx-auto px-6 py-4">
         <div class="flex items-center gap-2">
           <Shield class="w-6 h-6 text-primary-600 dark:text-primary-400" />
-          <h1 class="text-xl font-bold text-primary-600 dark:text-primary-400">Hoster Setup</h1>
+          <h1 class="text-xl font-bold text-primary-600 dark:text-primary-400">Fleet Setup</h1>
         </div>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Set up your hosting platform in a few steps</p>
       </div>
@@ -162,22 +211,21 @@ async function goToDashboard() {
         <!-- Step 0: Choose mode -->
         <template v-if="currentStep === 0">
           <div class="text-center mb-8">
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Welcome to Hoster</h2>
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Welcome to Fleet</h2>
             <p class="text-gray-500 dark:text-gray-400">How would you like to set up this server?</p>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <!-- Leader node -->
             <button
               @click="chooseLeader"
-              class="group cursor-pointer bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-primary-500 dark:hover:border-primary-500 shadow-sm p-8 text-left transition-all"
+              class="group bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-primary-500 dark:hover:border-primary-500 shadow-sm p-8 text-left transition-all"
             >
               <div class="w-12 h-12 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mb-4 group-hover:bg-primary-200 dark:group-hover:bg-primary-900/50 transition-colors">
                 <Crown class="w-6 h-6 text-primary-600 dark:text-primary-400" />
               </div>
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Setup Leader Node</h3>
               <p class="text-sm text-gray-500 dark:text-gray-400">
-                Initialize a new Hoster platform. Create the first admin account, configure your domain, and start managing services.
+                Initialize a new Fleet platform. Create the first admin account, configure your domain, and start managing services.
               </p>
               <div class="flex items-center gap-1 mt-4 text-sm font-medium text-primary-600 dark:text-primary-400">
                 Get started
@@ -185,17 +233,16 @@ async function goToDashboard() {
               </div>
             </button>
 
-            <!-- Worker node -->
             <button
               @click="chooseWorker"
-              class="group cursor-pointer bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-primary-500 dark:hover:border-primary-500 shadow-sm p-8 text-left transition-all"
+              class="group bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-primary-500 dark:hover:border-primary-500 shadow-sm p-8 text-left transition-all"
             >
               <div class="w-12 h-12 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center mb-4 group-hover:bg-orange-200 dark:group-hover:bg-orange-900/50 transition-colors">
                 <Network class="w-6 h-6 text-orange-600 dark:text-orange-400" />
               </div>
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Connect to Existing Node</h3>
               <p class="text-sm text-gray-500 dark:text-gray-400">
-                Join this server to an existing Hoster cluster. Install Docker, join the Swarm, and configure shared storage.
+                Join this server to an existing Fleet cluster. Install Docker, join the Swarm, and configure shared storage.
               </p>
               <div class="flex items-center gap-1 mt-4 text-sm font-medium text-orange-600 dark:text-orange-400">
                 Connect node
@@ -205,7 +252,7 @@ async function goToDashboard() {
           </div>
         </template>
 
-        <!-- Leader wizard steps (1-3) -->
+        <!-- Leader wizard steps (1-4) -->
         <template v-if="currentStep >= 1">
           <!-- Step indicator -->
           <div class="mb-10">
@@ -254,8 +301,79 @@ async function goToDashboard() {
             <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
           </div>
 
-          <!-- Step 1: Admin Account -->
+          <!-- Step 1: Docker & Swarm -->
           <div v-if="currentStep === 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Docker & Swarm</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Fleet uses Docker Swarm to orchestrate your services.</p>
+            </div>
+            <div class="p-6 space-y-5">
+              <!-- Loading -->
+              <div v-if="dockerLoading" class="flex items-center justify-center py-8 gap-3 text-gray-500 dark:text-gray-400">
+                <Loader2 class="w-5 h-5 animate-spin" />
+                <span class="text-sm">Detecting Docker...</span>
+              </div>
+
+              <template v-else-if="dockerState">
+                <!-- Docker status -->
+                <div class="flex items-center gap-3 p-4 rounded-lg" :class="dockerState.available ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'">
+                  <CheckCircle2 v-if="dockerState.available" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                  <AlertTriangle v-else class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+                  <div>
+                    <p class="text-sm font-medium" :class="dockerState.available ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300'">
+                      {{ dockerState.available ? 'Docker is installed and running' : 'Docker is not available' }}
+                    </p>
+                    <p v-if="!dockerState.available" class="text-xs text-red-600 dark:text-red-400 mt-1">
+                      Install Docker first: <code class="bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded">curl -fsSL https://get.docker.com | sh</code>
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Swarm status -->
+                <div v-if="dockerState.available" class="flex items-center gap-3 p-4 rounded-lg" :class="dockerState.swarm === 'active' ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'">
+                  <CheckCircle2 v-if="dockerState.swarm === 'active'" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                  <AlertTriangle v-else class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0" />
+                  <div class="flex-1">
+                    <p class="text-sm font-medium" :class="dockerState.swarm === 'active' ? 'text-green-800 dark:text-green-300' : 'text-yellow-800 dark:text-yellow-300'">
+                      <template v-if="dockerState.swarm === 'active'">
+                        Swarm is active ({{ dockerState.role ?? 'manager' }})
+                      </template>
+                      <template v-else>
+                        Docker Swarm is not initialized
+                      </template>
+                    </p>
+                    <p v-if="dockerState.swarm === 'active' && dockerState.nodeId" class="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                      Node ID: {{ dockerState.nodeId }}
+                    </p>
+                  </div>
+                  <button
+                    v-if="dockerState.swarm !== 'active'"
+                    @click="initSwarm"
+                    :disabled="swarmInitLoading"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
+                  >
+                    <Loader2 v-if="swarmInitLoading" class="w-3.5 h-3.5 animate-spin" />
+                    {{ swarmInitLoading ? 'Initializing...' : 'Initialize Swarm' }}
+                  </button>
+                </div>
+
+                <!-- Refresh button -->
+                <div v-if="!dockerState.available || dockerState.swarm !== 'active'" class="flex justify-center">
+                  <button
+                    @click="detectDocker"
+                    :disabled="dockerLoading"
+                    class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                  >
+                    <RefreshCw class="w-4 h-4" />
+                    Re-check
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Step 2: Admin Account -->
+          <div v-if="currentStep === 2" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Create Admin Account</h2>
               <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">This will be the super administrator of your platform.</p>
@@ -302,8 +420,8 @@ async function goToDashboard() {
             </div>
           </div>
 
-          <!-- Step 2: Platform Configuration -->
-          <div v-if="currentStep === 2" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <!-- Step 3: Platform Configuration -->
+          <div v-if="currentStep === 3" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Platform Configuration</h2>
               <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Basic platform settings. You can change these later in admin settings.</p>
@@ -314,7 +432,7 @@ async function goToDashboard() {
                 <input
                   v-model="platformName"
                   type="text"
-                  placeholder="Hoster"
+                  placeholder="Fleet"
                   class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
                 />
               </div>
@@ -334,8 +452,8 @@ async function goToDashboard() {
             </div>
           </div>
 
-          <!-- Step 3: Complete -->
-          <div v-if="currentStep === 3" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <!-- Step 4: Complete -->
+          <div v-if="currentStep === 4" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="p-12 text-center">
               <CheckCircle2 class="w-16 h-16 text-green-500 mx-auto mb-4" />
               <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Setup Complete</h2>
@@ -346,6 +464,9 @@ async function goToDashboard() {
                 <div><span class="font-medium text-gray-900 dark:text-white">Admin:</span> {{ email }}</div>
                 <div v-if="domain"><span class="font-medium text-gray-900 dark:text-white">Domain:</span> {{ domain }}</div>
                 <div v-if="platformName"><span class="font-medium text-gray-900 dark:text-white">Platform:</span> {{ platformName }}</div>
+                <div v-if="dockerState?.swarm === 'active'">
+                  <span class="font-medium text-gray-900 dark:text-white">Swarm:</span> Active ({{ dockerState.role ?? 'manager' }})
+                </div>
               </div>
             </div>
           </div>
@@ -353,9 +474,9 @@ async function goToDashboard() {
           <!-- Navigation -->
           <div class="flex items-center justify-between mt-6">
             <button
-              v-if="currentStep >= 1 && currentStep < 3"
+              v-if="currentStep >= 1 && currentStep < 4"
               @click="prevStep"
-              class="cursor-pointer flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
             >
               <ArrowLeft class="w-4 h-4" />
               Back
@@ -363,13 +484,13 @@ async function goToDashboard() {
             <div v-else></div>
 
             <button
-              v-if="currentStep >= 1 && currentStep < 3"
+              v-if="currentStep >= 1 && currentStep < 4"
               @click="nextStep"
               :disabled="!canProceed || loading"
-              class="cursor-pointer flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
               <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
-              <template v-if="currentStep === 2">
+              <template v-if="currentStep === 3">
                 {{ loading ? 'Setting up...' : 'Complete Setup' }}
               </template>
               <template v-else>
@@ -379,9 +500,9 @@ async function goToDashboard() {
             </button>
 
             <button
-              v-if="currentStep === 3"
+              v-if="currentStep === 4"
               @click="goToDashboard"
-              class="cursor-pointer flex items-center gap-2 px-6 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
+              class="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
             >
               Go to Admin Dashboard
               <ArrowRight class="w-4 h-4" />

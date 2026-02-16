@@ -77,7 +77,7 @@ async function runMysqlMigrations(url: string): Promise<{ applied: number }> {
 
   try {
     // Use MySQL named lock for concurrency safety
-    await db.execute(drizzleSql`SELECT GET_LOCK('hoster_migrate', 30)`);
+    await db.execute(drizzleSql`SELECT GET_LOCK('fleet_migrate', 30)`);
 
     try {
       let beforeCount = 0;
@@ -106,7 +106,7 @@ async function runMysqlMigrations(url: string): Promise<{ applied: number }> {
 
       return { applied: afterCount - beforeCount };
     } finally {
-      await db.execute(drizzleSql`SELECT RELEASE_LOCK('hoster_migrate')`);
+      await db.execute(drizzleSql`SELECT RELEASE_LOCK('fleet_migrate')`);
     }
   } finally {
     await pool.end();

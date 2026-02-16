@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, accounts, userAccounts, users, insertReturning, updateReturning, deleteReturning, eq, like, and } from '@hoster/db';
+import { db, accounts, userAccounts, users, insertReturning, updateReturning, deleteReturning, eq, like, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 

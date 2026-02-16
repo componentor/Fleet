@@ -187,18 +187,18 @@ export const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  const token = localStorage.getItem('hoster_token')
+  const token = localStorage.getItem('fleet_token')
   const isAuthenticated = !!token
 
   // Check if platform needs first-run setup (skip for setup routes themselves)
   if (!to.path.startsWith('/setup')) {
-    const setupDone = localStorage.getItem('hoster_setup_done')
+    const setupDone = localStorage.getItem('fleet_setup_done')
     if (!setupDone) {
       try {
         const res = await fetch('/api/v1/setup/status')
         const { needsSetup } = await res.json()
         if (needsSetup) return { path: '/setup' }
-        localStorage.setItem('hoster_setup_done', 'true')
+        localStorage.setItem('fleet_setup_done', 'true')
       } catch {
         // API not available, continue normally
       }
@@ -221,7 +221,7 @@ router.beforeEach(async (to) => {
   // Check super user access for admin routes
   if (to.matched.some((record) => record.meta.requiresSuper)) {
     try {
-      const userJson = localStorage.getItem('hoster_user')
+      const userJson = localStorage.getItem('fleet_user')
       const user = userJson ? JSON.parse(userJson) : null
       if (!user?.isSuper) {
         return { path: '/panel' }

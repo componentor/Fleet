@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, dnsZones, dnsRecords, insertReturning, updateReturning, eq, and } from '@hoster/db';
+import { db, dnsZones, dnsRecords, insertReturning, updateReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dnsService } from '../services/dns.service.js';
@@ -93,7 +93,7 @@ dnsRoutes.post('/zones', async (c) => {
   try {
     await dnsService.createRecord(
       domain,
-      `_hoster-verify.${domain}`,
+      `_fleet-verify.${domain}`,
       'TXT',
       `"${verificationToken}"`,
       3600,
@@ -105,8 +105,8 @@ dnsRoutes.post('/zones', async (c) => {
 
   // Insert into DB
   const resolvedNameservers = nameservers ?? [
-    'ns1.hoster.local',
-    'ns2.hoster.local',
+    'ns1.fleet.local',
+    'ns2.fleet.local',
   ];
 
   const [zone] = await insertReturning(dnsZones, {
@@ -227,7 +227,7 @@ dnsRoutes.post('/zones/:id/verify', async (c) => {
     return c.json(
       {
         error:
-          'Verification failed. Ensure the TXT record _hoster-verify is configured correctly.',
+          'Verification failed. Ensure the TXT record _fleet-verify is configured correctly.',
         verified: false,
       },
       422,

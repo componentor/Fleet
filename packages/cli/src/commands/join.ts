@@ -6,7 +6,7 @@ interface JoinOptions {
 }
 
 export async function joinCommand(options: JoinOptions) {
-  console.log('🔗 Joining Hoster swarm...\n')
+  console.log('🔗 Joining Fleet swarm...\n')
 
   if (!options.token || !options.address) {
     console.log('No token/address provided. Starting setup wizard...')
@@ -35,6 +35,6 @@ export async function joinCommand(options: JoinOptions) {
     process.exit(1)
   }
 
-  console.log('\n✅ Node joined the Hoster swarm!')
+  console.log('\n✅ Node joined the Fleet swarm!')
   console.log('   The agent will be automatically deployed to this node.')
 }

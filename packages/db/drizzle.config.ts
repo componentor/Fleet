@@ -31,7 +31,7 @@ function getConfig() {
     schema: './src/dialects/sqlite/schema',
     out: './src/migrations/sqlite',
     dbCredentials: {
-      url: process.env['DATABASE_PATH'] ?? './hoster.db',
+      url: process.env['DATABASE_PATH'] ?? './fleet.db',
     },
   });
 }

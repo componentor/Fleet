@@ -1,5 +1,5 @@
 {
-  "name": "@hoster/api",
+  "name": "@fleet/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,8 @@
   "dependencies": {
     "@hono/node-server": "^1.13.8",
     "@hono/node-ws": "^1.1.1",
-    "@hoster/db": "workspace:*",
-    "@hoster/types": "workspace:*",
+    "@fleet/db": "workspace:*",
+    "@fleet/types": "workspace:*",
     "argon2": "^0.41.1",
     "dockerode": "^4.0.4",
     "hono": "^4.7.4",

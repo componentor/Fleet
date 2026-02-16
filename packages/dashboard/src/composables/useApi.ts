@@ -20,12 +20,12 @@ async function request<T>(
     'Content-Type': 'application/json',
   }
 
-  const token = localStorage.getItem('hoster_token')
+  const token = localStorage.getItem('fleet_token')
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const accountId = localStorage.getItem('hoster_account_id')
+  const accountId = localStorage.getItem('fleet_account_id')
   if (accountId) {
     headers['X-Account-Id'] = accountId
   }

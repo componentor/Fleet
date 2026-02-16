@@ -89,7 +89,7 @@ function handleSwitchAccount(id: string) {
     >
       <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
         <RouterLink to="/panel" class="text-xl font-bold text-primary-600 dark:text-primary-400">
-          Hoster
+          Fleet
         </RouterLink>
       </div>
 

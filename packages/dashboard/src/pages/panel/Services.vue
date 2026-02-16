@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Box, Plus, ArrowRight } from 'lucide-vue-next'
+import { onMounted } from 'vue'
+import { Box, Plus, ArrowRight, Loader2 } from 'lucide-vue-next'
+import { useServicesStore } from '@/stores/services'
 
-const services = ref<any[]>([])
-const loading = ref(false)
+const store = useServicesStore()
 
 function statusColor(status: string) {
   switch (status) {
     case 'running': return 'bg-green-500'
     case 'deploying': return 'bg-yellow-500'
     case 'stopped': return 'bg-red-500'
+    case 'failed': return 'bg-red-500'
     default: return 'bg-gray-400'
   }
 }
@@ -19,9 +20,14 @@ function statusBadge(status: string) {
     case 'running': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
     case 'deploying': return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
     case 'stopped': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+    case 'failed': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
     default: return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
   }
 }
+
+onMounted(() => {
+  store.fetchServices()
+})
 </script>
 
 <template>
@@ -40,8 +46,13 @@ function statusBadge(status: string) {
       </router-link>
     </div>
 
+    <!-- Loading state -->
+    <div v-if="store.loading && store.services.length === 0" class="flex items-center justify-center py-20">
+      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+    </div>
+
     <!-- Empty state -->
-    <div v-if="services.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
+    <div v-else-if="store.services.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
       <Box class="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
       <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">No services yet</h3>
       <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">Deploy your first service to get started.</p>
@@ -57,7 +68,7 @@ function statusBadge(status: string) {
     <!-- Service cards grid -->
     <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
       <router-link
-        v-for="service in services"
+        v-for="service in store.services"
         :key="service.id"
         :to="`/panel/services/${service.id}`"
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow overflow-hidden group"
@@ -76,7 +87,7 @@ function statusBadge(status: string) {
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 font-mono mb-3">{{ service.image }}</p>
           <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-            <span>{{ service.cpu }} CPU / {{ service.memory }} RAM</span>
+            <span>{{ service.replicas ?? 1 }} replica{{ (service.replicas ?? 1) !== 1 ? 's' : '' }}</span>
             <ArrowRight class="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-primary-600 dark:text-primary-400" />
           </div>
         </div>

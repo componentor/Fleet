@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { BillingPlan, Subscription, UsageRecord } from '@hoster/types'
+import type { BillingPlan, Subscription, UsageRecord } from '@fleet/types'
 import { useApi } from '@/composables/useApi'
 
 export interface Invoice {

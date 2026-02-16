@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { hash, verify } from 'argon2';
 import { SignJWT, jwtVerify } from 'jose';
-import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq } from '@hoster/db';
+import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
 

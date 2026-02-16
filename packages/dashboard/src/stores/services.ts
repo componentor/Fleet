@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Service, CreateServiceInput, UpdateServiceInput } from '@hoster/types'
+import type { Service, CreateServiceInput, UpdateServiceInput } from '@fleet/types'
 import { useApi } from '@/composables/useApi'
 
 export const useServicesStore = defineStore('services', () => {

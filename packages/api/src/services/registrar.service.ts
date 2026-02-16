@@ -1,4 +1,4 @@
-import { db, domainRegistrars, domainRegistrations, insertReturning, updateReturning, eq } from '@hoster/db';
+import { db, domainRegistrars, domainRegistrations, insertReturning, updateReturning, eq } from '@fleet/db';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types

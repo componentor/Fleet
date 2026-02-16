@@ -83,7 +83,7 @@ export class DnsService {
    */
   async createZone(
     domain: string,
-    nameservers: string[] = ['ns1.hoster.local.', 'ns2.hoster.local.'],
+    nameservers: string[] = ['ns1.fleet.local.', 'ns2.fleet.local.'],
   ): Promise<PowerDnsZone> {
     const canonicalDomain = this.canonicalize(domain);
 
@@ -216,7 +216,7 @@ export class DnsService {
   ): Promise<boolean> {
     try {
       const zone = await this.getZone(domain);
-      const verificationName = `_hoster-verify.${this.canonicalize(domain)}`;
+      const verificationName = `_fleet-verify.${this.canonicalize(domain)}`;
 
       const txtRrset = zone.rrsets.find(
         (rrset) =>

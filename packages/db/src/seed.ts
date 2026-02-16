@@ -104,7 +104,7 @@ const seeders: SeederFn[] = [
     description: 'Default platform settings',
     run: async (db, schema, dialect) => {
       const defaults = [
-        { key: 'platform:name', value: 'Hoster' },
+        { key: 'platform:name', value: 'Fleet' },
         { key: 'platform:version', value: '0.1.0' },
         { key: 'platform:registrationEnabled', value: true },
         { key: 'platform:defaultPlan', value: null },
@@ -125,7 +125,7 @@ const seeders: SeederFn[] = [
 function createTrackingTableSql(dialect: string) {
   if (dialect === 'mysql') {
     return drizzleSql`
-      CREATE TABLE IF NOT EXISTS hoster_seeders (
+      CREATE TABLE IF NOT EXISTS fleet_seeders (
         id INT AUTO_INCREMENT PRIMARY KEY,
         version VARCHAR(255) NOT NULL,
         description VARCHAR(255) NOT NULL,
@@ -136,7 +136,7 @@ function createTrackingTableSql(dialect: string) {
   }
   if (dialect === 'sqlite') {
     return drizzleSql`
-      CREATE TABLE IF NOT EXISTS hoster_seeders (
+      CREATE TABLE IF NOT EXISTS fleet_seeders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         version TEXT NOT NULL,
         description TEXT NOT NULL,
@@ -147,7 +147,7 @@ function createTrackingTableSql(dialect: string) {
   }
   // PG
   return drizzleSql`
-    CREATE TABLE IF NOT EXISTS hoster_seeders (
+    CREATE TABLE IF NOT EXISTS fleet_seeders (
       id SERIAL PRIMARY KEY,
       version VARCHAR NOT NULL,
       description VARCHAR NOT NULL,
@@ -230,7 +230,7 @@ async function executeSeederLoop(db: any, schema: any, dialect: string): Promise
   for (const seeder of seeders) {
     // Check if already run
     const existing = await db.execute(
-      drizzleSql`SELECT id FROM hoster_seeders WHERE version = ${seeder.version} AND description = ${seeder.description}`,
+      drizzleSql`SELECT id FROM fleet_seeders WHERE version = ${seeder.version} AND description = ${seeder.description}`,
     );
 
     const rows = dialect === 'mysql' ? (existing as any)[0] : existing;
@@ -241,7 +241,7 @@ async function executeSeederLoop(db: any, schema: any, dialect: string): Promise
     await seeder.run(db, schema, dialect);
 
     await db.execute(
-      drizzleSql`INSERT INTO hoster_seeders (version, description) VALUES (${seeder.version}, ${seeder.description})`,
+      drizzleSql`INSERT INTO fleet_seeders (version, description) VALUES (${seeder.version}, ${seeder.description})`,
     );
 
     executed++;

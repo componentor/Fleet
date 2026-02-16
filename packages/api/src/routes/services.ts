@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, services, deployments, insertReturning, updateReturning, eq, and } from '@hoster/db';
+import { db, services, deployments, insertReturning, updateReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
@@ -141,7 +141,7 @@ serviceRoutes.post('/', async (c) => {
 
   // Deploy to Docker Swarm
   try {
-    const swarmServiceName = `hoster-${accountId.slice(0, 8)}-${data.name}`;
+    const swarmServiceName = `fleet-${accountId.slice(0, 8)}-${data.name}`;
 
     const result = await dockerService.createService({
       name: swarmServiceName,
@@ -160,8 +160,8 @@ serviceRoutes.post('/', async (c) => {
       })),
       labels: {
         ...traefikLabels,
-        'hoster.account-id': accountId,
-        'hoster.service-id': svc.id,
+        'fleet.account-id': accountId,
+        'fleet.service-id': svc.id,
       },
       constraints,
       healthCheck: data.healthCheck ?? undefined,
@@ -307,8 +307,8 @@ serviceRoutes.patch('/:id', async (c) => {
         env: data.env,
         labels: {
           ...traefikLabels,
-          'hoster.account-id': accountId,
-          'hoster.service-id': serviceId,
+          'fleet.account-id': accountId,
+          'fleet.service-id': serviceId,
         },
         constraints: data.placementConstraints ?? (svc.placementConstraints as string[]) ?? [],
         ports: data.ports?.map((p) => ({

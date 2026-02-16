@@ -1,5 +1,5 @@
 {
-  "name": "@hoster/dashboard",
+  "name": "@fleet/dashboard",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -30,6 +30,6 @@
     "typescript": "^5.7.3",
     "@tailwindcss/vite": "^4.0.7",
     "tailwindcss": "^4.0.7",
-    "@hoster/types": "workspace:*"
+    "@fleet/types": "workspace:*"
   }
 }

@@ -20,7 +20,7 @@ const { theme, toggle } = useTheme()
 
     <!-- Logo -->
     <div class="mb-8 text-center">
-      <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">Hoster</h1>
+      <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">Fleet</h1>
       <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Cloud hosting made simple</p>
     </div>
 

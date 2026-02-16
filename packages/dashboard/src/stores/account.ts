@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Account, CreateAccountInput } from '@hoster/types'
+import type { Account, CreateAccountInput } from '@fleet/types'
 import { useApi } from '@/composables/useApi'
 
 export const useAccountStore = defineStore('account', () => {
@@ -18,10 +18,10 @@ export const useAccountStore = defineStore('account', () => {
 
       // Set current account if not set
       if (!currentAccount.value && data.length > 0) {
-        const savedId = localStorage.getItem('hoster_account_id')
+        const savedId = localStorage.getItem('fleet_account_id')
         const saved = savedId ? data.find((a) => a.id === savedId) : null
         currentAccount.value = saved ?? data[0]!
-        localStorage.setItem('hoster_account_id', currentAccount.value.id)
+        localStorage.setItem('fleet_account_id', currentAccount.value.id)
       }
 
       return data
@@ -34,7 +34,7 @@ export const useAccountStore = defineStore('account', () => {
     const account = accounts.value.find((a) => a.id === id)
     if (account) {
       currentAccount.value = account
-      localStorage.setItem('hoster_account_id', id)
+      localStorage.setItem('fleet_account_id', id)
     }
   }
 
@@ -52,7 +52,7 @@ export const useAccountStore = defineStore('account', () => {
   function clear() {
     currentAccount.value = null
     accounts.value = []
-    localStorage.removeItem('hoster_account_id')
+    localStorage.removeItem('fleet_account_id')
   }
 
   return {

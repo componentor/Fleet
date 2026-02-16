@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { hash, verify } from 'argon2';
-import { db, users, userAccounts, updateReturning, eq } from '@hoster/db';
+import { db, users, userAccounts, updateReturning, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 
 const userRoutes = new Hono<{

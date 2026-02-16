@@ -1,5 +1,5 @@
 {
-  "name": "@hoster/agent",
+  "name": "@fleet/agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hoster/types": "workspace:*",
+    "@fleet/types": "workspace:*",
     "dockerode": "^4.0.4",
     "ioredis": "^5.4.2"
   },

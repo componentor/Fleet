@@ -1,4 +1,4 @@
-# Hoster
+# Fleet
 
 Multi-tenant PaaS hosting control panel built on Docker Swarm.
 
@@ -7,13 +7,13 @@ Multi-tenant PaaS hosting control panel built on Docker Swarm.
 ### Installation (Production)
 
 ```bash
-curl -fsSL https://get.hoster.app | sh
+curl -fsSL https://get.fleet.app | sh
 ```
 
 With a specific database:
 
 ```bash
-curl -fsSL https://get.hoster.app | sh -s -- --db postgres
+curl -fsSL https://get.fleet.app | sh -s -- --db postgres
 ```
 
 Supported databases: `postgres` (default), `sqlite`, `mysql`
@@ -29,8 +29,8 @@ After installation, open the dashboard in your browser. The setup wizard will gu
 Prerequisites: Node.js >= 20, pnpm
 
 ```bash
-git clone https://github.com/your-org/hoster.git
-cd hoster
+git clone https://github.com/your-org/fleet.git
+cd fleet
 pnpm install
 cp env.example .env
 pnpm dev
@@ -54,7 +54,7 @@ packages/
 
 ### Key Design Decisions
 
-- **Multi-dialect database**: `@hoster/db` abstracts SQLite, PostgreSQL, and MySQL behind a single interface. The dialect is chosen via `DB_DIALECT` env var at startup.
+- **Multi-dialect database**: `@fleet/db` abstracts SQLite, PostgreSQL, and MySQL behind a single interface. The dialect is chosen via `DB_DIALECT` env var at startup.
 - **Docker Swarm**: Services are deployed as Swarm services, enabling multi-node scaling and rolling updates.
 - **Multi-tenant**: Accounts can be nested (reseller model). Each account has isolated services, domains, and billing.
 - **Setup wizard**: First-run setup is handled entirely through the dashboard UI. No manual database seeding or config file editing required.
@@ -88,8 +88,8 @@ pnpm db:push      # Push schema to database
 
 ```bash
 pnpm test                        # All tests (via Turbo)
-pnpm --filter @hoster/db test    # Database tests only
-pnpm --filter @hoster/api test   # API tests only
+pnpm --filter @fleet/db test    # Database tests only
+pnpm --filter @fleet/api test   # API tests only
 ```
 
 Tests use an in-memory SQLite database — no external services required.

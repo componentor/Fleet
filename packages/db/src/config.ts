@@ -12,7 +12,7 @@ export function getConnectionString(): string {
   const dialect = getDialect();
 
   if (dialect === 'sqlite') {
-    return process.env['DATABASE_PATH'] ?? './hoster.db';
+    return process.env['DATABASE_PATH'] ?? './fleet.db';
   }
 
   const url = process.env['DATABASE_URL'];

@@ -15,7 +15,7 @@ COPY --from=deps /app/packages/dashboard/node_modules ./packages/dashboard/node_
 COPY packages/types ./packages/types
 COPY packages/dashboard ./packages/dashboard
 COPY tsconfig.base.json ./
-RUN pnpm --filter @hoster/dashboard build
+RUN pnpm --filter @fleet/dashboard build
 
 FROM nginx:alpine AS runner
 COPY --from=build /app/packages/dashboard/dist /usr/share/nginx/html

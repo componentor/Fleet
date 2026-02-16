@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 
 export async function statusCommand() {
-  console.log('📊 Hoster Cluster Status\n')
+  console.log('📊 Fleet Cluster Status\n')
 
   try {
     console.log('Swarm Nodes:')
@@ -19,6 +19,6 @@ export async function statusCommand() {
     console.log(services)
   } catch (err) {
     console.error('Failed to get cluster status. Is Docker Swarm initialized?')
-    console.error('Run: hoster init')
+    console.error('Run: fleet init')
   }
 }

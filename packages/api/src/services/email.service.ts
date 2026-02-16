@@ -1,4 +1,4 @@
-import { db, emailTemplates, emailLog, insertReturning, eq, and } from '@hoster/db';
+import { db, emailTemplates, emailLog, insertReturning, eq, and } from '@fleet/db';
 import { createTransport, type Transporter } from 'nodemailer';
 
 export interface EmailProvider {
@@ -26,7 +26,7 @@ class SmtpProvider implements EmailProvider {
     const port = parseInt(process.env['SMTP_PORT'] ?? '587', 10);
     const user = process.env['SMTP_USER'];
     const pass = process.env['SMTP_PASS'];
-    this.from = process.env['SMTP_FROM'] ?? 'noreply@hoster.app';
+    this.from = process.env['SMTP_FROM'] ?? 'noreply@fleet.app';
 
     this.transporter = createTransport({
       host,
@@ -72,7 +72,7 @@ class ResendProvider implements EmailProvider {
 
   constructor() {
     this.apiKey = process.env['RESEND_API_KEY'] ?? '';
-    this.from = process.env['RESEND_FROM'] ?? 'noreply@hoster.app';
+    this.from = process.env['RESEND_FROM'] ?? 'noreply@fleet.app';
   }
 
   async sendMail(options: {
@@ -251,7 +251,7 @@ export class EmailService {
     const from =
       process.env['SMTP_FROM'] ??
       process.env['RESEND_FROM'] ??
-      'noreply@hoster.app';
+      'noreply@fleet.app';
 
     // Log the email attempt
     const [logEntry] = await insertReturning(emailLog, {
@@ -309,7 +309,7 @@ export class EmailService {
     const from =
       process.env['SMTP_FROM'] ??
       process.env['RESEND_FROM'] ??
-      'noreply@hoster.app';
+      'noreply@fleet.app';
 
     // Log the email attempt
     const [logEntry] = await insertReturning(emailLog, {

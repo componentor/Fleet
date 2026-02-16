@@ -8,7 +8,7 @@ import {
   usageRecords,
   eq,
   and,
-} from '@hoster/db';
+} from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { stripeService } from '../services/stripe.service.js';

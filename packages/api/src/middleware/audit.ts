@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory';
-import { db, auditLog } from '@hoster/db';
+import { db, auditLog } from '@fleet/db';
 import type { AuthUser } from './auth.js';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);

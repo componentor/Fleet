@@ -3,8 +3,8 @@ import { EventEmitter } from 'node:events';
 import { dockerService } from './docker.service.js';
 import { backupService } from './backup.service.js';
 
-const GITHUB_REPO = process.env['HOSTER_GITHUB_REPO'] ?? 'componentor/hoster';
-const IMAGE_PREFIX = process.env['HOSTER_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
+const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
+const IMAGE_PREFIX = process.env['FLEET_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export type UpdateStatus = 'idle' | 'checking' | 'backing-up' | 'pulling' | 'verifying-images' | 'migrating' | 'updating' | 'seeding' | 'verifying' | 'completed' | 'failed' | 'rolling-back';
@@ -37,12 +37,12 @@ export interface UpdateState {
   preUpdateBackupId: string | null;
 }
 
-const HOSTER_SERVICES = ['hoster_api', 'hoster_dashboard', 'hoster_ssh-gateway', 'hoster_agent'] as const;
+const FLEET_SERVICES = ['fleet_api', 'fleet_dashboard', 'fleet_ssh-gateway', 'fleet_agent'] as const;
 
 export class UpdateService {
   private state: UpdateState = {
     status: 'idle',
-    currentVersion: process.env['HOSTER_VERSION'] ?? 'unknown',
+    currentVersion: process.env['FLEET_VERSION'] ?? 'unknown',
     targetVersion: null,
     log: '',
     startedAt: null,
@@ -224,7 +224,7 @@ export class UpdateService {
 
       // 6. Rolling update each service (one at a time, start-first)
       this.state.status = 'updating';
-      for (const serviceName of HOSTER_SERVICES) {
+      for (const serviceName of FLEET_SERVICES) {
         await this.updateSwarmService(serviceName, imageTag);
       }
 
@@ -366,7 +366,7 @@ export class UpdateService {
       {
         headers: {
           Accept: 'application/vnd.github+json',
-          'User-Agent': 'hoster-update-service',
+          'User-Agent': 'fleet-update-service',
         },
       },
     );
@@ -395,7 +395,7 @@ export class UpdateService {
         {
           headers: {
             Accept: 'application/vnd.github+json',
-            'User-Agent': 'hoster-update-service',
+            'User-Agent': 'fleet-update-service',
           },
         },
       );
@@ -421,8 +421,8 @@ export class UpdateService {
    * Expected format in release notes (under a "## Checksums" heading):
    *
    *   ```
-   *   sha256:abc123... ghcr.io/componentor/hoster-api:1.2.3
-   *   sha256:def456... ghcr.io/componentor/hoster-dashboard:1.2.3
+   *   sha256:abc123... ghcr.io/componentor/fleet-api:1.2.3
+   *   sha256:def456... ghcr.io/componentor/fleet-dashboard:1.2.3
    *   ```
    */
   private parseChecksums(body: string): Record<string, string> {
@@ -442,7 +442,7 @@ export class UpdateService {
   }
 
   private async snapshotCurrentImages(): Promise<void> {
-    for (const serviceName of HOSTER_SERVICES) {
+    for (const serviceName of FLEET_SERVICES) {
       try {
         const swarmServices = await dockerService.listServices({
           name: [serviceName],
@@ -464,10 +464,10 @@ export class UpdateService {
 
   private async pullImages(imageTag: string): Promise<void> {
     const images = [
-      `${IMAGE_PREFIX}/hoster-api:${imageTag}`,
-      `${IMAGE_PREFIX}/hoster-dashboard:${imageTag}`,
-      `${IMAGE_PREFIX}/hoster-ssh-gateway:${imageTag}`,
-      `${IMAGE_PREFIX}/hoster-agent:${imageTag}`,
+      `${IMAGE_PREFIX}/fleet-api:${imageTag}`,
+      `${IMAGE_PREFIX}/fleet-dashboard:${imageTag}`,
+      `${IMAGE_PREFIX}/fleet-ssh-gateway:${imageTag}`,
+      `${IMAGE_PREFIX}/fleet-agent:${imageTag}`,
     ];
 
     for (const image of images) {
@@ -487,12 +487,12 @@ export class UpdateService {
     imageTag: string,
     expectedChecksums: Record<string, string>,
   ): Promise<void> {
-    for (const serviceName of HOSTER_SERVICES) {
+    for (const serviceName of FLEET_SERVICES) {
       const imageMap: Record<string, string> = {
-        hoster_api: `${IMAGE_PREFIX}/hoster-api:${imageTag}`,
-        hoster_dashboard: `${IMAGE_PREFIX}/hoster-dashboard:${imageTag}`,
-        'hoster_ssh-gateway': `${IMAGE_PREFIX}/hoster-ssh-gateway:${imageTag}`,
-        hoster_agent: `${IMAGE_PREFIX}/hoster-agent:${imageTag}`,
+        fleet_api: `${IMAGE_PREFIX}/fleet-api:${imageTag}`,
+        fleet_dashboard: `${IMAGE_PREFIX}/fleet-dashboard:${imageTag}`,
+        'fleet_ssh-gateway': `${IMAGE_PREFIX}/fleet-ssh-gateway:${imageTag}`,
+        fleet_agent: `${IMAGE_PREFIX}/fleet-agent:${imageTag}`,
       };
 
       const imageName = imageMap[serviceName];
@@ -516,7 +516,7 @@ export class UpdateService {
           const spec = svc.Spec as { TaskTemplate?: { ContainerSpec?: { Image?: string } } };
           const imageRef = spec?.TaskTemplate?.ContainerSpec?.Image ?? '';
 
-          // Image ref format: ghcr.io/componentor/hoster-api:tag@sha256:abc123...
+          // Image ref format: ghcr.io/componentor/fleet-api:tag@sha256:abc123...
           const digestMatch = imageRef.match(/@(sha256:[a-f0-9]{64})/);
           if (digestMatch) {
             const actualDigest = digestMatch[1]!;
@@ -559,10 +559,10 @@ export class UpdateService {
       const dockerSvcId = svc.ID as string;
 
       const imageMap: Record<string, string> = {
-        hoster_api: `${IMAGE_PREFIX}/hoster-api:${imageTag}`,
-        hoster_dashboard: `${IMAGE_PREFIX}/hoster-dashboard:${imageTag}`,
-        'hoster_ssh-gateway': `${IMAGE_PREFIX}/hoster-ssh-gateway:${imageTag}`,
-        hoster_agent: `${IMAGE_PREFIX}/hoster-agent:${imageTag}`,
+        fleet_api: `${IMAGE_PREFIX}/fleet-api:${imageTag}`,
+        fleet_dashboard: `${IMAGE_PREFIX}/fleet-dashboard:${imageTag}`,
+        'fleet_ssh-gateway': `${IMAGE_PREFIX}/fleet-ssh-gateway:${imageTag}`,
+        fleet_agent: `${IMAGE_PREFIX}/fleet-agent:${imageTag}`,
       };
 
       const newImage = imageMap[serviceName];
@@ -621,7 +621,7 @@ export class UpdateService {
   }
 
   private async verifyServiceHealth(): Promise<void> {
-    for (const serviceName of HOSTER_SERVICES) {
+    for (const serviceName of FLEET_SERVICES) {
       try {
         const swarmServices = await dockerService.listServices({
           name: [serviceName],

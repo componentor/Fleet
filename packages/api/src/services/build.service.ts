@@ -19,7 +19,7 @@ export interface BuildInfo {
   finishedAt: Date | null;
 }
 
-const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/hoster-builds';
+const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
 const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
 
 export class BuildService {

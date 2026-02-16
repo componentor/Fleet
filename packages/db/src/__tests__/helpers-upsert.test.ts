@@ -9,7 +9,7 @@ describe('upsert', () => {
   it('inserts when no conflict', async () => {
     await upsert(
       schema.platformSettings,
-      { id: 'setting-1', key: 'site_name', value: JSON.stringify('Hoster') },
+      { id: 'setting-1', key: 'site_name', value: JSON.stringify('Fleet') },
       schema.platformSettings.key,
       { value: JSON.stringify('Updated') },
     );
@@ -19,7 +19,7 @@ describe('upsert', () => {
     });
 
     expect(row).toBeDefined();
-    expect(JSON.parse(row!.value as string)).toBe('Hoster');
+    expect(JSON.parse(row!.value as string)).toBe('Fleet');
   });
 
   it('updates on conflict', async () => {

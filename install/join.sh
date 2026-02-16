@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Hoster — Node join installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/componentor/hoster/main/install/join.sh | bash
+# Fleet — Node join installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | bash
 
 # Colors
 RED='\033[0;31m'
@@ -11,9 +11,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log()  { echo -e "${GREEN}[hoster]${NC} $1"; }
-warn() { echo -e "${YELLOW}[hoster]${NC} $1"; }
-err()  { echo -e "${RED}[hoster]${NC} $1"; exit 1; }
+log()  { echo -e "${GREEN}[fleet]${NC} $1"; }
+warn() { echo -e "${YELLOW}[fleet]${NC} $1"; }
+err()  { echo -e "${RED}[fleet]${NC} $1"; exit 1; }
 
 if [ "$EUID" -ne 0 ]; then
   err "Please run as root: sudo bash join.sh"
@@ -114,14 +114,14 @@ start_wizard() {
   warn "Open it in your browser to complete the join process."
   echo ""
   echo "Alternatively, you can join manually:"
-  echo "  1. Get the join token from the Hoster admin dashboard"
+  echo "  1. Get the join token from the Fleet admin dashboard"
   echo "  2. Run: docker swarm join --token <TOKEN> <MANAGER_IP>:2377"
   echo ""
 
   # If token was passed as env var, join automatically
-  if [ -n "${HOSTER_JOIN_TOKEN:-}" ] && [ -n "${HOSTER_MANAGER_ADDR:-}" ]; then
+  if [ -n "${FLEET_JOIN_TOKEN:-}" ] && [ -n "${FLEET_MANAGER_ADDR:-}" ]; then
     log "Join token detected, joining swarm automatically..."
-    docker swarm join --token "$HOSTER_JOIN_TOKEN" "$HOSTER_MANAGER_ADDR"
+    docker swarm join --token "$FLEET_JOIN_TOKEN" "$FLEET_MANAGER_ADDR"
     log "Successfully joined the swarm!"
     return
   fi
@@ -142,16 +142,16 @@ start_wizard() {
 # ─── Configure NFS mount ─────────────────────────────────────────────
 configure_nfs_mount() {
   log "Configuring NFS mount..."
-  mkdir -p /mnt/hoster-nfs
+  mkdir -p /mnt/fleet-nfs
 
-  if [ -n "${HOSTER_NFS_SERVER:-}" ]; then
-    echo "$HOSTER_NFS_SERVER:/opt/hoster/nfs-exports /mnt/hoster-nfs nfs defaults 0 0" >> /etc/fstab
+  if [ -n "${FLEET_NFS_SERVER:-}" ]; then
+    echo "$FLEET_NFS_SERVER:/opt/fleet/nfs-exports /mnt/fleet-nfs nfs defaults 0 0" >> /etc/fstab
     mount -a
-    log "NFS mounted from $HOSTER_NFS_SERVER"
+    log "NFS mounted from $FLEET_NFS_SERVER"
   else
     read -rp "$(echo -e ${BLUE}Enter NFS server IP \(first node IP\): ${NC})" NFS_SERVER
     if [ -n "$NFS_SERVER" ]; then
-      echo "$NFS_SERVER:/opt/hoster/nfs-exports /mnt/hoster-nfs nfs defaults 0 0" >> /etc/fstab
+      echo "$NFS_SERVER:/opt/fleet/nfs-exports /mnt/fleet-nfs nfs defaults 0 0" >> /etc/fstab
       mount -a
       log "NFS mounted from $NFS_SERVER"
     else
@@ -174,7 +174,7 @@ main() {
   echo -e "${GREEN}  ✅ Node joined successfully!${NC}"
   echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
   echo ""
-  echo "  The Hoster agent will be automatically deployed to this node."
+  echo "  The Fleet agent will be automatically deployed to this node."
   echo "  Check the admin dashboard for the new node."
   echo ""
 }

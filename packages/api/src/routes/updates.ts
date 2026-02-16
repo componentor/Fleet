@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, platformSettings, upsert, eq } from '@hoster/db';
+import { db, platformSettings, upsert, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { updateService } from '../services/update.service.js';
-import { runMigrations, verifyDatabase } from '@hoster/db/migrate';
-import { runSeeders } from '@hoster/db/seed';
+import { runMigrations, verifyDatabase } from '@fleet/db/migrate';
+import { runSeeders } from '@fleet/db/seed';
 
 const updateRoutes = new Hono<{
   Variables: { user: AuthUser };

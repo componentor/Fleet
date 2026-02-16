@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// @hoster/types - Central type definitions
+// @fleet/types - Central type definitions
 // ---------------------------------------------------------------------------
 
 export * from './account.js';

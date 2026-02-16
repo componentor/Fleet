@@ -1,10 +1,38 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ScrollText, Search, Filter } from 'lucide-vue-next'
+import { ref, onMounted } from 'vue'
+import { ScrollText, Search, Loader2 } from 'lucide-vue-next'
+import { useApi } from '@/composables/useApi'
+
+const api = useApi()
 
 const logs = ref<any[]>([])
 const search = ref('')
-const loading = ref(false)
+const loading = ref(true)
+const page = ref(1)
+const totalPages = ref(1)
+
+async function fetchLogs() {
+  loading.value = true
+  try {
+    const data = await api.get<any>(`/admin/audit-log?page=${page.value}&limit=50`)
+    logs.value = data.data ?? []
+    totalPages.value = data.pagination?.totalPages ?? 1
+  } catch {
+    logs.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+function formatDate(ts: any) {
+  if (!ts) return '--'
+  const d = new Date(ts)
+  return d.toLocaleString()
+}
+
+onMounted(() => {
+  fetchLogs()
+})
 </script>
 
 <template>
@@ -16,9 +44,9 @@ const loading = ref(false)
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="flex flex-col sm:flex-row gap-3 mb-6">
-      <div class="relative flex-1 max-w-md">
+    <!-- Search -->
+    <div class="mb-6">
+      <div class="relative max-w-md">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
           v-model="search"
@@ -27,22 +55,22 @@ const loading = ref(false)
           class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
         />
       </div>
-      <button class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium">
-        <Filter class="w-4 h-4" />
-        Filters
-      </button>
     </div>
 
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+    <div v-if="loading" class="flex items-center justify-center py-20">
+      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+    </div>
+
+    <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Time</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">User</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Resource</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">IP</th>
             </tr>
           </thead>
@@ -57,9 +85,8 @@ const loading = ref(false)
               :key="log.id"
               class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
             >
-              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ log.timestamp }}</td>
-              <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ log.userName }}</td>
-              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ log.accountName }}</td>
+              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ formatDate(log.createdAt) }}</td>
+              <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ log.userId?.slice(0, 8) || '--' }}</td>
               <td class="px-6 py-4 text-sm">
                 <span
                   :class="[
@@ -73,11 +100,24 @@ const loading = ref(false)
                   {{ log.action }}
                 </span>
               </td>
-              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ log.resource }}</td>
-              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ log.ip }}</td>
+              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                <span class="font-medium">{{ log.resourceType }}</span>
+                <span v-if="log.resourceId" class="font-mono text-xs ml-1 text-gray-400">{{ log.resourceId.slice(0, 8) }}</span>
+              </td>
+              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ log.accountId?.slice(0, 8) || '--' }}</td>
+              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ log.ipAddress || '--' }}</td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Pagination -->
+      <div v-if="totalPages > 1" class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <p class="text-xs text-gray-500 dark:text-gray-400">Page {{ page }} of {{ totalPages }}</p>
+        <div class="flex gap-2">
+          <button @click="page--; fetchLogs()" :disabled="page <= 1" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Previous</button>
+          <button @click="page++; fetchLogs()" :disabled="page >= totalPages" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Next</button>
+        </div>
       </div>
     </div>
   </div>

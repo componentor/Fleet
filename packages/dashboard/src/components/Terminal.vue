@@ -15,7 +15,7 @@ function connectWebSocket(serviceId: string) {
   ws?.close()
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const token = localStorage.getItem('hoster_token')
+  const token = localStorage.getItem('fleet_token')
   ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?token=${token}`)
 
   ws.onmessage = (event) => {

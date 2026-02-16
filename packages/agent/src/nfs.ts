@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 
 export class NfsManager {
-  private mountPoint = '/mnt/hoster-nfs'
+  private mountPoint = '/mnt/fleet-nfs'
 
   async initialize() {
     console.log('[nfs] Initializing NFS manager')

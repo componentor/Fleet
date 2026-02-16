@@ -76,7 +76,7 @@ function goToPanel() {
     >
       <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700">
         <RouterLink to="/admin" class="text-xl font-bold text-primary-600 dark:text-primary-400">
-          Hoster
+          Fleet
         </RouterLink>
         <span class="text-xs font-medium bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">
           Admin

@@ -597,8 +597,8 @@ const countSql = (): any => {
   return drizzleOrm.sql`COUNT(*)`;
 };
 
-// ── Mock @hoster/db ──
-vi.mock('@hoster/db', () => ({
+// ── Mock @fleet/db ──
+vi.mock('@fleet/db', () => ({
   db: testDb,
 
   // Table objects

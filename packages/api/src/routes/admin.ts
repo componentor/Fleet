@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, accounts, users, services, nodes, auditLog, updateReturning, countSql, eq } from '@hoster/db';
+import { db, accounts, users, services, nodes, auditLog, updateReturning, countSql, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';

@@ -42,10 +42,10 @@ describe('getConnectionString', () => {
     expect(getConnectionString()).toBe('/tmp/test.db');
   });
 
-  it('returns default ./hoster.db when DATABASE_PATH not set', () => {
+  it('returns default ./fleet.db when DATABASE_PATH not set', () => {
     delete process.env['DB_DIALECT'];
     delete process.env['DATABASE_PATH'];
-    expect(getConnectionString()).toBe('./hoster.db');
+    expect(getConnectionString()).toBe('./fleet.db');
   });
 
   it('returns DATABASE_URL for pg', () => {

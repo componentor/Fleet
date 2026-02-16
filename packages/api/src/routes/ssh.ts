@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, sshKeys, sshAccessRules, services, insertReturning, updateReturning, eq, and } from '@hoster/db';
+import { db, sshKeys, sshAccessRules, services, insertReturning, updateReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { sshService } from '../services/ssh.service.js';

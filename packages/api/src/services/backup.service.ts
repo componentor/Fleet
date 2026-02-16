@@ -3,11 +3,11 @@ import { promisify } from 'node:util';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and } from '@hoster/db';
+import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and } from '@fleet/db';
 
 const execFileAsync = promisify(execFile);
 
-const BACKUP_DIR = process.env['BACKUP_DIR'] ?? '/var/hoster/backups';
+const BACKUP_DIR = process.env['BACKUP_DIR'] ?? '/var/fleet/backups';
 const NFS_BACKUP_DIR = process.env['NFS_BACKUP_DIR'] ?? '/mnt/nfs/backups';
 
 export class BackupService {

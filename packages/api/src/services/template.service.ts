@@ -3,7 +3,7 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { db, appTemplates, services, insertReturning, updateReturning, deleteReturning, eq, and, or } from '@hoster/db';
+import { db, appTemplates, services, insertReturning, updateReturning, deleteReturning, eq, and, or } from '@fleet/db';
 import { dockerService } from './docker.service.js';
 
 // Resolve the templates directory relative to this file
@@ -264,7 +264,7 @@ export class TemplateService {
     }
 
     // Build a map of service names to their Swarm service names for cross-references
-    const swarmNamePrefix = `hoster-${accountId.slice(0, 8)}`;
+    const swarmNamePrefix = `fleet-${accountId.slice(0, 8)}`;
     const serviceNameMap: Record<string, string> = {};
     for (const svcDef of parsed.services) {
       serviceNameMap[svcDef.name] = `${swarmNamePrefix}-${svcDef.name}`;
@@ -342,9 +342,9 @@ export class TemplateService {
           })),
           volumes: resolvedVolumes,
           labels: {
-            'hoster.account-id': accountId,
-            'hoster.service-id': svc.id,
-            'hoster.template': slug,
+            'fleet.account-id': accountId,
+            'fleet.service-id': svc.id,
+            'fleet.template': slug,
           },
           constraints: [],
           updateParallelism: 1,

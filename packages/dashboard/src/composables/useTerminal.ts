@@ -44,7 +44,7 @@ export function useTerminal() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}`
 
-    const token = localStorage.getItem('hoster_token')
+    const token = localStorage.getItem('fleet_token')
     ws = new WebSocket(`${wsUrl}?token=${token}`)
 
     ws.onopen = () => {

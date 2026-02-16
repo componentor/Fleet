@@ -1,10 +1,88 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Settings, Save, AlertTriangle } from 'lucide-vue-next'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { Settings, Save, AlertTriangle, Loader2 } from 'lucide-vue-next'
+import { useApi } from '@/composables/useApi'
+import { useAccountStore } from '@/stores/account'
+
+const api = useApi()
+const router = useRouter()
+const accountStore = useAccountStore()
 
 const accountName = ref('')
 const accountSlug = ref('')
-const loading = ref(false)
+const saving = ref(false)
+const loading = ref(true)
+const error = ref('')
+const success = ref('')
+
+async function loadAccount() {
+  loading.value = true
+  const accountId = accountStore.currentAccount?.id
+  if (!accountId) { loading.value = false; return }
+  try {
+    const account = await api.get<any>(`/accounts/${accountId}`)
+    accountName.value = account.name || ''
+    accountSlug.value = account.slug || ''
+  } catch {
+    // use store data as fallback
+    accountName.value = accountStore.currentAccount?.name || ''
+    accountSlug.value = accountStore.currentAccount?.slug || ''
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveSettings() {
+  const accountId = accountStore.currentAccount?.id
+  if (!accountId) return
+  saving.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch(`/accounts/${accountId}`, {
+      name: accountName.value,
+      slug: accountSlug.value,
+    })
+    success.value = 'Settings saved successfully'
+    await accountStore.fetchAccounts()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save settings'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function disconnectFromParent() {
+  if (!confirm('Are you sure you want to disconnect this account from its parent? This cannot be undone.')) return
+  const accountId = accountStore.currentAccount?.id
+  if (!accountId) return
+  try {
+    await api.post(`/accounts/${accountId}/disconnect`, {})
+    success.value = 'Disconnected from parent'
+    await accountStore.fetchAccounts()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to disconnect'
+  }
+}
+
+async function deleteAccount() {
+  if (!confirm('Are you sure you want to permanently delete this account and all associated data? This cannot be undone.')) return
+  const accountId = accountStore.currentAccount?.id
+  if (!accountId) return
+  try {
+    await api.del(`/accounts/${accountId}`)
+    await accountStore.fetchAccounts()
+    router.push('/panel')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to delete account'
+  }
+}
+
+onMounted(() => {
+  loadAccount()
+})
 </script>
 
 <template>
@@ -14,14 +92,25 @@ const loading = ref(false)
       <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Account Settings</h1>
     </div>
 
-    <div class="space-y-8 max-w-2xl">
+    <div v-if="loading" class="flex items-center justify-center py-20">
+      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+    </div>
+
+    <div v-else class="space-y-8 max-w-2xl">
+      <div v-if="error" class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+        <p class="text-sm text-red-700 dark:text-red-300">{{ error }}</p>
+      </div>
+      <div v-if="success" class="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+        <p class="text-sm text-green-700 dark:text-green-300">{{ success }}</p>
+      </div>
+
       <!-- General settings -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">General</h2>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Basic account information.</p>
         </div>
-        <div class="p-6 space-y-5">
+        <form @submit.prevent="saveSettings" class="p-6 space-y-5">
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Account Name</label>
             <input
@@ -41,13 +130,14 @@ const loading = ref(false)
             />
             <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">This is used in URLs and API calls.</p>
           </div>
-        </div>
-        <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
-          <button class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors">
-            <Save class="w-4 h-4" />
-            Save Changes
-          </button>
-        </div>
+          <div class="pt-2 flex justify-end">
+            <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ saving ? 'Saving...' : 'Save Changes' }}
+            </button>
+          </div>
+        </form>
       </div>
 
       <!-- Danger zone -->
@@ -59,26 +149,24 @@ const loading = ref(false)
           </div>
         </div>
         <div class="p-6 space-y-6">
-          <!-- Disconnect from parent -->
           <div class="flex items-center justify-between">
             <div>
               <h3 class="text-sm font-medium text-gray-900 dark:text-white">Disconnect from Parent</h3>
               <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Remove this account from its parent organization. This cannot be undone.</p>
             </div>
-            <button class="px-4 py-2 rounded-lg border border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors">
+            <button @click="disconnectFromParent" class="px-4 py-2 rounded-lg border border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors">
               Disconnect
             </button>
           </div>
 
           <div class="border-t border-gray-200 dark:border-gray-700"></div>
 
-          <!-- Delete account -->
           <div class="flex items-center justify-between">
             <div>
               <h3 class="text-sm font-medium text-gray-900 dark:text-white">Delete Account</h3>
               <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Permanently delete this account and all associated data. This cannot be undone.</p>
             </div>
-            <button class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors">
+            <button @click="deleteAccount" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors">
               Delete Account
             </button>
           </div>

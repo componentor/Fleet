@@ -1,17 +1,17 @@
 {
-  "name": "@hoster/cli",
+  "name": "@fleet/cli",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "hoster": "./dist/index.js"
+    "fleet": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hoster/types": "workspace:*",
+    "@fleet/types": "workspace:*",
     "commander": "^13.1.0"
   },
   "devDependencies": {
