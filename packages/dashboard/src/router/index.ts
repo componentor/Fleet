@@ -112,6 +112,12 @@ const panelRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/panel/Domains.vue'),
       },
       {
+        path: 'domains/:id',
+        name: 'panel-domain-detail',
+        component: () => import('@/pages/panel/DomainDetail.vue'),
+        props: true,
+      },
+      {
         path: 'terminal',
         name: 'panel-terminal',
         component: () => import('@/pages/panel/Terminal.vue'),
@@ -150,6 +156,11 @@ const panelRoutes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'panel-settings',
         component: () => import('@/pages/panel/Settings.vue'),
+      },
+      {
+        path: 'profile',
+        name: 'panel-profile',
+        component: () => import('@/pages/panel/Profile.vue'),
       },
     ],
   },

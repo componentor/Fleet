@@ -285,7 +285,7 @@ export class DockerService {
   async execInContainer(
     containerId: string,
     cmd: string[] = ['/bin/sh'],
-  ) {
+  ): Promise<{ stream: NodeJS.ReadWriteStream; execId: string }> {
     const container = docker.getContainer(containerId);
     const exec = await container.exec({
       Cmd: cmd,
@@ -294,7 +294,13 @@ export class DockerService {
       AttachStderr: true,
       Tty: true,
     });
-    return exec.start({ hijack: true, stdin: true, Tty: true });
+    const stream = await exec.start({ hijack: true, stdin: true, Tty: true });
+    return { stream, execId: exec.id };
+  }
+
+  async resizeExec(execId: string, h: number, w: number): Promise<void> {
+    const exec = docker.getExec(execId);
+    await exec.resize({ h, w });
   }
 }
 

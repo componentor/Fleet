@@ -19,7 +19,8 @@ export const tenantMiddleware = createMiddleware<{
   };
 }>(async (c, next) => {
   const user = c.get('user');
-  const accountIdHeader = c.req.header('X-Account-Id');
+  const apiKeyAccountId = c.get('apiKeyAccountId' as any) as string | undefined;
+  const accountIdHeader = apiKeyAccountId ?? c.req.header('X-Account-Id');
 
   // Super user with no account header operates in admin context
   if (user.isSuper && !accountIdHeader) {

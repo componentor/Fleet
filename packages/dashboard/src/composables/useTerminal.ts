@@ -65,8 +65,9 @@ export function useTerminal() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}`
     const token = localStorage.getItem('fleet_token')
+    const accountId = localStorage.getItem('fleet_account_id')
 
-    ws = new WebSocket(`${wsUrl}?token=${token}`)
+    ws = new WebSocket(`${wsUrl}?token=${token}&accountId=${accountId}`)
 
     ws.onopen = () => {
       connectionState.value = 'connected'

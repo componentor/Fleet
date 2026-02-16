@@ -2,35 +2,32 @@ import { NodeMonitor } from './monitor.js'
 import { NfsManager } from './nfs.js'
 
 const HEARTBEAT_INTERVAL = 30_000 // 30 seconds
-const API_URL = process.env.API_URL || 'http://api:3000'
+const API_URL = process.env.API_URL || 'http://localhost:3000'
 const NODE_ID = process.env.NODE_ID || 'unknown'
 
-async function main() {
-  console.log(`[agent] Starting Fleet agent for node: ${NODE_ID}`)
+// Register shutdown handlers early — before any async work
+let monitor: NodeMonitor | undefined
+function shutdown() {
+  console.log('[agent] Shutting down...')
+  monitor?.stop()
+  process.exit(0)
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
 
-  const monitor = new NodeMonitor(API_URL, NODE_ID)
-  const nfs = new NfsManager()
+console.log(`[agent] Starting Fleet agent for node: ${NODE_ID}`)
 
-  // Start health reporting
-  monitor.start(HEARTBEAT_INTERVAL)
+monitor = new NodeMonitor(API_URL, NODE_ID)
+const nfs = new NfsManager()
 
-  // Initialize NFS mounts
+// Start health reporting
+monitor.start(HEARTBEAT_INTERVAL)
+
+// Initialize NFS mounts (non-fatal if not available)
+try {
   await nfs.initialize()
-
-  console.log('[agent] Agent running')
-
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log('[agent] Shutting down...')
-    monitor.stop()
-    process.exit(0)
-  }
-
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+} catch {
+  // NFS not available in this environment
 }
 
-main().catch((err) => {
-  console.error('[agent] Fatal error:', err)
-  process.exit(1)
-})
+console.log('[agent] Agent running')

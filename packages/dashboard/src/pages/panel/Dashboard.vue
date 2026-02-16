@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { LayoutDashboard, Box, Globe, HardDrive, DollarSign, Activity, Loader2 } from 'lucide-vue-next'
+import { LayoutDashboard, Box, Globe, HardDrive, DollarSign, Activity, Loader2, Clock } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useServicesStore } from '@/stores/services'
+import { useAccount } from '@/composables/useAccount'
 
 const api = useApi()
 const servicesStore = useServicesStore()
+const { currentAccount } = useAccount()
 
 const domains = ref<any[]>([])
+const activityFeed = ref<any[]>([])
 const loading = ref(true)
 
 const runningCount = computed(() =>
@@ -35,12 +38,37 @@ function formatDate(ts: any) {
   return d.toLocaleDateString()
 }
 
+function formatTimestamp(ts: any) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleString()
+}
+
+function methodBadgeClasses(method: string) {
+  switch (method?.toUpperCase()) {
+    case 'POST':
+      return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+    case 'DELETE':
+      return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+    case 'PATCH':
+    case 'PUT':
+      return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+    default:
+      return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+  }
+}
+
 onMounted(async () => {
   loading.value = true
   try {
     await Promise.all([
       servicesStore.fetchServices(),
       api.get<any[]>('/dns/zones').then(data => { domains.value = data }).catch(() => {}),
+      currentAccount.value?.id
+        ? api.get<any[]>(`/accounts/${currentAccount.value.id}/activity?limit=10`)
+            .then(data => { activityFeed.value = data })
+            .catch(() => {})
+        : Promise.resolve(),
     ])
   } finally {
     loading.value = false
@@ -122,6 +150,40 @@ onMounted(async () => {
               <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{{ formatDate(svc.updatedAt || svc.createdAt) }}</span>
             </div>
           </router-link>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+          <Clock class="w-5 h-5 text-gray-500 dark:text-gray-400" />
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+        </div>
+        <div class="divide-y divide-gray-200 dark:divide-gray-700">
+          <div v-if="activityFeed.length === 0" class="px-6 py-12 text-center">
+            <p class="text-gray-500 dark:text-gray-400 text-sm">No recent activity.</p>
+          </div>
+          <div
+            v-for="(entry, idx) in activityFeed"
+            :key="entry.id || idx"
+            class="px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+          >
+            <div class="flex items-center gap-3 min-w-0">
+              <span
+                :class="[
+                  'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase shrink-0',
+                  methodBadgeClasses(entry.method)
+                ]"
+              >
+                {{ entry.method }}
+              </span>
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ entry.resource || entry.path || entry.action }}</p>
+                <p v-if="entry.description" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{{ entry.description }}</p>
+              </div>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap ml-4">{{ formatTimestamp(entry.createdAt || entry.timestamp) }}</span>
+          </div>
         </div>
       </div>
     </template>

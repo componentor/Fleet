@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Rocket, Github, FileCode2, Loader2 } from 'lucide-vue-next'
+import { Rocket, Github, FileCode2, Loader2, Plus, X } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 
 const router = useRouter()
@@ -20,6 +20,41 @@ const repoUrl = ref('')
 const branch = ref('main')
 const ghServiceName = ref('')
 
+// Shared env vars and ports for both deploy methods
+const envVars = ref<{ key: string; value: string }[]>([])
+const ports = ref<{ container: number | null; published: number | null }[]>([])
+
+function addEnvVar() {
+  envVars.value.push({ key: '', value: '' })
+}
+function removeEnvVar(index: number) {
+  envVars.value.splice(index, 1)
+}
+function addPort() {
+  ports.value.push({ container: null, published: null })
+}
+function removePort(index: number) {
+  ports.value.splice(index, 1)
+}
+
+function buildEnvVarsPayload(): Record<string, string> | undefined {
+  const filtered = envVars.value.filter(e => e.key.trim())
+  if (filtered.length === 0) return undefined
+  const obj: Record<string, string> = {}
+  for (const e of filtered) obj[e.key.trim()] = e.value
+  return obj
+}
+
+function buildPortsPayload(): { container: number; published: number; protocol: string }[] | undefined {
+  const filtered = ports.value.filter(p => p.container)
+  if (filtered.length === 0) return undefined
+  return filtered.map(p => ({
+    container: p.container!,
+    published: p.published || p.container!,
+    protocol: 'tcp',
+  }))
+}
+
 async function deployDocker() {
   if (!serviceName.value || !dockerImage.value) return
   loading.value = true
@@ -30,6 +65,8 @@ async function deployDocker() {
       image: dockerImage.value,
       replicas: replicas.value,
       domain: domain.value || undefined,
+      envVars: buildEnvVarsPayload(),
+      ports: buildPortsPayload(),
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -50,6 +87,8 @@ async function deployGithub() {
       githubRepo: repoUrl.value,
       githubBranch: branch.value,
       autoDeploy: true,
+      envVars: buildEnvVarsPayload(),
+      ports: buildPortsPayload(),
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -124,6 +163,48 @@ async function deployGithub() {
               <input v-model="domain" type="text" placeholder="app.example.com" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
           </div>
+
+          <!-- Environment Variables -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Environment Variables</label>
+              <button type="button" @click="addEnvVar" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+            <div v-for="(env, i) in envVars" :key="i" class="flex items-center gap-2 mb-2">
+              <input v-model="env.key" type="text" placeholder="KEY" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="env.value" type="text" placeholder="value" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <button type="button" @click="removeEnvVar(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">No environment variables configured.</p>
+          </div>
+
+          <!-- Port Mappings -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Port Mappings</label>
+              <button type="button" @click="addPort" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
+              <div class="flex-1">
+                <input v-model.number="port.container" type="number" placeholder="Container port" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
+              <div class="flex-1">
+                <input v-model.number="port.published" type="number" :placeholder="String(port.container || 'Host port')" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <button type="button" @click="removePort(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">No ports exposed. Add a port mapping to make the service accessible.</p>
+          </div>
+
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="loading || !serviceName || !dockerImage" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
               <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
@@ -157,6 +238,48 @@ async function deployGithub() {
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Branch</label>
             <input v-model="branch" type="text" placeholder="main" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
           </div>
+
+          <!-- Environment Variables -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Environment Variables</label>
+              <button type="button" @click="addEnvVar" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+            <div v-for="(env, i) in envVars" :key="i" class="flex items-center gap-2 mb-2">
+              <input v-model="env.key" type="text" placeholder="KEY" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="env.value" type="text" placeholder="value" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <button type="button" @click="removeEnvVar(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">No environment variables configured.</p>
+          </div>
+
+          <!-- Port Mappings -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Port Mappings</label>
+              <button type="button" @click="addPort" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
+              <div class="flex-1">
+                <input v-model.number="port.container" type="number" placeholder="Container port" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
+              <div class="flex-1">
+                <input v-model.number="port.published" type="number" :placeholder="String(port.container || 'Host port')" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <button type="button" @click="removePort(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">No ports exposed.</p>
+          </div>
+
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="loading || !repoUrl || !ghServiceName" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
               <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />

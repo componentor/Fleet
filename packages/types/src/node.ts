@@ -17,3 +17,25 @@ export interface SwarmNode {
   nfsServer: boolean;
   lastHeartbeat: Date;
 }
+
+export interface HeartbeatPayload {
+  hostname: string;
+  cpuCount: number;
+  memTotal: number;
+  memUsed: number;
+  memFree: number;
+  containerCount: number;
+  timestamp: string;
+}
+
+export interface NodeMetrics {
+  id: string;
+  nodeId: string;
+  hostname: string;
+  cpuCount: number;
+  memTotal: number;
+  memUsed: number;
+  memFree: number;
+  containerCount: number;
+  recordedAt: Date;
+}

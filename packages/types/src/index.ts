@@ -13,3 +13,5 @@ export * from './backup.js';
 export * from './email.js';
 export * from './marketplace.js';
 export * from './audit.js';
+export * from './notification.js';
+export * from './api-key.js';

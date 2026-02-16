@@ -100,9 +100,21 @@ export const appTemplates = _schema.appTemplates as typeof PgSchema.appTemplates
 // settings.ts
 export const platformSettings = _schema.platformSettings as typeof PgSchema.platformSettings;
 
+// metrics.ts
+export const nodeMetrics = _schema.nodeMetrics as typeof PgSchema.nodeMetrics;
+export const nodeMetricsRelations = _schema.nodeMetricsRelations;
+
+// notifications.ts
+export const notifications = _schema.notifications as typeof PgSchema.notifications;
+export const notificationsRelations = _schema.notificationsRelations;
+
+// api-keys.ts
+export const apiKeys = _schema.apiKeys as typeof PgSchema.apiKeys;
+export const apiKeysRelations = _schema.apiKeysRelations;
+
 // --- Helper exports ---
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql } from './helpers.js';
 export { getDialect } from './config.js';
 
 // --- Re-export drizzle-orm operators so consumers use the same instance ---
-export { eq, and, or, not, like, ilike, isNull, isNotNull, inArray, notInArray, between, sql, asc, desc } from 'drizzle-orm';
+export { eq, and, or, not, like, ilike, isNull, isNotNull, inArray, notInArray, between, sql, asc, desc, gte, lte, gt, lt } from 'drizzle-orm';

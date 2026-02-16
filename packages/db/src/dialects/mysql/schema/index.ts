@@ -10,3 +10,6 @@ export * from './backups.js';
 export * from './emails.js';
 export * from './marketplace.js';
 export * from './settings.js';
+export * from './metrics.js';
+export * from './notifications.js';
+export * from './api-keys.js';

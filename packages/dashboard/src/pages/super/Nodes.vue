@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { Server, Plus, RefreshCw, Loader2 } from 'lucide-vue-next'
+import { ref, computed, onMounted } from 'vue'
+import { Server, Plus, RefreshCw, Loader2, Cpu, MemoryStick } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const api = useApi()
@@ -14,11 +14,48 @@ const addRole = ref<'worker' | 'manager'>('worker')
 const adding = ref(false)
 const error = ref('')
 const joinToken = ref('')
+const nodeMetrics = ref<Record<string, { cpuPercent: number; memoryPercent: number }>>({})
+
+function getHealthStatus(node: any): 'green' | 'yellow' | 'red' {
+  if (!node.lastHeartbeat) return 'red'
+  const elapsed = Date.now() - new Date(node.lastHeartbeat).getTime()
+  if (elapsed <= 60_000) return 'green'
+  if (elapsed <= 300_000) return 'yellow'
+  return 'red'
+}
+
+const healthColorMap = {
+  green: 'bg-green-500',
+  yellow: 'bg-yellow-500',
+  red: 'bg-red-500',
+}
+
+async function fetchNodeMetrics(nodeId: string) {
+  try {
+    const data = await api.get<any>(`/nodes/${nodeId}/metrics?hours=1`)
+    if (data && typeof data.cpuPercent === 'number') {
+      nodeMetrics.value[nodeId] = {
+        cpuPercent: data.cpuPercent,
+        memoryPercent: data.memoryPercent,
+      }
+    } else if (Array.isArray(data) && data.length > 0) {
+      const latest = data[data.length - 1]
+      nodeMetrics.value[nodeId] = {
+        cpuPercent: latest.cpuPercent ?? 0,
+        memoryPercent: latest.memoryPercent ?? 0,
+      }
+    }
+  } catch {}
+}
 
 async function fetchNodes() {
   loading.value = true
   try {
     nodes.value = await api.get<any[]>('/nodes')
+    // Fetch metrics for all nodes in parallel
+    await Promise.allSettled(
+      nodes.value.map(node => fetchNodeMetrics(node.id))
+    )
   } catch {
     nodes.value = []
   } finally {
@@ -162,13 +199,14 @@ onMounted(() => {
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">IP</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Role</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Resources</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Docker</th>
               <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="nodes.length === 0">
-              <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+              <td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 No nodes registered yet. Add your first node to get started.
               </td>
             </tr>
@@ -177,7 +215,15 @@ onMounted(() => {
               :key="node.id"
               class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
             >
-              <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ node.hostname }}</td>
+              <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
+                <div class="flex items-center gap-2">
+                  <span
+                    :class="['w-2.5 h-2.5 rounded-full shrink-0', healthColorMap[getHealthStatus(node)]]"
+                    :title="`Heartbeat: ${node.lastHeartbeat ? new Date(node.lastHeartbeat).toLocaleString() : 'never'}`"
+                  ></span>
+                  {{ node.hostname }}
+                </div>
+              </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ node.ipAddress }}</td>
               <td class="px-6 py-4 text-sm">
                 <span
@@ -202,6 +248,33 @@ onMounted(() => {
                   ></span>
                   {{ node.status }}
                 </span>
+              </td>
+              <td class="px-6 py-4 text-sm">
+                <div v-if="nodeMetrics[node.id]" class="space-y-1.5 min-w-[120px]">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">CPU</span>
+                    <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                      <div
+                        class="h-full rounded-full transition-all"
+                        :class="nodeMetrics[node.id].cpuPercent > 80 ? 'bg-red-500' : nodeMetrics[node.id].cpuPercent > 50 ? 'bg-yellow-500' : 'bg-green-500'"
+                        :style="{ width: `${Math.min(100, nodeMetrics[node.id].cpuPercent)}%` }"
+                      ></div>
+                    </div>
+                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id].cpuPercent) }}%</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">MEM</span>
+                    <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                      <div
+                        class="h-full rounded-full transition-all"
+                        :class="nodeMetrics[node.id].memoryPercent > 80 ? 'bg-red-500' : nodeMetrics[node.id].memoryPercent > 50 ? 'bg-yellow-500' : 'bg-blue-500'"
+                        :style="{ width: `${Math.min(100, nodeMetrics[node.id].memoryPercent)}%` }"
+                      ></div>
+                    </div>
+                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id].memoryPercent) }}%</span>
+                  </div>
+                </div>
+                <span v-else class="text-xs text-gray-400 dark:text-gray-500">No data</span>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                 <span v-if="node.docker" class="text-green-600 dark:text-green-400">{{ node.docker.Status?.State || 'linked' }}</span>

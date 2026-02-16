@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, accounts, userAccounts, users, insertReturning, updateReturning, deleteReturning, eq, like, and } from '@fleet/db';
+import { db, accounts, userAccounts, users, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 
@@ -504,6 +504,29 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
   }
 
   return c.json({ message: 'Member removed successfully' });
+});
+
+// GET /:id/activity — account-scoped audit log
+accountRoutes.get('/:id/activity', tenantMiddleware, async (c) => {
+  const accountId = c.get('accountId');
+  const paramId = c.req.param('id');
+
+  if (!accountId || accountId !== paramId) {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  const page = parseInt(c.req.query('page') ?? '1', 10);
+  const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10), 100);
+  const offset = (page - 1) * limit;
+
+  const logs = await db.query.auditLog.findMany({
+    where: eq(auditLog.accountId, accountId),
+    orderBy: (a, { desc: d }) => d(a.createdAt),
+    limit,
+    offset,
+  });
+
+  return c.json({ data: logs });
 });
 
 export default accountRoutes;

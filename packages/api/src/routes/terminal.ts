@@ -107,7 +107,7 @@ terminalRoutes.post('/exec/:serviceId', async (c) => {
     }
 
     const containerId = running.containerStatus.containerId;
-    const stream = await dockerService.execInContainer(containerId, command);
+    const { stream } = await dockerService.execInContainer(containerId, command);
 
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {

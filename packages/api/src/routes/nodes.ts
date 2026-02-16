@@ -1,17 +1,47 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, nodes, insertReturning, updateReturning, eq } from '@fleet/db';
+import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 
-const nodeRoutes = new Hono<{
+const nodeRoutes = new Hono();
+
+// ── Unauthenticated: heartbeat from agent ──
+nodeRoutes.post('/:id/heartbeat', async (c) => {
+  const nodeId = c.req.param('id');
+
+  const node = await db.query.nodes.findFirst({
+    where: eq(nodes.id, nodeId),
+  });
+  if (!node) {
+    return c.json({ error: 'Node not found' }, 404);
+  }
+
+  const body = await c.req.json();
+
+  await db.update(nodes).set({ lastHeartbeat: new Date() }).where(eq(nodes.id, nodeId));
+
+  await db.insert(nodeMetrics).values({
+    nodeId,
+    hostname: body.hostname ?? node.hostname,
+    cpuCount: body.cpuCount ?? 0,
+    memTotal: body.memTotal ?? 0,
+    memUsed: body.memUsed ?? 0,
+    memFree: body.memFree ?? 0,
+    containerCount: body.containerCount ?? 0,
+  });
+
+  return c.json({ ok: true });
+});
+
+// ── Authenticated admin routes ──
+const adminNodeRoutes = new Hono<{
   Variables: { user: AuthUser };
 }>();
 
-nodeRoutes.use('*', authMiddleware);
+adminNodeRoutes.use('*', authMiddleware);
 
-// Super user guard for all node routes
-nodeRoutes.use('*', async (c, next) => {
+adminNodeRoutes.use('*', async (c, next) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super users can manage nodes' }, 403);
@@ -20,7 +50,7 @@ nodeRoutes.use('*', async (c, next) => {
 });
 
 // GET / — list swarm nodes
-nodeRoutes.get('/', async (c) => {
+adminNodeRoutes.get('/', async (c) => {
   // Fetch from DB
   const dbNodes = await db.query.nodes.findMany({
     orderBy: (n, { asc }) => asc(n.hostname),
@@ -54,7 +84,7 @@ const registerNodeSchema = z.object({
   nfsServer: z.boolean().default(false),
 });
 
-nodeRoutes.post('/', async (c) => {
+adminNodeRoutes.post('/', async (c) => {
   const body = await c.req.json();
   const parsed = registerNodeSchema.safeParse(body);
 
@@ -84,7 +114,7 @@ nodeRoutes.post('/', async (c) => {
 });
 
 // GET /:id — node details
-nodeRoutes.get('/:id', async (c) => {
+adminNodeRoutes.get('/:id', async (c) => {
   const nodeId = c.req.param('id');
 
   const node = await db.query.nodes.findFirst({
@@ -116,7 +146,7 @@ const updateNodeSchema = z.object({
   dockerNodeId: z.string().optional(),
 });
 
-nodeRoutes.patch('/:id', async (c) => {
+adminNodeRoutes.patch('/:id', async (c) => {
   const nodeId = c.req.param('id');
   const body = await c.req.json();
   const parsed = updateNodeSchema.safeParse(body);
@@ -154,7 +184,7 @@ nodeRoutes.patch('/:id', async (c) => {
 });
 
 // DELETE /:id — drain and remove node
-nodeRoutes.delete('/:id', async (c) => {
+adminNodeRoutes.delete('/:id', async (c) => {
   const nodeId = c.req.param('id');
 
   const node = await db.query.nodes.findFirst({
@@ -181,7 +211,7 @@ nodeRoutes.delete('/:id', async (c) => {
 });
 
 // POST /:id/drain — drain node
-nodeRoutes.post('/:id/drain', async (c) => {
+adminNodeRoutes.post('/:id/drain', async (c) => {
   const nodeId = c.req.param('id');
 
   const node = await db.query.nodes.findFirst({
@@ -208,7 +238,7 @@ nodeRoutes.post('/:id/drain', async (c) => {
 });
 
 // POST /:id/activate — reactivate a drained node
-nodeRoutes.post('/:id/activate', async (c) => {
+adminNodeRoutes.post('/:id/activate', async (c) => {
   const nodeId = c.req.param('id');
 
   const node = await db.query.nodes.findFirst({
@@ -233,5 +263,21 @@ nodeRoutes.post('/:id/activate', async (c) => {
     return c.json({ error: 'Failed to activate node' }, 500);
   }
 });
+
+// GET /:id/metrics — query node metrics
+adminNodeRoutes.get('/:id/metrics', async (c) => {
+  const nodeId = c.req.param('id');
+  const hours = parseInt(c.req.query('hours') ?? '24', 10);
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  const metrics = await db.query.nodeMetrics.findMany({
+    where: and(eq(nodeMetrics.nodeId, nodeId), gte(nodeMetrics.recordedAt, since)),
+    orderBy: (m, { asc: a }) => a(m.recordedAt),
+  });
+
+  return c.json(metrics);
+});
+
+nodeRoutes.route('/', adminNodeRoutes);
 
 export default nodeRoutes;

@@ -1,12 +1,14 @@
 import Docker from 'dockerode'
 import { cpus, freemem, totalmem, hostname } from 'node:os'
 
-const docker = new Docker({ socketPath: '/var/run/docker.sock' })
+const DOCKER_SOCKET = process.env.DOCKER_SOCKET || '/var/run/docker.sock'
+const docker = new Docker({ socketPath: DOCKER_SOCKET })
 
 export class NodeMonitor {
   private intervalId: ReturnType<typeof setInterval> | null = null
   private apiUrl: string
   private nodeId: string
+  private consecutiveFailures = 0
 
   constructor(apiUrl: string, nodeId: string) {
     this.apiUrl = apiUrl
@@ -15,13 +17,20 @@ export class NodeMonitor {
 
   start(intervalMs: number) {
     this.intervalId = setInterval(() => {
-      this.sendHeartbeat().catch((err) =>
-        console.error('[monitor] Heartbeat failed:', err.message)
-      )
+      this.sendHeartbeat().catch((err) => {
+        this.consecutiveFailures++
+        // Only log every 5th failure to avoid spamming
+        if (this.consecutiveFailures <= 1 || this.consecutiveFailures % 5 === 0) {
+          console.error(`[monitor] Heartbeat failed (${this.consecutiveFailures}x):`, err.message)
+        }
+      })
     }, intervalMs)
 
     // Send initial heartbeat
-    this.sendHeartbeat().catch(() => {})
+    this.sendHeartbeat().catch((err) => {
+      this.consecutiveFailures++
+      console.error('[monitor] Initial heartbeat failed:', err.message)
+    })
   }
 
   stop() {
@@ -37,8 +46,14 @@ export class NodeMonitor {
     const memFree = freemem()
     const memUsed = memTotal - memFree
 
-    // Get container count on this node
-    const containers = await docker.listContainers()
+    // Get container count — gracefully handle Docker unavailability
+    let containerCount = 0
+    try {
+      const containers = await docker.listContainers()
+      containerCount = containers.length
+    } catch {
+      // Docker socket not available
+    }
 
     return {
       hostname: hostname(),
@@ -46,7 +61,7 @@ export class NodeMonitor {
       memTotal,
       memUsed,
       memFree,
-      containerCount: containers.length,
+      containerCount,
       timestamp: new Date().toISOString(),
     }
   }
@@ -63,5 +78,8 @@ export class NodeMonitor {
     if (!response.ok) {
       throw new Error(`Heartbeat response: ${response.status}`)
     }
+
+    // Reset failure counter on success
+    this.consecutiveFailures = 0
   }
 }

@@ -208,6 +208,13 @@ function handleSwitchAccount(id: string) {
                 <p class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ user?.name }}</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ user?.email }}</p>
               </div>
+              <RouterLink
+                to="/panel/profile"
+                class="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <Users class="w-4 h-4" />
+                Profile
+              </RouterLink>
               <button
                 @click="handleLogout"
                 class="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"

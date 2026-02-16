@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, RotateCw, Trash2, Loader2, ArrowLeft } from 'lucide-vue-next'
+import { Box, Play, RotateCw, Trash2, Loader2, ArrowLeft, Radio } from 'lucide-vue-next'
 import { useApi, ApiError } from '@/composables/useApi'
+import { useLogStream } from '@/composables/useLogStream'
 
 const route = useRoute()
 const router = useRouter()
 const api = useApi()
 const serviceId = route.params.id as string
+const logStream = useLogStream()
 
 const activeTab = ref('overview')
 const tabs = [
@@ -23,11 +25,34 @@ const actionLoading = ref('')
 const error = ref('')
 const logs = ref('')
 const logsLoading = ref(false)
+const liveMode = ref(false)
 const deployments = ref<any[]>([])
 const deploymentsLoading = ref(false)
+const logsContainer = ref<HTMLElement | null>(null)
 
 const envVars = ref<{ key: string; value: string }[]>([])
 const settingsLoading = ref(false)
+
+const displayedLogs = computed(() => liveMode.value ? logStream.logs.value : logs.value)
+
+function toggleLiveMode() {
+  liveMode.value = !liveMode.value
+  if (liveMode.value) {
+    logStream.start(serviceId)
+  } else {
+    logStream.stop()
+    fetchLogs()
+  }
+}
+
+// Auto-scroll logs when new content arrives in live mode
+watch(() => logStream.logs.value, () => {
+  if (liveMode.value && logsContainer.value) {
+    nextTick(() => {
+      logsContainer.value!.scrollTop = logsContainer.value!.scrollHeight
+    })
+  }
+})
 
 async function fetchService() {
   loading.value = true
@@ -136,6 +161,12 @@ function formatDate(ts: any) {
 }
 
 function onTabChange(tabId: string) {
+  // Stop live mode when leaving logs tab
+  if (activeTab.value === 'logs' && tabId !== 'logs' && liveMode.value) {
+    liveMode.value = false
+    logStream.stop()
+  }
+
   activeTab.value = tabId
   if (tabId === 'logs') fetchLogs()
   if (tabId === 'deployments') fetchDeployments()
@@ -297,14 +328,42 @@ onMounted(() => {
         <div v-if="activeTab === 'logs'">
           <div class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
             <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-              <span class="text-sm font-medium text-gray-300">Service Logs</span>
-              <button @click="fetchLogs" class="text-xs text-gray-400 hover:text-gray-300 transition-colors">Refresh</button>
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-medium text-gray-300">Service Logs</span>
+                <span
+                  v-if="liveMode"
+                  :class="[
+                    'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                    logStream.state.value === 'connected'
+                      ? 'bg-green-900/40 text-green-400'
+                      : 'bg-yellow-900/40 text-yellow-400'
+                  ]"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                  {{ logStream.state.value === 'connected' ? 'Live' : 'Connecting...' }}
+                </span>
+              </div>
+              <div class="flex items-center gap-3">
+                <button
+                  @click="toggleLiveMode"
+                  :class="[
+                    'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                    liveMode
+                      ? 'bg-green-900/40 text-green-400 hover:bg-green-900/60'
+                      : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800'
+                  ]"
+                >
+                  <Radio class="w-3.5 h-3.5" />
+                  {{ liveMode ? 'Stop Live' : 'Live' }}
+                </button>
+                <button v-if="!liveMode" @click="fetchLogs" class="text-xs text-gray-400 hover:text-gray-300 transition-colors">Refresh</button>
+              </div>
             </div>
-            <div class="p-4 h-96 overflow-y-auto font-mono text-xs text-gray-300 leading-relaxed whitespace-pre-wrap">
-              <div v-if="logsLoading" class="flex items-center justify-center h-full">
+            <div ref="logsContainer" class="p-4 h-96 overflow-y-auto font-mono text-xs text-gray-300 leading-relaxed whitespace-pre-wrap">
+              <div v-if="logsLoading && !liveMode" class="flex items-center justify-center h-full">
                 <Loader2 class="w-6 h-6 text-gray-500 animate-spin" />
               </div>
-              <template v-else>{{ logs || 'No logs available.' }}</template>
+              <template v-else>{{ displayedLogs || 'No logs available.' }}</template>
             </div>
           </div>
         </div>

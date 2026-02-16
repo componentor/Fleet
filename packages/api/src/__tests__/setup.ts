@@ -308,6 +308,44 @@ sqlite.exec(`
     value TEXT NOT NULL,
     updated_at INTEGER DEFAULT (unixepoch())
   );
+
+  CREATE TABLE node_metrics (
+    id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL REFERENCES nodes(id),
+    hostname TEXT NOT NULL,
+    cpu_count INTEGER NOT NULL,
+    mem_total INTEGER NOT NULL,
+    mem_used INTEGER NOT NULL,
+    mem_free INTEGER NOT NULL,
+    container_count INTEGER NOT NULL,
+    recorded_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE notifications (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id),
+    user_id TEXT REFERENCES users(id),
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id TEXT,
+    read INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE api_keys (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id),
+    created_by TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    scopes TEXT DEFAULT '["*"]',
+    last_used_at INTEGER,
+    expires_at INTEGER,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
 `);
 
 // Create drizzle instance with schema
@@ -315,6 +353,18 @@ const testDb = drizzle(sqlite, { schema: sqliteSchema });
 
 // Wire up the helpers to use this test database
 _setDb(testDb);
+
+// ── Mock @hono/node-ws (not available in test env) ──
+vi.mock('@hono/node-ws', () => ({
+  createNodeWebSocket: vi.fn().mockReturnValue({
+    upgradeWebSocket: vi.fn().mockImplementation(() => {
+      // Return a no-op middleware for WebSocket routes in tests
+      return vi.fn().mockImplementation(async (c: any, next: any) => next());
+    }),
+    injectWebSocket: vi.fn(),
+    wss: {},
+  }),
+}));
 
 // ── Mock ioredis ──
 vi.mock('ioredis', () => {
@@ -548,6 +598,16 @@ vi.mock('../services/template.service.js', () => ({
   },
 }));
 
+// ── Mock notification service ──
+vi.mock('../services/notification.service.js', () => ({
+  notificationService: {
+    create: vi.fn().mockResolvedValue({ id: 'notif-1' }),
+    getUnreadCount: vi.fn().mockResolvedValue(0),
+    markRead: vi.fn().mockResolvedValue(undefined),
+    markAllRead: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 // ── Mock nodemailer ──
 vi.mock('nodemailer', () => ({
   createTransport: vi.fn().mockReturnValue({
@@ -645,6 +705,12 @@ vi.mock('@fleet/db', () => ({
   emailLog: sqliteSchema.emailLog,
   appTemplates: (sqliteSchema as any).appTemplates,
   platformSettings: (sqliteSchema as any).platformSettings,
+  nodeMetrics: sqliteSchema.nodeMetrics,
+  nodeMetricsRelations: sqliteSchema.nodeMetricsRelations,
+  notifications: sqliteSchema.notifications,
+  notificationsRelations: sqliteSchema.notificationsRelations,
+  apiKeys: sqliteSchema.apiKeys,
+  apiKeysRelations: sqliteSchema.apiKeysRelations,
 
   // Helpers
   insertReturning,
@@ -670,10 +736,17 @@ vi.mock('@fleet/db', () => ({
   sql: drizzleOrm.sql,
   asc: drizzleOrm.asc,
   desc: drizzleOrm.desc,
+  gte: drizzleOrm.gte,
+  lte: drizzleOrm.lte,
+  gt: drizzleOrm.gt,
+  lt: drizzleOrm.lt,
 }));
 
 // ── All table names in FK-safe deletion order ──
 const allTableNames = [
+  'api_keys',
+  'notifications',
+  'node_metrics',
   'email_log',
   'email_templates',
   'backup_schedules',

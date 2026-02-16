@@ -120,8 +120,13 @@ onMounted(() => {
                 No domains configured. Add your first domain to get started.
               </td>
             </tr>
-            <tr v-for="domain in domains" :key="domain.id" class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
-              <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ domain.domain }}</td>
+            <tr
+              v-for="domain in domains"
+              :key="domain.id"
+              class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer"
+              @click="$router.push(`/panel/domains/${domain.id}`)"
+            >
+              <td class="px-6 py-4 text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">{{ domain.domain }}</td>
               <td class="px-6 py-4 text-sm">
                 <span
                   :class="[
@@ -136,7 +141,7 @@ onMounted(() => {
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(domain.createdAt) }}</td>
               <td class="px-6 py-4 text-right">
-                <button @click="deleteDomain(domain.id)" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline">
+                <button @click.stop="deleteDomain(domain.id)" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline">
                   Delete
                 </button>
               </td>
