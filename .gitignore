@@ -25,3 +25,8 @@ docker/data/
 
 # Coverage
 coverage/
+
+# DB
+fleet.db
+fleet.db-shm
+fleet.db-wal
