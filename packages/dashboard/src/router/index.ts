@@ -208,6 +208,8 @@ export const router = createRouter({
   routes,
 })
 
+let appInitialized = false
+
 router.beforeEach(async (to) => {
   const token = localStorage.getItem('fleet_token')
   const isAuthenticated = !!token
@@ -237,7 +239,25 @@ router.beforeEach(async (to) => {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
+    appInitialized = false
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  // Load user & accounts once per page load so stores are populated
+  if (!appInitialized) {
+    appInitialized = true
+    try {
+      const { useAuthStore } = await import('@/stores/auth')
+      const { useAccountStore } = await import('@/stores/account')
+      const authStore = useAuthStore()
+      const accountStore = useAccountStore()
+      await authStore.loadUser()
+      if (authStore.isAuthenticated) {
+        await accountStore.fetchAccounts()
+      }
+    } catch {
+      // Cached data from localStorage is still available
+    }
   }
 
   // Check super user access for admin routes
