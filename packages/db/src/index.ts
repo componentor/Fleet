@@ -118,6 +118,12 @@ export const notificationsRelations = _schema.notificationsRelations;
 export const apiKeys = _schema.apiKeys as typeof PgSchema.apiKeys;
 export const apiKeysRelations = _schema.apiKeysRelations;
 
+// errors.ts
+export const errorLog = _schema.errorLog as typeof PgSchema.errorLog;
+
+// webhook_events (from billing.ts)
+export const webhookEvents = _schema.webhookEvents as typeof PgSchema.webhookEvents;
+
 // --- Helper exports ---
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql } from './helpers';
 export { getDialect } from './config';

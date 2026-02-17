@@ -8,6 +8,8 @@ import { dockerService } from '../services/docker.service.js';
 
 const setup = new Hono();
 
+let setupInProgress = false;
+
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
@@ -79,35 +81,44 @@ setup.post('/swarm-init', async (c) => {
     return c.json({ error: 'Setup has already been completed' }, 403);
   }
 
-  const docker = await detectDocker();
-  if (!docker.available) {
-    return c.json({ error: 'Docker is not available. Install Docker first.' }, 400);
+  if (setupInProgress) {
+    return c.json({ error: 'Setup is already in progress' }, 409);
   }
-  if (docker.swarm === 'active') {
-    return c.json({ error: 'Swarm is already active' }, 400);
-  }
+  setupInProgress = true;
 
   try {
-    // Dynamically import dockerode to call swarmInit directly
-    const Dockerode = (await import('dockerode')).default;
-    const dockerClient = new Dockerode({ socketPath: '/var/run/docker.sock' });
-    await dockerClient.swarmInit({
-      ListenAddr: '0.0.0.0:2377',
-      AdvertiseAddr: '0.0.0.0:2377',
-      ForceNewCluster: false,
-    });
-
-    // Create the default overlay network for Fleet services
-    try {
-      await dockerService.createNetwork('fleet-net', { 'com.fleet.managed': 'true' });
-    } catch {
-      // Network may already exist
+    const docker = await detectDocker();
+    if (!docker.available) {
+      return c.json({ error: 'Docker is not available. Install Docker first.' }, 400);
+    }
+    if (docker.swarm === 'active') {
+      return c.json({ error: 'Swarm is already active' }, 400);
     }
 
-    const updatedDocker = await detectDocker();
-    return c.json({ ok: true, docker: updatedDocker }, 201);
-  } catch (err: any) {
-    return c.json({ error: err.message || 'Failed to initialize Swarm' }, 500);
+    try {
+      // Dynamically import dockerode to call swarmInit directly
+      const Dockerode = (await import('dockerode')).default;
+      const dockerClient = new Dockerode({ socketPath: '/var/run/docker.sock' });
+      await dockerClient.swarmInit({
+        ListenAddr: '0.0.0.0:2377',
+        AdvertiseAddr: '0.0.0.0:2377',
+        ForceNewCluster: false,
+      });
+
+      // Create the default overlay network for Fleet services
+      try {
+        await dockerService.createNetwork('fleet-net', { 'com.fleet.managed': 'true' });
+      } catch {
+        // Network may already exist
+      }
+
+      const updatedDocker = await detectDocker();
+      return c.json({ ok: true, docker: updatedDocker }, 201);
+    } catch (err: any) {
+      return c.json({ error: err.message || 'Failed to initialize Swarm' }, 500);
+    }
+  } finally {
+    setupInProgress = false;
   }
 });
 
@@ -126,114 +137,125 @@ setup.post('/', async (c) => {
     return c.json({ error: 'Setup has already been completed' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = setupSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  if (setupInProgress) {
+    return c.json({ error: 'Setup is already in progress' }, 409);
   }
+  setupInProgress = true;
 
-  const { name, email, password, domain, platformName } = parsed.data;
+  try {
+    const body = await c.req.json();
+    const parsed = setupSchema.safeParse(body);
 
-  // 1. Hash password
-  const passwordHash = await hash(password);
+    if (!parsed.success) {
+      return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    }
 
-  // 2. Create super admin user
-  const [user] = await insertReturning(users, {
-    email,
-    passwordHash,
-    name,
-    isSuper: true,
-  });
+    const { name, email, password, domain, platformName } = parsed.data;
 
-  if (!user) {
-    return c.json({ error: 'Failed to create admin user' }, 500);
-  }
+    // 1. Hash password
+    const passwordHash = await hash(password);
 
-  // 3. Create personal account
-  const slug = slugify(name) + '-' + user.id.slice(0, 8);
-  const [account] = await insertReturning(accounts, {
-    name: `${name}'s Account`,
-    slug,
-    parentId: null,
-    path: slug,
-    depth: 0,
-    status: 'active',
-  });
-
-  if (account) {
-    await db.insert(userAccounts).values({
-      userId: user.id,
-      accountId: account.id,
-      role: 'owner',
+    // 2. Create super admin user (first user is auto-verified)
+    const [user] = await insertReturning(users, {
+      email,
+      passwordHash,
+      name,
+      isSuper: true,
+      emailVerified: true,
     });
+
+    if (!user) {
+      return c.json({ error: 'Failed to create admin user' }, 500);
+    }
+
+    // 3. Create personal account
+    const slug = slugify(name) + '-' + user.id.slice(0, 8);
+    const [account] = await insertReturning(accounts, {
+      name: `${name}'s Account`,
+      slug,
+      parentId: null,
+      path: slug,
+      depth: 0,
+      status: 'active',
+    });
+
+    if (account) {
+      await db.insert(userAccounts).values({
+        userId: user.id,
+        accountId: account.id,
+        role: 'owner',
+      });
+    }
+
+    // 4. Store platform settings
+    if (domain) {
+      await upsert(
+        platformSettings,
+        { id: crypto.randomUUID(), key: 'platform:domain', value: JSON.stringify(domain) },
+        platformSettings.key,
+        { value: JSON.stringify(domain) },
+      );
+    }
+
+    if (platformName) {
+      await upsert(
+        platformSettings,
+        { id: crypto.randomUUID(), key: 'platform:name', value: JSON.stringify(platformName) },
+        platformSettings.key,
+        { value: JSON.stringify(platformName) },
+      );
+    }
+
+    // 5. Auto-generate JWT secret if not set via env
+    let jwtSecret = process.env['JWT_SECRET'];
+    if (!jwtSecret) {
+      jwtSecret = randomBytes(32).toString('hex');
+      process.env['JWT_SECRET'] = jwtSecret;
+      // Persist encrypted so it survives restarts
+      const { encrypt } = await import('../services/crypto.service.js');
+      await upsert(
+        platformSettings,
+        { id: crypto.randomUUID(), key: 'platform:jwtSecret', value: encrypt(jwtSecret) },
+        platformSettings.key,
+        { value: encrypt(jwtSecret) },
+      );
+    }
+
+    // 6. Generate tokens
+    const secret = new TextEncoder().encode(jwtSecret);
+
+    const accessToken = await new SignJWT({
+      userId: user.id,
+      email: user.email!,
+      isSuper: true,
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime(ACCESS_TOKEN_EXPIRY)
+      .sign(secret);
+
+    const refreshToken = await new SignJWT({
+      userId: user.id,
+      type: 'refresh',
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime(REFRESH_TOKEN_EXPIRY)
+      .sign(secret);
+
+    return c.json({
+      tokens: { accessToken, refreshToken },
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isSuper: user.isSuper,
+        createdAt: user.createdAt,
+      },
+    }, 201);
+  } finally {
+    setupInProgress = false;
   }
-
-  // 4. Store platform settings
-  if (domain) {
-    await upsert(
-      platformSettings,
-      { id: crypto.randomUUID(), key: 'platform:domain', value: JSON.stringify(domain) },
-      platformSettings.key,
-      { value: JSON.stringify(domain) },
-    );
-  }
-
-  if (platformName) {
-    await upsert(
-      platformSettings,
-      { id: crypto.randomUUID(), key: 'platform:name', value: JSON.stringify(platformName) },
-      platformSettings.key,
-      { value: JSON.stringify(platformName) },
-    );
-  }
-
-  // 5. Auto-generate JWT secret if not set via env
-  let jwtSecret = process.env['JWT_SECRET'];
-  if (!jwtSecret) {
-    jwtSecret = randomBytes(32).toString('hex');
-    process.env['JWT_SECRET'] = jwtSecret;
-    // Also persist so it survives restarts (admin can retrieve from settings)
-    await upsert(
-      platformSettings,
-      { id: crypto.randomUUID(), key: 'platform:jwtSecret', value: JSON.stringify(jwtSecret) },
-      platformSettings.key,
-      { value: JSON.stringify(jwtSecret) },
-    );
-  }
-
-  // 6. Generate tokens
-  const secret = new TextEncoder().encode(jwtSecret);
-
-  const accessToken = await new SignJWT({
-    userId: user.id,
-    email: user.email!,
-    isSuper: true,
-  })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(ACCESS_TOKEN_EXPIRY)
-    .sign(secret);
-
-  const refreshToken = await new SignJWT({
-    userId: user.id,
-    type: 'refresh',
-  })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(REFRESH_TOKEN_EXPIRY)
-    .sign(secret);
-
-  return c.json({
-    tokens: { accessToken, refreshToken },
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      isSuper: user.isSuper,
-      createdAt: user.createdAt,
-    },
-  }, 201);
 });
 
 export default setup;

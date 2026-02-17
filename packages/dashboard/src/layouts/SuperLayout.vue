@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useAuth } from '@/composables/useAuth'
 import {
@@ -21,9 +22,12 @@ import {
   ChevronDown,
   Search,
   Activity,
+  Bug,
+  Languages,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { theme, toggle } = useTheme()
@@ -33,15 +37,16 @@ const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
 
 const navItems = [
-  { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-  { name: 'Nodes', path: '/admin/nodes', icon: Server },
-  { name: 'Accounts', path: '/admin/accounts', icon: Users },
-  { name: 'Users', path: '/admin/users', icon: Users },
-  { name: 'Marketplace', path: '/admin/marketplace', icon: Store },
-  { name: 'Status', path: '/admin/status', icon: Activity },
-  { name: 'Audit Log', path: '/admin/audit-log', icon: ScrollText },
-  { name: 'Settings', path: '/admin/settings', icon: Settings },
-  { name: 'Billing', path: '/admin/billing', icon: CreditCard },
+  { nameKey: 'nav.dashboard', path: '/admin', icon: LayoutDashboard },
+  { nameKey: 'nav.nodes', path: '/admin/nodes', icon: Server },
+  { nameKey: 'nav.accounts', path: '/admin/accounts', icon: Users },
+  { nameKey: 'nav.users', path: '/admin/users', icon: Users },
+  { nameKey: 'nav.marketplace', path: '/admin/marketplace', icon: Store },
+  { nameKey: 'nav.status', path: '/admin/status', icon: Activity },
+  { nameKey: 'nav.auditLog', path: '/admin/audit-log', icon: ScrollText },
+  { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings },
+  { nameKey: 'nav.billing', path: '/admin/billing', icon: CreditCard },
+  { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug },
 ]
 
 function isActive(path: string) {
@@ -58,6 +63,11 @@ async function handleLogout() {
 
 function goToPanel() {
   router.push('/panel')
+}
+
+function changeLocale(newLocale: string) {
+  locale.value = newLocale
+  localStorage.setItem('fleet_locale', newLocale)
 }
 </script>
 
@@ -82,7 +92,7 @@ function goToPanel() {
           Fleet
         </RouterLink>
         <span class="text-xs font-medium bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">
-          Admin
+          {{ $t('nav.admin') }}
         </span>
       </div>
 
@@ -100,7 +110,7 @@ function goToPanel() {
           @click="sidebarOpen = false"
         >
           <component :is="item.icon" class="w-5 h-5 shrink-0" />
-          {{ item.name }}
+          {{ $t(item.nameKey) }}
         </RouterLink>
       </nav>
 
@@ -111,7 +121,7 @@ function goToPanel() {
           class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
           <Shield class="w-5 h-5 shrink-0" />
-          Switch to Panel
+          {{ $t('nav.switchToPanel') }}
         </button>
       </div>
     </aside>
@@ -135,13 +145,25 @@ function goToPanel() {
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search..."
+              :placeholder="$t('common.search')"
               class="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
           </div>
         </div>
 
         <div class="flex items-center gap-2 ml-auto">
+          <!-- Language selector -->
+          <select
+            :value="locale"
+            @change="changeLocale(($event.target as HTMLSelectElement).value)"
+            class="px-2 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          >
+            <option value="en">English</option>
+            <option value="nb">Norsk</option>
+            <option value="de">Deutsch</option>
+            <option value="zh">中文</option>
+          </select>
+
           <!-- Theme toggle -->
           <button
             @click="toggle"
@@ -184,7 +206,7 @@ function goToPanel() {
                 class="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 <LogOut class="w-4 h-4" />
-                Sign out
+                {{ $t('auth.signOut') }}
               </button>
             </div>
           </div>

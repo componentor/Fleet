@@ -59,10 +59,20 @@ export async function invalidateCache(pattern: string): Promise<void> {
   if (!valkey) return;
 
   try {
-    const keys = await valkey.keys(`cache:${pattern}`);
-    if (keys.length > 0) {
-      await valkey.del(...keys);
-    }
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await valkey.scan(
+        Number(cursor),
+        'MATCH',
+        `cache:${pattern}`,
+        'COUNT',
+        100,
+      );
+      cursor = String(nextCursor);
+      if (keys.length > 0) {
+        await valkey.del(...keys);
+      }
+    } while (cursor !== '0');
   } catch {
     // Best-effort invalidation
   }

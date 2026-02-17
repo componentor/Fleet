@@ -13,6 +13,8 @@ export interface User {
   name: string;
   avatarUrl: string | null;
   isSuper: boolean;
+  emailVerified: boolean;
+  twoFactorEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

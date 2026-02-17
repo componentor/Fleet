@@ -23,6 +23,30 @@ const authRoutes: RouteRecordRaw[] = [
     component: () => import('@/pages/auth/OAuth.vue'),
     meta: { public: true },
   },
+  {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('@/pages/auth/ForgotPassword.vue'),
+    meta: { public: true },
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('@/pages/auth/ResetPassword.vue'),
+    meta: { public: true },
+  },
+  {
+    path: '/two-factor',
+    name: 'two-factor',
+    component: () => import('@/pages/auth/TwoFactor.vue'),
+    meta: { public: true },
+  },
+  {
+    path: '/verify-email',
+    name: 'verify-email',
+    component: () => import('@/pages/auth/VerifyEmail.vue'),
+    meta: { public: true },
+  },
 ]
 
 const superRoutes: RouteRecordRaw[] = [
@@ -75,6 +99,11 @@ const superRoutes: RouteRecordRaw[] = [
         path: 'status',
         name: 'super-status',
         component: () => import('@/pages/super/Status.vue'),
+      },
+      {
+        path: 'errors',
+        name: 'super-errors',
+        component: () => import('@/pages/super/Errors.vue'),
       },
     ],
   },

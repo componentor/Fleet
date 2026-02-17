@@ -18,6 +18,7 @@ import {
   eq,
   and,
   isNull,
+  webhookEvents,
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -575,6 +576,21 @@ billing.post('/webhook', async (c) => {
     logger.error({ err }, 'Webhook signature verification failed');
     return c.json({ error: 'Invalid signature' }, 400);
   }
+
+  // Idempotency: check if we already processed this event
+  const existing = await db.query.webhookEvents.findFirst({
+    where: eq(webhookEvents.stripeEventId, event.id),
+  });
+  if (existing) {
+    return c.json({ received: true, duplicate: true });
+  }
+
+  // Record the event before processing
+  await db.insert(webhookEvents).values({
+    stripeEventId: event.id,
+    eventType: event.type,
+    processedAt: new Date(),
+  }).catch(() => {}); // ignore duplicates from race conditions
 
   switch (event.type) {
     case 'checkout.session.completed': {

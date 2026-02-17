@@ -1,0 +1,114 @@
+{
+  "nav": {
+    "features": "Features",
+    "pricing": "Pricing",
+    "github": "GitHub",
+    "getStarted": "Get Started"
+  },
+  "hero": {
+    "badge": "Open Source PaaS Platform",
+    "deployManage": "Deploy & Manage",
+    "dockerServices": "Docker Services",
+    "atScale": "at Scale",
+    "subtitle": "Fleet is an open-source, multi-tenant PaaS built on Docker Swarm. Self-host your own Heroku/Vercel alternative with full control over your infrastructure.",
+    "getStarted": "Get Started",
+    "viewOnGithub": "View on GitHub"
+  },
+  "terminal": {
+    "title": "terminal",
+    "command": "fleet deploy --service my-app",
+    "deploying": "Deploying service to cluster...",
+    "building": "Building image from Dockerfile...",
+    "pushing": "Pushing to registry...",
+    "updating": "Updating swarm service (3 replicas)...",
+    "success": "Service deployed successfully",
+    "url": "https://my-app.example.com"
+  },
+  "features": {
+    "label": "Features",
+    "title": "Everything you need to run your platform",
+    "subtitle": "Fleet provides a complete toolkit for deploying and managing containerized applications with enterprise-grade features built in.",
+    "dockerSwarm": {
+      "title": "Docker Swarm Orchestration",
+      "description": "Deploy, scale, and manage services across your cluster with native Docker Swarm integration."
+    },
+    "multiTenant": {
+      "title": "Multi-Tenant Architecture",
+      "description": "Full account isolation, role-based access control, and team management out of the box."
+    },
+    "billing": {
+      "title": "Built-in Billing",
+      "description": "Stripe integration with flexible plans, usage-based pricing, and automated invoicing."
+    },
+    "domains": {
+      "title": "Domain Management",
+      "description": "DNS zones, automatic SSL certificates, and integrated domain purchases."
+    },
+    "ssh": {
+      "title": "SSH Access",
+      "description": "Secure terminal access to your running containers directly from the browser."
+    },
+    "backups": {
+      "title": "Automated Backups",
+      "description": "Scheduled backups with NFS storage support and one-click restore."
+    },
+    "marketplace": {
+      "title": "Marketplace",
+      "description": "One-click application templates to deploy popular services in seconds."
+    },
+    "monitoring": {
+      "title": "Real-time Monitoring",
+      "description": "Node metrics, audit logs, and instant notifications for your infrastructure."
+    }
+  },
+  "pricing": {
+    "label": "Pricing",
+    "title": "Simple, transparent pricing",
+    "subtitle": "Start free and scale as you grow. All plans include the full Fleet platform.",
+    "popular": "Popular",
+    "getStarted": "Get Started",
+    "perMonth": "/mo",
+    "plans": {
+      "free": {
+        "name": "Free",
+        "description": "Perfect for trying Fleet out",
+        "f1": "1 service",
+        "f2": "512MB RAM",
+        "f3": "1 CPU core",
+        "f4": "5GB storage",
+        "f5": "Community support"
+      },
+      "starter": {
+        "name": "Starter",
+        "description": "For small projects and teams",
+        "f1": "5 services",
+        "f2": "2GB RAM",
+        "f3": "2 CPU cores",
+        "f4": "20GB storage",
+        "f5": "Email support"
+      },
+      "pro": {
+        "name": "Pro",
+        "description": "For production workloads",
+        "f1": "Unlimited services",
+        "f2": "8GB RAM",
+        "f3": "4 CPU cores",
+        "f4": "100GB storage",
+        "f5": "Priority support"
+      }
+    }
+  },
+  "cta": {
+    "title": "Ready to deploy your infrastructure?",
+    "subtitle": "Get started with Fleet in minutes. Deploy on your own servers and take full control of your platform.",
+    "getStarted": "Get Started Free",
+    "starOnGithub": "Star on GitHub"
+  },
+  "footer": {
+    "builtWith": "Built with Vue, Hono, Docker Swarm",
+    "github": "GitHub",
+    "docs": "Docs",
+    "discord": "Discord",
+    "rights": "Fleet. All rights reserved."
+  }
+}

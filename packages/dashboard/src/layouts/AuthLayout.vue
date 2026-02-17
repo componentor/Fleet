@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { useTheme } from '@/composables/useTheme'
 import { Sun, Moon, Monitor } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const { theme, toggle } = useTheme()
 </script>
 
@@ -21,7 +23,7 @@ const { theme, toggle } = useTheme()
     <!-- Logo -->
     <div class="mb-8 text-center">
       <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">Fleet</h1>
-      <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Cloud hosting made simple</p>
+      <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ $t('authLayout.tagline') }}</p>
     </div>
 
     <!-- Card -->

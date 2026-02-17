@@ -40,6 +40,14 @@ sqlite.exec(`
     name TEXT,
     avatar_url TEXT,
     is_super INTEGER DEFAULT 0,
+    email_verified INTEGER DEFAULT 0,
+    email_verify_token TEXT,
+    email_verify_expires INTEGER,
+    password_reset_token TEXT,
+    password_reset_expires INTEGER,
+    two_factor_enabled INTEGER DEFAULT 0,
+    two_factor_secret TEXT,
+    two_factor_backup_codes TEXT,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
@@ -415,6 +423,31 @@ sqlite.exec(`
     expires_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch())
   );
+
+  CREATE TABLE error_log (
+    id TEXT PRIMARY KEY,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    stack TEXT,
+    method TEXT,
+    path TEXT,
+    status_code INTEGER,
+    user_id TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    metadata TEXT,
+    resolved INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE webhook_events (
+    id TEXT PRIMARY KEY,
+    stripe_event_id TEXT UNIQUE NOT NULL,
+    event_type TEXT NOT NULL,
+    processed_at INTEGER DEFAULT (unixepoch()),
+    payload TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
 `);
 
 // Create drizzle instance with schema
@@ -491,14 +524,54 @@ vi.mock('../services/docker.service.js', () => ({
 }));
 
 // ── Mock DNS service ──
-vi.mock('../services/dns.service.js', () => ({
-  dnsService: {
+const mockDnsProvider = {
+  name: 'powerdns',
+  createZone: vi.fn().mockResolvedValue(undefined),
+  deleteZone: vi.fn().mockResolvedValue(undefined),
+  createRecord: vi.fn().mockResolvedValue(undefined),
+  updateRecord: vi.fn().mockResolvedValue(undefined),
+  deleteRecord: vi.fn().mockResolvedValue(undefined),
+  verifyDomain: vi.fn().mockResolvedValue(true),
+};
+vi.mock('../services/dns.service.js', () => {
+  const PowerDnsProvider = vi.fn().mockImplementation(() => mockDnsProvider);
+  return {
+    PowerDnsProvider,
+    dnsService: mockDnsProvider,
+  };
+});
+
+// ── Mock Cloudflare DNS provider ──
+vi.mock('../services/cloudflare-dns-provider.js', () => {
+  const CloudflareDnsProvider = vi.fn().mockImplementation(() => ({
+    name: 'cloudflare',
     createZone: vi.fn().mockResolvedValue(undefined),
     deleteZone: vi.fn().mockResolvedValue(undefined),
     createRecord: vi.fn().mockResolvedValue(undefined),
     updateRecord: vi.fn().mockResolvedValue(undefined),
     deleteRecord: vi.fn().mockResolvedValue(undefined),
     verifyDomain: vi.fn().mockResolvedValue(true),
+  }));
+  return { CloudflareDnsProvider };
+});
+
+// ── Mock DNS provider manager ──
+vi.mock('../services/dns-provider-manager.js', () => ({
+  DnsProviderManager: vi.fn().mockImplementation(() => ({
+    register: vi.fn(),
+    createZone: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    deleteZone: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    createRecord: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    updateRecord: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    deleteRecord: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+  })),
+  dnsManager: {
+    register: vi.fn(),
+    createZone: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    deleteZone: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    createRecord: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    updateRecord: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
+    deleteRecord: vi.fn().mockResolvedValue({ success: true, warnings: [] }),
   },
 }));
 
@@ -554,7 +627,7 @@ vi.mock('../services/email.service.js', () => ({
 // ── Mock update service ──
 vi.mock('../services/update.service.js', () => ({
   updateService: {
-    getNotification: vi.fn().mockReturnValue(null),
+    getNotification: vi.fn().mockReturnValue({ available: false, latest: null }),
     getState: vi.fn().mockReturnValue({
       status: 'idle',
       currentVersion: '0.1.0',
@@ -836,6 +909,8 @@ vi.mock('@fleet/db', () => ({
   notificationsRelations: sqliteSchema.notificationsRelations,
   apiKeys: sqliteSchema.apiKeys,
   apiKeysRelations: sqliteSchema.apiKeysRelations,
+  errorLog: (sqliteSchema as any).errorLog,
+  webhookEvents: (sqliteSchema as any).webhookEvents,
 
   // Helpers
   insertReturning,
@@ -869,6 +944,8 @@ vi.mock('@fleet/db', () => ({
 
 // ── All table names in FK-safe deletion order ──
 const allTableNames = [
+  'webhook_events',
+  'error_log',
   'api_keys',
   'notifications',
   'node_metrics',

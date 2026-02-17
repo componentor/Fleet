@@ -9,26 +9,31 @@ interface RateLimitEntry {
 interface RateLimiterOptions {
   windowMs: number;
   max: number;
+  keyPrefix?: string;
 }
 
-// In-memory fallback when Valkey is unavailable
-const fallbackStore = new Map<string, RateLimitEntry>();
-let fallbackCleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-function ensureFallbackCleanup(windowMs: number) {
-  if (fallbackCleanupTimer) return;
-  fallbackCleanupTimer = setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of fallbackStore) {
-      if (now > entry.resetAt) {
-        fallbackStore.delete(key);
-      }
-    }
-  }, windowMs);
-}
-
-export function rateLimiter({ windowMs, max }: RateLimiterOptions) {
+export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimiterOptions) {
   const windowSec = Math.ceil(windowMs / 1000);
+
+  // Per-instance in-memory fallback store
+  const fallbackStore = new Map<string, RateLimitEntry>();
+  let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  function ensureCleanup() {
+    if (cleanupTimer) return;
+    cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of fallbackStore) {
+        if (now > entry.resetAt) {
+          fallbackStore.delete(key);
+        }
+      }
+    }, windowMs);
+    // Don't block process exit
+    if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) {
+      cleanupTimer.unref();
+    }
+  }
 
   return createMiddleware(async (c, next) => {
     const ip =
@@ -39,8 +44,7 @@ export function rateLimiter({ windowMs, max }: RateLimiterOptions) {
     const valkey = await getValkey();
 
     if (valkey) {
-      // Redis-backed rate limiting with INCR + EXPIRE
-      const key = `rl:${ip}:${windowSec}`;
+      const key = `rl:${keyPrefix}:${ip}:${windowSec}`;
       try {
         const results = await valkey.multi()
           .incr(key)
@@ -63,13 +67,14 @@ export function rateLimiter({ windowMs, max }: RateLimiterOptions) {
     }
 
     // In-memory fallback
-    ensureFallbackCleanup(windowMs);
+    ensureCleanup();
 
     const now = Date.now();
-    const entry = fallbackStore.get(ip);
+    const memKey = `${keyPrefix}:${ip}`;
+    const entry = fallbackStore.get(memKey);
 
     if (!entry || now > entry.resetAt) {
-      fallbackStore.set(ip, { count: 1, resetAt: now + windowMs });
+      fallbackStore.set(memKey, { count: 1, resetAt: now + windowMs });
       await next();
       return;
     }

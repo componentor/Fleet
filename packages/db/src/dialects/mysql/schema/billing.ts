@@ -130,6 +130,15 @@ export const accountBillingOverrides = mysqlTable('account_billing_overrides', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const webhookEvents = mysqlTable('webhook_events', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  stripeEventId: varchar('stripe_event_id', { length: 255 }).unique().notNull(),
+  eventType: varchar('event_type', { length: 255 }).notNull(),
+  processedAt: timestamp('processed_at').defaultNow(),
+  payload: json('payload').$type<Record<string, unknown> | null>(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const billingPlansRelations = relations(
   billingPlans,
   ({ many }) => ({

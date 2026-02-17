@@ -2,6 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { jwtVerify } from 'jose';
 import { verify } from 'argon2';
 import { db, apiKeys, users, eq } from '@fleet/db';
+import { getValkey } from '../services/valkey.service.js';
 
 export interface AuthUser {
   userId: string;
@@ -14,6 +15,7 @@ export const authMiddleware = createMiddleware<{
   Variables: {
     user: AuthUser;
     apiKeyAccountId?: string;
+    apiKeyScopes?: string[];
   };
 }>(async (c, next) => {
   const authorization = c.req.header('Authorization');
@@ -28,6 +30,16 @@ export const authMiddleware = createMiddleware<{
     try {
       const secret = new TextEncoder().encode(jwtSecret);
       const { payload } = await jwtVerify(token, secret);
+
+      // Check token blocklist
+      const valkey = await getValkey();
+      if (valkey) {
+        const blocked = await valkey.get(`blocklist:${token}`);
+        if (blocked) {
+          return c.json({ error: 'Token has been revoked' }, 401);
+        }
+      }
+
       c.set('user', {
         userId: payload['userId'] as string,
         email: payload['email'] as string,
@@ -69,6 +81,7 @@ export const authMiddleware = createMiddleware<{
         isSuper: creator.isSuper ?? false,
       });
       c.set('apiKeyAccountId' as any, candidate.accountId);
+      c.set('apiKeyScopes' as any, candidate.scopes ?? ['*']);
       await next();
       return;
     }

@@ -61,7 +61,7 @@ serviceRoutes.get('/', cache(30), async (c) => {
 
 // POST / — deploy a new service
 const createServiceSchema = z.object({
-  name: z.string().min(1).max(255),
+  name: z.string().min(1).max(63).regex(/^[a-zA-Z0-9]([a-zA-Z0-9_.-]*[a-zA-Z0-9])?$/, 'Service name must contain only letters, numbers, hyphens, dots, and underscores'),
   image: z.string().min(1),
   replicas: z.number().int().min(1).max(100).default(1),
   env: z.record(z.string()).default({}),

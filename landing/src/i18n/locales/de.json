@@ -1,0 +1,114 @@
+{
+  "nav": {
+    "features": "Funktionen",
+    "pricing": "Preise",
+    "github": "GitHub",
+    "getStarted": "Loslegen"
+  },
+  "hero": {
+    "badge": "Open-Source-PaaS-Plattform",
+    "deployManage": "Bereitstellen & Verwalten",
+    "dockerServices": "Docker-Dienste",
+    "atScale": "im großen Maßstab",
+    "subtitle": "Fleet ist eine Open-Source, mandantenfähige PaaS-Plattform auf Basis von Docker Swarm. Hosten Sie Ihre eigene Heroku/Vercel-Alternative mit voller Kontrolle über Ihre Infrastruktur.",
+    "getStarted": "Loslegen",
+    "viewOnGithub": "Auf GitHub ansehen"
+  },
+  "terminal": {
+    "title": "terminal",
+    "command": "fleet deploy --service my-app",
+    "deploying": "Dienst wird im Cluster bereitgestellt...",
+    "building": "Image wird aus Dockerfile erstellt...",
+    "pushing": "Push in die Registry...",
+    "updating": "Swarm-Dienst wird aktualisiert (3 Replikate)...",
+    "success": "Dienst erfolgreich bereitgestellt",
+    "url": "https://my-app.example.com"
+  },
+  "features": {
+    "label": "Funktionen",
+    "title": "Alles, was Sie für Ihre Plattform brauchen",
+    "subtitle": "Fleet bietet ein vollständiges Toolkit zur Bereitstellung und Verwaltung containerisierter Anwendungen mit integrierten Enterprise-Funktionen.",
+    "dockerSwarm": {
+      "title": "Docker Swarm Orchestrierung",
+      "description": "Stellen Sie Dienste bereit, skalieren und verwalten Sie sie über Ihren Cluster mit nativer Docker Swarm-Integration."
+    },
+    "multiTenant": {
+      "title": "Mandantenfähige Architektur",
+      "description": "Vollständige Kontoisolierung, rollenbasierte Zugriffskontrolle und Teamverwaltung direkt einsatzbereit."
+    },
+    "billing": {
+      "title": "Integrierte Abrechnung",
+      "description": "Stripe-Integration mit flexiblen Plänen, nutzungsbasierter Preisgestaltung und automatischer Rechnungsstellung."
+    },
+    "domains": {
+      "title": "Domain-Verwaltung",
+      "description": "DNS-Zonen, automatische SSL-Zertifikate und integrierter Domainkauf."
+    },
+    "ssh": {
+      "title": "SSH-Zugang",
+      "description": "Sicherer Terminalzugriff auf Ihre laufenden Container direkt aus dem Browser."
+    },
+    "backups": {
+      "title": "Automatische Backups",
+      "description": "Geplante Backups mit NFS-Speicherunterstützung und Ein-Klick-Wiederherstellung."
+    },
+    "marketplace": {
+      "title": "Marktplatz",
+      "description": "Ein-Klick-Anwendungsvorlagen zur Bereitstellung beliebter Dienste in Sekunden."
+    },
+    "monitoring": {
+      "title": "Echtzeit-Überwachung",
+      "description": "Knotenmetriken, Audit-Logs und sofortige Benachrichtigungen für Ihre Infrastruktur."
+    }
+  },
+  "pricing": {
+    "label": "Preise",
+    "title": "Einfache, transparente Preise",
+    "subtitle": "Starten Sie kostenlos und skalieren Sie mit Ihrem Wachstum. Alle Pläne beinhalten die vollständige Fleet-Plattform.",
+    "popular": "Beliebt",
+    "getStarted": "Loslegen",
+    "perMonth": "/Mo.",
+    "plans": {
+      "free": {
+        "name": "Kostenlos",
+        "description": "Perfekt zum Ausprobieren von Fleet",
+        "f1": "1 Dienst",
+        "f2": "512MB RAM",
+        "f3": "1 CPU-Kern",
+        "f4": "5GB Speicher",
+        "f5": "Community-Support"
+      },
+      "starter": {
+        "name": "Starter",
+        "description": "Für kleine Projekte und Teams",
+        "f1": "5 Dienste",
+        "f2": "2GB RAM",
+        "f3": "2 CPU-Kerne",
+        "f4": "20GB Speicher",
+        "f5": "E-Mail-Support"
+      },
+      "pro": {
+        "name": "Pro",
+        "description": "Für Produktions-Workloads",
+        "f1": "Unbegrenzte Dienste",
+        "f2": "8GB RAM",
+        "f3": "4 CPU-Kerne",
+        "f4": "100GB Speicher",
+        "f5": "Prioritäts-Support"
+      }
+    }
+  },
+  "cta": {
+    "title": "Bereit, Ihre Infrastruktur bereitzustellen?",
+    "subtitle": "Starten Sie mit Fleet in wenigen Minuten. Stellen Sie auf Ihren eigenen Servern bereit und übernehmen Sie die volle Kontrolle über Ihre Plattform.",
+    "getStarted": "Kostenlos starten",
+    "starOnGithub": "Auf GitHub markieren"
+  },
+  "footer": {
+    "builtWith": "Erstellt mit Vue, Hono, Docker Swarm",
+    "github": "GitHub",
+    "docs": "Dokumentation",
+    "discord": "Discord",
+    "rights": "Fleet. Alle Rechte vorbehalten."
+  }
+}

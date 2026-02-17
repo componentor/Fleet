@@ -1,12 +1,17 @@
+import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { hash, verify } from 'argon2';
 import { SignJWT, jwtVerify } from 'jose';
+import * as OTPAuth from 'otpauth';
+import QRCode from 'qrcode';
 import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../services/logger.js';
-import { encrypt } from '../services/crypto.service.js';
+import { encrypt, decrypt } from '../services/crypto.service.js';
+import { emailService } from '../services/email.service.js';
+import { getValkey } from '../services/valkey.service.js';
 
 const auth = new Hono();
 
@@ -50,7 +55,33 @@ function slugify(text: string): string {
 }
 
 // Rate limit auth endpoints
-const authRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 20 });
+const authRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'auth' });
+const passwordResetRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'reset' });
+
+/** Generate a random token, return raw + SHA256 hash for storage. */
+function generateSecureToken(): { raw: string; hashed: string } {
+  const raw = crypto.randomBytes(32).toString('hex');
+  const hashed = crypto.createHash('sha256').update(raw).digest('hex');
+  return { raw, hashed };
+}
+
+function hashToken(raw: string): string {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function userResponse(user: any) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    avatarUrl: user.avatarUrl,
+    isSuper: user.isSuper,
+    emailVerified: user.emailVerified ?? false,
+    twoFactorEnabled: user.twoFactorEnabled ?? false,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
 
 // POST /register
 const registerSchema = z.object({
@@ -81,12 +112,18 @@ auth.post('/register', authRateLimit, async (c) => {
   // Hash password
   const passwordHash = await hash(password);
 
-  // Create user
+  // Generate email verification token
+  const verifyToken = generateSecureToken();
+
+  // Create user with verification token
   const [user] = await insertReturning(users, {
     email,
     passwordHash,
     name,
     isSuper: false,
+    emailVerified: false,
+    emailVerifyToken: verifyToken.hashed,
+    emailVerifyExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
   });
 
   if (!user) {
@@ -113,6 +150,13 @@ auth.post('/register', authRateLimit, async (c) => {
     });
   }
 
+  // Send verification email (fire-and-forget)
+  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  emailService.sendTemplateEmail('email-verification', email, {
+    userName: name,
+    verifyUrl: `${appUrl}/verify-email?token=${verifyToken.raw}`,
+  }).catch((err) => logger.error({ err }, 'Failed to send verification email'));
+
   // Generate tokens
   const tokens = await generateTokens({
     userId: user.id,
@@ -122,15 +166,7 @@ auth.post('/register', authRateLimit, async (c) => {
 
   return c.json({
     tokens,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      isSuper: user.isSuper,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    },
+    user: userResponse(user),
   }, 201);
 });
 
@@ -163,6 +199,24 @@ auth.post('/login', authRateLimit, async (c) => {
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
+  // Check email verification
+  if (!user.emailVerified) {
+    return c.json({ error: 'Email not verified', code: 'EMAIL_NOT_VERIFIED' }, 403);
+  }
+
+  // Check 2FA
+  if (user.twoFactorEnabled) {
+    // Generate a short-lived temp token for 2FA flow
+    const secret = JWT_SECRET_KEY();
+    const tempToken = await new SignJWT({ userId: user.id, type: '2fa-challenge' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(secret);
+
+    return c.json({ requiresTwoFactor: true, tempToken });
+  }
+
   const tokens = await generateTokens({
     userId: user.id,
     email: user.email!,
@@ -171,15 +225,7 @@ auth.post('/login', authRateLimit, async (c) => {
 
   return c.json({
     tokens,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      isSuper: user.isSuper,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    },
+    user: userResponse(user),
   });
 });
 
@@ -194,6 +240,19 @@ auth.post('/refresh', async (c) => {
 
   if (!parsed.success) {
     return c.json({ error: 'Refresh token is required' }, 400);
+  }
+
+  // Check if refresh token is blocklisted (was already rotated)
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const blocked = await valkey.get(`blocklist:${parsed.data.refreshToken}`);
+      if (blocked) {
+        return c.json({ error: 'Refresh token has been revoked' }, 401);
+      }
+    }
+  } catch {
+    // If Valkey is down, allow refresh (graceful degradation)
   }
 
   try {
@@ -223,6 +282,22 @@ auth.post('/refresh', async (c) => {
       impersonatingAccountId,
     });
 
+    // Rotate: blocklist the old refresh token
+    try {
+      const valkey = await getValkey();
+      if (valkey) {
+        const oldExp = payload.exp;
+        if (oldExp) {
+          const ttl = oldExp - Math.floor(Date.now() / 1000);
+          if (ttl > 0) {
+            await valkey.setex(`blocklist:${parsed.data.refreshToken}`, ttl, '1');
+          }
+        }
+      }
+    } catch {
+      // Best effort - don't fail the refresh if blocklist fails
+    }
+
     return c.json({ tokens });
   } catch {
     return c.json({ error: 'Invalid or expired refresh token' }, 401);
@@ -230,9 +305,27 @@ auth.post('/refresh', async (c) => {
 });
 
 // POST /logout
-auth.post('/logout', (c) => {
-  // JWT-based auth is stateless — client just discards tokens.
-  // In a production system, you'd add the token to a blocklist in Valkey.
+auth.post('/logout', authMiddleware, async (c) => {
+  const authorization = c.req.header('Authorization');
+  if (authorization?.startsWith('Bearer ')) {
+    const token = authorization.slice(7);
+    try {
+      const secret = JWT_SECRET_KEY();
+      const { payload } = await jwtVerify(token, secret);
+      const exp = payload.exp;
+      if (exp) {
+        const ttl = exp - Math.floor(Date.now() / 1000);
+        if (ttl > 0) {
+          const valkey = await getValkey();
+          if (valkey) {
+            await valkey.setex(`blocklist:${token}`, ttl, '1');
+          }
+        }
+      }
+    } catch {
+      // Token already invalid, that's fine
+    }
+  }
   return c.json({ message: 'Logged out successfully' });
 });
 
@@ -248,15 +341,7 @@ auth.get('/me', authMiddleware, async (c) => {
     return c.json({ error: 'User not found' }, 404);
   }
 
-  return c.json({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    avatarUrl: user.avatarUrl,
-    isSuper: user.isSuper,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-  });
+  return c.json(userResponse(user));
 });
 
 // GET /me/accounts — list all accounts user has access to
@@ -276,6 +361,371 @@ auth.get('/me/accounts', authMiddleware, async (c) => {
   return c.json(result);
 });
 
+// --- Email Verification ---
+
+// POST /verify-email
+auth.post('/verify-email', async (c) => {
+  const body = await c.req.json();
+  const token = body?.token;
+  if (!token || typeof token !== 'string') {
+    return c.json({ error: 'Token is required' }, 400);
+  }
+
+  const hashed = hashToken(token);
+  const user = await db.query.users.findFirst({
+    where: eq(users.emailVerifyToken, hashed),
+  });
+
+  if (!user) {
+    return c.json({ error: 'Invalid or expired verification token' }, 400);
+  }
+
+  if (user.emailVerifyExpires && new Date(user.emailVerifyExpires) < new Date()) {
+    return c.json({ error: 'Verification token has expired' }, 400);
+  }
+
+  await db.update(users).set({
+    emailVerified: true,
+    emailVerifyToken: null,
+    emailVerifyExpires: null,
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
+
+  return c.json({ message: 'Email verified successfully' });
+});
+
+// POST /resend-verification
+auth.post('/resend-verification', authMiddleware, async (c) => {
+  const authUser = c.get('user');
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, authUser.userId),
+  });
+
+  if (!user) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  if (user.emailVerified) {
+    return c.json({ error: 'Email is already verified' }, 400);
+  }
+
+  const verifyToken = generateSecureToken();
+  await db.update(users).set({
+    emailVerifyToken: verifyToken.hashed,
+    emailVerifyExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
+
+  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  await emailService.sendTemplateEmail('email-verification', user.email!, {
+    userName: user.name ?? 'User',
+    verifyUrl: `${appUrl}/verify-email?token=${verifyToken.raw}`,
+  });
+
+  return c.json({ message: 'Verification email sent' });
+});
+
+// --- Password Reset ---
+
+// POST /forgot-password
+auth.post('/forgot-password', passwordResetRateLimit, async (c) => {
+  const body = await c.req.json();
+  const email = body?.email;
+
+  // Always return 200 to prevent email enumeration
+  if (!email || typeof email !== 'string') {
+    return c.json({ message: 'If an account exists with that email, a password reset link will be sent.' });
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, email),
+  });
+
+  if (user) {
+    const resetToken = generateSecureToken();
+    await db.update(users).set({
+      passwordResetToken: resetToken.hashed,
+      passwordResetExpires: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
+      updatedAt: new Date(),
+    }).where(eq(users.id, user.id));
+
+    const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+    emailService.sendTemplateEmail('password-reset', email, {
+      userName: user.name ?? 'User',
+      resetUrl: `${appUrl}/reset-password?token=${resetToken.raw}`,
+      expiresIn: '1 hour',
+    }).catch((err) => logger.error({ err }, 'Failed to send password reset email'));
+  }
+
+  return c.json({ message: 'If an account exists with that email, a password reset link will be sent.' });
+});
+
+// POST /reset-password
+auth.post('/reset-password', async (c) => {
+  const body = await c.req.json();
+  const { token, password } = body ?? {};
+
+  if (!token || !password || typeof token !== 'string' || typeof password !== 'string') {
+    return c.json({ error: 'Token and new password are required' }, 400);
+  }
+
+  if (password.length < 8) {
+    return c.json({ error: 'Password must be at least 8 characters' }, 400);
+  }
+
+  const hashed = hashToken(token);
+  const user = await db.query.users.findFirst({
+    where: eq(users.passwordResetToken, hashed),
+  });
+
+  if (!user) {
+    return c.json({ error: 'Invalid or expired reset token' }, 400);
+  }
+
+  if (user.passwordResetExpires && new Date(user.passwordResetExpires) < new Date()) {
+    return c.json({ error: 'Reset token has expired' }, 400);
+  }
+
+  const passwordHash = await hash(password);
+  await db.update(users).set({
+    passwordHash,
+    passwordResetToken: null,
+    passwordResetExpires: null,
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
+
+  return c.json({ message: 'Password has been reset successfully' });
+});
+
+// --- Two-Factor Authentication (TOTP) ---
+
+// POST /2fa/setup — generate TOTP secret and QR code
+auth.post('/2fa/setup', authMiddleware, async (c) => {
+  const authUser = c.get('user');
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, authUser.userId),
+  });
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  if (user.twoFactorEnabled) return c.json({ error: '2FA is already enabled' }, 400);
+
+  const totp = new OTPAuth.TOTP({
+    issuer: 'Fleet',
+    label: user.email!,
+    algorithm: 'SHA1',
+    digits: 6,
+    period: 30,
+    secret: new OTPAuth.Secret({ size: 20 }),
+  });
+
+  const otpauthUri = totp.toString();
+  const qrCodeDataUrl = await QRCode.toDataURL(otpauthUri);
+
+  // Store encrypted secret temporarily in the user record
+  await db.update(users).set({
+    twoFactorSecret: encrypt(totp.secret.base32),
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
+
+  return c.json({
+    secret: totp.secret.base32,
+    otpauthUri,
+    qrCode: qrCodeDataUrl,
+  });
+});
+
+// POST /2fa/enable — verify code and enable 2FA
+auth.post('/2fa/enable', authMiddleware, async (c) => {
+  const authUser = c.get('user');
+  const body = await c.req.json();
+  const code = body?.code;
+
+  if (!code || typeof code !== 'string') {
+    return c.json({ error: 'Verification code is required' }, 400);
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, authUser.userId),
+  });
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  if (user.twoFactorEnabled) return c.json({ error: '2FA is already enabled' }, 400);
+  if (!user.twoFactorSecret) return c.json({ error: 'Run 2FA setup first' }, 400);
+
+  const secretBase32 = decrypt(user.twoFactorSecret);
+  const totp = new OTPAuth.TOTP({
+    issuer: 'Fleet',
+    label: user.email!,
+    algorithm: 'SHA1',
+    digits: 6,
+    period: 30,
+    secret: OTPAuth.Secret.fromBase32(secretBase32),
+  });
+
+  const delta = totp.validate({ token: code, window: 1 });
+  if (delta === null) {
+    return c.json({ error: 'Invalid verification code' }, 400);
+  }
+
+  // Generate backup codes
+  const backupCodes = Array.from({ length: 10 }, () =>
+    crypto.randomBytes(4).toString('hex'),
+  );
+  const hashedBackupCodes = await Promise.all(backupCodes.map((code) => hash(code)));
+
+  await db.update(users).set({
+    twoFactorEnabled: true,
+    twoFactorBackupCodes: hashedBackupCodes,
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
+
+  return c.json({ backupCodes });
+});
+
+// POST /2fa/disable — disable 2FA
+auth.post('/2fa/disable', authMiddleware, async (c) => {
+  const authUser = c.get('user');
+  const body = await c.req.json();
+  const code = body?.code;
+
+  if (!code || typeof code !== 'string') {
+    return c.json({ error: 'Verification code is required' }, 400);
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, authUser.userId),
+  });
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  if (!user.twoFactorEnabled) return c.json({ error: '2FA is not enabled' }, 400);
+
+  // Verify TOTP code or backup code
+  let verified = false;
+  if (user.twoFactorSecret) {
+    const secretBase32 = decrypt(user.twoFactorSecret);
+    const totp = new OTPAuth.TOTP({
+      issuer: 'Fleet',
+      label: user.email!,
+      algorithm: 'SHA1',
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromBase32(secretBase32),
+    });
+    if (totp.validate({ token: code, window: 1 }) !== null) {
+      verified = true;
+    }
+  }
+
+  if (!verified) {
+    // Check backup codes
+    const backupCodes = (user.twoFactorBackupCodes as string[] | null) ?? [];
+    for (let i = 0; i < backupCodes.length; i++) {
+      try {
+        if (await verify(backupCodes[i]!, code)) {
+          verified = true;
+          break;
+        }
+      } catch {
+        // skip invalid hash
+      }
+    }
+  }
+
+  if (!verified) {
+    return c.json({ error: 'Invalid verification code' }, 400);
+  }
+
+  await db.update(users).set({
+    twoFactorEnabled: false,
+    twoFactorSecret: null,
+    twoFactorBackupCodes: null,
+    updatedAt: new Date(),
+  }).where(eq(users.id, user.id));
+
+  return c.json({ message: '2FA has been disabled' });
+});
+
+// POST /2fa/verify — verify 2FA during login flow
+auth.post('/2fa/verify', async (c) => {
+  const body = await c.req.json();
+  const { tempToken, code } = body ?? {};
+
+  if (!tempToken || !code || typeof tempToken !== 'string' || typeof code !== 'string') {
+    return c.json({ error: 'Temp token and code are required' }, 400);
+  }
+
+  // Verify temp token
+  let userId: string;
+  try {
+    const secret = JWT_SECRET_KEY();
+    const { payload } = await jwtVerify(tempToken, secret);
+    if (payload['type'] !== '2fa-challenge') {
+      return c.json({ error: 'Invalid token' }, 401);
+    }
+    userId = payload['userId'] as string;
+  } catch {
+    return c.json({ error: 'Invalid or expired token' }, 401);
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
+
+  if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+    return c.json({ error: 'Invalid request' }, 400);
+  }
+
+  // Try TOTP verification
+  let verified = false;
+  const secretBase32 = decrypt(user.twoFactorSecret);
+  const totp = new OTPAuth.TOTP({
+    issuer: 'Fleet',
+    label: user.email!,
+    algorithm: 'SHA1',
+    digits: 6,
+    period: 30,
+    secret: OTPAuth.Secret.fromBase32(secretBase32),
+  });
+
+  if (totp.validate({ token: code, window: 1 }) !== null) {
+    verified = true;
+  }
+
+  // Try backup codes
+  if (!verified) {
+    const backupCodes = (user.twoFactorBackupCodes as string[] | null) ?? [];
+    for (let i = 0; i < backupCodes.length; i++) {
+      try {
+        if (await verify(backupCodes[i]!, code)) {
+          verified = true;
+          // Consume backup code
+          const remaining = [...backupCodes];
+          remaining.splice(i, 1);
+          await db.update(users).set({
+            twoFactorBackupCodes: remaining,
+            updatedAt: new Date(),
+          }).where(eq(users.id, user.id));
+          break;
+        }
+      } catch {
+        // skip invalid hash
+      }
+    }
+  }
+
+  if (!verified) {
+    return c.json({ error: 'Invalid verification code' }, 400);
+  }
+
+  const tokens = await generateTokens({
+    userId: user.id,
+    email: user.email!,
+    isSuper: user.isSuper ?? false,
+  });
+
+  return c.json({ tokens, user: userResponse(user) });
+});
+
 // --- OAuth Routes ---
 
 // GET /github — redirect to GitHub OAuth
@@ -285,15 +735,40 @@ auth.get('/github', (c) => {
     return c.json({ error: 'GitHub OAuth is not configured' }, 500);
   }
 
+  const returnTo = c.req.query('returnTo') || '';
+  const state = returnTo ? Buffer.from(JSON.stringify({ returnTo })).toString('base64url') : '';
   const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/github/callback`;
-  const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: 'user:email repo',
+  });
+  if (state) params.set('state', state);
 
-  return c.redirect(url);
+  return c.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
 });
 
 // GET /github/callback
 auth.get('/github/callback', async (c) => {
   const code = c.req.query('code');
+  const stateParam = c.req.query('state') || '';
+
+  // Parse returnTo from state
+  let returnTo = '';
+  if (stateParam) {
+    try {
+      const decoded = JSON.parse(Buffer.from(stateParam, 'base64url').toString());
+      returnTo = decoded.returnTo || '';
+    } catch {
+      // ignore invalid state
+    }
+  }
+
+  // Validate returnTo is a safe relative path (prevent open redirect)
+  if (returnTo && (!returnTo.startsWith('/') || returnTo.startsWith('//'))) {
+    returnTo = '';
+  }
+
   if (!code) {
     return c.redirect('/auth/callback?error=Missing+authorization+code');
   }
@@ -306,6 +781,8 @@ auth.get('/github/callback', async (c) => {
 
   try {
     // Exchange code for access token
+    const ghTokenController = new AbortController();
+    const ghTokenTimeout = setTimeout(() => ghTokenController.abort(), 10_000);
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
@@ -317,7 +794,9 @@ auth.get('/github/callback', async (c) => {
         client_secret: clientSecret,
         code,
       }),
+      signal: ghTokenController.signal,
     });
+    clearTimeout(ghTokenTimeout);
 
     const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string };
 
@@ -326,9 +805,13 @@ auth.get('/github/callback', async (c) => {
     }
 
     // Fetch GitHub user profile
+    const ghUserController = new AbortController();
+    const ghUserTimeout = setTimeout(() => ghUserController.abort(), 10_000);
     const userRes = await fetch('https://api.github.com/user', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      signal: ghUserController.signal,
     });
+    clearTimeout(ghUserTimeout);
     const githubUser = (await userRes.json()) as {
       id: number;
       login: string;
@@ -340,9 +823,13 @@ auth.get('/github/callback', async (c) => {
     // Fetch primary email if not public
     let email = githubUser.email;
     if (!email) {
+      const ghEmailsController = new AbortController();
+      const ghEmailsTimeout = setTimeout(() => ghEmailsController.abort(), 10_000);
       const emailsRes = await fetch('https://api.github.com/user/emails', {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        signal: ghEmailsController.signal,
       });
+      clearTimeout(ghEmailsTimeout);
       const emails = (await emailsRes.json()) as Array<{
         email: string;
         primary: boolean;
@@ -381,12 +868,13 @@ auth.get('/github/callback', async (c) => {
       });
 
       if (!user) {
-        // Create new user
+        // Create new user (OAuth = email already verified)
         const [newUser] = await insertReturning(users, {
           email,
           name: githubUser.name ?? githubUser.login,
           avatarUrl: githubUser.avatar_url,
           isSuper: false,
+          emailVerified: true,
         });
         if (!newUser) throw new Error('Failed to create user');
         user = newUser;
@@ -436,6 +924,14 @@ auth.get('/github/callback', async (c) => {
       isSuper: user.isSuper ?? false,
     });
 
+    // If returnTo is set, redirect there with github_connected flag + tokens
+    if (returnTo) {
+      const sep = returnTo.includes('?') ? '&' : '?';
+      return c.redirect(
+        `${returnTo}${sep}github_connected=true&token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
+      );
+    }
+
     return c.redirect(
       `/auth/callback?token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
     );
@@ -475,6 +971,8 @@ auth.get('/google/callback', async (c) => {
     const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/google/callback`;
 
     // Exchange code for tokens
+    const googleTokenController = new AbortController();
+    const googleTokenTimeout = setTimeout(() => googleTokenController.abort(), 10_000);
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -485,7 +983,9 @@ auth.get('/google/callback', async (c) => {
         redirect_uri: redirectUri,
         grant_type: 'authorization_code',
       }),
+      signal: googleTokenController.signal,
     });
+    clearTimeout(googleTokenTimeout);
 
     const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string };
 
@@ -494,9 +994,13 @@ auth.get('/google/callback', async (c) => {
     }
 
     // Fetch Google user info
+    const googleUserController = new AbortController();
+    const googleUserTimeout = setTimeout(() => googleUserController.abort(), 10_000);
     const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      signal: googleUserController.signal,
     });
+    clearTimeout(googleUserTimeout);
     const googleUser = (await userRes.json()) as {
       id: string;
       email: string;
@@ -535,6 +1039,7 @@ auth.get('/google/callback', async (c) => {
           name: googleUser.name,
           avatarUrl: googleUser.picture,
           isSuper: false,
+          emailVerified: true,
         });
         if (!newUser) throw new Error('Failed to create user');
         user = newUser;

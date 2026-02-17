@@ -1,13 +1,18 @@
 import Redis from 'ioredis';
 import { logger } from './logger.js';
 
-const VALKEY_URL = process.env['VALKEY_URL'] ?? 'redis://:fleetvalkey@valkey:6379';
+const VALKEY_URL = process.env['VALKEY_URL'];
 
 let client: Redis | null = null;
 let subscriber: Redis | null = null;
 let connectionFailed = false;
 
 function createClient(name: string): Redis | null {
+  if (!VALKEY_URL) {
+    logger.warn({ name }, `Valkey ${name}: VALKEY_URL not set, Valkey disabled`);
+    connectionFailed = true;
+    return null;
+  }
   try {
     const redis = new Redis(VALKEY_URL, {
       maxRetriesPerRequest: 3,
@@ -90,7 +95,7 @@ export async function getSubscriber(): Promise<Redis | null> {
 export function getValkeyConnectionOpts() {
   // Parse the URL to extract components for BullMQ's IORedis options
   try {
-    const url = new URL(VALKEY_URL);
+    const url = new URL(VALKEY_URL!);
     return {
       host: url.hostname || 'valkey',
       port: Number(url.port) || 6379,
@@ -98,10 +103,16 @@ export function getValkeyConnectionOpts() {
       maxRetriesPerRequest: null as null, // Required by BullMQ
     };
   } catch {
+    if (!VALKEY_URL) {
+      return {
+        host: 'localhost',
+        port: 6379,
+        maxRetriesPerRequest: null as null,
+      };
+    }
     return {
       host: 'valkey',
       port: 6379,
-      password: 'fleetvalkey',
       maxRetriesPerRequest: null as null,
     };
   }

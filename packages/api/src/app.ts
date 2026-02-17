@@ -1,12 +1,15 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, eq, and } from '@fleet/db';
+import { db, services, eq, and, errorLog } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
 import { logger } from './services/logger.js';
 import { requestLogger } from './middleware/request-logger.js';
+import { securityHeaders } from './middleware/security.js';
+import { rateLimiter } from './middleware/rate-limit.js';
 import { auditMiddleware } from './middleware/audit.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/accounts.js';
@@ -31,25 +34,61 @@ import setupRoutes from './routes/setup.js';
 import notificationRoutes from './routes/notifications.js';
 import apiKeyRoutes from './routes/api-keys.js';
 import domainPricingRoutes from './routes/domain-pricing.js';
+import errorRoutes from './routes/errors.js';
 
 export const app = new Hono();
 
 // WebSocket support — export for use in index.ts
 export const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
 
+// Security headers
+app.use('*', securityHeaders);
+
 // CORS
 app.use('*', cors({
-  origin: process.env['CORS_ORIGIN'] ?? '*',
+  origin: process.env['CORS_ORIGIN'] || (process.env['NODE_ENV'] === 'production' ? '' : '*'),
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Account-Id', 'X-API-Key'],
   maxAge: 86400,
 }));
 
+// Request body size limit (2 MB default)
+app.use('*', bodyLimit({ maxSize: 2 * 1024 * 1024 }));
+
+// Global rate limiter: 120 requests per minute per IP
+app.use('*', rateLimiter({ windowMs: 60_000, max: 120, keyPrefix: 'global' }));
+
 // Request logging
 app.use('*', requestLogger);
 
-// Global error handler
+// Global error handler — logs to DB for super admin error tracking
 app.onError((err, c) => {
+  const ip =
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
+    c.req.header('x-real-ip') ??
+    'unknown';
+
+  let userId: string | null = null;
+  try {
+    const user = c.get('user' as never) as { userId?: string } | undefined;
+    userId = user?.userId ?? null;
+  } catch { /* not authenticated */ }
+
+  // Fire-and-forget: write to error_log table
+  db.insert(errorLog)
+    .values({
+      level: 'error',
+      message: err.message,
+      stack: err.stack ?? null,
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      statusCode: 500,
+      userId,
+      ip,
+      userAgent: c.req.header('user-agent') ?? null,
+    })
+    .catch(() => {});
+
   logger.error({ err, path: c.req.path, method: c.req.method }, 'Unhandled error');
   return c.json({ error: 'Internal server error' }, 500);
 });
@@ -59,9 +98,13 @@ app.notFound((c) => {
   return c.json({ error: 'Not found' }, 404);
 });
 
-// Health check
+// Health check (enhanced with uptime)
 app.get('/health', (c) => {
-  return c.json({ status: 'ok', timestamp: new Date().toISOString() });
+  return c.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+  });
 });
 
 // ── Helper: verify JWT from WebSocket query param ──
@@ -102,6 +145,7 @@ api.route('/setup', setupRoutes);
 api.route('/notifications', notificationRoutes);
 api.route('/api-keys', apiKeyRoutes);
 api.route('/domain-pricing', domainPricingRoutes);
+api.route('/errors', errorRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(

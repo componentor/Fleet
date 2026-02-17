@@ -130,6 +130,15 @@ export const accountBillingOverrides = pgTable('account_billing_overrides', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const webhookEvents = pgTable('webhook_events', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  stripeEventId: varchar('stripe_event_id').unique().notNull(),
+  eventType: varchar('event_type').notNull(),
+  processedAt: timestamp('processed_at').defaultNow(),
+  payload: jsonb('payload').$type<Record<string, unknown> | null>(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const billingPlansRelations = relations(
   billingPlans,
   ({ many }) => ({

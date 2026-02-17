@@ -53,7 +53,7 @@ export class PowerDnsProvider implements DnsProvider {
 
   async createZone(
     domain: string,
-    nameservers: string[] = ['ns1.fleet.local.', 'ns2.fleet.local.'],
+    nameservers: string[] = process.env['NAMESERVERS']?.split(',').map(s => s.trim().endsWith('.') ? s.trim() : s.trim() + '.') ?? ['ns1.fleet.local.', 'ns2.fleet.local.'],
   ): Promise<DnsProviderResult> {
     try {
       const canonicalDomain = this.canonicalize(domain);

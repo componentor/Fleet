@@ -101,7 +101,19 @@ export const tenantMiddleware = createMiddleware<{
 
   c.set('account', accountCtx);
   c.set('accountId', targetAccount.id);
-  c.set('userRole', 'member');
+  // Inherit role from the parent account membership, but cap at 'member' for non-admin roles
+  const parentMembership = userMemberships.find((membership) => {
+    const memberPath = membership.account.path ?? '';
+    return (
+      targetPath.startsWith(memberPath) &&
+      targetPath.length > memberPath.length &&
+      targetPath[memberPath.length] === '.'
+    );
+  });
+  const inheritedRole = parentMembership?.role ?? 'member';
+  // viewer in parent stays viewer in child; member stays member; admin/owner get admin in child
+  const childRole = inheritedRole === 'viewer' ? 'viewer' : inheritedRole === 'member' ? 'member' : 'admin';
+  c.set('userRole', childRole);
 
   await next();
 });

@@ -106,8 +106,7 @@ dnsRoutes.post('/zones', requireMember, async (c) => {
 
   // Insert into DB
   const resolvedNameservers = nameservers ?? [
-    'ns1.fleet.local',
-    'ns2.fleet.local',
+    ...(process.env['NAMESERVERS']?.split(',').map(s => s.trim()) ?? ['ns1.fleet.local', 'ns2.fleet.local']),
   ];
 
   const [zone] = await insertReturning(dnsZones, {

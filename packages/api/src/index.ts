@@ -11,12 +11,19 @@ import { logger } from './services/logger.js'
 
 // Register shutdown handlers early — before any async work
 let server: ReturnType<typeof serve> | undefined
-function shutdown() {
+let shuttingDown = false
+async function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  logger.info('Shutting down gracefully...')
   updateService.stopPeriodicCheck()
   schedulerService.shutdown()
-  shutdownWorkers().catch(() => {})
-  closeValkey().catch(() => {})
   try { server?.close() } catch {}
+  await Promise.allSettled([
+    shutdownWorkers(),
+    closeValkey(),
+  ])
+  logger.info('Shutdown complete')
   process.exit(0)
 }
 process.on('SIGINT', shutdown)
@@ -32,14 +39,22 @@ try {
   logger.error({ err }, 'Database migration failed')
 }
 
-// Load JWT secret from DB if not set via env (setup wizard stores it in platformSettings)
+// Load JWT secret from DB if not set via env (setup wizard stores it encrypted in platformSettings)
 if (!process.env['JWT_SECRET']) {
   try {
     const row = await db.query.platformSettings.findFirst({
       where: eq(platformSettings.key, 'platform:jwtSecret'),
     })
     if (row) {
-      process.env['JWT_SECRET'] = row.value as string
+      const { decrypt } = await import('./services/crypto.service.js')
+      const value = row.value as string
+      // Handle both legacy JSON-stringified and encrypted values
+      try {
+        const parsed = JSON.parse(value)
+        process.env['JWT_SECRET'] = typeof parsed === 'string' ? parsed : value
+      } catch {
+        process.env['JWT_SECRET'] = decrypt(value)
+      }
     }
   } catch {
     // DB may not be initialized yet (first run)

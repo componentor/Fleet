@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { RouterView, RouterLink, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useAuth } from '@/composables/useAuth'
 import { useAccount } from '@/composables/useAccount'
@@ -29,9 +30,11 @@ import {
   ChevronDown,
   ArrowLeft,
   ShieldAlert,
+  Languages,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 
+const { t, locale } = useI18n()
 const route = useRoute()
 const { theme, toggle } = useTheme()
 const { user, isSuper, logout } = useAuth()
@@ -60,20 +63,20 @@ const userMenuOpen = ref(false)
 const accountMenuOpen = ref(false)
 
 const navItems = [
-  { name: 'Dashboard', path: '/panel', icon: LayoutDashboard },
-  { name: 'Services', path: '/panel/services', icon: Layers },
-  { name: 'Deploy', path: '/panel/deploy', icon: Rocket },
-  { name: 'Marketplace', path: '/panel/marketplace', icon: Store },
-  { name: 'Domains', path: '/panel/domains', icon: Globe },
-  { name: 'Terminal', path: '/panel/terminal', icon: TerminalIcon },
-  { name: 'Storage', path: '/panel/storage', icon: HardDrive },
-  { name: 'Backups', path: '/panel/backups', icon: Archive },
-  { name: 'SSH Keys', path: '/panel/ssh', icon: Key },
-  { name: 'API Keys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
-  { name: 'Sub-Accounts', path: '/panel/sub-accounts', icon: UserPlus },
-  { name: 'Users', path: '/panel/users', icon: Users },
-  { name: 'Billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
-  { name: 'Settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
+  { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
+  { nameKey: 'nav.services', path: '/panel/services', icon: Layers },
+  { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
+  { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
+  { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
+  { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
+  { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
+  { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
+  { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
+  { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
+  { nameKey: 'nav.subAccounts', path: '/panel/sub-accounts', icon: UserPlus },
+  { nameKey: 'nav.users', path: '/panel/users', icon: Users },
+  { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
+  { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
 ]
 
 function isActive(path: string) {
@@ -91,6 +94,11 @@ async function handleLogout() {
 function handleSwitchAccount(id: string) {
   accountMenuOpen.value = false
   switchAccount(id)
+}
+
+function changeLocale(newLocale: string) {
+  locale.value = newLocale
+  localStorage.setItem('fleet_locale', newLocale)
 }
 </script>
 
@@ -130,7 +138,7 @@ function handleSwitchAccount(id: string) {
           @click="sidebarOpen = false"
         >
           <component :is="item.icon" class="w-5 h-5 shrink-0" />
-          {{ item.name }}
+          {{ $t(item.nameKey) }}
         </RouterLink>
       </nav>
 
@@ -141,7 +149,7 @@ function handleSwitchAccount(id: string) {
           class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
         >
           <ArrowLeft class="w-5 h-5 shrink-0" />
-          Back to Admin
+          {{ $t('nav.backToAdmin') }}
         </RouterLink>
       </div>
     </aside>
@@ -165,7 +173,7 @@ function handleSwitchAccount(id: string) {
             @click="accountMenuOpen = !accountMenuOpen"
             class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors"
           >
-            <span>{{ currentAccount?.name ?? 'Select account' }}</span>
+            <span>{{ currentAccount?.name ?? $t('nav.selectAccount') }}</span>
             <ChevronDown class="w-4 h-4" />
           </button>
 
@@ -175,7 +183,7 @@ function handleSwitchAccount(id: string) {
             class="absolute left-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50"
           >
             <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              Accounts
+              {{ $t('nav.accounts') }}
             </div>
             <button
               v-for="account in accounts"
@@ -197,6 +205,18 @@ function handleSwitchAccount(id: string) {
         </div>
 
         <div class="flex items-center gap-2 ml-auto">
+          <!-- Language selector -->
+          <select
+            :value="locale"
+            @change="changeLocale(($event.target as HTMLSelectElement).value)"
+            class="px-2 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          >
+            <option value="en">English</option>
+            <option value="nb">Norsk</option>
+            <option value="de">Deutsch</option>
+            <option value="zh">中文</option>
+          </select>
+
           <!-- Theme toggle -->
           <button
             @click="toggle"
@@ -239,14 +259,14 @@ function handleSwitchAccount(id: string) {
                 class="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 <Users class="w-4 h-4" />
-                Profile
+                {{ $t('nav.profile') }}
               </RouterLink>
               <button
                 @click="handleLogout"
                 class="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 <LogOut class="w-4 h-4" />
-                Sign out
+                {{ $t('auth.signOut') }}
               </button>
             </div>
           </div>
@@ -257,13 +277,13 @@ function handleSwitchAccount(id: string) {
       <div v-if="isImpersonating" class="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-sm">
         <div class="flex items-center gap-2">
           <ShieldAlert class="w-4 h-4" />
-          <span>You are impersonating <strong>{{ currentAccount?.name ?? 'an account' }}</strong></span>
+          <span>{{ $t('impersonation.youAreImpersonating') }} <strong>{{ currentAccount?.name ?? $t('impersonation.anAccount') }}</strong></span>
         </div>
         <button
           @click="stopImpersonating"
           class="px-3 py-1 rounded bg-white/20 hover:bg-white/30 font-medium transition-colors"
         >
-          Stop Impersonating
+          {{ $t('impersonation.stopImpersonating') }}
         </button>
       </div>
 

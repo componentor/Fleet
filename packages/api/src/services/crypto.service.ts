@@ -55,3 +55,12 @@ export function decrypt(encrypted: string): string {
     return encrypted;
   }
 }
+
+// Warn at module load if ENCRYPTION_KEY is not configured
+if (!getKey()) {
+  const msg = 'ENCRYPTION_KEY is not set or invalid (must be 64 hex chars). Encryption is DISABLED — sensitive data will be stored in plaintext.';
+  if (process.env['NODE_ENV'] === 'production') {
+    throw new Error(msg);
+  }
+  console.warn(`[WARN] ${msg}`);
+}

@@ -13,3 +13,4 @@ export * from './settings';
 export * from './metrics';
 export * from './notifications';
 export * from './api-keys';
+export * from './errors';

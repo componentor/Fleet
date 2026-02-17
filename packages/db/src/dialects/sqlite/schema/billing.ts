@@ -127,6 +127,15 @@ export const accountBillingOverrides = sqliteTable('account_billing_overrides', 
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+export const webhookEvents = sqliteTable('webhook_events', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  stripeEventId: text('stripe_event_id').unique().notNull(),
+  eventType: text('event_type').notNull(),
+  processedAt: integer('processed_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown> | null>(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
 export const billingPlansRelations = relations(
   billingPlans,
   ({ many }) => ({

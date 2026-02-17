@@ -17,7 +17,9 @@ import {
   GitCommit,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const api = useApi()
 const loading = ref(true)
 const status = ref<any>(null)
@@ -145,7 +147,7 @@ onUnmounted(() => {
     <div class="flex items-center justify-between mb-8">
       <div class="flex items-center gap-3">
         <Activity class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">System Status</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.status.title') }}</h1>
       </div>
       <div class="flex items-center gap-3">
         <button
@@ -158,7 +160,7 @@ onUnmounted(() => {
           ]"
         >
           <span :class="['w-2 h-2 rounded-full', autoRefresh ? 'bg-green-500 animate-pulse' : 'bg-gray-400']"></span>
-          Auto-refresh {{ autoRefresh ? 'ON' : 'OFF' }}
+          {{ $t('super.status.autoRefresh') }} {{ autoRefresh ? $t('super.status.on') : $t('super.status.off') }}
         </button>
         <button
           @click="fetchStatus"
@@ -166,7 +168,7 @@ onUnmounted(() => {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
         >
           <RefreshCw :class="['w-4 h-4', loading && 'animate-spin']" />
-          Refresh
+          {{ $t('super.status.refresh') }}
         </button>
       </div>
     </div>
@@ -188,10 +190,10 @@ onUnmounted(() => {
           <XCircle v-else class="w-6 h-6 text-red-600 dark:text-red-400" />
           <div>
             <p :class="['text-sm font-semibold', healthColor]">
-              System {{ overallHealth === 'healthy' ? 'Healthy' : overallHealth === 'degraded' ? 'Degraded' : 'Unhealthy' }}
+              {{ overallHealth === 'healthy' ? $t('super.status.systemHealthy') : overallHealth === 'degraded' ? $t('super.status.systemDegraded') : $t('super.status.systemUnhealthy') }}
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400">
-              Response: {{ status.responseTimeMs }}ms | Last checked: {{ formatDate(status.timestamp) }}
+              {{ $t('super.status.response') }}: {{ status.responseTimeMs }}ms | {{ $t('super.status.lastChecked') }}: {{ formatDate(status.timestamp) }}
             </p>
           </div>
         </div>
@@ -204,24 +206,24 @@ onUnmounted(() => {
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <Zap class="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <span class="text-sm font-semibold text-gray-900 dark:text-white">API</span>
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.api') }}</span>
             </div>
             <span class="flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-green-500"></span>
-              <span class="text-xs font-medium text-green-600 dark:text-green-400">Healthy</span>
+              <span class="text-xs font-medium text-green-600 dark:text-green-400">{{ $t('super.status.healthy') }}</span>
             </span>
           </div>
           <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
             <div class="flex justify-between">
-              <span>Uptime</span>
+              <span>{{ $t('super.status.uptime') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ formatUptime(status.api.uptimeSeconds) }}</span>
             </div>
             <div class="flex justify-between">
-              <span>Memory</span>
+              <span>{{ $t('super.status.memory') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.api.memoryUsageMb }} MB</span>
             </div>
             <div class="flex justify-between">
-              <span>Node.js</span>
+              <span>{{ $t('super.status.nodejs') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.api.nodeVersion }}</span>
             </div>
           </div>
@@ -232,27 +234,27 @@ onUnmounted(() => {
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <Database class="w-4 h-4 text-red-600 dark:text-red-400" />
-              <span class="text-sm font-semibold text-gray-900 dark:text-white">Valkey</span>
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.valkey') }}</span>
             </div>
             <span class="flex items-center gap-1.5">
               <span :class="['w-2 h-2 rounded-full', status.valkey.status === 'connected' ? 'bg-green-500' : 'bg-red-500']"></span>
               <span :class="['text-xs font-medium', status.valkey.status === 'connected' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400']">
-                {{ status.valkey.status === 'connected' ? 'Connected' : 'Disconnected' }}
+                {{ status.valkey.status === 'connected' ? $t('super.status.connected') : $t('super.status.disconnected') }}
               </span>
             </span>
           </div>
           <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
             <div class="flex justify-between">
-              <span>Latency</span>
+              <span>{{ $t('super.status.latency') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.valkey.latencyMs !== null ? `${status.valkey.latencyMs}ms` : '--' }}</span>
             </div>
             <div class="flex justify-between">
-              <span>Memory</span>
+              <span>{{ $t('super.status.memory') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.valkey.memoryUsage ?? '--' }}</span>
             </div>
             <div class="flex justify-between">
-              <span>Queues</span>
-              <span class="font-medium text-gray-900 dark:text-white">{{ status.queues.available ? 'Active' : 'Disabled' }}</span>
+              <span>{{ $t('super.status.queues') }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.queues.available ? $t('super.status.active') : $t('super.status.disabled') }}</span>
             </div>
           </div>
         </div>
@@ -262,26 +264,26 @@ onUnmounted(() => {
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <Container class="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-              <span class="text-sm font-semibold text-gray-900 dark:text-white">Docker Swarm</span>
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.dockerSwarm') }}</span>
             </div>
             <span class="flex items-center gap-1.5">
               <span :class="['w-2 h-2 rounded-full', status.docker?.status === 'connected' ? 'bg-green-500' : 'bg-red-500']"></span>
               <span :class="['text-xs font-medium', status.docker?.status === 'connected' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400']">
-                {{ status.docker?.status === 'connected' ? 'Connected' : 'Disconnected' }}
+                {{ status.docker?.status === 'connected' ? $t('super.status.connected') : $t('super.status.disconnected') }}
               </span>
             </span>
           </div>
           <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
             <div class="flex justify-between">
-              <span>Total Nodes</span>
+              <span>{{ $t('super.status.totalNodes') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.docker?.nodes ?? 0 }}</span>
             </div>
             <div class="flex justify-between">
-              <span>Managers</span>
+              <span>{{ $t('super.status.managers') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.docker?.managers ?? 0 }}</span>
             </div>
             <div class="flex justify-between">
-              <span>Workers</span>
+              <span>{{ $t('super.status.workers') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ status.docker?.workers ?? 0 }}</span>
             </div>
           </div>
@@ -292,9 +294,9 @@ onUnmounted(() => {
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <HardDrive class="w-4 h-4 text-purple-600 dark:text-purple-400" />
-              <span class="text-sm font-semibold text-gray-900 dark:text-white">Services</span>
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.services') }}</span>
             </div>
-            <span class="text-xs font-medium text-gray-900 dark:text-white">{{ status.services.total }} total</span>
+            <span class="text-xs font-medium text-gray-900 dark:text-white">{{ status.services.total }} {{ $t('super.status.total') }}</span>
           </div>
           <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
             <div v-for="(count, st) in status.services.byStatus" :key="st" class="flex justify-between">
@@ -302,7 +304,7 @@ onUnmounted(() => {
               <span class="font-medium text-gray-900 dark:text-white">{{ count }}</span>
             </div>
             <div v-if="Object.keys(status.services.byStatus).length === 0" class="text-center py-1">
-              <span class="text-gray-400 dark:text-gray-500">No services</span>
+              <span class="text-gray-400 dark:text-gray-500">{{ $t('super.status.noServices') }}</span>
             </div>
           </div>
         </div>
@@ -314,11 +316,11 @@ onUnmounted(() => {
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
             <Server class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Node Health</h2>
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.nodeHealth') }}</h2>
           </div>
           <div class="p-4">
             <div v-if="status.nodes.length === 0" class="text-center py-6">
-              <p class="text-sm text-gray-500 dark:text-gray-400">No nodes registered</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.status.noNodes') }}</p>
             </div>
             <div v-else class="space-y-3">
               <div
@@ -350,12 +352,12 @@ onUnmounted(() => {
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
             <Cpu class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Job Queues</h2>
-            <span v-if="!status.queues.available" class="ml-auto text-xs text-yellow-600 dark:text-yellow-400 font-medium">Disabled</span>
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.jobQueues') }}</h2>
+            <span v-if="!status.queues.available" class="ml-auto text-xs text-yellow-600 dark:text-yellow-400 font-medium">{{ $t('super.status.disabled') }}</span>
           </div>
           <div class="p-4">
             <div v-if="!status.queues.available" class="text-center py-6">
-              <p class="text-sm text-gray-500 dark:text-gray-400">Queues are disabled (Valkey not available)</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.status.queuesDisabled') }}</p>
             </div>
             <div v-else-if="status.queues.data" class="space-y-4">
               <!-- Summary bar -->
@@ -363,15 +365,15 @@ onUnmounted(() => {
                 <span class="text-gray-500 dark:text-gray-400">Total:</span>
                 <span class="flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
-                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.waiting }} waiting</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.waiting }} {{ $t('super.status.waiting').toLowerCase() }}</span>
                 </span>
                 <span class="flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.active }} active</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.active }} {{ $t('super.status.active').toLowerCase() }}</span>
                 </span>
                 <span class="flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-red-500"></span>
-                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.failed }} failed</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.failed }} {{ $t('super.status.failed').toLowerCase() }}</span>
                 </span>
               </div>
 
@@ -383,23 +385,23 @@ onUnmounted(() => {
                 <div class="grid grid-cols-5 gap-2 text-xs">
                   <div class="text-center">
                     <p class="font-medium text-gray-900 dark:text-white">{{ q.waiting }}</p>
-                    <p class="text-gray-400">Waiting</p>
+                    <p class="text-gray-400">{{ $t('super.status.waiting') }}</p>
                   </div>
                   <div class="text-center">
                     <p class="font-medium text-gray-900 dark:text-white">{{ q.active }}</p>
-                    <p class="text-gray-400">Active</p>
+                    <p class="text-gray-400">{{ $t('super.status.active') }}</p>
                   </div>
                   <div class="text-center">
                     <p class="font-medium text-gray-900 dark:text-white">{{ q.delayed }}</p>
-                    <p class="text-gray-400">Delayed</p>
+                    <p class="text-gray-400">{{ $t('super.status.delayed') }}</p>
                   </div>
                   <div class="text-center">
                     <p class="font-medium text-green-600 dark:text-green-400">{{ q.completed }}</p>
-                    <p class="text-gray-400">Done</p>
+                    <p class="text-gray-400">{{ $t('super.status.done') }}</p>
                   </div>
                   <div class="text-center">
                     <p :class="['font-medium', q.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white']">{{ q.failed }}</p>
-                    <p class="text-gray-400">Failed</p>
+                    <p class="text-gray-400">{{ $t('super.status.failed') }}</p>
                   </div>
                 </div>
               </div>
@@ -412,22 +414,22 @@ onUnmounted(() => {
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
           <GitCommit class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Recent Deployments</h2>
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.recentDeployments') }}</h2>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Service</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Commit</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Time</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.status.service') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.status.status') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.status.commit') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.status.time') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-if="status.recentDeployments.length === 0">
                 <td colspan="4" class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                  No recent deployments
+                  {{ $t('super.status.noDeployments') }}
                 </td>
               </tr>
               <tr

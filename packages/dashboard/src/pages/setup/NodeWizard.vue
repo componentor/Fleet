@@ -3,7 +3,9 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { Sun, Moon, Monitor, Server, Key, HardDrive, CheckCircle2, ArrowRight, ArrowLeft, Loader2 } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const router = useRouter()
 const { theme, toggle } = useTheme()
 
@@ -17,12 +19,12 @@ const nfsPath = ref('/exports/fleet')
 const loading = ref(false)
 const error = ref('')
 
-const steps = [
-  { number: 1, label: 'Install Docker', icon: Server },
-  { number: 2, label: 'Join Swarm', icon: Key },
-  { number: 3, label: 'Configure NFS', icon: HardDrive },
-  { number: 4, label: 'Complete', icon: CheckCircle2 },
-]
+const steps = computed(() => [
+  { number: 1, label: t('setup.installDockerStep'), icon: Server },
+  { number: 2, label: t('setup.joinSwarmStep'), icon: Key },
+  { number: 3, label: t('setup.configureNfs'), icon: HardDrive },
+  { number: 4, label: t('setup.stepComplete'), icon: CheckCircle2 },
+])
 
 const canProceed = computed(() => {
   switch (currentStep.value) {
@@ -76,8 +78,8 @@ async function completeSetup() {
     <!-- Header -->
     <div class="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
       <div class="max-w-3xl mx-auto px-6 py-4">
-        <h1 class="text-xl font-bold text-primary-600 dark:text-primary-400">Fleet Setup</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Configure your hosting platform</p>
+        <h1 class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ $t('setup.title') }}</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('setup.configureHosting') }}</p>
       </div>
     </div>
 
@@ -133,41 +135,41 @@ async function completeSetup() {
         <!-- Step 1: Install Docker -->
         <div v-if="currentStep === 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Step 1: Install Docker</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Ensure Docker is installed and running on this node.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('setup.installDockerStep') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('setup.ensureDocker') }}</p>
           </div>
           <div class="p-6 space-y-4">
-            <p class="text-sm text-gray-600 dark:text-gray-400">Run the following command on your server to install Docker:</p>
+            <p class="text-sm text-gray-600 dark:text-gray-400">{{ $t('setup.runCommand') }}</p>
             <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
               <code>curl -fsSL https://get.docker.com | sh</code>
             </div>
-            <p class="text-sm text-gray-600 dark:text-gray-400">Then enable and start the Docker service:</p>
+            <p class="text-sm text-gray-600 dark:text-gray-400">{{ $t('setup.enableDocker') }}</p>
             <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
               <code>sudo systemctl enable docker && sudo systemctl start docker</code>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-4">Once Docker is running, proceed to the next step.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-4">{{ $t('setup.dockerRunning') }}</p>
           </div>
         </div>
 
         <!-- Step 2: Join Swarm -->
         <div v-if="currentStep === 2" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Step 2: Join Docker Swarm</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Connect this node to the Docker Swarm cluster.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('setup.joinSwarmStep') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('setup.connectSwarm') }}</p>
           </div>
           <div class="p-6 space-y-5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Join Token</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('setup.joinToken') }}</label>
               <input
                 v-model="joinToken"
                 type="text"
                 placeholder="SWMTKN-1-..."
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
               />
-              <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Get this from your manager node with: <code class="text-gray-500 dark:text-gray-400">docker swarm join-token worker</code></p>
+              <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">{{ $t('setup.joinTokenHint') }} <code class="text-gray-500 dark:text-gray-400">docker swarm join-token worker</code></p>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Manager Address</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('setup.managerAddress') }}</label>
               <input
                 v-model="managerAddress"
                 type="text"
@@ -181,12 +183,12 @@ async function completeSetup() {
         <!-- Step 3: Configure NFS -->
         <div v-if="currentStep === 3" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Step 3: Configure NFS Storage</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Set up shared NFS storage for persistent data.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('setup.configureNfs') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('setup.nfsDesc') }}</p>
           </div>
           <div class="p-6 space-y-5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">NFS Server</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('setup.nfsServer') }}</label>
               <input
                 v-model="nfsServer"
                 type="text"
@@ -195,7 +197,7 @@ async function completeSetup() {
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">NFS Path</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('setup.nfsPath') }}</label>
               <input
                 v-model="nfsPath"
                 type="text"
@@ -210,9 +212,9 @@ async function completeSetup() {
         <div v-if="currentStep === 4" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="p-12 text-center">
             <CheckCircle2 class="w-16 h-16 text-green-500 mx-auto mb-4" />
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Setup Complete</h2>
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">{{ $t('setup.nodeComplete') }}</h2>
             <p class="text-gray-500 dark:text-gray-400 text-sm max-w-md mx-auto">
-              Your node has been configured and is ready to join the Fleet platform. Click the button below to finish setup and start using the dashboard.
+              {{ $t('setup.nodeCompleteDesc') }}
             </p>
           </div>
         </div>
@@ -225,7 +227,7 @@ async function completeSetup() {
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
           >
             <ArrowLeft class="w-4 h-4" />
-            Back
+            {{ $t('setup.back') }}
           </button>
           <div v-else></div>
 
@@ -235,7 +237,7 @@ async function completeSetup() {
             :disabled="!canProceed"
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
-            Next
+            {{ $t('setup.next') }}
             <ArrowRight class="w-4 h-4" />
           </button>
 
@@ -247,7 +249,7 @@ async function completeSetup() {
           >
             <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
             <CheckCircle2 v-else class="w-4 h-4" />
-            {{ loading ? 'Finishing...' : 'Complete Setup' }}
+            {{ loading ? $t('setup.finishing') : $t('setup.completeSetup') }}
           </button>
         </div>
       </div>

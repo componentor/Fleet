@@ -2,6 +2,9 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Bell } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const api = useApi()
 const unreadCount = ref(0)
@@ -66,14 +69,14 @@ onUnmounted(() => {
     <!-- Dropdown -->
     <div v-if="showDropdown" class="absolute right-0 top-full mt-2 w-80 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg z-50">
       <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <span class="text-sm font-semibold text-gray-900 dark:text-white">Notifications</span>
+        <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('notifications.title') }}</span>
         <button v-if="unreadCount > 0" @click="markAllRead" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">
-          Mark all read
+          {{ $t('notifications.markAllRead') }}
         </button>
       </div>
       <div class="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-        <div v-if="loading" class="px-4 py-6 text-center text-sm text-gray-500">Loading...</div>
-        <div v-else-if="notifications.length === 0" class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">No notifications</div>
+        <div v-if="loading" class="px-4 py-6 text-center text-sm text-gray-500">{{ $t('notifications.loading') }}</div>
+        <div v-else-if="notifications.length === 0" class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">{{ $t('notifications.noNotifications') }}</div>
         <div
           v-for="n in notifications"
           :key="n.id"

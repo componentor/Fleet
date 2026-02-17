@@ -343,6 +343,20 @@ authenticatedRoutes.get('/:id/logs', async (c) => {
 
 // --- GitHub Repo Management (authenticated) ---
 
+// GET /github/status — check if user has GitHub connected
+authenticatedRoutes.get('/github/status', async (c) => {
+  const user = c.get('user');
+
+  const oauth = await db.query.oauthProviders.findFirst({
+    where: and(
+      eq(oauthProviders.userId, user.userId),
+      eq(oauthProviders.provider, 'github'),
+    ),
+  });
+
+  return c.json({ connected: !!oauth });
+});
+
 // GET /github/repos — list user's GitHub repositories
 authenticatedRoutes.get('/github/repos', async (c) => {
   const user = c.get('user');

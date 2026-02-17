@@ -1,0 +1,114 @@
+{
+  "nav": {
+    "features": "功能",
+    "pricing": "定价",
+    "github": "GitHub",
+    "getStarted": "开始使用"
+  },
+  "hero": {
+    "badge": "开源 PaaS 平台",
+    "deployManage": "部署与管理",
+    "dockerServices": "Docker 服务",
+    "atScale": "大规模运行",
+    "subtitle": "Fleet 是一个基于 Docker Swarm 的开源多租户 PaaS 平台。自托管您自己的 Heroku/Vercel 替代方案，完全掌控您的基础设施。",
+    "getStarted": "开始使用",
+    "viewOnGithub": "在 GitHub 上查看"
+  },
+  "terminal": {
+    "title": "终端",
+    "command": "fleet deploy --service my-app",
+    "deploying": "正在将服务部署到集群...",
+    "building": "正在从 Dockerfile 构建镜像...",
+    "pushing": "正在推送到镜像仓库...",
+    "updating": "正在更新 Swarm 服务（3 个副本）...",
+    "success": "服务部署成功",
+    "url": "https://my-app.example.com"
+  },
+  "features": {
+    "label": "功能",
+    "title": "运营平台所需的一切",
+    "subtitle": "Fleet 提供完整的工具集，用于部署和管理容器化应用程序，内置企业级功能。",
+    "dockerSwarm": {
+      "title": "Docker Swarm 编排",
+      "description": "通过原生 Docker Swarm 集成，在集群中部署、扩展和管理服务。"
+    },
+    "multiTenant": {
+      "title": "多租户架构",
+      "description": "开箱即用的完整账户隔离、基于角色的访问控制和团队管理。"
+    },
+    "billing": {
+      "title": "内置计费",
+      "description": "Stripe 集成，支持灵活的套餐方案、按量计费和自动开票。"
+    },
+    "domains": {
+      "title": "域名管理",
+      "description": "DNS 区域、自动 SSL 证书和集成的域名购买。"
+    },
+    "ssh": {
+      "title": "SSH 访问",
+      "description": "直接从浏览器安全地终端访问运行中的容器。"
+    },
+    "backups": {
+      "title": "自动备份",
+      "description": "支持 NFS 存储的定时备份和一键恢复。"
+    },
+    "marketplace": {
+      "title": "应用市场",
+      "description": "一键应用模板，秒级部署热门服务。"
+    },
+    "monitoring": {
+      "title": "实时监控",
+      "description": "节点指标、审计日志和基础设施即时通知。"
+    }
+  },
+  "pricing": {
+    "label": "定价",
+    "title": "简单透明的定价",
+    "subtitle": "免费开始，随需扩展。所有套餐均包含完整的 Fleet 平台。",
+    "popular": "热门",
+    "getStarted": "开始使用",
+    "perMonth": "/月",
+    "plans": {
+      "free": {
+        "name": "免费",
+        "description": "适合试用 Fleet",
+        "f1": "1 个服务",
+        "f2": "512MB 内存",
+        "f3": "1 个 CPU 核心",
+        "f4": "5GB 存储",
+        "f5": "社区支持"
+      },
+      "starter": {
+        "name": "入门",
+        "description": "适合小型项目和团队",
+        "f1": "5 个服务",
+        "f2": "2GB 内存",
+        "f3": "2 个 CPU 核心",
+        "f4": "20GB 存储",
+        "f5": "邮件支持"
+      },
+      "pro": {
+        "name": "专业",
+        "description": "适合生产工作负载",
+        "f1": "无限服务",
+        "f2": "8GB 内存",
+        "f3": "4 个 CPU 核心",
+        "f4": "100GB 存储",
+        "f5": "优先支持"
+      }
+    }
+  },
+  "cta": {
+    "title": "准备好部署您的基础设施了吗？",
+    "subtitle": "几分钟即可开始使用 Fleet。在您自己的服务器上部署，完全掌控您的平台。",
+    "getStarted": "免费开始",
+    "starOnGithub": "在 GitHub 上加星"
+  },
+  "footer": {
+    "builtWith": "使用 Vue、Hono、Docker Swarm 构建",
+    "github": "GitHub",
+    "docs": "文档",
+    "discord": "Discord",
+    "rights": "Fleet。保留所有权利。"
+  }
+}

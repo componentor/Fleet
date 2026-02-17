@@ -5,6 +5,7 @@ import {
   boolean,
   timestamp,
   uniqueIndex,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -16,6 +17,14 @@ export const users = pgTable('users', {
   name: varchar('name', { length: 255 }),
   avatarUrl: varchar('avatar_url'),
   isSuper: boolean('is_super').default(false),
+  emailVerified: boolean('email_verified').default(false),
+  emailVerifyToken: varchar('email_verify_token', { length: 255 }),
+  emailVerifyExpires: timestamp('email_verify_expires'),
+  passwordResetToken: varchar('password_reset_token', { length: 255 }),
+  passwordResetExpires: timestamp('password_reset_expires'),
+  twoFactorEnabled: boolean('two_factor_enabled').default(false),
+  twoFactorSecret: varchar('two_factor_secret', { length: 255 }),
+  twoFactorBackupCodes: jsonb('two_factor_backup_codes').$type<string[] | null>(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

@@ -81,6 +81,8 @@ class ResendProvider implements EmailProvider {
     subject: string;
     html: string;
   }): Promise<{ messageId: string }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -93,7 +95,9 @@ class ResendProvider implements EmailProvider {
         subject: options.subject,
         html: options.html,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -110,6 +114,15 @@ const DEFAULT_TEMPLATES: Record<
   string,
   { subject: string; bodyHtml: string; variables: string[] }
 > = {
+  'email-verification': {
+    subject: 'Verify your email address',
+    bodyHtml: `<h1>Verify Your Email</h1>
+<p>Hi {{userName}},</p>
+<p>Please verify your email address by clicking the link below:</p>
+<p><a href="{{verifyUrl}}">Verify Email</a></p>
+<p>This link expires in 24 hours.</p>`,
+    variables: ['userName', 'verifyUrl'],
+  },
   'welcome': {
     subject: 'Welcome to {{platformName}}',
     bodyHtml: `<h1>Welcome, {{userName}}!</h1>

@@ -5,6 +5,9 @@ export function getDialect(): Dialect {
   if (dialect !== 'sqlite' && dialect !== 'pg' && dialect !== 'mysql') {
     throw new Error(`Invalid DB_DIALECT: "${dialect}". Must be "sqlite", "pg", or "mysql".`);
   }
+  if (dialect === 'sqlite' && process.env['NODE_ENV'] === 'production') {
+    console.warn('[WARN] Using SQLite in production is not recommended. Set DB_DIALECT=pg for PostgreSQL.');
+  }
   return dialect;
 }
 

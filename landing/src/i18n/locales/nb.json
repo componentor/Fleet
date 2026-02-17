@@ -1,0 +1,114 @@
+{
+  "nav": {
+    "features": "Funksjoner",
+    "pricing": "Priser",
+    "github": "GitHub",
+    "getStarted": "Kom i gang"
+  },
+  "hero": {
+    "badge": "Åpen kildekode PaaS-plattform",
+    "deployManage": "Distribuer og administrer",
+    "dockerServices": "Docker-tjenester",
+    "atScale": "i stor skala",
+    "subtitle": "Fleet er en åpen kildekode, multi-tenant PaaS bygget på Docker Swarm. Drift din egen Heroku/Vercel-alternativ med full kontroll over infrastrukturen.",
+    "getStarted": "Kom i gang",
+    "viewOnGithub": "Se på GitHub"
+  },
+  "terminal": {
+    "title": "terminal",
+    "command": "fleet deploy --service my-app",
+    "deploying": "Distribuerer tjeneste til klusteret...",
+    "building": "Bygger bilde fra Dockerfile...",
+    "pushing": "Laster opp til register...",
+    "updating": "Oppdaterer swarm-tjeneste (3 replikaer)...",
+    "success": "Tjenesten ble distribuert",
+    "url": "https://my-app.example.com"
+  },
+  "features": {
+    "label": "Funksjoner",
+    "title": "Alt du trenger for å drifte plattformen din",
+    "subtitle": "Fleet gir deg et komplett verktøysett for å distribuere og administrere containeriserte applikasjoner med innebygde bedriftsfunksjoner.",
+    "dockerSwarm": {
+      "title": "Docker Swarm-orkestrering",
+      "description": "Distribuer, skaler og administrer tjenester på tvers av klusteret med innebygd Docker Swarm-integrasjon."
+    },
+    "multiTenant": {
+      "title": "Multi-tenant-arkitektur",
+      "description": "Full kontoisolering, rollebasert tilgangskontroll og teamadministrasjon ut av boksen."
+    },
+    "billing": {
+      "title": "Innebygd fakturering",
+      "description": "Stripe-integrasjon med fleksible planer, bruksbasert prising og automatisk fakturering."
+    },
+    "domains": {
+      "title": "Domeneadministrasjon",
+      "description": "DNS-soner, automatiske SSL-sertifikater og integrerte domenekjøp."
+    },
+    "ssh": {
+      "title": "SSH-tilgang",
+      "description": "Sikker terminaltilgang til dine kjørende containere direkte fra nettleseren."
+    },
+    "backups": {
+      "title": "Automatiske sikkerhetskopier",
+      "description": "Planlagte sikkerhetskopier med NFS-lagringsstøtte og ett-klikks gjenoppretting."
+    },
+    "marketplace": {
+      "title": "Markedsplass",
+      "description": "Ett-klikks applikasjonsmaler for å distribuere populære tjenester på sekunder."
+    },
+    "monitoring": {
+      "title": "Sanntidsovervåking",
+      "description": "Nodemålinger, revisjonslogger og umiddelbare varsler for infrastrukturen din."
+    }
+  },
+  "pricing": {
+    "label": "Priser",
+    "title": "Enkle, transparente priser",
+    "subtitle": "Start gratis og skaler etter hvert som du vokser. Alle planer inkluderer hele Fleet-plattformen.",
+    "popular": "Populær",
+    "getStarted": "Kom i gang",
+    "perMonth": "/mnd",
+    "plans": {
+      "free": {
+        "name": "Gratis",
+        "description": "Perfekt for å prøve Fleet",
+        "f1": "1 tjeneste",
+        "f2": "512MB RAM",
+        "f3": "1 CPU-kjerne",
+        "f4": "5GB lagring",
+        "f5": "Fellesskapsstøtte"
+      },
+      "starter": {
+        "name": "Start",
+        "description": "For små prosjekter og team",
+        "f1": "5 tjenester",
+        "f2": "2GB RAM",
+        "f3": "2 CPU-kjerner",
+        "f4": "20GB lagring",
+        "f5": "E-poststøtte"
+      },
+      "pro": {
+        "name": "Pro",
+        "description": "For produksjonsarbeid",
+        "f1": "Ubegrensede tjenester",
+        "f2": "8GB RAM",
+        "f3": "4 CPU-kjerner",
+        "f4": "100GB lagring",
+        "f5": "Prioritert støtte"
+      }
+    }
+  },
+  "cta": {
+    "title": "Klar til å distribuere infrastrukturen din?",
+    "subtitle": "Kom i gang med Fleet på minutter. Distribuer på dine egne servere og ta full kontroll over plattformen din.",
+    "getStarted": "Kom i gang gratis",
+    "starOnGithub": "Stjerne på GitHub"
+  },
+  "footer": {
+    "builtWith": "Bygget med Vue, Hono, Docker Swarm",
+    "github": "GitHub",
+    "docs": "Dokumentasjon",
+    "discord": "Discord",
+    "rights": "Fleet. Alle rettigheter reservert."
+  }
+}
