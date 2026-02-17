@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
-import { db, accounts, users, services, nodes, auditLog, updateReturning, countSql, eq } from '@fleet/db';
+import { db, accounts, users, services, nodes, deployments, auditLog, updateReturning, countSql, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';
+import { getValkey } from '../services/valkey.service.js';
+import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
 
 const adminRoutes = new Hono<{
   Variables: { user: AuthUser };
@@ -202,6 +204,136 @@ adminRoutes.get('/services', async (c) => {
       total: total?.count ?? 0,
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
+  });
+});
+
+// GET /status — system health & status overview
+adminRoutes.get('/status', async (c) => {
+  const startTime = Date.now();
+
+  // --- Valkey ---
+  let valkeyStatus: 'connected' | 'disconnected' = 'disconnected';
+  let valkeyLatencyMs: number | null = null;
+  let valkeyMemory: string | null = null;
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const t0 = Date.now();
+      await valkey.ping();
+      valkeyLatencyMs = Date.now() - t0;
+      valkeyStatus = 'connected';
+
+      const info = await valkey.info('memory');
+      const usedMatch = info.match(/used_memory_human:(\S+)/);
+      valkeyMemory = usedMatch?.[1] ?? null;
+    }
+  } catch {}
+
+  // --- Queue stats (BullMQ) ---
+  let queues: Array<{ name: string; waiting: number; active: number; completed: number; failed: number; delayed: number }> | null = null;
+  if (isQueueAvailable()) {
+    try {
+      const [depQ, backQ, maintQ] = await Promise.all([
+        getDeploymentQueue().getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        getBackupQueue().getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        getMaintenanceQueue().getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+      ]);
+      const mapCounts = (name: string, q: Record<string, number>) => ({
+        name,
+        waiting: q['waiting'] ?? 0,
+        active: q['active'] ?? 0,
+        completed: q['completed'] ?? 0,
+        failed: q['failed'] ?? 0,
+        delayed: q['delayed'] ?? 0,
+      });
+      queues = [
+        mapCounts('deployment', depQ),
+        mapCounts('backup', backQ),
+        mapCounts('maintenance', maintQ),
+      ];
+    } catch {}
+  }
+
+  // --- Docker Swarm ---
+  let docker: { status: string; nodes: number; managers: number; workers: number } | null = null;
+  try {
+    const swarm = await dockerService.getSwarmInfo();
+    const dockerNodes = await dockerService.listNodes();
+    const managers = dockerNodes.filter((n: any) => n.Spec?.Role === 'manager').length;
+    docker = {
+      status: 'connected',
+      nodes: dockerNodes.length,
+      managers,
+      workers: dockerNodes.length - managers,
+    };
+  } catch {
+    docker = { status: 'disconnected', nodes: 0, managers: 0, workers: 0 };
+  }
+
+  // --- Nodes from DB ---
+  const allNodes = await db.query.nodes.findMany();
+  const fiveMinAgo = new Date(Date.now() - 5 * 60_000);
+  const nodeStatuses = allNodes.map((n) => ({
+    id: n.id,
+    hostname: n.hostname,
+    ipAddress: n.ipAddress,
+    role: n.role,
+    status: n.status,
+    healthy: !!n.lastHeartbeat && new Date(n.lastHeartbeat) > fiveMinAgo,
+    lastHeartbeat: n.lastHeartbeat,
+  }));
+
+  // --- Services breakdown ---
+  const allServices = await db.query.services.findMany();
+  const servicesByStatus: Record<string, number> = {};
+  for (const s of allServices) {
+    const st = s.status ?? 'unknown';
+    servicesByStatus[st] = (servicesByStatus[st] ?? 0) + 1;
+  }
+
+  // --- Recent deployments ---
+  const recentDeploys = await db.query.deployments.findMany({
+    orderBy: (d, { desc: descOrder }) => descOrder(d.createdAt),
+    limit: 10,
+    with: { service: true },
+  });
+
+  const recentDeployments = recentDeploys.map((d) => ({
+    id: d.id,
+    serviceName: d.service?.name ?? 'unknown',
+    status: d.status,
+    commitSha: d.commitSha,
+    createdAt: d.createdAt,
+  }));
+
+  // --- API uptime ---
+  const uptimeSeconds = Math.floor(process.uptime());
+
+  return c.json({
+    timestamp: new Date().toISOString(),
+    responseTimeMs: Date.now() - startTime,
+    api: {
+      status: 'healthy',
+      uptimeSeconds,
+      nodeVersion: process.version,
+      memoryUsageMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    },
+    valkey: {
+      status: valkeyStatus,
+      latencyMs: valkeyLatencyMs,
+      memoryUsage: valkeyMemory,
+    },
+    queues: {
+      available: isQueueAvailable(),
+      data: queues,
+    },
+    docker,
+    nodes: nodeStatuses,
+    services: {
+      total: allServices.length,
+      byStatus: servicesByStatus,
+    },
+    recentDeployments,
   });
 });
 

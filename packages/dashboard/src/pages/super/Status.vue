@@ -1,0 +1,460 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import {
+  Activity,
+  RefreshCw,
+  Loader2,
+  Server,
+  Database,
+  Container,
+  Cpu,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Zap,
+  HardDrive,
+  GitCommit,
+} from 'lucide-vue-next'
+import { useApi } from '@/composables/useApi'
+
+const api = useApi()
+const loading = ref(true)
+const status = ref<any>(null)
+const error = ref('')
+const autoRefresh = ref(true)
+let refreshInterval: ReturnType<typeof setInterval> | null = null
+
+async function fetchStatus() {
+  try {
+    status.value = await api.get<any>('/admin/status')
+    error.value = ''
+  } catch {
+    error.value = 'Failed to fetch system status'
+  } finally {
+    loading.value = false
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  if (autoRefresh.value) {
+    refreshInterval = setInterval(fetchStatus, 15000)
+  }
+}
+
+function stopAutoRefresh() {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
+}
+
+function toggleAutoRefresh() {
+  autoRefresh.value = !autoRefresh.value
+  if (autoRefresh.value) {
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
+}
+
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h ${mins}m`
+  if (hours > 0) return `${hours}h ${mins}m`
+  return `${mins}m`
+}
+
+function formatDate(ts: string | null): string {
+  if (!ts) return 'Never'
+  return new Date(ts).toLocaleString()
+}
+
+function timeSince(ts: string | null): string {
+  if (!ts) return 'never'
+  const diff = Date.now() - new Date(ts).getTime()
+  const secs = Math.floor(diff / 1000)
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
+const overallHealth = computed(() => {
+  if (!status.value) return 'unknown'
+  const apiOk = status.value.api?.status === 'healthy'
+  const dockerOk = status.value.docker?.status === 'connected'
+  const nodesHealthy = status.value.nodes?.every((n: any) => n.healthy) ?? true
+  if (apiOk && dockerOk && nodesHealthy) return 'healthy'
+  if (apiOk) return 'degraded'
+  return 'unhealthy'
+})
+
+const healthColor = computed(() => {
+  switch (overallHealth.value) {
+    case 'healthy': return 'text-green-600 dark:text-green-400'
+    case 'degraded': return 'text-yellow-600 dark:text-yellow-400'
+    default: return 'text-red-600 dark:text-red-400'
+  }
+})
+
+const healthBg = computed(() => {
+  switch (overallHealth.value) {
+    case 'healthy': return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+    case 'degraded': return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+    default: return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+  }
+})
+
+const totalQueueJobs = computed(() => {
+  if (!status.value?.queues?.data) return { waiting: 0, active: 0, failed: 0 }
+  return status.value.queues.data.reduce(
+    (acc: any, q: any) => ({
+      waiting: acc.waiting + (q.waiting ?? 0),
+      active: acc.active + (q.active ?? 0),
+      failed: acc.failed + (q.failed ?? 0),
+    }),
+    { waiting: 0, active: 0, failed: 0 },
+  )
+})
+
+const deployStatusColor: Record<string, string> = {
+  succeeded: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
+  failed: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+  building: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+  deploying: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
+}
+
+onMounted(() => {
+  fetchStatus()
+  startAutoRefresh()
+})
+
+onUnmounted(() => {
+  stopAutoRefresh()
+})
+</script>
+
+<template>
+  <div>
+    <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-3">
+        <Activity class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">System Status</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <button
+          @click="toggleAutoRefresh"
+          :class="[
+            'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+            autoRefresh
+              ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800'
+              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600',
+          ]"
+        >
+          <span :class="['w-2 h-2 rounded-full', autoRefresh ? 'bg-green-500 animate-pulse' : 'bg-gray-400']"></span>
+          Auto-refresh {{ autoRefresh ? 'ON' : 'OFF' }}
+        </button>
+        <button
+          @click="fetchStatus"
+          :disabled="loading"
+          class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
+        >
+          <RefreshCw :class="['w-4 h-4', loading && 'animate-spin']" />
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <div v-if="error" class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+      <p class="text-sm text-red-700 dark:text-red-300">{{ error }}</p>
+    </div>
+
+    <div v-if="loading && !status" class="flex items-center justify-center py-20">
+      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+    </div>
+
+    <template v-else-if="status">
+      <!-- Overall health banner -->
+      <div :class="['mb-6 p-4 rounded-lg border flex items-center justify-between', healthBg]">
+        <div class="flex items-center gap-3">
+          <CheckCircle v-if="overallHealth === 'healthy'" class="w-6 h-6 text-green-600 dark:text-green-400" />
+          <AlertTriangle v-else-if="overallHealth === 'degraded'" class="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+          <XCircle v-else class="w-6 h-6 text-red-600 dark:text-red-400" />
+          <div>
+            <p :class="['text-sm font-semibold', healthColor]">
+              System {{ overallHealth === 'healthy' ? 'Healthy' : overallHealth === 'degraded' ? 'Degraded' : 'Unhealthy' }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              Response: {{ status.responseTimeMs }}ms | Last checked: {{ formatDate(status.timestamp) }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Component status cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <!-- API -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <Zap class="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">API</span>
+            </div>
+            <span class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span class="text-xs font-medium text-green-600 dark:text-green-400">Healthy</span>
+            </span>
+          </div>
+          <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
+            <div class="flex justify-between">
+              <span>Uptime</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ formatUptime(status.api.uptimeSeconds) }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Memory</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.api.memoryUsageMb }} MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Node.js</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.api.nodeVersion }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Valkey -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <Database class="w-4 h-4 text-red-600 dark:text-red-400" />
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">Valkey</span>
+            </div>
+            <span class="flex items-center gap-1.5">
+              <span :class="['w-2 h-2 rounded-full', status.valkey.status === 'connected' ? 'bg-green-500' : 'bg-red-500']"></span>
+              <span :class="['text-xs font-medium', status.valkey.status === 'connected' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400']">
+                {{ status.valkey.status === 'connected' ? 'Connected' : 'Disconnected' }}
+              </span>
+            </span>
+          </div>
+          <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
+            <div class="flex justify-between">
+              <span>Latency</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.valkey.latencyMs !== null ? `${status.valkey.latencyMs}ms` : '--' }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Memory</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.valkey.memoryUsage ?? '--' }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Queues</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.queues.available ? 'Active' : 'Disabled' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Docker -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <Container class="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">Docker Swarm</span>
+            </div>
+            <span class="flex items-center gap-1.5">
+              <span :class="['w-2 h-2 rounded-full', status.docker?.status === 'connected' ? 'bg-green-500' : 'bg-red-500']"></span>
+              <span :class="['text-xs font-medium', status.docker?.status === 'connected' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400']">
+                {{ status.docker?.status === 'connected' ? 'Connected' : 'Disconnected' }}
+              </span>
+            </span>
+          </div>
+          <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
+            <div class="flex justify-between">
+              <span>Total Nodes</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.docker?.nodes ?? 0 }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Managers</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.docker?.managers ?? 0 }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Workers</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ status.docker?.workers ?? 0 }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Services -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <HardDrive class="w-4 h-4 text-purple-600 dark:text-purple-400" />
+              <span class="text-sm font-semibold text-gray-900 dark:text-white">Services</span>
+            </div>
+            <span class="text-xs font-medium text-gray-900 dark:text-white">{{ status.services.total }} total</span>
+          </div>
+          <div class="space-y-2 text-xs text-gray-600 dark:text-gray-400">
+            <div v-for="(count, st) in status.services.byStatus" :key="st" class="flex justify-between">
+              <span class="capitalize">{{ st }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ count }}</span>
+            </div>
+            <div v-if="Object.keys(status.services.byStatus).length === 0" class="text-center py-1">
+              <span class="text-gray-400 dark:text-gray-500">No services</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nodes + Queues row -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Node health -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+            <Server class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Node Health</h2>
+          </div>
+          <div class="p-4">
+            <div v-if="status.nodes.length === 0" class="text-center py-6">
+              <p class="text-sm text-gray-500 dark:text-gray-400">No nodes registered</p>
+            </div>
+            <div v-else class="space-y-3">
+              <div
+                v-for="node in status.nodes"
+                :key="node.id"
+                class="flex items-center justify-between px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750"
+              >
+                <div class="flex items-center gap-3">
+                  <span
+                    :class="['w-2.5 h-2.5 rounded-full shrink-0', node.healthy ? 'bg-green-500' : 'bg-red-500']"
+                  ></span>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ node.hostname }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ node.ipAddress }} &middot; {{ node.role }}</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p :class="['text-xs font-medium', node.healthy ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400']">
+                    {{ node.status }}
+                  </p>
+                  <p class="text-[10px] text-gray-400 dark:text-gray-500">{{ timeSince(node.lastHeartbeat) }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Queue stats -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+            <Cpu class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Job Queues</h2>
+            <span v-if="!status.queues.available" class="ml-auto text-xs text-yellow-600 dark:text-yellow-400 font-medium">Disabled</span>
+          </div>
+          <div class="p-4">
+            <div v-if="!status.queues.available" class="text-center py-6">
+              <p class="text-sm text-gray-500 dark:text-gray-400">Queues are disabled (Valkey not available)</p>
+            </div>
+            <div v-else-if="status.queues.data" class="space-y-4">
+              <!-- Summary bar -->
+              <div class="flex items-center gap-4 px-3 py-2 bg-gray-50 dark:bg-gray-750 rounded-lg text-xs">
+                <span class="text-gray-500 dark:text-gray-400">Total:</span>
+                <span class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.waiting }} waiting</span>
+                </span>
+                <span class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.active }} active</span>
+                </span>
+                <span class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ totalQueueJobs.failed }} failed</span>
+                </span>
+              </div>
+
+              <!-- Per-queue breakdown -->
+              <div v-for="q in status.queues.data" :key="q.name" class="px-3">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-sm font-medium text-gray-900 dark:text-white capitalize">{{ q.name }}</span>
+                </div>
+                <div class="grid grid-cols-5 gap-2 text-xs">
+                  <div class="text-center">
+                    <p class="font-medium text-gray-900 dark:text-white">{{ q.waiting }}</p>
+                    <p class="text-gray-400">Waiting</p>
+                  </div>
+                  <div class="text-center">
+                    <p class="font-medium text-gray-900 dark:text-white">{{ q.active }}</p>
+                    <p class="text-gray-400">Active</p>
+                  </div>
+                  <div class="text-center">
+                    <p class="font-medium text-gray-900 dark:text-white">{{ q.delayed }}</p>
+                    <p class="text-gray-400">Delayed</p>
+                  </div>
+                  <div class="text-center">
+                    <p class="font-medium text-green-600 dark:text-green-400">{{ q.completed }}</p>
+                    <p class="text-gray-400">Done</p>
+                  </div>
+                  <div class="text-center">
+                    <p :class="['font-medium', q.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white']">{{ q.failed }}</p>
+                    <p class="text-gray-400">Failed</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent deployments -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+          <GitCommit class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Recent Deployments</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-gray-200 dark:border-gray-700">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Service</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Commit</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Time</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr v-if="status.recentDeployments.length === 0">
+                <td colspan="4" class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                  No recent deployments
+                </td>
+              </tr>
+              <tr
+                v-for="dep in status.recentDeployments"
+                :key="dep.id"
+                class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              >
+                <td class="px-6 py-3 text-sm font-medium text-gray-900 dark:text-white">{{ dep.serviceName }}</td>
+                <td class="px-6 py-3 text-sm">
+                  <span
+                    :class="[
+                      'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
+                      deployStatusColor[dep.status] ?? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    ]"
+                  >
+                    {{ dep.status }}
+                  </span>
+                </td>
+                <td class="px-6 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">
+                  {{ dep.commitSha ? dep.commitSha.slice(0, 7) : '--' }}
+                </td>
+                <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400">{{ timeSince(dep.createdAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

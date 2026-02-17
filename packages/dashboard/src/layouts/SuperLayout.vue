@@ -20,6 +20,7 @@ import {
   ScrollText,
   ChevronDown,
   Search,
+  Activity,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 
@@ -37,6 +38,7 @@ const navItems = [
   { name: 'Accounts', path: '/admin/accounts', icon: Users },
   { name: 'Users', path: '/admin/users', icon: Users },
   { name: 'Marketplace', path: '/admin/marketplace', icon: Store },
+  { name: 'Status', path: '/admin/status', icon: Activity },
   { name: 'Audit Log', path: '/admin/audit-log', icon: ScrollText },
   { name: 'Settings', path: '/admin/settings', icon: Settings },
   { name: 'Billing', path: '/admin/billing', icon: CreditCard },

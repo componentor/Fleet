@@ -6,120 +6,24 @@ import { githubService } from '../services/github.service.js';
 import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
+import type { DeploymentJobData } from '../workers/deployment.worker.js';
 
-// Helper: get GitHub access token for the service's account owner
-async function getGitHubTokenForService(accountId: string): Promise<string | null> {
-  // Find any user on this account that has a GitHub OAuth connection
-  const result = await db.query.oauthProviders.findFirst({
-    where: eq(oauthProviders.provider, 'github'),
-    with: {
-      user: {
-        with: {
-          userAccounts: true,
-        },
-      },
-    },
-  });
-
-  if (!result?.accessToken) return null;
-
-  // Verify the user belongs to this account
-  const hasAccess = result.user.userAccounts.some(
-    (ua) => ua.accountId === accountId,
-  );
-
-  return hasAccess ? result.accessToken : null;
-}
-
-// Helper: run the full build → deploy pipeline for a service
-async function triggerBuildAndDeploy(
-  svc: typeof services.$inferSelect,
-  deploymentId: string,
-  commitSha: string | null,
-): Promise<void> {
-  if (!svc.githubRepo || !svc.githubBranch) {
-    throw new Error('Service has no GitHub repository configured');
-  }
-
-  const [owner, repo] = svc.githubRepo.split('/');
-  if (!owner || !repo) {
-    throw new Error(`Invalid GitHub repo format: ${svc.githubRepo}`);
-  }
-
-  // Get GitHub token for cloning (needed for private repos)
-  const githubToken = await getGitHubTokenForService(svc.accountId);
-  const cloneUrl = githubToken
-    ? githubService.getAuthenticatedCloneUrl(githubToken, owner, repo)
-    : `https://github.com/${svc.githubRepo}.git`;
-
-  const imageTag = `${svc.accountId.slice(0, 8)}-${svc.name}:${commitSha?.slice(0, 7) ?? 'latest'}`;
-
-  try {
-    // Start the build
-    const buildInfo = await buildService.buildImage({
-      serviceId: svc.id,
-      cloneUrl,
-      branch: svc.githubBranch,
-      imageTag,
+// Inline fallback for local dev when Valkey/BullMQ is not available.
+// Imports the worker's processor and runs it in-process.
+async function enqueueOrRunDeployment(data: DeploymentJobData) {
+  if (isQueueAvailable()) {
+    await getDeploymentQueue().add('build-and-deploy', data, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
     });
-
-    // Wait for build to complete
-    await new Promise<void>((resolve, reject) => {
-      const unsubscribe = buildService.onBuildUpdate(buildInfo.id, (info) => {
-        // Update deployment log in DB
-        db.update(deployments)
-          .set({ log: info.log, status: info.status === 'succeeded' ? 'deploying' : info.status === 'failed' ? 'failed' : 'building' })
-          .where(eq(deployments.id, deploymentId))
-          .then(() => {})
-          .catch(() => {});
-
-        if (info.status === 'succeeded') {
-          unsubscribe();
-          resolve();
-        } else if (info.status === 'failed' || info.status === 'cancelled') {
-          unsubscribe();
-          reject(new Error(`Build ${info.status}`));
-        }
-      });
-    });
-
-    // Deploy the newly built image
-    const fullImageTag = buildInfo.imageTag;
-
-    await db
-      .update(deployments)
-      .set({ status: 'deploying', imageTag: fullImageTag })
-      .where(eq(deployments.id, deploymentId));
-
-    if (svc.dockerServiceId) {
-      // Update existing service
-      await dockerService.updateService(svc.dockerServiceId, {
-        image: fullImageTag,
-      });
-    }
-
-    // Mark as succeeded
-    await db
-      .update(deployments)
-      .set({ status: 'succeeded', commitSha })
-      .where(eq(deployments.id, deploymentId));
-
-    await db
-      .update(services)
-      .set({ image: fullImageTag, status: 'running', updatedAt: new Date() })
-      .where(eq(services.id, svc.id));
-  } catch (err) {
-    await db
-      .update(deployments)
-      .set({ status: 'failed', log: `Build/deploy failed: ${String(err)}` })
-      .where(eq(deployments.id, deploymentId));
-
-    await db
-      .update(services)
-      .set({ status: 'failed', updatedAt: new Date() })
-      .where(eq(services.id, svc.id));
-
-    throw err;
+  } else {
+    // Fire-and-forget fallback (single-instance dev mode)
+    import('../workers/deployment.worker.js').then(({ processDeploymentInline }) =>
+      processDeploymentInline(data).catch((err) =>
+        console.error(`Build failed for deployment ${data.deploymentId}:`, err),
+      ),
+    );
   }
 }
 
@@ -189,9 +93,12 @@ webhookRoutes.post('/github/webhook', async (c) => {
       .set({ status: 'deploying', updatedAt: new Date() })
       .where(eq(services.id, svc.id));
 
-    // Start build pipeline asynchronously
-    triggerBuildAndDeploy(svc, deployment.id, commitSha).catch((err) => {
-      console.error(`Build failed for service ${svc.id}:`, err);
+    // Queue build pipeline via BullMQ (or run in-process if Valkey unavailable)
+    await enqueueOrRunDeployment({
+      deploymentId: deployment.id,
+      serviceId: svc.id,
+      accountId: svc.accountId,
+      commitSha,
     });
 
     results.push({
@@ -318,9 +225,12 @@ authenticatedRoutes.post('/trigger', requireMember, async (c) => {
     .set({ status: 'deploying', updatedAt: new Date() })
     .where(eq(services.id, svc.id));
 
-  // Start build asynchronously
-  triggerBuildAndDeploy(svc, deployment.id, null).catch((err) => {
-    console.error(`Build failed for service ${svc.id}:`, err);
+  // Queue build pipeline via BullMQ (or run in-process if Valkey unavailable)
+  await enqueueOrRunDeployment({
+    deploymentId: deployment.id,
+    serviceId: svc.id,
+    accountId: svc.accountId,
+    commitSha: null,
   });
 
   return c.json({ message: 'Deployment triggered', deploymentId: deployment.id }, 201);

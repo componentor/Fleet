@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory';
+import { getValkey } from '../services/valkey.service.js';
 
 interface RateLimitEntry {
   count: number;
@@ -10,18 +11,24 @@ interface RateLimiterOptions {
   max: number;
 }
 
-export function rateLimiter({ windowMs, max }: RateLimiterOptions) {
-  const store = new Map<string, RateLimitEntry>();
+// In-memory fallback when Valkey is unavailable
+const fallbackStore = new Map<string, RateLimitEntry>();
+let fallbackCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Periodically clean up expired entries
-  setInterval(() => {
+function ensureFallbackCleanup(windowMs: number) {
+  if (fallbackCleanupTimer) return;
+  fallbackCleanupTimer = setInterval(() => {
     const now = Date.now();
-    for (const [key, entry] of store) {
+    for (const [key, entry] of fallbackStore) {
       if (now > entry.resetAt) {
-        store.delete(key);
+        fallbackStore.delete(key);
       }
     }
   }, windowMs);
+}
+
+export function rateLimiter({ windowMs, max }: RateLimiterOptions) {
+  const windowSec = Math.ceil(windowMs / 1000);
 
   return createMiddleware(async (c, next) => {
     const ip =
@@ -29,11 +36,40 @@ export function rateLimiter({ windowMs, max }: RateLimiterOptions) {
       c.req.header('x-real-ip') ??
       'unknown';
 
+    const valkey = await getValkey();
+
+    if (valkey) {
+      // Redis-backed rate limiting with INCR + EXPIRE
+      const key = `rl:${ip}:${windowSec}`;
+      try {
+        const results = await valkey.multi()
+          .incr(key)
+          .expire(key, windowSec)
+          .exec();
+
+        const count = (results?.[0]?.[1] as number) ?? 1;
+
+        if (count > max) {
+          const ttl = await valkey.ttl(key);
+          c.header('Retry-After', String(ttl > 0 ? ttl : windowSec));
+          return c.json({ error: 'Too many requests' }, 429);
+        }
+
+        await next();
+        return;
+      } catch {
+        // Valkey command failed, fall through to in-memory
+      }
+    }
+
+    // In-memory fallback
+    ensureFallbackCleanup(windowMs);
+
     const now = Date.now();
-    const entry = store.get(ip);
+    const entry = fallbackStore.get(ip);
 
     if (!entry || now > entry.resetAt) {
-      store.set(ip, { count: 1, resetAt: now + windowMs });
+      fallbackStore.set(ip, { count: 1, resetAt: now + windowMs });
       await next();
       return;
     }

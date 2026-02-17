@@ -1,0 +1,69 @@
+import { createMiddleware } from 'hono/factory';
+import { getValkey } from '../services/valkey.service.js';
+
+/**
+ * Valkey-backed response cache middleware.
+ * Caches JSON responses by method + path + accountId.
+ * Skipped gracefully when Valkey is unavailable.
+ */
+export function cache(ttlSeconds: number) {
+  return createMiddleware(async (c, next) => {
+    // Only cache GET requests
+    if (c.req.method !== 'GET') {
+      await next();
+      return;
+    }
+
+    const valkey = await getValkey();
+    if (!valkey) {
+      await next();
+      return;
+    }
+
+    const accountId = c.req.header('x-account-id') ?? 'none';
+    const cacheKey = `cache:${c.req.method}:${c.req.path}:${accountId}`;
+
+    try {
+      const cached = await valkey.get(cacheKey);
+      if (cached) {
+        c.header('X-Cache', 'HIT');
+        const parsed = JSON.parse(cached) as { body: unknown; status: number };
+        return c.json(parsed.body, parsed.status as 200);
+      }
+    } catch {
+      // Cache read failed, proceed normally
+    }
+
+    await next();
+
+    // Cache successful JSON responses
+    if (c.res.status >= 200 && c.res.status < 300) {
+      try {
+        const body = await c.res.clone().json();
+        await valkey.setex(cacheKey, ttlSeconds, JSON.stringify({ body, status: c.res.status }));
+      } catch {
+        // Not a JSON response or cache write failed — skip
+      }
+    }
+
+    c.header('X-Cache', 'MISS');
+  });
+}
+
+/**
+ * Invalidate cached responses matching a prefix pattern.
+ * Call this on write operations to ensure stale data is cleared.
+ */
+export async function invalidateCache(pattern: string): Promise<void> {
+  const valkey = await getValkey();
+  if (!valkey) return;
+
+  try {
+    const keys = await valkey.keys(`cache:${pattern}`);
+    if (keys.length > 0) {
+      await valkey.del(...keys);
+    }
+  } catch {
+    // Best-effort invalidation
+  }
+}

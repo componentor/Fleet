@@ -4,6 +4,7 @@ import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and } from '@fleet/db';
+import { getBackupQueue, isQueueAvailable } from './queue.service.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -50,12 +51,19 @@ export class BackupService {
       throw new Error('Failed to create backup record');
     }
 
-    // Run backup asynchronously
-    this.runBackup(backupId, accountId, serviceId ?? null, backupPath).catch(
-      (err) => {
-        console.error(`Backup ${backupId} failed:`, err);
-      },
-    );
+    if (isQueueAvailable()) {
+      // Queue backup job via BullMQ for distributed execution
+      await getBackupQueue().add('create-backup', {
+        accountId,
+        serviceId,
+        storageBackend,
+      }, { attempts: 2, backoff: { type: 'exponential', delay: 5000 } });
+    } else {
+      // Fallback: run in-process (local dev without Valkey)
+      this.runBackup(backupId, accountId, serviceId ?? null, backupPath).catch(
+        (err) => console.error(`Backup ${backupId} failed:`, err),
+      );
+    }
 
     return {
       id: backup.id,
@@ -63,6 +71,39 @@ export class BackupService {
       storagePath: backupPath,
       sizeBytes: BigInt(0),
     };
+  }
+
+  /**
+   * Run a backup directly (called by the BullMQ worker).
+   * Creates the DB record and executes the backup synchronously.
+   */
+  async runBackupDirect(
+    accountId: string,
+    serviceId: string | null,
+    storageBackend: string = 'nfs',
+  ): Promise<void> {
+    const backupId = randomUUID();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupName = serviceId
+      ? `${accountId.slice(0, 8)}-${serviceId.slice(0, 8)}-${timestamp}`
+      : `${accountId.slice(0, 8)}-full-${timestamp}`;
+
+    const baseDir = storageBackend === 'nfs' ? NFS_BACKUP_DIR : BACKUP_DIR;
+    const backupPath = join(baseDir, accountId, backupName);
+
+    await insertReturning(backups, {
+      id: backupId,
+      accountId,
+      serviceId,
+      type: 'manual',
+      status: 'pending',
+      storagePath: backupPath,
+      storageBackend,
+      sizeBytes: BigInt(0),
+      contents: [],
+    });
+
+    await this.runBackup(backupId, accountId, serviceId, backupPath);
   }
 
   private async runBackup(

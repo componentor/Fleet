@@ -117,9 +117,6 @@ services:
         - "traefik.http.routers.api.entrypoints=websecure"
         - "traefik.http.routers.api.tls.certresolver=letsencrypt"
         - "traefik.http.services.api.loadbalancer.server.port=3000"
-        - "traefik.http.services.api.loadbalancer.sticky.cookie=true"
-        - "traefik.http.services.api.loadbalancer.sticky.cookie.name=fleet_api"
-        - "traefik.http.services.api.loadbalancer.sticky.cookie.httpOnly=true"
 
   # ─── Dashboard (SPA) ────────────────────────────────────────────────
   dashboard:
@@ -180,7 +177,7 @@ services:
         mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /opt/fleet/certs:/certs
+      - fleet_certs:/certs
     configs:
       - source: traefik_config
         target: /etc/traefik/traefik.yml
@@ -314,6 +311,12 @@ volumes:
     driver: local
   registry_data:
     driver: local
+  fleet_certs:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${NFS_SERVER:-127.0.0.1},nolock,soft,rw"
+      device: ":${NFS_CERTS_PATH:-/opt/fleet/certs}"
 
 # ─── Configs ──────────────────────────────────────────────────────────
 configs:

@@ -71,6 +71,11 @@ const superRoutes: RouteRecordRaw[] = [
         name: 'super-billing',
         component: () => import('@/pages/super/Billing.vue'),
       },
+      {
+        path: 'status',
+        name: 'super-status',
+        component: () => import('@/pages/super/Status.vue'),
+      },
     ],
   },
 ]

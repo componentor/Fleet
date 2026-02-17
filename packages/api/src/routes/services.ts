@@ -5,6 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { cache, invalidateCache } from '../middleware/cache.js';
 
 const serviceRoutes = new Hono<{
   Variables: {
@@ -42,7 +43,7 @@ function buildTraefikLabels(
 }
 
 // GET / — list services for the current account
-serviceRoutes.get('/', async (c) => {
+serviceRoutes.get('/', cache(30), async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -332,6 +333,8 @@ serviceRoutes.patch('/:id', requireMember, async (c) => {
     }
   }
 
+  await invalidateCache(`GET:/services:${accountId}`);
+
   return c.json(updated);
 });
 
@@ -364,6 +367,8 @@ serviceRoutes.delete('/:id', requireMember, async (c) => {
   // Delete deployments first, then service
   await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
   await db.delete(services).where(eq(services.id, serviceId));
+
+  await invalidateCache(`GET:/services:${accountId}`);
 
   return c.json({ message: 'Service destroyed' });
 });

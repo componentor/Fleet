@@ -4,6 +4,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { cache } from '../middleware/cache.js';
 
 const marketplace = new Hono<{
   Variables: {
@@ -17,7 +18,7 @@ marketplace.use('*', authMiddleware);
 marketplace.use('*', tenantMiddleware);
 
 // GET /templates — list all available templates
-marketplace.get('/templates', async (c) => {
+marketplace.get('/templates', cache(600), async (c) => {
   const accountId = c.get('accountId');
   const category = c.req.query('category');
 

@@ -4,6 +4,7 @@ import { db, accounts, userAccounts, users, auditLog, insertReturning, updateRet
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { generateTokens } from './auth.js';
+import { cache, invalidateCache } from '../middleware/cache.js';
 
 const accountRoutes = new Hono<{
   Variables: {
@@ -127,7 +128,7 @@ accountRoutes.post('/', async (c) => {
 });
 
 // GET /:id — get account details
-accountRoutes.get('/:id', tenantMiddleware, async (c) => {
+accountRoutes.get('/:id', tenantMiddleware, cache(60), async (c) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -164,6 +165,8 @@ accountRoutes.patch('/:id', tenantMiddleware, async (c) => {
     ...parsed.data,
     updatedAt: new Date(),
   }, eq(accounts.id, account.id));
+
+  await invalidateCache(`GET:/accounts/${account.id}:*`);
 
   return c.json(updated);
 });

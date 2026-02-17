@@ -5,6 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
+import { cache, invalidateCache } from '../middleware/cache.js';
 
 const settings = new Hono<{
   Variables: {
@@ -48,7 +49,7 @@ async function upsertSetting(key: string, value: unknown): Promise<void> {
 // Super user with no account context: returns platform-wide settings.
 // Account context: returns account-scoped settings.
 // ────────────────────────────────────────────────────────────────────────────
-settings.get('/', async (c) => {
+settings.get('/', cache(300), async (c) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
@@ -125,6 +126,8 @@ settings.patch('/', requireAdmin, async (c) => {
   for (const [key, value] of entries) {
     await upsertSetting(`account:${accountId}:${key}`, value);
   }
+
+  await invalidateCache('GET:/settings/*');
 
   return c.json({ message: 'Account settings updated', updated: entries.map(([k]) => k) });
 });
