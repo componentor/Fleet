@@ -4,6 +4,7 @@ import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
+import { decrypt } from '../services/crypto.service.js';
 
 export interface DeploymentJobData {
   deploymentId: string;
@@ -30,7 +31,7 @@ async function getGitHubTokenForService(accountId: string): Promise<string | nul
     (ua) => ua.accountId === accountId,
   );
 
-  return hasAccess ? result.accessToken : null;
+  return hasAccess ? decrypt(result.accessToken) : null;
 }
 
 async function publishProgress(deploymentId: string, status: string, log: string) {

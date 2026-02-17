@@ -6,6 +6,8 @@ import { schedulerService } from './services/scheduler.service.js'
 import { initWorkers, shutdownWorkers } from './services/queue.service.js'
 import { closeValkey } from './services/valkey.service.js'
 import { db, platformSettings, eq } from '@fleet/db'
+import { runMigrations } from '@fleet/db/migrate'
+import { logger } from './services/logger.js'
 
 // Register shutdown handlers early — before any async work
 let server: ReturnType<typeof serve> | undefined
@@ -21,6 +23,14 @@ process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
 const port = Number(process.env['PORT'] ?? 3000)
+
+// Run database migrations on startup
+try {
+  const { applied } = await runMigrations()
+  if (applied > 0) logger.info({ applied }, 'Database migrations applied')
+} catch (err) {
+  logger.error({ err }, 'Database migration failed')
+}
 
 // Load JWT secret from DB if not set via env (setup wizard stores it in platformSettings)
 if (!process.env['JWT_SECRET']) {
@@ -41,12 +51,12 @@ try { await templateService.syncBuiltinTemplates() } catch {}
 
 // Initialize BullMQ workers (deployment, backup, maintenance)
 try { await initWorkers() } catch (err) {
-  console.error('Worker initialization failed:', err)
+  logger.error({ err }, 'Worker initialization failed')
 }
 
 // Initialize background job scheduler (registers repeatable BullMQ jobs)
 try { await schedulerService.initialize() } catch (err) {
-  console.error('Scheduler initialization failed:', err)
+  logger.error({ err }, 'Scheduler initialization failed')
 }
 
 server = serve({
@@ -56,6 +66,6 @@ server = serve({
 
 injectWebSocket(server)
 
-console.log(`Fleet API running on port ${port}`)
+logger.info({ port }, `Fleet API running on port ${port}`)
 
 updateService.startPeriodicCheck()

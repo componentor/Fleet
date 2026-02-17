@@ -16,6 +16,7 @@ export const nodes = pgTable('nodes', {
   role: varchar('role').default('worker'),
   status: varchar('status').default('active'),
   labels: jsonb('labels').default({}),
+  location: varchar('location'),
   nfsServer: boolean('nfs_server').default(false),
   lastHeartbeat: timestamp('last_heartbeat'),
   createdAt: timestamp('created_at').defaultNow(),

@@ -5,6 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { logger } from '../services/logger.js';
 
 const emails = new Hono<{
   Variables: {
@@ -232,7 +233,7 @@ emails.post('/templates/:slug/test', requireMember, async (c) => {
       slug,
     });
   } catch (err) {
-    console.error('Test email failed:', err);
+    logger.error({ err }, 'Test email failed');
     return c.json(
       {
         error: 'Failed to send test email',

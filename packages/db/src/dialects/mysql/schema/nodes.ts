@@ -16,6 +16,7 @@ export const nodes = mysqlTable('nodes', {
   role: varchar('role', { length: 255 }).default('worker'),
   status: varchar('status', { length: 255 }).default('active'),
   labels: json('labels').$default(() => ({})),
+  location: varchar('location', { length: 255 }),
   nfsServer: boolean('nfs_server').default(false),
   lastHeartbeat: timestamp('last_heartbeat'),
   createdAt: timestamp('created_at').defaultNow(),

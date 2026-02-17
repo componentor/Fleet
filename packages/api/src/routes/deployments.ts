@@ -8,6 +8,7 @@ import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { DeploymentJobData } from '../workers/deployment.worker.js';
+import { logger } from '../services/logger.js';
 
 // Inline fallback for local dev when Valkey/BullMQ is not available.
 // Imports the worker's processor and runs it in-process.
@@ -21,7 +22,7 @@ async function enqueueOrRunDeployment(data: DeploymentJobData) {
     // Fire-and-forget fallback (single-instance dev mode)
     import('../workers/deployment.worker.js').then(({ processDeploymentInline }) =>
       processDeploymentInline(data).catch((err) =>
-        console.error(`Build failed for deployment ${data.deploymentId}:`, err),
+        logger.error({ err, deploymentId: data.deploymentId }, `Build failed for deployment ${data.deploymentId}`),
       ),
     );
   }
@@ -362,7 +363,7 @@ authenticatedRoutes.get('/github/repos', async (c) => {
     const repos = await githubService.getRepositories(oauth.accessToken);
     return c.json(repos);
   } catch (err) {
-    console.error('Failed to fetch GitHub repos:', err);
+    logger.error({ err }, 'Failed to fetch GitHub repos');
     return c.json({ error: 'Failed to fetch repositories from GitHub' }, 500);
   }
 });
@@ -388,7 +389,7 @@ authenticatedRoutes.get('/github/repos/:owner/:repo/branches', async (c) => {
     const branches = await githubService.getBranches(oauth.accessToken, owner, repo);
     return c.json(branches);
   } catch (err) {
-    console.error('Failed to fetch branches:', err);
+    logger.error({ err }, 'Failed to fetch branches');
     return c.json({ error: 'Failed to fetch branches from GitHub' }, 500);
   }
 });

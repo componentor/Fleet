@@ -64,7 +64,9 @@ adminRoutes.get('/stats', async (c) => {
           version: swarmInfo.Version,
         }
       : null,
-    updateNotification: updateService.getNotification(),
+    updateAvailable: updateService.getNotification().available
+      ? `Fleet ${updateService.getNotification().latest?.tag ?? 'update'} is available`
+      : null,
   });
 });
 

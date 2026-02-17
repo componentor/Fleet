@@ -14,6 +14,7 @@ export const nodes = sqliteTable('nodes', {
   role: text('role').default('worker'),
   status: text('status').default('active'),
   labels: text('labels', { mode: 'json' }).$default(() => ({})),
+  location: text('location'),
   nfsServer: integer('nfs_server', { mode: 'boolean' }).default(false),
   lastHeartbeat: integer('last_heartbeat', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

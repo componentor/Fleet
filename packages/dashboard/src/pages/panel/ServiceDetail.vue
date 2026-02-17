@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, RotateCw, Trash2, Loader2, ArrowLeft, Radio } from 'lucide-vue-next'
+import { Box, Play, Square, Power, RotateCw, Trash2, Loader2, ArrowLeft, Radio } from 'lucide-vue-next'
 import { useApi, ApiError } from '@/composables/useApi'
 import { useLogStream } from '@/composables/useLogStream'
 
@@ -90,6 +90,30 @@ async function fetchDeployments() {
     deployments.value = []
   } finally {
     deploymentsLoading.value = false
+  }
+}
+
+async function stopService() {
+  actionLoading.value = 'stop'
+  try {
+    await api.post(`/services/${serviceId}/stop`, {})
+    await fetchService()
+  } catch {
+    // ignore
+  } finally {
+    actionLoading.value = ''
+  }
+}
+
+async function startService() {
+  actionLoading.value = 'start'
+  try {
+    await api.post(`/services/${serviceId}/start`, {})
+    await fetchService()
+  } catch {
+    // ignore
+  } finally {
+    actionLoading.value = ''
   }
 }
 
@@ -214,15 +238,38 @@ onMounted(() => {
             :class="[
               'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ml-2',
               service.status === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-              service.status === 'stopped' || service.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+              service.status === 'stopped' ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' :
+              service.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
               'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
             ]"
           >
             {{ service.status }}
           </span>
+          <span v-if="service.status === 'stopped'" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-1 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+            Not billed
+          </span>
         </div>
         <div class="flex items-center gap-2">
           <button
+            v-if="service.status === 'stopped'"
+            @click="startService"
+            :disabled="!!actionLoading"
+            class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-green-300 dark:border-green-600 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors text-sm font-medium disabled:opacity-50"
+          >
+            <Power class="w-4 h-4" />
+            Start
+          </button>
+          <button
+            v-if="service.status === 'running'"
+            @click="stopService"
+            :disabled="!!actionLoading"
+            class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-orange-300 dark:border-orange-600 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors text-sm font-medium disabled:opacity-50"
+          >
+            <Square class="w-4 h-4" />
+            Stop
+          </button>
+          <button
+            v-if="service.status !== 'stopped'"
             @click="redeployService"
             :disabled="!!actionLoading"
             class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
@@ -231,6 +278,7 @@ onMounted(() => {
             Redeploy
           </button>
           <button
+            v-if="service.status !== 'stopped'"
             @click="restartService"
             :disabled="!!actionLoading"
             class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
@@ -311,6 +359,10 @@ onMounted(() => {
               <div>
                 <dt class="text-gray-500 dark:text-gray-400">Last Updated</dt>
                 <dd class="text-gray-900 dark:text-white mt-0.5">{{ formatDate(service.updatedAt) }}</dd>
+              </div>
+              <div v-if="service.stoppedAt">
+                <dt class="text-gray-500 dark:text-gray-400">Stopped At</dt>
+                <dd class="text-gray-900 dark:text-white mt-0.5">{{ formatDate(service.stoppedAt) }}</dd>
               </div>
               <div v-if="service.githubRepo">
                 <dt class="text-gray-500 dark:text-gray-400">GitHub Repo</dt>

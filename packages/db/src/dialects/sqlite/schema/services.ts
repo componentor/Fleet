@@ -31,6 +31,11 @@ export const services = sqliteTable('services', {
   updateDelay: text('update_delay').default('10s'),
   rollbackOnFailure: integer('rollback_on_failure', { mode: 'boolean' }).default(true),
   healthCheck: text('health_check', { mode: 'json' }),
+  cpuLimit: integer('cpu_limit'),
+  memoryLimit: integer('memory_limit'),
+  cpuReservation: integer('cpu_reservation'),
+  memoryReservation: integer('memory_reservation'),
+  stoppedAt: integer('stopped_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });

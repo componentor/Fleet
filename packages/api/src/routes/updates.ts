@@ -5,6 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { updateService } from '../services/update.service.js';
 import { runMigrations, verifyDatabase } from '@fleet/db/migrate';
 import { runSeeders } from '@fleet/db/seed';
+import { logger } from '../services/logger.js';
 
 const updateRoutes = new Hono<{
   Variables: { user: AuthUser };
@@ -178,7 +179,7 @@ updateRoutes.post('/perform', async (c) => {
       () => runSeeders(),
     )
     .catch((err) => {
-      console.error('[update] Update failed:', err);
+      logger.error({ err }, 'Update failed');
     });
 
   return c.json({
@@ -207,7 +208,7 @@ updateRoutes.post('/rollback', async (c) => {
   updateService
     .rollback()
     .catch((err) => {
-      console.error('[update] Rollback failed:', err);
+      logger.error({ err }, 'Rollback failed');
     });
 
   return c.json({

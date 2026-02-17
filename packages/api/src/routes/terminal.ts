@@ -4,6 +4,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { sshService } from '../services/ssh.service.js';
+import { logger } from '../services/logger.js';
 
 const terminalRoutes = new Hono<{
   Variables: {
@@ -53,7 +54,7 @@ terminalRoutes.get('/info/:serviceId', async (c) => {
       })),
     });
   } catch (err) {
-    console.error('Failed to get service tasks:', err);
+    logger.error({ err }, 'Failed to get service tasks');
     return c.json({ error: 'Failed to query Docker for running containers' }, 500);
   }
 });
@@ -117,7 +118,7 @@ terminalRoutes.post('/exec/:serviceId', async (c) => {
     const output = Buffer.concat(chunks).toString('utf-8');
     return c.json({ output });
   } catch (err) {
-    console.error('Exec failed:', err);
+    logger.error({ err }, 'Exec failed');
     return c.json({ error: 'Command execution failed' }, 500);
   }
 });

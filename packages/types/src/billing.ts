@@ -2,51 +2,143 @@
 // Billing & Subscription types
 // ---------------------------------------------------------------------------
 
-export type SubscriptionStatus = 'active' | 'past_due' | 'cancelled';
+export type SubscriptionStatus = 'active' | 'past_due' | 'cancelled' | 'trialing' | 'incomplete';
+
+export type BillingModel = 'fixed' | 'usage' | 'hybrid';
+
+export type BillingCycle = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly';
+
+export interface CycleDiscount {
+  type: 'fixed' | 'percentage';
+  value: number;
+}
+
+export interface BillingConfig {
+  billingModel: BillingModel;
+  allowUserChoice: boolean;
+  allowedCycles: BillingCycle[];
+  cycleDiscounts: Partial<Record<BillingCycle, CycleDiscount>>;
+  trialDays: number;
+}
 
 export interface PricingConfig {
-  containerFee: number;
-  cpuFee: number;
-  memoryFee: number;
-  storageFee: number;
-  bandwidthFee: number;
+  cpuCentsPerHour: number;
+  memoryCentsPerGbHour: number;
+  storageCentsPerGbMonth: number;
+  bandwidthCentsPerGb: number;
+  containerCentsPerHour: number;
   domainMarkupPercent: number;
-  backupStorageFee: number;
+  backupStorageCentsPerGb: number;
+  locationPricingEnabled: boolean;
+}
+
+export interface LocationMultiplier {
+  id: string;
+  locationKey: string;
+  label: string;
+  multiplier: number;
+  createdAt: Date;
 }
 
 export interface BillingPlan {
   id: string;
-  accountId: string;
   name: string;
-  stripePriceId: string | null;
+  slug: string;
+  description: string | null;
+  sortOrder: number;
+  isDefault: boolean;
+  isFree: boolean;
+  visible: boolean;
   cpuLimit: number;
   memoryLimit: number;
   containerLimit: number;
   storageLimit: number;
+  bandwidthLimit: number | null;
   priceCents: number;
+  stripeProductId: string | null;
+  stripePriceIds: Record<string, string>;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Subscription {
   id: string;
   accountId: string;
-  planId: string;
+  planId: string | null;
+  billingModel: BillingModel;
   stripeSubscriptionId: string | null;
+  stripeCustomerId: string | null;
+  billingCycle: BillingCycle;
   status: SubscriptionStatus;
+  trialEndsAt: Date | null;
+  currentPeriodStart: Date | null;
+  currentPeriodEnd: Date | null;
+  cancelledAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface UsageRecord {
   id: string;
   accountId: string;
+  periodStart: Date | null;
+  periodEnd: Date | null;
   containers: number;
   cpuSeconds: number;
   memoryMbHours: number;
   storageGb: number;
+  bandwidthGb: number;
   recordedAt: Date;
+}
+
+export interface UsageSummary {
+  containers: number;
+  cpuHours: number;
+  memoryGbHours: number;
+  storageGb: number;
+  bandwidthGb: number;
+  estimatedCostCents: number;
+  breakdown: {
+    cpuCents: number;
+    memoryCents: number;
+    storageCents: number;
+    bandwidthCents: number;
+    containerCents: number;
+  };
+  periodStart: Date | null;
+  periodEnd: Date | null;
+}
+
+export interface ResourceLimits {
+  id: string;
+  accountId: string | null;
+  maxCpuPerContainer: number | null;
+  maxMemoryPerContainer: number | null;
+  maxReplicas: number | null;
+  maxContainers: number | null;
+  maxStorageGb: number | null;
+  maxBandwidthGb: number | null;
+  maxNfsStorageGb: number | null;
+}
+
+export interface AccountBillingOverride {
+  id: string;
+  accountId: string;
+  discountPercent: number;
+  customPriceCents: number | null;
+  notes: string | null;
+  cpuCentsPerHourOverride: number | null;
+  memoryCentsPerGbHourOverride: number | null;
+  storageCentsPerGbMonthOverride: number | null;
+  bandwidthCentsPerGbOverride: number | null;
+  containerCentsPerHourOverride: number | null;
 }
 
 export interface CreateCheckoutInput {
   accountId: string;
-  planId: string;
+  billingModel: BillingModel;
+  billingCycle: BillingCycle;
+  planId?: string;
   successUrl: string;
   cancelUrl: string;
 }

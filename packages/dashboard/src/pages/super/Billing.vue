@@ -1,69 +1,282 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { CreditCard, TrendingUp, DollarSign, Users, Save, Loader2 } from 'lucide-vue-next'
+import { ref, onMounted } from 'vue'
+import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const api = useApi()
 
 const loading = ref(true)
 const saving = ref(false)
+const savingConfig = ref(false)
+const savingPricing = ref(false)
+const savingLimits = ref(false)
+const syncing = ref(false)
 const error = ref('')
 const success = ref('')
-const settings = ref<Record<string, any>>({})
 
-// Pricing fields
-const basePlanPrice = ref('')
-const proPlanPrice = ref('')
-const maxServices = ref('')
-const maxStorageGb = ref('')
-const maxDomains = ref('')
+// ─── Billing Config ──────────────────────────────────────────
+const billingModel = ref('fixed')
+const allowUserChoice = ref(false)
+const allowedCycles = ref<string[]>(['monthly', 'yearly'])
+const trialDays = ref(0)
+const cycleDiscounts = ref<Record<string, { type: string; value: number }>>({})
 
-const revenueStats = computed(() => [
-  { label: 'Monthly Revenue', value: settings.value['billing:monthlyRevenue'] ?? '$0', icon: DollarSign, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
-  { label: 'Active Subscriptions', value: settings.value['billing:activeSubscriptions'] ?? '0', icon: TrendingUp, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-  { label: 'Paying Customers', value: settings.value['billing:payingCustomers'] ?? '0', icon: Users, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
-])
+// ─── Plans ───────────────────────────────────────────────────
+const plans = ref<any[]>([])
+const showPlanForm = ref(false)
+const editingPlan = ref<any>(null)
+const planForm = ref({
+  name: '', slug: '', description: '', sortOrder: 0,
+  isDefault: false, isFree: false, visible: true,
+  cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
+  storageLimit: 10, bandwidthLimit: 0, priceCents: 0,
+})
 
-async function fetchSettings() {
+// ─── Usage Pricing ───────────────────────────────────────────
+const pricing = ref({
+  cpuCentsPerHour: 0, memoryCentsPerGbHour: 0,
+  storageCentsPerGbMonth: 0, bandwidthCentsPerGb: 0,
+  containerCentsPerHour: 0, domainMarkupPercent: 0,
+  backupStorageCentsPerGb: 0, locationPricingEnabled: false,
+})
+
+// ─── Location Multipliers ────────────────────────────────────
+const locations = ref<any[]>([])
+const newLocation = ref({ locationKey: '', label: '', multiplier: 100 })
+
+// ─── Resource Limits (Global) ────────────────────────────────
+const resourceLimitsForm = ref({
+  maxCpuPerContainer: null as number | null,
+  maxMemoryPerContainer: null as number | null,
+  maxReplicas: null as number | null,
+  maxContainers: null as number | null,
+  maxStorageGb: null as number | null,
+  maxBandwidthGb: null as number | null,
+  maxNfsStorageGb: null as number | null,
+})
+
+// ─── Subscriptions ───────────────────────────────────────────
+const subs = ref<any[]>([])
+
+// ─── Account Overrides ───────────────────────────────────────
+const overrides = ref<any[]>([])
+
+const allCycles = [
+  { id: 'daily', label: 'Daily' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+  { id: 'quarterly', label: 'Quarterly' },
+  { id: 'half_yearly', label: 'Half Yearly' },
+  { id: 'yearly', label: 'Yearly' },
+]
+
+function toggleCycle(cycleId: string) {
+  const idx = allowedCycles.value.indexOf(cycleId)
+  if (idx >= 0) {
+    if (allowedCycles.value.length > 1) {
+      allowedCycles.value.splice(idx, 1)
+      delete cycleDiscounts.value[cycleId]
+    }
+  } else {
+    allowedCycles.value.push(cycleId)
+  }
+}
+
+function setDiscount(cycleId: string, type: string, value: number) {
+  if (type === 'none') {
+    delete cycleDiscounts.value[cycleId]
+  } else {
+    cycleDiscounts.value[cycleId] = { type, value }
+  }
+}
+
+function getDiscountType(cycleId: string): string {
+  return cycleDiscounts.value[cycleId]?.type ?? 'none'
+}
+
+function getDiscountValue(cycleId: string): number {
+  return cycleDiscounts.value[cycleId]?.value ?? 0
+}
+
+function openPlanForm(plan?: any) {
+  if (plan) {
+    editingPlan.value = plan
+    planForm.value = { ...plan }
+  } else {
+    editingPlan.value = null
+    planForm.value = {
+      name: '', slug: '', description: '', sortOrder: 0,
+      isDefault: false, isFree: false, visible: true,
+      cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
+      storageLimit: 10, bandwidthLimit: 0, priceCents: 0,
+    }
+  }
+  showPlanForm.value = true
+}
+
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
+}
+
+async function fetchAll() {
   loading.value = true
   try {
-    settings.value = await api.get<Record<string, any>>('/settings')
-    basePlanPrice.value = settings.value['pricing:basePlanPrice'] ?? ''
-    proPlanPrice.value = settings.value['pricing:proPlanPrice'] ?? ''
-    maxServices.value = settings.value['pricing:freeMaxServices'] ?? ''
-    maxStorageGb.value = settings.value['pricing:freeMaxStorageGb'] ?? ''
-    maxDomains.value = settings.value['pricing:freeMaxDomains'] ?? ''
+    const [configData, plansData, pricingData, locData, limitsData, subsData, overridesData] = await Promise.all([
+      api.get<any>('/billing/config'),
+      api.get<any[]>('/billing/admin/plans'),
+      api.get<any>('/billing/admin/pricing'),
+      api.get<any[]>('/billing/admin/locations'),
+      api.get<any>('/billing/admin/resource-limits'),
+      api.get<any[]>('/billing/admin/subscriptions'),
+      api.get<any[]>('/billing/admin/account-overrides'),
+    ])
+
+    billingModel.value = configData.billingModel ?? 'fixed'
+    allowUserChoice.value = configData.allowUserChoice ?? false
+    allowedCycles.value = configData.allowedCycles ?? ['monthly', 'yearly']
+    cycleDiscounts.value = configData.cycleDiscounts ?? {}
+    trialDays.value = configData.trialDays ?? 0
+
+    plans.value = plansData
+    pricing.value = { ...pricing.value, ...pricingData }
+    locations.value = locData
+    resourceLimitsForm.value = { ...resourceLimitsForm.value, ...limitsData }
+    subs.value = subsData
+    overrides.value = overridesData
   } catch {
-    settings.value = {}
+    error.value = 'Failed to load billing settings'
   } finally {
     loading.value = false
   }
 }
 
-async function savePricing() {
+async function saveBillingConfig() {
+  savingConfig.value = true
+  error.value = ''
+  try {
+    await api.patch('/billing/config', {
+      billingModel: billingModel.value,
+      allowUserChoice: allowUserChoice.value,
+      allowedCycles: allowedCycles.value,
+      cycleDiscounts: cycleDiscounts.value,
+      trialDays: trialDays.value,
+    })
+    showSuccess('Billing configuration saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save billing config'
+  } finally {
+    savingConfig.value = false
+  }
+}
+
+async function savePlan() {
   saving.value = true
   error.value = ''
-  success.value = ''
   try {
-    await api.patch('/settings', {
-      'pricing:basePlanPrice': basePlanPrice.value,
-      'pricing:proPlanPrice': proPlanPrice.value,
-      'pricing:freeMaxServices': maxServices.value,
-      'pricing:freeMaxStorageGb': maxStorageGb.value,
-      'pricing:freeMaxDomains': maxDomains.value,
-    })
-    success.value = 'Pricing settings saved'
-    setTimeout(() => { success.value = '' }, 3000)
+    if (editingPlan.value) {
+      await api.patch(`/billing/admin/plans/${editingPlan.value.id}`, planForm.value)
+    } else {
+      await api.post('/billing/admin/plans', planForm.value)
+    }
+    showPlanForm.value = false
+    showSuccess('Plan saved')
+    const data = await api.get<any[]>('/billing/admin/plans')
+    plans.value = data
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save pricing'
+    error.value = err?.body?.error || 'Failed to save plan'
   } finally {
     saving.value = false
   }
 }
 
-onMounted(() => {
-  fetchSettings()
-})
+async function deletePlan(id: string) {
+  if (!confirm('This will hide the plan. Continue?')) return
+  try {
+    await api.del(`/billing/admin/plans/${id}`)
+    plans.value = plans.value.filter(p => p.id !== id)
+    showSuccess('Plan hidden')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to delete plan'
+  }
+}
+
+async function syncPlan(id: string) {
+  syncing.value = true
+  try {
+    await api.post(`/billing/admin/plans/${id}/sync-stripe`, {})
+    showSuccess('Plan synced to Stripe')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Stripe sync failed'
+  } finally {
+    syncing.value = false
+  }
+}
+
+async function syncAllPlans() {
+  syncing.value = true
+  try {
+    const res = await api.post<any>('/billing/admin/plans/sync-all', {})
+    showSuccess(res.message || 'All plans synced')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Stripe sync failed'
+  } finally {
+    syncing.value = false
+  }
+}
+
+async function savePricingConfig() {
+  savingPricing.value = true
+  error.value = ''
+  try {
+    await api.patch('/billing/admin/pricing', pricing.value)
+    showSuccess('Usage pricing saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save pricing'
+  } finally {
+    savingPricing.value = false
+  }
+}
+
+async function addLocation() {
+  try {
+    const loc = await api.post<any>('/billing/admin/locations', newLocation.value)
+    locations.value.push(loc)
+    newLocation.value = { locationKey: '', label: '', multiplier: 100 }
+    showSuccess('Location added')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to add location'
+  }
+}
+
+async function removeLocation(id: string) {
+  try {
+    await api.del(`/billing/admin/locations/${id}`)
+    locations.value = locations.value.filter(l => l.id !== id)
+    showSuccess('Location removed')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to remove location'
+  }
+}
+
+async function saveResourceLimits() {
+  savingLimits.value = true
+  error.value = ''
+  try {
+    await api.patch('/billing/admin/resource-limits', resourceLimitsForm.value)
+    showSuccess('Resource limits saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save resource limits'
+  } finally {
+    savingLimits.value = false
+  }
+}
+
+function showSuccess(msg: string) {
+  success.value = msg
+  setTimeout(() => { success.value = '' }, 3000)
+}
+
+onMounted(() => { fetchAll() })
 </script>
 
 <template>
@@ -85,76 +298,409 @@ onMounted(() => {
         <p class="text-sm text-green-700 dark:text-green-300">{{ success }}</p>
       </div>
 
-      <!-- Revenue stats -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-        <div
-          v-for="stat in revenueStats"
-          :key="stat.label"
-          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6"
-        >
-          <div class="flex items-center gap-4">
-            <div :class="[stat.bg, 'p-3 rounded-lg']">
-              <component :is="stat.icon" :class="[stat.color, 'w-6 h-6']" />
-            </div>
-            <div>
-              <p class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ stat.label }}</p>
-              <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ stat.value }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Revenue chart placeholder -->
+      <!-- Section 1: Billing Model Configuration -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Revenue Overview</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Billing Model</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose how customers are charged.</p>
         </div>
-        <div class="p-6">
-          <div class="h-64 flex items-center justify-center bg-gray-50 dark:bg-gray-750 rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-600">
-            <p class="text-gray-400 dark:text-gray-500 text-sm">Revenue chart will be displayed here</p>
+        <form @submit.prevent="saveBillingConfig" class="p-6 space-y-6">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button v-for="m in [{ id: 'fixed', title: 'Fixed Price', desc: 'Flat fee per billing cycle' }, { id: 'usage', title: 'Usage-Based', desc: 'Pay for consumed resources' }, { id: 'hybrid', title: 'Hybrid', desc: 'Base fee + overage charges' }]"
+              :key="m.id" type="button" @click="billingModel = m.id"
+              :class="['p-4 rounded-lg border-2 text-left transition-colors', billingModel === m.id ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300']"
+            >
+              <p class="font-medium text-gray-900 dark:text-white text-sm">{{ m.title }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ m.desc }}</p>
+            </button>
           </div>
-        </div>
-      </div>
 
-      <!-- Pricing configuration -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Pricing Plans</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure pricing tiers for your customers.</p>
-        </div>
-        <form @submit.prevent="savePricing" class="p-6 space-y-5">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Base Plan Price (monthly)</label>
-              <div class="relative">
-                <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                <input v-model="basePlanPrice" type="number" step="0.01" placeholder="0.00" class="w-full pl-8 pr-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              </div>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Pro Plan Price (monthly)</label>
-              <div class="relative">
-                <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                <input v-model="proPlanPrice" type="number" step="0.01" placeholder="0.00" class="w-full pl-8 pr-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              </div>
-            </div>
+          <div class="flex items-center gap-3">
+            <input id="allowUserChoice" type="checkbox" v-model="allowUserChoice" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <label for="allowUserChoice" class="text-sm text-gray-700 dark:text-gray-300">Allow end users to choose their billing model</label>
           </div>
+
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Free Tier Limits</label>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input v-model="maxServices" type="number" placeholder="Max services" class="px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              <input v-model="maxStorageGb" type="number" placeholder="Max storage (GB)" class="px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              <input v-model="maxDomains" type="number" placeholder="Max domains" class="px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Allowed Billing Cycles</label>
+            <div class="flex flex-wrap gap-2">
+              <button v-for="cycle in allCycles" :key="cycle.id" type="button" @click="toggleCycle(cycle.id)"
+                :class="['px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors', allowedCycles.includes(cycle.id) ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400']"
+              >{{ cycle.label }}</button>
             </div>
           </div>
+
+          <div v-if="allowedCycles.length > 0">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Cycle Discounts</label>
+            <div class="space-y-3">
+              <div v-for="cycle in allCycles.filter(c => allowedCycles.includes(c.id))" :key="cycle.id"
+                class="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600"
+              >
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300 w-24 shrink-0">{{ cycle.label }}</span>
+                <select :value="getDiscountType(cycle.id)" @change="setDiscount(cycle.id, ($event.target as HTMLSelectElement).value, getDiscountValue(cycle.id))"
+                  class="px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="none">No discount</option>
+                  <option value="percentage">Percentage off</option>
+                  <option value="fixed">Fixed amount off</option>
+                </select>
+                <template v-if="getDiscountType(cycle.id) !== 'none'">
+                  <div class="relative">
+                    <span v-if="getDiscountType(cycle.id) === 'percentage'" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
+                    <span v-else class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                    <input type="number" step="0.01" min="0" :value="getDiscountValue(cycle.id)"
+                      @input="setDiscount(cycle.id, getDiscountType(cycle.id), Number(($event.target as HTMLInputElement).value))"
+                      :class="['w-28 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500', getDiscountType(cycle.id) === 'percentage' ? 'px-3 pr-8' : 'pl-8 pr-3']"
+                    />
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Free Trial (days)</label>
+            <input v-model.number="trialDays" type="number" min="0" placeholder="0" class="w-32 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+          </div>
+
           <div class="pt-2 flex justify-end">
-            <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+            <button type="submit" :disabled="savingConfig" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingConfig" class="w-4 h-4 animate-spin" />
               <Save v-else class="w-4 h-4" />
-              {{ saving ? 'Saving...' : 'Save Changes' }}
+              {{ savingConfig ? 'Saving...' : 'Save Billing Config' }}
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- Section 2: Plan Tiers -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Plan Tiers</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Define pricing tiers with resource limits.</p>
+          </div>
+          <div class="flex gap-2">
+            <button @click="syncAllPlans" :disabled="syncing" class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors">
+              <RefreshCw :class="['w-4 h-4', syncing ? 'animate-spin' : '']" /> Sync All to Stripe
+            </button>
+            <button @click="openPlanForm()" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors">
+              <Plus class="w-4 h-4" /> Add Plan
+            </button>
+          </div>
+        </div>
+
+        <!-- Plan form modal -->
+        <div v-if="showPlanForm" class="p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750">
+          <form @submit.prevent="savePlan" class="space-y-4">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div class="col-span-2">
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Name</label>
+                <input v-model="planForm.name" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Slug</label>
+                <input v-model="planForm.slug" required pattern="[a-z0-9-]+" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Monthly Price (cents)</label>
+                <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU Limit (mc)</label>
+                <input v-model.number="planForm.cpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (MB)</label>
+                <input v-model.number="planForm.memoryLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Containers</label>
+                <input v-model.number="planForm.containerLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (GB)</label>
+                <input v-model.number="planForm.storageLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bandwidth (GB)</label>
+                <input v-model.number="planForm.bandwidthLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+            </div>
+            <div class="flex items-center gap-4">
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input type="checkbox" v-model="planForm.isFree" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> Free tier
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input type="checkbox" v-model="planForm.isDefault" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> Default plan
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input type="checkbox" v-model="planForm.visible" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> Visible
+              </label>
+            </div>
+            <div class="flex gap-2 justify-end">
+              <button type="button" @click="showPlanForm = false" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium">
+                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                {{ editingPlan ? 'Update Plan' : 'Create Plan' }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table v-if="plans.length > 0" class="w-full">
+            <thead>
+              <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th class="px-6 py-3">Name</th>
+                <th class="px-6 py-3">Slug</th>
+                <th class="px-6 py-3">Price</th>
+                <th class="px-6 py-3">CPU / Mem / Containers</th>
+                <th class="px-6 py-3">Stripe</th>
+                <th class="px-6 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr v-for="plan in plans" :key="plan.id" :class="!plan.visible ? 'opacity-50' : ''">
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium">
+                  {{ plan.name }}
+                  <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">Free</span>
+                  <span v-if="plan.isDefault" class="ml-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded">Default</span>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ plan.slug }}</td>
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ formatCents(plan.priceCents) }}/mo</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
+                <td class="px-6 py-4">
+                  <span :class="plan.stripeProductId ? 'text-green-600 dark:text-green-400' : 'text-gray-400'" class="text-xs font-medium">
+                    {{ plan.stripeProductId ? 'Synced' : 'Not synced' }}
+                  </span>
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-2">
+                    <button @click="openPlanForm(plan)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">Edit</button>
+                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Sync</button>
+                    <button @click="deletePlan(plan.id)" class="text-xs text-red-600 dark:text-red-400 hover:underline">Hide</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No plans created yet. Click "Add Plan" to create your first tier.</div>
+        </div>
+      </div>
+
+      <!-- Section 3: Usage-Based Pricing -->
+      <div v-if="billingModel === 'usage' || billingModel === 'hybrid'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Gauge class="w-5 h-5 text-orange-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Usage-Based Pricing</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Set per-unit rates for resource consumption.</p>
+        </div>
+        <form @submit.prevent="savePricingConfig" class="p-6 space-y-5">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU (cents/hr)</label>
+              <input v-model.number="pricing.cpuCentsPerHour" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (cents/GB-hr)</label>
+              <input v-model.number="pricing.memoryCentsPerGbHour" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (cents/GB-mo)</label>
+              <input v-model.number="pricing.storageCentsPerGbMonth" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bandwidth (cents/GB)</label>
+              <input v-model.number="pricing.bandwidthCentsPerGb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Container (cents/hr)</label>
+              <input v-model.number="pricing.containerCentsPerHour" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Domain Markup (%)</label>
+              <input v-model.number="pricing.domainMarkupPercent" type="number" min="0" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Backup (cents/GB)</label>
+              <input v-model.number="pricing.backupStorageCentsPerGb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+          <div class="pt-2 flex justify-end">
+            <button type="submit" :disabled="savingPricing" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingPricing" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ savingPricing ? 'Saving...' : 'Save Usage Pricing' }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Section 4: Location Pricing -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <MapPin class="w-5 h-5 text-blue-500" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Location Pricing</h2>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input type="checkbox" v-model="pricing.locationPricingEnabled" @change="savePricingConfig" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              Enable
+            </label>
+          </div>
+        </div>
+        <div v-if="pricing.locationPricingEnabled" class="p-6 space-y-4">
+          <div v-for="loc in locations" :key="loc.id" class="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
+            <span class="text-sm font-mono text-gray-600 dark:text-gray-400 w-28">{{ loc.locationKey }}</span>
+            <span class="text-sm text-gray-900 dark:text-white flex-1">{{ loc.label }}</span>
+            <span class="text-sm text-gray-600 dark:text-gray-400">{{ (loc.multiplier / 100).toFixed(2) }}x</span>
+            <button @click="removeLocation(loc.id)" class="text-red-500 hover:text-red-700 dark:hover:text-red-400">
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="flex items-end gap-3">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Key</label>
+              <input v-model="newLocation.locationKey" placeholder="us-east" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Label</label>
+              <input v-model="newLocation.label" placeholder="US East" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Multiplier (%)</label>
+              <input v-model.number="newLocation.multiplier" type="number" min="1" class="w-24 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <button @click="addLocation" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium">
+              <Plus class="w-4 h-4" /> Add
+            </button>
+          </div>
+        </div>
+        <div v-else class="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Enable location pricing to configure per-region cost multipliers.</div>
+      </div>
+
+      <!-- Section 5: Global Resource Limits -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Shield class="w-5 h-5 text-purple-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Global Resource Limits</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Default limits inherited by all accounts. Override per account as needed.</p>
+        </div>
+        <form @submit.prevent="saveResourceLimits" class="p-6 space-y-5">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max CPU/container (mc)</label>
+              <input v-model.number="resourceLimitsForm.maxCpuPerContainer" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Memory/container (MB)</label>
+              <input v-model.number="resourceLimitsForm.maxMemoryPerContainer" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Replicas</label>
+              <input v-model.number="resourceLimitsForm.maxReplicas" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Containers</label>
+              <input v-model.number="resourceLimitsForm.maxContainers" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Storage (GB)</label>
+              <input v-model.number="resourceLimitsForm.maxStorageGb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Bandwidth (GB)</label>
+              <input v-model.number="resourceLimitsForm.maxBandwidthGb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max NFS Storage (GB)</label>
+              <input v-model.number="resourceLimitsForm.maxNfsStorageGb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+          <div class="pt-2 flex justify-end">
+            <button type="submit" :disabled="savingLimits" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingLimits" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ savingLimits ? 'Saving...' : 'Save Resource Limits' }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Section 6: Subscriptions Overview -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Users class="w-5 h-5 text-green-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Subscriptions</h2>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table v-if="subs.length > 0" class="w-full">
+            <thead>
+              <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th class="px-6 py-3">Account</th>
+                <th class="px-6 py-3">Plan</th>
+                <th class="px-6 py-3">Model</th>
+                <th class="px-6 py-3">Cycle</th>
+                <th class="px-6 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr v-for="sub in subs" :key="sub.id">
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ sub.account?.name ?? sub.accountId }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ sub.plan?.name ?? 'Usage only' }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 capitalize">{{ sub.billingModel }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ sub.billingCycle }}</td>
+                <td class="px-6 py-4">
+                  <span :class="[
+                    'px-2 py-0.5 text-xs font-medium rounded-full',
+                    sub.status === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
+                    sub.status === 'trialing' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                    'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  ]">{{ sub.status }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No active subscriptions yet.</div>
+        </div>
+      </div>
+
+      <!-- Section 7: Account Billing Overrides -->
+      <div v-if="overrides.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <DollarSign class="w-5 h-5 text-yellow-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Account Billing Overrides</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Custom discounts and pricing for specific accounts.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th class="px-6 py-3">Account</th>
+                <th class="px-6 py-3">Discount</th>
+                <th class="px-6 py-3">Notes</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr v-for="o in overrides" :key="o.id">
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ o.account?.name ?? o.accountId }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ o.discountPercent }}%</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ o.notes ?? '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </template>
   </div>

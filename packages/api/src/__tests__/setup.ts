@@ -85,6 +85,11 @@ sqlite.exec(`
     update_delay TEXT DEFAULT '10s',
     rollback_on_failure INTEGER DEFAULT 1,
     health_check TEXT,
+    cpu_limit INTEGER,
+    memory_limit INTEGER,
+    cpu_reservation INTEGER,
+    memory_reservation INTEGER,
+    stopped_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
@@ -153,6 +158,7 @@ sqlite.exec(`
     role TEXT DEFAULT 'worker',
     status TEXT DEFAULT 'active',
     labels TEXT DEFAULT '{}',
+    location TEXT,
     nfs_server INTEGER DEFAULT 0,
     last_heartbeat INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
@@ -161,14 +167,21 @@ sqlite.exec(`
 
   CREATE TABLE billing_plans (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
     name TEXT NOT NULL,
-    stripe_price_id TEXT,
+    slug TEXT UNIQUE NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_default INTEGER DEFAULT 0,
+    is_free INTEGER DEFAULT 0,
+    visible INTEGER DEFAULT 1,
     cpu_limit INTEGER NOT NULL,
     memory_limit INTEGER NOT NULL,
     container_limit INTEGER NOT NULL,
     storage_limit INTEGER NOT NULL,
+    bandwidth_limit INTEGER,
     price_cents INTEGER NOT NULL,
+    stripe_product_id TEXT,
+    stripe_price_ids TEXT DEFAULT '{}',
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
@@ -176,36 +189,91 @@ sqlite.exec(`
   CREATE TABLE subscriptions (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id),
-    plan_id TEXT NOT NULL REFERENCES billing_plans(id),
+    plan_id TEXT REFERENCES billing_plans(id),
+    billing_model TEXT DEFAULT 'fixed',
     stripe_subscription_id TEXT,
+    stripe_customer_id TEXT,
+    billing_cycle TEXT DEFAULT 'monthly',
     status TEXT DEFAULT 'active',
+    trial_ends_at INTEGER,
+    current_period_start INTEGER,
+    current_period_end INTEGER,
+    cancelled_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE billing_config (
+    id TEXT PRIMARY KEY,
+    billing_model TEXT DEFAULT 'fixed' NOT NULL,
+    allow_user_choice INTEGER DEFAULT 0,
+    allowed_cycles TEXT DEFAULT '["monthly","yearly"]',
+    cycle_discounts TEXT DEFAULT '{}',
+    trial_days INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE usage_records (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id),
+    period_start INTEGER,
+    period_end INTEGER,
     containers INTEGER DEFAULT 0,
     cpu_seconds INTEGER DEFAULT 0,
     memory_mb_hours INTEGER DEFAULT 0,
     storage_gb INTEGER DEFAULT 0,
+    bandwidth_gb INTEGER DEFAULT 0,
     recorded_at INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE pricing_config (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
-    container_fee INTEGER DEFAULT 0,
-    cpu_fee INTEGER DEFAULT 0,
-    memory_fee INTEGER DEFAULT 0,
-    storage_fee INTEGER DEFAULT 0,
-    bandwidth_fee INTEGER DEFAULT 0,
+    cpu_cents_per_hour INTEGER DEFAULT 0,
+    memory_cents_per_gb_hour INTEGER DEFAULT 0,
+    storage_cents_per_gb_month INTEGER DEFAULT 0,
+    bandwidth_cents_per_gb INTEGER DEFAULT 0,
+    container_cents_per_hour INTEGER DEFAULT 0,
     domain_markup_percent INTEGER DEFAULT 0,
-    backup_storage_fee INTEGER DEFAULT 0,
+    backup_storage_cents_per_gb INTEGER DEFAULT 0,
+    location_pricing_enabled INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT (unixepoch())
   );
-  CREATE UNIQUE INDEX pricing_config_account_idx ON pricing_config(account_id);
+
+  CREATE TABLE location_multipliers (
+    id TEXT PRIMARY KEY,
+    location_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    multiplier INTEGER DEFAULT 100,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE resource_limits (
+    id TEXT PRIMARY KEY,
+    account_id TEXT REFERENCES accounts(id),
+    max_cpu_per_container INTEGER,
+    max_memory_per_container INTEGER,
+    max_replicas INTEGER,
+    max_containers INTEGER,
+    max_storage_gb INTEGER,
+    max_bandwidth_gb INTEGER,
+    max_nfs_storage_gb INTEGER,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE account_billing_overrides (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id),
+    discount_percent INTEGER DEFAULT 0,
+    custom_price_cents INTEGER,
+    notes TEXT,
+    cpu_cents_per_hour_override INTEGER,
+    memory_cents_per_gb_hour_override INTEGER,
+    storage_cents_per_gb_month_override INTEGER,
+    bandwidth_cents_per_gb_override INTEGER,
+    container_cents_per_hour_override INTEGER,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
 
   CREATE TABLE ssh_keys (
     id TEXT PRIMARY KEY,
@@ -532,9 +600,20 @@ vi.mock('../services/stripe.service.js', () => ({
   stripeService: {
     createCustomer: vi.fn().mockResolvedValue({ id: 'cus_test' }),
     createCheckoutSession: vi.fn().mockResolvedValue({ url: 'https://checkout.stripe.com/test' }),
+    createFlexibleCheckoutSession: vi.fn().mockResolvedValue({ url: 'https://checkout.stripe.com/test' }),
     createPortalSession: vi.fn().mockResolvedValue({ url: 'https://portal.stripe.com/test' }),
     getSubscription: vi.fn().mockResolvedValue(null),
     cancelSubscription: vi.fn().mockResolvedValue(undefined),
+    cancelSubscriptionAtPeriodEnd: vi.fn().mockResolvedValue(undefined),
+    reportUsage: vi.fn().mockResolvedValue(undefined),
+    listInvoices: vi.fn().mockResolvedValue({ data: [] }),
+    createProduct: vi.fn().mockResolvedValue({ id: 'prod_test' }),
+    updateProduct: vi.fn().mockResolvedValue({ id: 'prod_test' }),
+    createPrice: vi.fn().mockResolvedValue({ id: 'price_test' }),
+    listPrices: vi.fn().mockResolvedValue({ data: [] }),
+    updateSubscription: vi.fn().mockResolvedValue(undefined),
+    createDomainCheckoutSession: vi.fn().mockResolvedValue({ url: 'https://checkout.stripe.com/domain' }),
+    constructWebhookEvent: vi.fn(),
   },
 }));
 
@@ -587,6 +666,35 @@ vi.mock('../services/registrar.service.js', () => ({
     registerDomain: vi.fn().mockResolvedValue({ domainId: 'domain-1' }),
     renewDomain: vi.fn().mockResolvedValue(undefined),
     transferDomain: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+// ── Mock stripe-sync service ──
+vi.mock('../services/stripe-sync.service.js', () => ({
+  stripeSyncService: {
+    syncPlanToStripe: vi.fn().mockResolvedValue(undefined),
+    syncAllPlans: vi.fn().mockResolvedValue({ synced: 0 }),
+    ensureMeteredPrices: vi.fn().mockResolvedValue(undefined),
+    createCheckoutSession: vi.fn().mockResolvedValue({ url: 'https://checkout.stripe.com/test' }),
+  },
+}));
+
+// ── Mock usage service ──
+vi.mock('../services/usage.service.js', () => ({
+  usageService: {
+    collectUsage: vi.fn().mockResolvedValue(undefined),
+    getAccountUsageSummary: vi.fn().mockResolvedValue({
+      containers: 0,
+      cpuHours: 0,
+      memoryGbHours: 0,
+      storageGb: 0,
+      bandwidthGb: 0,
+      estimatedCostCents: 0,
+      breakdown: { cpuCents: 0, memoryCents: 0, storageCents: 0, bandwidthCents: 0, containerCents: 0 },
+      periodStart: null,
+      periodEnd: null,
+    }),
+    reportUsageToStripe: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -700,10 +808,15 @@ vi.mock('@fleet/db', () => ({
   subscriptions: (sqliteSchema as any).subscriptions,
   usageRecords: (sqliteSchema as any).usageRecords,
   pricingConfig: (sqliteSchema as any).pricingConfig,
+  locationMultipliers: (sqliteSchema as any).locationMultipliers,
+  resourceLimits: (sqliteSchema as any).resourceLimits,
+  accountBillingOverrides: (sqliteSchema as any).accountBillingOverrides,
   billingPlansRelations: (sqliteSchema as any).billingPlansRelations,
   subscriptionsRelations: (sqliteSchema as any).subscriptionsRelations,
   usageRecordsRelations: (sqliteSchema as any).usageRecordsRelations,
-  pricingConfigRelations: (sqliteSchema as any).pricingConfigRelations,
+  resourceLimitsRelations: (sqliteSchema as any).resourceLimitsRelations,
+  accountBillingOverridesRelations: (sqliteSchema as any).accountBillingOverridesRelations,
+  billingConfig: (sqliteSchema as any).billingConfig,
   sshKeys: sqliteSchema.sshKeys,
   sshAccessRules: sqliteSchema.sshAccessRules,
   sshKeysRelations: (sqliteSchema as any).sshKeysRelations,
@@ -766,6 +879,10 @@ const allTableNames = [
   'audit_log',
   'ssh_access_rules',
   'ssh_keys',
+  'account_billing_overrides',
+  'resource_limits',
+  'billing_config',
+  'location_multipliers',
   'pricing_config',
   'usage_records',
   'subscriptions',

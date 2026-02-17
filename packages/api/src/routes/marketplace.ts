@@ -5,6 +5,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { cache } from '../middleware/cache.js';
+import { logger } from '../services/logger.js';
 
 const marketplace = new Hono<{
   Variables: {
@@ -91,7 +92,7 @@ marketplace.post('/deploy', requireMember, async (c) => {
       return c.json({ error: message }, 400);
     }
 
-    console.error('Template deployment failed:', err);
+    logger.error({ err }, 'Template deployment failed');
     return c.json({ error: 'Failed to deploy template', details: message }, 500);
   }
 });
@@ -132,7 +133,7 @@ marketplace.post('/templates', requireMember, async (c) => {
     return c.json(template, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('Template creation failed:', err);
+    logger.error({ err }, 'Template creation failed');
     return c.json({ error: 'Failed to create template', details: message }, 500);
   }
 });
@@ -173,7 +174,7 @@ marketplace.patch('/templates/:slug', requireMember, async (c) => {
     return c.json(updated);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('Template update failed:', err);
+    logger.error({ err }, 'Template update failed');
     return c.json({ error: 'Failed to update template', details: message }, 500);
   }
 });
@@ -214,7 +215,7 @@ marketplace.post('/sync', async (c) => {
     await templateService.syncBuiltinTemplates();
     return c.json({ message: 'Templates synced successfully' });
   } catch (err) {
-    console.error('Template sync failed:', err);
+    logger.error({ err }, 'Template sync failed');
     return c.json({ error: 'Failed to sync templates' }, 500);
   }
 });

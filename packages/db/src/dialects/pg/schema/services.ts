@@ -35,6 +35,11 @@ export const services = pgTable('services', {
   updateDelay: varchar('update_delay').default('10s'),
   rollbackOnFailure: boolean('rollback_on_failure').default(true),
   healthCheck: jsonb('health_check'),
+  cpuLimit: integer('cpu_limit'),
+  memoryLimit: integer('memory_limit'),
+  cpuReservation: integer('cpu_reservation'),
+  memoryReservation: integer('memory_reservation'),
+  stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

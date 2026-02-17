@@ -71,10 +71,15 @@ export const billingPlans = _schema.billingPlans as typeof PgSchema.billingPlans
 export const subscriptions = _schema.subscriptions as typeof PgSchema.subscriptions;
 export const usageRecords = _schema.usageRecords as typeof PgSchema.usageRecords;
 export const pricingConfig = _schema.pricingConfig as typeof PgSchema.pricingConfig;
+export const locationMultipliers = _schema.locationMultipliers as typeof PgSchema.locationMultipliers;
+export const billingConfig = _schema.billingConfig as typeof PgSchema.billingConfig;
+export const resourceLimits = _schema.resourceLimits as typeof PgSchema.resourceLimits;
+export const accountBillingOverrides = _schema.accountBillingOverrides as typeof PgSchema.accountBillingOverrides;
 export const billingPlansRelations = _schema.billingPlansRelations;
 export const subscriptionsRelations = _schema.subscriptionsRelations;
 export const usageRecordsRelations = _schema.usageRecordsRelations;
-export const pricingConfigRelations = _schema.pricingConfigRelations;
+export const resourceLimitsRelations = _schema.resourceLimitsRelations;
+export const accountBillingOverridesRelations = _schema.accountBillingOverridesRelations;
 
 // ssh-keys.ts
 export const sshKeys = _schema.sshKeys as typeof PgSchema.sshKeys;

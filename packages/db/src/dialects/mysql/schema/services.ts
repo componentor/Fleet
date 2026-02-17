@@ -35,6 +35,11 @@ export const services = mysqlTable('services', {
   updateDelay: varchar('update_delay', { length: 255 }).default('10s'),
   rollbackOnFailure: boolean('rollback_on_failure').default(true),
   healthCheck: json('health_check'),
+  cpuLimit: int('cpu_limit'),
+  memoryLimit: int('memory_limit'),
+  cpuReservation: int('cpu_reservation'),
+  memoryReservation: int('memory_reservation'),
+  stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

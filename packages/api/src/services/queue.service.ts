@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { getValkey, getValkeyConnectionOpts } from './valkey.service.js';
+import { logger } from './logger.js';
 
 // --- Lazy Queue Initialization ---
 // Queues are created on first access so the module can be imported
@@ -47,7 +48,7 @@ export async function initWorkers(): Promise<void> {
   // Probe Valkey connectivity before creating workers
   const valkey = await getValkey();
   if (!valkey) {
-    console.log('Valkey not available — queue workers disabled (local dev mode)');
+    logger.info('Valkey not available — queue workers disabled (local dev mode)');
     return;
   }
   _available = true;
@@ -69,7 +70,7 @@ export async function initWorkers(): Promise<void> {
     createMaintenanceWorker(connection),
   );
 
-  console.log(`Queue workers started: ${workers.length} workers across 3 queues`);
+  logger.info(`Queue workers started: ${workers.length} workers across 3 queues`);
 }
 
 /**

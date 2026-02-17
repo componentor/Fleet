@@ -144,6 +144,100 @@ export class StripeService {
   }
 
   /**
+   * Create a Stripe Product.
+   */
+  async createProduct(
+    name: string,
+    description?: string,
+    metadata?: Record<string, string>,
+  ): Promise<Stripe.Product> {
+    return getStripe().products.create({
+      name,
+      description,
+      metadata,
+    });
+  }
+
+  /**
+   * Update a Stripe Product.
+   */
+  async updateProduct(
+    productId: string,
+    data: { name?: string; description?: string; metadata?: Record<string, string> },
+  ): Promise<Stripe.Product> {
+    return getStripe().products.update(productId, data);
+  }
+
+  /**
+   * Create a Stripe Price on a Product.
+   */
+  async createPrice(
+    productId: string,
+    unitAmount: number,
+    currency: string,
+    recurring?: { interval: 'day' | 'week' | 'month' | 'year'; interval_count?: number; usage_type?: 'licensed' | 'metered' },
+    metadata?: Record<string, string>,
+  ): Promise<Stripe.Price> {
+    return getStripe().prices.create({
+      product: productId,
+      unit_amount: unitAmount,
+      currency,
+      recurring,
+      metadata,
+    });
+  }
+
+  /**
+   * List prices for a Product.
+   */
+  async listPrices(productId: string): Promise<Stripe.ApiList<Stripe.Price>> {
+    return getStripe().prices.list({ product: productId, active: true, limit: 100 });
+  }
+
+  /**
+   * Update a Stripe subscription (e.g. change items).
+   */
+  async updateSubscription(
+    subscriptionId: string,
+    params: Stripe.SubscriptionUpdateParams,
+  ): Promise<Stripe.Subscription> {
+    return getStripe().subscriptions.update(subscriptionId, params);
+  }
+
+  /**
+   * Cancel a subscription at period end (instead of immediately).
+   */
+  async cancelSubscriptionAtPeriodEnd(
+    subscriptionId: string,
+  ): Promise<Stripe.Subscription> {
+    return getStripe().subscriptions.update(subscriptionId, {
+      cancel_at_period_end: true,
+    });
+  }
+
+  /**
+   * Create a Stripe Checkout session with flexible line items.
+   */
+  async createFlexibleCheckoutSession(
+    customerId: string,
+    lineItems: Stripe.Checkout.SessionCreateParams.LineItem[],
+    metadata: Record<string, string>,
+    successUrl: string,
+    cancelUrl: string,
+    mode: 'subscription' | 'payment' = 'subscription',
+  ): Promise<Stripe.Checkout.Session> {
+    return getStripe().checkout.sessions.create({
+      customer: customerId,
+      mode,
+      line_items: lineItems,
+      metadata,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      subscription_data: mode === 'subscription' ? { metadata } : undefined,
+    });
+  }
+
+  /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */
   constructWebhookEvent(

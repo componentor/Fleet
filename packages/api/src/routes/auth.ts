@@ -5,6 +5,8 @@ import { SignJWT, jwtVerify } from 'jose';
 import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { logger } from '../services/logger.js';
+import { encrypt } from '../services/crypto.service.js';
 
 const auth = new Hono();
 
@@ -370,7 +372,7 @@ auth.get('/github/callback', async (c) => {
       // Update access token
       await db
         .update(oauthProviders)
-        .set({ accessToken: tokenData.access_token })
+        .set({ accessToken: encrypt(tokenData.access_token) })
         .where(eq(oauthProviders.id, existingOAuth.id));
     } else {
       // Check if a user with this email exists
@@ -415,7 +417,7 @@ auth.get('/github/callback', async (c) => {
         userId,
         provider: 'github',
         providerUserId,
-        accessToken: tokenData.access_token,
+        accessToken: encrypt(tokenData.access_token),
       });
     }
 
@@ -438,7 +440,7 @@ auth.get('/github/callback', async (c) => {
       `/auth/callback?token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
     );
   } catch (err) {
-    console.error('GitHub OAuth error:', err);
+    logger.error({ err }, 'GitHub OAuth error');
     return c.redirect('/auth/callback?error=OAuth+authentication+failed');
   }
 });
@@ -520,7 +522,7 @@ auth.get('/google/callback', async (c) => {
       userId = existingOAuth.userId;
       await db
         .update(oauthProviders)
-        .set({ accessToken: tokenData.access_token })
+        .set({ accessToken: encrypt(tokenData.access_token) })
         .where(eq(oauthProviders.id, existingOAuth.id));
     } else {
       let user = await db.query.users.findFirst({
@@ -561,7 +563,7 @@ auth.get('/google/callback', async (c) => {
         userId,
         provider: 'google',
         providerUserId,
-        accessToken: tokenData.access_token,
+        accessToken: encrypt(tokenData.access_token),
       });
     }
 
@@ -583,7 +585,7 @@ auth.get('/google/callback', async (c) => {
       `/auth/callback?token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
     );
   } catch (err) {
-    console.error('Google OAuth error:', err);
+    logger.error({ err }, 'Google OAuth error');
     return c.redirect('/auth/callback?error=OAuth+authentication+failed');
   }
 });

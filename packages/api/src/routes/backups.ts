@@ -5,6 +5,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { backupService } from '../services/backup.service.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { logger } from '../services/logger.js';
 
 const backupRoutes = new Hono<{
   Variables: {
@@ -70,7 +71,7 @@ backupRoutes.post('/', requireMember, async (c) => {
     }, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('Backup creation failed:', err);
+    logger.error({ err }, 'Backup creation failed');
     return c.json({ error: 'Failed to create backup', details: message }, 500);
   }
 });
@@ -121,7 +122,7 @@ backupRoutes.post('/schedules', requireMember, async (c) => {
     return c.json(schedule, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('Schedule creation failed:', err);
+    logger.error({ err }, 'Schedule creation failed');
     return c.json({ error: 'Failed to create schedule', details: message }, 500);
   }
 });
@@ -209,7 +210,7 @@ backupRoutes.post('/schedules/:id/run', requireMember, async (c) => {
       return c.json({ error: message }, 404);
     }
 
-    console.error('Scheduled backup trigger failed:', err);
+    logger.error({ err }, 'Scheduled backup trigger failed');
     return c.json({ error: 'Failed to trigger backup', details: message }, 500);
   }
 });
@@ -287,7 +288,7 @@ backupRoutes.post('/:id/restore', requireMember, async (c) => {
       return c.json({ error: message }, 400);
     }
 
-    console.error('Backup restore failed:', err);
+    logger.error({ err }, 'Backup restore failed');
     return c.json({ error: 'Failed to restore backup', details: message }, 500);
   }
 });

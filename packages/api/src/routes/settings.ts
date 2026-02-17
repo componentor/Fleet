@@ -6,6 +6,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
+import { encrypt } from '../services/crypto.service.js';
 
 const settings = new Hono<{
   Variables: {
@@ -308,8 +309,8 @@ settings.patch('/registrar', requireAdmin, async (c) => {
   if (existing) {
     const [updated] = await updateReturning(domainRegistrars, {
       provider,
-      apiKey,
-      apiSecret: apiSecret ?? null,
+      apiKey: encrypt(apiKey),
+      apiSecret: apiSecret ? encrypt(apiSecret) : null,
       config,
     }, eqOp(domainRegistrars.id, existing.id));
     // Reset provider cache
@@ -320,8 +321,8 @@ settings.patch('/registrar', requireAdmin, async (c) => {
 
   const [created] = await insertReturning(domainRegistrars, {
     provider,
-    apiKey,
-    apiSecret: apiSecret ?? null,
+    apiKey: encrypt(apiKey),
+    apiSecret: apiSecret ? encrypt(apiSecret) : null,
     config,
     enabled: true,
     createdBy: user.userId,

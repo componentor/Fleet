@@ -4,6 +4,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { nfsService } from '../services/nfs.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { logger } from '../services/logger.js';
 
 const storage = new Hono<{
   Variables: {
@@ -32,7 +33,7 @@ storage.get('/volumes', async (c) => {
 
     return c.json(volumes);
   } catch (err) {
-    console.error('Failed to list volumes:', err);
+    logger.error({ err }, 'Failed to list volumes');
     return c.json({ error: 'Failed to list volumes' }, 500);
   }
 });
@@ -72,7 +73,7 @@ storage.post('/volumes', requireMember, async (c) => {
     const volume = await nfsService.createVolume(volumeName, sizeGb, nodeId);
     return c.json(volume, 201);
   } catch (err) {
-    console.error('Failed to create volume:', err);
+    logger.error({ err }, 'Failed to create volume');
     return c.json({ error: 'Failed to create volume' }, 500);
   }
 });
@@ -93,7 +94,7 @@ storage.get('/volumes/:id', async (c) => {
     const volume = await nfsService.getVolumeInfo(volumeName);
     return c.json(volume);
   } catch (err) {
-    console.error('Failed to get volume info:', err);
+    logger.error({ err }, 'Failed to get volume info');
     return c.json({ error: 'Volume not found' }, 404);
   }
 });
@@ -120,7 +121,7 @@ storage.delete('/volumes/:id', requireMember, async (c) => {
     await nfsService.deleteVolume(volumeName);
     return c.json({ message: 'Volume deleted' });
   } catch (err) {
-    console.error('Failed to delete volume:', err);
+    logger.error({ err }, 'Failed to delete volume');
     return c.json({ error: 'Failed to delete volume' }, 500);
   }
 });

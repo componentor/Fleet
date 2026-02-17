@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { db, appTemplates, services, insertReturning, updateReturning, deleteReturning, eq, and, or } from '@fleet/db';
 import { dockerService } from './docker.service.js';
+import { logger } from './logger.js';
 
 // Resolve the templates directory relative to this file
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -48,7 +49,7 @@ export class TemplateService {
     try {
       files = await readdir(TEMPLATES_DIR);
     } catch {
-      console.warn(`Templates directory not found at ${TEMPLATES_DIR}, skipping sync.`);
+      logger.warn({ path: TEMPLATES_DIR }, 'Templates directory not found, skipping sync');
       return;
     }
 
@@ -363,7 +364,7 @@ export class TemplateService {
           })
           .where(eq(services.id, svc.id));
       } catch (err) {
-        console.error(`Failed to deploy template service ${svcDef.name}:`, err);
+        logger.error({ err, service: svcDef.name }, `Failed to deploy template service ${svcDef.name}`);
         await db
           .update(services)
           .set({ status: 'failed', updatedAt: new Date() })

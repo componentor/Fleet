@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
+import { logger } from '../services/logger.js';
 
 const nodeRoutes = new Hono();
 
@@ -171,7 +172,7 @@ adminNodeRoutes.patch('/:id', async (c) => {
         labels: parsed.data.labels,
       });
     } catch (err) {
-      console.error('Docker node update failed:', err);
+      logger.error({ err }, 'Docker node update failed');
     }
   }
 
@@ -201,7 +202,7 @@ adminNodeRoutes.delete('/:id', async (c) => {
       await dockerService.drainNode(node.dockerNodeId);
       await dockerService.removeNode(node.dockerNodeId, true);
     } catch (err) {
-      console.error('Docker node removal failed:', err);
+      logger.error({ err }, 'Docker node removal failed');
     }
   }
 
@@ -232,7 +233,7 @@ adminNodeRoutes.post('/:id/drain', async (c) => {
 
     return c.json({ message: 'Node draining initiated' });
   } catch (err) {
-    console.error('Node drain failed:', err);
+    logger.error({ err }, 'Node drain failed');
     return c.json({ error: 'Failed to drain node' }, 500);
   }
 });
@@ -259,7 +260,7 @@ adminNodeRoutes.post('/:id/activate', async (c) => {
 
     return c.json({ message: 'Node activated' });
   } catch (err) {
-    console.error('Node activation failed:', err);
+    logger.error({ err }, 'Node activation failed');
     return c.json({ error: 'Failed to activate node' }, 500);
   }
 });

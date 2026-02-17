@@ -6,13 +6,26 @@ import {
   billingPlans,
   subscriptions,
   usageRecords,
+  services,
+  billingConfig,
+  pricingConfig,
+  locationMultipliers,
+  resourceLimits,
+  accountBillingOverrides,
+  countSql,
+  insertReturning,
+  updateReturning,
   eq,
   and,
+  isNull,
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { stripeService } from '../services/stripe.service.js';
+import { stripeSyncService } from '../services/stripe-sync.service.js';
+import { usageService } from '../services/usage.service.js';
 import { requireOwner } from '../middleware/rbac.js';
+import { logger } from '../services/logger.js';
 
 type BillingEnv = {
   Variables: {
@@ -30,24 +43,35 @@ const authed = new Hono<BillingEnv>();
 authed.use('*', authMiddleware);
 authed.use('*', tenantMiddleware);
 
-// GET /plans — list billing plans for the current account
+// GET /plans — list all visible billing plans
 authed.get('/plans', async (c) => {
-  const accountId = c.get('accountId');
-  if (!accountId) {
-    return c.json({ error: 'Account context required' }, 400);
-  }
-
   const plans = await db.query.billingPlans.findMany({
-    where: eq(billingPlans.accountId, accountId),
-    orderBy: (p, { asc }) => asc(p.priceCents),
+    where: eq(billingPlans.visible, true),
+    orderBy: (p, { asc }) => asc(p.sortOrder),
   });
 
   return c.json(plans);
 });
 
+// GET /plans/:slug — get a specific plan by slug
+authed.get('/plans/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  const plan = await db.query.billingPlans.findFirst({
+    where: and(eq(billingPlans.slug, slug), eq(billingPlans.visible, true)),
+  });
+
+  if (!plan) {
+    return c.json({ error: 'Plan not found' }, 404);
+  }
+
+  return c.json(plan);
+});
+
 // POST /checkout — create a Stripe Checkout session
 const checkoutSchema = z.object({
-  planId: z.string().uuid(),
+  billingModel: z.enum(['fixed', 'usage', 'hybrid']),
+  billingCycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+  planId: z.string().optional(),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
 });
@@ -64,54 +88,45 @@ authed.post('/checkout', requireOwner, async (c) => {
     return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
   }
 
-  const { planId, successUrl, cancelUrl } = parsed.data;
+  const { billingModel, billingCycle, planId, successUrl, cancelUrl } = parsed.data;
 
-  // Look up the plan to get the Stripe price ID
-  const plan = await db.query.billingPlans.findFirst({
-    where: and(eq(billingPlans.id, planId), eq(billingPlans.accountId, accountId)),
-  });
-
-  if (!plan) {
-    return c.json({ error: 'Plan not found' }, 404);
+  // Verify billing model is allowed
+  const config = await db.query.billingConfig.findFirst();
+  if (config && !config.allowUserChoice && billingModel !== config.billingModel) {
+    return c.json({ error: 'This billing model is not available' }, 400);
   }
 
-  if (!plan.stripePriceId) {
-    return c.json({ error: 'Plan does not have a Stripe price configured' }, 400);
-  }
-
-  // Get the account's Stripe customer ID, or create one
+  // Get or create Stripe customer
   const account = await db.query.accounts.findFirst({
     where: eq(accounts.id, accountId),
   });
-
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
   }
 
   let stripeCustomerId = account.stripeCustomerId;
-
   if (!stripeCustomerId) {
     const user = c.get('user');
-    const customer = await stripeService.createCustomer(
-      user.email,
-      account.name ?? user.email,
-    );
+    const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
     stripeCustomerId = customer.id;
-
-    await db
-      .update(accounts)
-      .set({ stripeCustomerId, updatedAt: new Date() })
-      .where(eq(accounts.id, accountId));
+    await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
   }
 
-  const session = await stripeService.createCheckoutSession(
-    stripeCustomerId,
-    plan.stripePriceId,
-    successUrl,
-    cancelUrl,
-  );
-
-  return c.json({ url: session.url });
+  try {
+    const result = await stripeSyncService.createCheckoutSession({
+      accountId,
+      billingModel,
+      billingCycle,
+      planId,
+      stripeCustomerId,
+      successUrl,
+      cancelUrl,
+    });
+    return c.json(result);
+  } catch (err) {
+    logger.error({ err }, 'Failed to create checkout session');
+    return c.json({ error: err instanceof Error ? err.message : 'Checkout failed' }, 400);
+  }
 });
 
 // GET /subscription — current subscription for the account
@@ -122,53 +137,144 @@ authed.get('/subscription', async (c) => {
   }
 
   const sub = await db.query.subscriptions.findFirst({
-    where: and(
-      eq(subscriptions.accountId, accountId),
-      eq(subscriptions.status, 'active'),
-    ),
+    where: eq(subscriptions.accountId, accountId),
     with: { plan: true },
+    orderBy: (s, { desc: d }) => d(s.createdAt),
   });
 
   if (!sub) {
-    return c.json({ error: 'No active subscription found' }, 404);
+    return c.json(null);
   }
 
-  // Optionally enrich with live Stripe data
+  // Enrich with live Stripe data
   let stripeData = null;
   if (sub.stripeSubscriptionId) {
     try {
       stripeData = await stripeService.getSubscription(sub.stripeSubscriptionId);
     } catch {
-      // Stripe may be unavailable; return local data only
+      // Stripe may be unavailable
     }
   }
 
   return c.json({ ...sub, stripeData });
 });
 
-// GET /usage — current usage stats for the account
+// PATCH /subscription/cycle — change billing cycle
+const changeCycleSchema = z.object({
+  cycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+});
+
+authed.patch('/subscription/cycle', requireOwner, async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = changeCycleSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  const { cycle } = parsed.data;
+
+  const config = await db.query.billingConfig.findFirst();
+  const allowedCycles = (config?.allowedCycles ?? ['monthly', 'yearly']) as string[];
+  if (!allowedCycles.includes(cycle)) {
+    return c.json({ error: 'This billing cycle is not available' }, 400);
+  }
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.accountId, accountId), eq(subscriptions.status, 'active')),
+  });
+
+  if (!sub) {
+    return c.json({ error: 'No active subscription found' }, 404);
+  }
+
+  await db.update(subscriptions)
+    .set({ billingCycle: cycle, updatedAt: new Date() })
+    .where(eq(subscriptions.id, sub.id));
+
+  return c.json({ message: 'Billing cycle updated', cycle });
+});
+
+// DELETE /subscription — cancel subscription at period end
+authed.delete('/subscription', requireOwner, async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.accountId, accountId), eq(subscriptions.status, 'active')),
+  });
+
+  if (!sub) {
+    return c.json({ error: 'No active subscription found' }, 404);
+  }
+
+  // Cancel in Stripe at period end
+  if (sub.stripeSubscriptionId) {
+    try {
+      await stripeService.cancelSubscriptionAtPeriodEnd(sub.stripeSubscriptionId);
+    } catch (err) {
+      logger.error({ err }, 'Failed to cancel Stripe subscription');
+      return c.json({ error: 'Failed to cancel subscription' }, 500);
+    }
+  }
+
+  await db.update(subscriptions)
+    .set({ cancelledAt: new Date(), updatedAt: new Date() })
+    .where(eq(subscriptions.id, sub.id));
+
+  return c.json({ message: 'Subscription will cancel at end of billing period' });
+});
+
+// GET /usage — usage summary with cost estimates
 authed.get('/usage', async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const latestUsage = await db.query.usageRecords.findFirst({
-    where: eq(usageRecords.accountId, accountId),
-    orderBy: (u, { desc: d }) => d(u.recordedAt),
-  });
+  const summary = await usageService.getAccountUsageSummary(accountId);
 
-  if (!latestUsage) {
-    return c.json({
-      containers: 0,
-      cpuSeconds: 0,
-      memoryMbHours: 0,
-      storageGb: 0,
-      recordedAt: null,
-    });
+  const [totalCount] = await db
+    .select({ count: countSql() })
+    .from(services)
+    .where(eq(services.accountId, accountId));
+
+  const [runningCount] = await db
+    .select({ count: countSql() })
+    .from(services)
+    .where(and(eq(services.accountId, accountId), eq(services.status, 'running')));
+
+  return c.json({
+    ...summary,
+    runningContainers: runningCount?.count ?? 0,
+    totalContainers: totalCount?.count ?? 0,
+  });
+});
+
+// GET /usage/history — paginated usage records
+authed.get('/usage/history', async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
   }
 
-  return c.json(latestUsage);
+  const limit = Math.min(Number(c.req.query('limit') ?? 50), 100);
+  const offset = Number(c.req.query('offset') ?? 0);
+
+  const records = await db.query.usageRecords.findMany({
+    where: eq(usageRecords.accountId, accountId),
+    orderBy: (u, { desc: d }) => d(u.recordedAt),
+    limit,
+    offset,
+  });
+
+  return c.json(records);
 });
 
 // GET /invoices — invoice history from Stripe
@@ -198,7 +304,7 @@ authed.get('/invoices', async (c) => {
     }));
     return c.json(invoices);
   } catch (err) {
-    console.error('Failed to fetch invoices from Stripe:', err);
+    logger.error({ err }, 'Failed to fetch invoices from Stripe');
     return c.json({ error: 'Failed to fetch invoices' }, 500);
   }
 });
@@ -236,6 +342,217 @@ authed.post('/portal', requireOwner, async (c) => {
   return c.json({ url: session.url });
 });
 
+// GET /config — billing configuration (public for end users)
+authed.get('/config', async (c) => {
+  const config = await db.query.billingConfig.findFirst();
+  const pricing = await db.query.pricingConfig.findFirst();
+  const locations = await db.query.locationMultipliers.findMany();
+
+  return c.json({
+    billingModel: config?.billingModel ?? 'fixed',
+    allowUserChoice: config?.allowUserChoice ?? false,
+    allowedCycles: config?.allowedCycles ?? ['monthly', 'yearly'],
+    cycleDiscounts: config?.cycleDiscounts ?? {},
+    trialDays: config?.trialDays ?? 0,
+    pricingConfig: pricing ? {
+      cpuCentsPerHour: pricing.cpuCentsPerHour ?? 0,
+      memoryCentsPerGbHour: pricing.memoryCentsPerGbHour ?? 0,
+      storageCentsPerGbMonth: pricing.storageCentsPerGbMonth ?? 0,
+      bandwidthCentsPerGb: pricing.bandwidthCentsPerGb ?? 0,
+      containerCentsPerHour: pricing.containerCentsPerHour ?? 0,
+      locationPricingEnabled: pricing.locationPricingEnabled ?? false,
+    } : null,
+    locations: locations.map((l) => ({
+      locationKey: l.locationKey,
+      label: l.label,
+      multiplier: l.multiplier,
+    })),
+  });
+});
+
+// PATCH /config — update platform billing configuration (super admin only)
+const billingConfigSchema = z.object({
+  billingModel: z.enum(['fixed', 'usage', 'hybrid']).optional(),
+  allowUserChoice: z.boolean().optional(),
+  allowedCycles: z.array(z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly'])).min(1).optional(),
+  cycleDiscounts: z.record(
+    z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+    z.object({
+      type: z.enum(['fixed', 'percentage']),
+      value: z.number().min(0),
+    }),
+  ).optional(),
+  trialDays: z.number().int().min(0).optional(),
+});
+
+authed.patch('/config', async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Super user access required' }, 403);
+  }
+
+  const body = await c.req.json();
+  const parsed = billingConfigSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  const data = parsed.data;
+  const existing = await db.query.billingConfig.findFirst();
+
+  if (existing) {
+    const [updated] = await updateReturning(billingConfig, {
+      ...data,
+      updatedAt: new Date(),
+    }, eq(billingConfig.id, existing.id));
+    return c.json(updated);
+  }
+
+  const [created] = await insertReturning(billingConfig, {
+    billingModel: data.billingModel ?? 'fixed',
+    allowUserChoice: data.allowUserChoice ?? false,
+    allowedCycles: data.allowedCycles ?? ['monthly', 'yearly'],
+    cycleDiscounts: data.cycleDiscounts ?? {},
+    trialDays: data.trialDays ?? 0,
+  });
+
+  return c.json(created, 201);
+});
+
+// GET /price-preview — calculate price for a specific cycle
+authed.get('/price-preview', async (c) => {
+  const planId = c.req.query('planId');
+  const cycle = c.req.query('cycle') as string | undefined;
+
+  if (!planId || !cycle) {
+    return c.json({ error: 'planId and cycle are required' }, 400);
+  }
+
+  const validCycles = ['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly'];
+  if (!validCycles.includes(cycle)) {
+    return c.json({ error: 'Invalid billing cycle' }, 400);
+  }
+
+  const plan = await db.query.billingPlans.findFirst({
+    where: eq(billingPlans.id, planId),
+  });
+
+  if (!plan) {
+    return c.json({ error: 'Plan not found' }, 404);
+  }
+
+  const config = await db.query.billingConfig.findFirst();
+  const cycleDiscounts = (config?.cycleDiscounts ?? {}) as Record<string, { type: string; value: number }>;
+
+  const monthlyPrice = plan.priceCents;
+  const multipliers: Record<string, number> = {
+    daily: 1 / 30, weekly: 7 / 30, monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12,
+  };
+
+  const multiplier = multipliers[cycle] ?? 1;
+  let cyclePriceCents = Math.round(monthlyPrice * multiplier);
+
+  const discount = cycleDiscounts[cycle];
+  let discountAmount = 0;
+  if (discount) {
+    if (discount.type === 'percentage') {
+      discountAmount = Math.round(cyclePriceCents * (discount.value / 100));
+    } else if (discount.type === 'fixed') {
+      discountAmount = discount.value;
+    }
+    cyclePriceCents = Math.max(0, cyclePriceCents - discountAmount);
+  }
+
+  // Apply per-account discount if applicable
+  const accountId = c.get('accountId');
+  if (accountId) {
+    const override = await db.query.accountBillingOverrides.findFirst({
+      where: eq(accountBillingOverrides.accountId, accountId),
+    });
+    if (override?.discountPercent && override.discountPercent > 0) {
+      const accountDiscount = Math.round(cyclePriceCents * (override.discountPercent / 100));
+      cyclePriceCents = Math.max(0, cyclePriceCents - accountDiscount);
+      discountAmount += accountDiscount;
+    }
+  }
+
+  return c.json({
+    planId: plan.id,
+    planName: plan.name,
+    cycle,
+    monthlyPriceCents: monthlyPrice,
+    cyclePriceCents,
+    discountAmount,
+    discount: discount ?? null,
+  });
+});
+
+// GET /estimate — cost estimate based on current usage for a plan+cycle
+authed.get('/estimate', async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const billingModel = c.req.query('billingModel') ?? 'fixed';
+  const planId = c.req.query('planId');
+  const cycle = c.req.query('cycle') ?? 'monthly';
+
+  const usageSummary = await usageService.getAccountUsageSummary(accountId);
+
+  let fixedCostCents = 0;
+  if (planId && (billingModel === 'fixed' || billingModel === 'hybrid')) {
+    const plan = await db.query.billingPlans.findFirst({
+      where: eq(billingPlans.id, planId),
+    });
+    if (plan) {
+      const multipliers: Record<string, number> = {
+        daily: 1 / 30, weekly: 7 / 30, monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12,
+      };
+      fixedCostCents = Math.round(plan.priceCents * (multipliers[cycle] ?? 1));
+    }
+  }
+
+  return c.json({
+    billingModel,
+    cycle,
+    fixedCostCents,
+    usageCostCents: usageSummary.estimatedCostCents,
+    totalEstimateCents: billingModel === 'fixed'
+      ? fixedCostCents
+      : billingModel === 'usage'
+        ? usageSummary.estimatedCostCents
+        : fixedCostCents + usageSummary.estimatedCostCents,
+    usageBreakdown: usageSummary.breakdown,
+  });
+});
+
+// GET /resource-limits — effective resource limits for this account
+authed.get('/resource-limits', async (c) => {
+  const accountId = c.get('accountId');
+
+  const global = await db.query.resourceLimits.findFirst({
+    where: isNull(resourceLimits.accountId),
+  });
+
+  let override = null;
+  if (accountId) {
+    override = await db.query.resourceLimits.findFirst({
+      where: eq(resourceLimits.accountId, accountId),
+    });
+  }
+
+  return c.json({
+    maxCpuPerContainer: override?.maxCpuPerContainer ?? global?.maxCpuPerContainer ?? null,
+    maxMemoryPerContainer: override?.maxMemoryPerContainer ?? global?.maxMemoryPerContainer ?? null,
+    maxReplicas: override?.maxReplicas ?? global?.maxReplicas ?? null,
+    maxContainers: override?.maxContainers ?? global?.maxContainers ?? null,
+    maxStorageGb: override?.maxStorageGb ?? global?.maxStorageGb ?? null,
+    maxBandwidthGb: override?.maxBandwidthGb ?? global?.maxBandwidthGb ?? null,
+    maxNfsStorageGb: override?.maxNfsStorageGb ?? global?.maxNfsStorageGb ?? null,
+  });
+});
+
 // ─── Webhook route (unauthenticated, signature-verified) ─────────────────────
 
 billing.post('/webhook', async (c) => {
@@ -255,11 +572,10 @@ billing.post('/webhook', async (c) => {
   try {
     event = stripeService.constructWebhookEvent(rawBody, signature);
   } catch (err) {
-    console.error('Webhook signature verification failed:', err);
+    logger.error({ err }, 'Webhook signature verification failed');
     return c.json({ error: 'Invalid signature' }, 400);
   }
 
-  // Handle the event
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as {
@@ -269,89 +585,107 @@ billing.post('/webhook', async (c) => {
         payment_intent?: string;
       };
 
-      // Handle domain purchase/renewal
       if (session.metadata?.type === 'domain_registration') {
         try {
           const { registrarService } = await import('../services/registrar.service.js');
-          const { domainRegistrations: domRegTable, insertReturning: insert, updateReturning: update } = await import('@fleet/db');
+          const { domainRegistrations: domRegTable } = await import('@fleet/db');
 
-          // Create a placeholder contact for the registration
           const contact = {
-            firstName: 'Domain',
-            lastName: 'Owner',
-            email: 'domains@fleet.local',
-            phone: '0000000000',
-            address1: 'N/A',
-            city: 'N/A',
-            state: 'N/A',
-            postalCode: '00000',
-            country: 'US',
+            firstName: 'Domain', lastName: 'Owner', email: 'domains@fleet.local',
+            phone: '0000000000', address1: 'N/A', city: 'N/A', state: 'N/A',
+            postalCode: '00000', country: 'US',
           };
 
           const registration = await registrarService.registerDomain(
-            session.metadata.domain!,
-            Number(session.metadata.years) || 1,
-            contact,
-            session.metadata.accountId!,
+            session.metadata.domain!, Number(session.metadata.years) || 1,
+            contact, session.metadata.accountId!,
           );
 
-          // Update with stripe payment ID
           if (registration?.id && session.payment_intent) {
             await db.update(domRegTable)
               .set({ stripePaymentId: session.payment_intent as string })
               .where(eq(domRegTable.id, registration.id));
           }
         } catch (err) {
-          console.error('Domain registration after payment failed:', err);
+          logger.error({ err }, 'Domain registration after payment failed');
         }
       } else if (session.metadata?.type === 'domain_renewal') {
         try {
           const { registrarService } = await import('../services/registrar.service.js');
-          await registrarService.renewDomain(
-            session.metadata.registrationId!,
-            Number(session.metadata.years) || 1,
-          );
+          await registrarService.renewDomain(session.metadata.registrationId!, Number(session.metadata.years) || 1);
         } catch (err) {
-          console.error('Domain renewal after payment failed:', err);
+          logger.error({ err }, 'Domain renewal after payment failed');
         }
       } else if (session.customer && session.subscription) {
-        // Subscription checkout
         const account = await db.query.accounts.findFirst({
           where: eq(accounts.stripeCustomerId, session.customer),
         });
 
         if (account) {
-          const plan = await db.query.billingPlans.findFirst({
-            where: eq(billingPlans.accountId, account.id),
-          });
+          const billingModel = (session.metadata?.billingModel ?? 'fixed') as string;
+          const billingCycle = session.metadata?.billingCycle ?? 'monthly';
+          const planId = session.metadata?.planId ?? null;
 
-          if (plan) {
-            await db.insert(subscriptions).values({
-              accountId: account.id,
-              planId: plan.id,
-              stripeSubscriptionId: session.subscription,
-              status: 'active',
-            });
-          }
+          await db.insert(subscriptions).values({
+            accountId: account.id,
+            planId,
+            billingModel,
+            billingCycle,
+            stripeSubscriptionId: session.subscription,
+            stripeCustomerId: session.customer,
+            status: 'active',
+          });
         }
       }
       break;
     }
 
+    case 'invoice.payment_succeeded': {
+      const invoice = event.data.object as {
+        subscription?: string;
+        period_start?: number;
+        period_end?: number;
+      };
+      if (invoice.subscription) {
+        await db
+          .update(subscriptions)
+          .set({
+            currentPeriodStart: invoice.period_start ? new Date(invoice.period_start * 1000) : undefined,
+            currentPeriodEnd: invoice.period_end ? new Date(invoice.period_end * 1000) : undefined,
+            status: 'active',
+            updatedAt: new Date(),
+          })
+          .where(eq(subscriptions.stripeSubscriptionId, invoice.subscription));
+      }
+      break;
+    }
+
     case 'customer.subscription.updated': {
-      const sub = event.data.object as { id?: string; status?: string };
+      const sub = event.data.object as {
+        id?: string;
+        status?: string;
+        trial_end?: number | null;
+        current_period_start?: number;
+        current_period_end?: number;
+        canceled_at?: number | null;
+      };
       if (sub.id) {
         const statusMap: Record<string, string> = {
-          active: 'active',
-          past_due: 'past_due',
-          canceled: 'cancelled',
-          unpaid: 'past_due',
+          active: 'active', past_due: 'past_due', canceled: 'cancelled',
+          unpaid: 'past_due', trialing: 'trialing', incomplete: 'incomplete',
         };
         const mappedStatus = statusMap[sub.status ?? ''] ?? sub.status ?? 'active';
 
         await db
           .update(subscriptions)
-          .set({ status: mappedStatus, updatedAt: new Date() })
+          .set({
+            status: mappedStatus,
+            trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : undefined,
+            currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start * 1000) : undefined,
+            currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000) : undefined,
+            cancelledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : undefined,
+            updatedAt: new Date(),
+          })
           .where(eq(subscriptions.stripeSubscriptionId, sub.id));
       }
       break;
@@ -362,21 +696,19 @@ billing.post('/webhook', async (c) => {
       if (sub.id) {
         await db
           .update(subscriptions)
-          .set({ status: 'cancelled', updatedAt: new Date() })
+          .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
           .where(eq(subscriptions.stripeSubscriptionId, sub.id));
       }
       break;
     }
 
     default:
-      // Unhandled event type — acknowledge receipt
       break;
   }
 
   return c.json({ received: true });
 });
 
-// Mount authenticated routes under the billing router
 billing.route('/', authed);
 
 export default billing;

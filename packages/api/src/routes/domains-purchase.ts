@@ -6,6 +6,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { registrarService } from '../services/registrar.service.js';
 import { stripeService } from '../services/stripe.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
+import { logger } from '../services/logger.js';
 
 const domainPurchase = new Hono<{
   Variables: {
@@ -66,7 +67,7 @@ domainPurchase.get('/search', async (c) => {
 
     return c.json({ query: query.trim(), results: enriched });
   } catch (err) {
-    console.error('Domain search failed:', err);
+    logger.error({ err }, 'Domain search failed');
     return c.json(
       {
         error: 'Domain search failed',
@@ -192,7 +193,7 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
 
     return c.json(registration, 201);
   } catch (err) {
-    console.error('Domain registration failed:', err);
+    logger.error({ err }, 'Domain registration failed');
     return c.json(
       {
         error: 'Domain registration failed',
@@ -312,7 +313,7 @@ domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
 
     return c.json(updated);
   } catch (err) {
-    console.error('Domain renewal failed:', err);
+    logger.error({ err }, 'Domain renewal failed');
     return c.json(
       {
         error: 'Domain renewal failed',

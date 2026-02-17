@@ -1,5 +1,6 @@
 import { db, backupSchedules, eq } from '@fleet/db';
 import { getMaintenanceQueue, isQueueAvailable } from './queue.service.js';
+import { logger } from './logger.js';
 
 class SchedulerService {
   private initialized = false;
@@ -9,7 +10,7 @@ class SchedulerService {
     this.initialized = true;
 
     if (!isQueueAvailable()) {
-      console.log('Scheduler skipped — queues not available');
+      logger.info('Scheduler skipped — queues not available');
       return;
     }
 
@@ -32,6 +33,26 @@ class SchedulerService {
       },
     );
 
+    // Usage collection — every 5 minutes
+    await getMaintenanceQueue().add(
+      'usage-collection',
+      { type: 'usage-collection' },
+      {
+        repeat: { every: 5 * 60 * 1000 },
+        jobId: 'system:usage-collection',
+      },
+    );
+
+    // Stripe usage reporting — hourly
+    await getMaintenanceQueue().add(
+      'stripe-usage-report',
+      { type: 'stripe-usage-report' },
+      {
+        repeat: { pattern: '0 * * * *' },
+        jobId: 'system:stripe-usage-report',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -41,8 +62,8 @@ class SchedulerService {
       await this.addScheduleJob(schedule.id, schedule.cron);
     }
 
-    console.log(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 2 system jobs (BullMQ)`,
+    logger.info(
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 4 system jobs (BullMQ)`,
     );
   }
 
@@ -84,9 +105,9 @@ class SchedulerService {
         },
       );
     } catch (err) {
-      console.error(
-        `Failed to register backup schedule ${scheduleId} (cron: ${cronExpr}):`,
-        err,
+      logger.error(
+        { err, scheduleId, cron: cronExpr },
+        `Failed to register backup schedule ${scheduleId} (cron: ${cronExpr})`,
       );
     }
   }
@@ -99,7 +120,7 @@ class SchedulerService {
         await getMaintenanceQueue().removeRepeatableByKey(match.key);
       }
     } catch (err) {
-      console.error(`Failed to remove backup schedule ${scheduleId}:`, err);
+      logger.error({ err, scheduleId }, `Failed to remove backup schedule ${scheduleId}`);
     }
   }
 }

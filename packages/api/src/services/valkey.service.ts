@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { logger } from './logger.js';
 
 const VALKEY_URL = process.env['VALKEY_URL'] ?? 'redis://:fleetvalkey@valkey:6379';
 
@@ -22,18 +23,18 @@ function createClient(name: string): Redis | null {
 
     redis.on('error', (err) => {
       if (!connectionFailed) {
-        console.error(`Valkey ${name} error:`, err.message);
+        logger.error({ error: err.message, name }, `Valkey ${name} error`);
       }
     });
 
     redis.on('connect', () => {
       connectionFailed = false;
-      console.log(`Valkey ${name} connected`);
+      logger.info({ name }, `Valkey ${name} connected`);
     });
 
     return redis;
   } catch (err) {
-    console.error(`Failed to create Valkey ${name} client:`, err);
+    logger.error({ err, name }, `Failed to create Valkey ${name} client`);
     return null;
   }
 }

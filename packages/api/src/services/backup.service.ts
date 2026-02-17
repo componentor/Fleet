@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and } from '@fleet/db';
 import { getBackupQueue, isQueueAvailable } from './queue.service.js';
+import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -61,7 +62,7 @@ export class BackupService {
     } else {
       // Fallback: run in-process (local dev without Valkey)
       this.runBackup(backupId, accountId, serviceId ?? null, backupPath).catch(
-        (err) => console.error(`Backup ${backupId} failed:`, err),
+        (err) => logger.error({ err, backupId }, `Backup ${backupId} failed`),
       );
     }
 
@@ -163,7 +164,7 @@ export class BackupService {
               path: volumeBackupPath,
             });
           } catch (err) {
-            console.error(`Failed to backup volume ${vol.source}:`, err);
+            logger.error({ err, volume: vol.source }, `Failed to backup volume ${vol.source}`);
           }
         }
 
@@ -223,9 +224,9 @@ export class BackupService {
                 path: join(svcDir, archiveName),
               });
             } catch (err) {
-              console.error(
-                `Failed to backup volume ${vol.source} for service ${service.name}:`,
-                err,
+              logger.error(
+                { err, volume: vol.source, service: service.name },
+                `Failed to backup volume ${vol.source} for service ${service.name}`,
               );
             }
           }
@@ -267,7 +268,7 @@ export class BackupService {
         })
         .where(eq(backups.id, backupId));
     } catch (err) {
-      console.error(`Backup ${backupId} failed:`, err);
+      logger.error({ err, backupId }, `Backup ${backupId} failed`);
       await db
         .update(backups)
         .set({ status: 'failed' })
@@ -326,7 +327,7 @@ export class BackupService {
               'cd /target && tar xzf /backup/archive.tar.gz',
             ]);
           } catch (err) {
-            console.error(`Failed to restore volume ${volumeName}:`, err);
+            logger.error({ err, volume: volumeName }, `Failed to restore volume ${volumeName}`);
           }
         }
       }
@@ -364,7 +365,7 @@ export class BackupService {
       try {
         await rm(backup.storagePath, { recursive: true, force: true });
       } catch (err) {
-        console.error(`Failed to remove backup files at ${backup.storagePath}:`, err);
+        logger.error({ err, storagePath: backup.storagePath }, `Failed to remove backup files at ${backup.storagePath}`);
       }
     }
 

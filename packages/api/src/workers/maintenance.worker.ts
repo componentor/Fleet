@@ -2,6 +2,8 @@ import { Worker, type Job, type ConnectionOptions } from 'bullmq';
 import { db, nodes, deployments, backupSchedules, eq, and, lt } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
+import { usageService } from '../services/usage.service.js';
+import { logger } from '../services/logger.js';
 
 interface HealthCheckData {
   type: 'health-check';
@@ -16,7 +18,20 @@ interface BackupScheduleData {
   scheduleId: string;
 }
 
-type MaintenanceJobData = HealthCheckData | StaleCleanupData | BackupScheduleData;
+interface UsageCollectionData {
+  type: 'usage-collection';
+}
+
+interface StripeUsageReportData {
+  type: 'stripe-usage-report';
+}
+
+type MaintenanceJobData =
+  | HealthCheckData
+  | StaleCleanupData
+  | BackupScheduleData
+  | UsageCollectionData
+  | StripeUsageReportData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -31,14 +46,14 @@ async function checkNodeHealth(): Promise<void> {
         .set({ status: 'offline', updatedAt: new Date() })
         .where(eq(nodes.id, node.id));
 
-      console.log(`Node ${node.hostname} marked offline (no heartbeat)`);
+      logger.info(`Node ${node.hostname} marked offline (no heartbeat)`);
     } else if (!isStale && node.status === 'offline') {
       await db
         .update(nodes)
         .set({ status: 'active', updatedAt: new Date() })
         .where(eq(nodes.id, node.id));
 
-      console.log(`Node ${node.hostname} back online`);
+      logger.info(`Node ${node.hostname} back online`);
     }
   }
 }
@@ -50,7 +65,7 @@ async function cleanupStaleDeployments(): Promise<void> {
     and(eq(deployments.status, 'failed'), lt(deployments.createdAt, thirtyDaysAgo)),
   );
 
-  console.log('Stale deployment cleanup complete');
+  logger.info('Stale deployment cleanup complete');
 }
 
 async function executeBackupSchedule(scheduleId: string): Promise<void> {
@@ -61,7 +76,7 @@ async function executeBackupSchedule(scheduleId: string): Promise<void> {
   if (!schedule || !schedule.enabled) return;
 
   try {
-    console.log(
+    logger.info(
       `Executing backup schedule ${scheduleId} for account ${schedule.accountId}`,
     );
 
@@ -76,7 +91,7 @@ async function executeBackupSchedule(scheduleId: string): Promise<void> {
       .set({ lastRunAt: new Date() })
       .where(eq(backupSchedules.id, scheduleId));
   } catch (err) {
-    console.error(`Backup schedule ${scheduleId} failed:`, err);
+    logger.error({ err, scheduleId }, `Backup schedule ${scheduleId} failed`);
 
     try {
       await notificationService.create(schedule.accountId, {
@@ -100,6 +115,12 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'backup-schedule':
       await executeBackupSchedule((job.data as BackupScheduleData).scheduleId);
+      break;
+    case 'usage-collection':
+      await usageService.collectUsage();
+      break;
+    case 'stripe-usage-report':
+      await usageService.reportUsageToStripe();
       break;
   }
 }

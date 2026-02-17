@@ -1,9 +1,13 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
 import { db, services, eq, and } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
+import { logger } from './services/logger.js';
+import { requestLogger } from './middleware/request-logger.js';
+import { auditMiddleware } from './middleware/audit.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/accounts.js';
 import userRoutes from './routes/users.js';
@@ -12,6 +16,7 @@ import deploymentRoutes from './routes/deployments.js';
 import dnsRoutes from './routes/domains.js';
 import nodeRoutes from './routes/nodes.js';
 import billingRoutes from './routes/billing.js';
+import billingAdminRoutes from './routes/billing-admin.js';
 import terminalRoutes from './routes/terminal.js';
 import sshRoutes from './routes/ssh.js';
 import storageRoutes from './routes/storage.js';
@@ -32,6 +37,28 @@ export const app = new Hono();
 // WebSocket support — export for use in index.ts
 export const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
 
+// CORS
+app.use('*', cors({
+  origin: process.env['CORS_ORIGIN'] ?? '*',
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Account-Id', 'X-API-Key'],
+  maxAge: 86400,
+}));
+
+// Request logging
+app.use('*', requestLogger);
+
+// Global error handler
+app.onError((err, c) => {
+  logger.error({ err, path: c.req.path, method: c.req.method }, 'Unhandled error');
+  return c.json({ error: 'Internal server error' }, 500);
+});
+
+// 404 handler
+app.notFound((c) => {
+  return c.json({ error: 'Not found' }, 404);
+});
+
 // Health check
 app.get('/health', (c) => {
   return c.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -49,6 +76,9 @@ async function verifyWsToken(token: string) {
 // API v1 routes
 const api = new Hono();
 
+// Audit logging for mutating requests (POST/PUT/PATCH/DELETE)
+api.use('*', auditMiddleware);
+
 api.route('/auth', authRoutes);
 api.route('/accounts', accountRoutes);
 api.route('/users', userRoutes);
@@ -57,6 +87,7 @@ api.route('/deployments', deploymentRoutes);
 api.route('/dns', dnsRoutes);
 api.route('/nodes', nodeRoutes);
 api.route('/billing', billingRoutes);
+api.route('/billing/admin', billingAdminRoutes);
 api.route('/terminal', terminalRoutes);
 api.route('/ssh', sshRoutes);
 api.route('/storage', storageRoutes);
@@ -116,11 +147,11 @@ api.get(
           });
 
           logStream.on('error', (err: Error) => {
-            console.error('Log stream error:', err);
+            logger.error({ err }, 'Log stream error');
             ws.close(1011, 'Log stream error');
           });
         } catch (err) {
-          console.error('WS log auth failed:', err);
+          logger.error({ err }, 'WS log auth failed');
           ws.close(4003, 'Auth failed');
         }
       },
@@ -190,11 +221,11 @@ api.get(
           });
 
           dockerStream.on('error', (err: Error) => {
-            console.error('Docker stream error:', err);
+            logger.error({ err }, 'Docker stream error');
             ws.close(1011, 'Container error');
           });
         } catch (err) {
-          console.error('WS terminal auth failed:', err);
+          logger.error({ err }, 'WS terminal auth failed');
           ws.close(4003, 'Auth failed');
         }
       },

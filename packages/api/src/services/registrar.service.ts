@@ -1,4 +1,5 @@
 import { db, domainRegistrars, domainRegistrations, insertReturning, updateReturning, eq } from '@fleet/db';
+import { decrypt } from './crypto.service.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -205,11 +206,13 @@ export class RegistrarService {
 
     if (registrar) {
       const config = (registrar.config ?? {}) as Record<string, string>;
+      const decryptedKey = decrypt(registrar.apiKey);
+      const decryptedSecret = registrar.apiSecret ? decrypt(registrar.apiSecret) : null;
       switch (registrar.provider) {
         case 'resellerclub': {
           const { ResellerClubProvider } = await import('./resellerclub.provider.js');
-          const resellerId = config['resellerId'] ?? registrar.apiKey;
-          this.provider = new ResellerClubProvider(resellerId, registrar.apiSecret ?? registrar.apiKey);
+          const resellerId = config['resellerId'] ?? decryptedKey;
+          this.provider = new ResellerClubProvider(resellerId, decryptedSecret ?? decryptedKey);
           break;
         }
         default:

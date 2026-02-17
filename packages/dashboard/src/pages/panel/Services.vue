@@ -11,7 +11,7 @@ function statusColor(status: string) {
   switch (status) {
     case 'running': return 'bg-green-500'
     case 'deploying': return 'bg-yellow-500'
-    case 'stopped': return 'bg-red-500'
+    case 'stopped': return 'bg-gray-400'
     case 'failed': return 'bg-red-500'
     default: return 'bg-gray-400'
   }
@@ -21,7 +21,7 @@ function statusBadge(status: string) {
   switch (status) {
     case 'running': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
     case 'deploying': return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-    case 'stopped': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+    case 'stopped': return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
     case 'failed': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
     default: return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
   }
@@ -91,7 +91,10 @@ onMounted(() => {
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 font-mono mb-3">{{ service.image }}</p>
           <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-            <span>{{ service.replicas ?? 1 }} replica{{ (service.replicas ?? 1) !== 1 ? 's' : '' }}</span>
+            <div>
+              <span>{{ service.replicas ?? 1 }} replica{{ (service.replicas ?? 1) !== 1 ? 's' : '' }}</span>
+              <span v-if="service.status === 'stopped'" class="ml-2 text-gray-400 dark:text-gray-500">Not billed</span>
+            </div>
             <ArrowRight class="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-primary-600 dark:text-primary-400" />
           </div>
         </div>

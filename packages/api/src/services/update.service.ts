@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { dockerService } from './docker.service.js';
 import { backupService } from './backup.service.js';
+import { logger } from './logger.js';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 const IMAGE_PREFIX = process.env['FLEET_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
@@ -89,13 +90,13 @@ export class UpdateService {
     // Check immediately on startup (after a short delay to let the API boot)
     setTimeout(() => {
       this.refreshNotification().catch((err) => {
-        console.error('[update] Periodic check failed:', err);
+        logger.error({ err }, 'Periodic update check failed');
       });
     }, 30_000); // 30s after boot
 
     this.checkTimer = setInterval(() => {
       this.refreshNotification().catch((err) => {
-        console.error('[update] Periodic check failed:', err);
+        logger.error({ err }, 'Periodic update check failed');
       });
     }, CHECK_INTERVAL_MS);
   }

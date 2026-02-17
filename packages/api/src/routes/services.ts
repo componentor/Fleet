@@ -6,6 +6,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
+import { logger } from '../services/logger.js';
 
 const serviceRoutes = new Hono<{
   Variables: {
@@ -190,7 +191,7 @@ serviceRoutes.post('/', requireMember, async (c) => {
       .set({ status: 'failed', updatedAt: new Date() })
       .where(eq(services.id, svc.id));
 
-    console.error('Docker service creation failed:', err);
+    logger.error({ err }, 'Docker service creation failed');
     return c.json({
       error: 'Failed to deploy service to Docker Swarm',
       serviceId: svc.id,
@@ -324,7 +325,7 @@ serviceRoutes.patch('/:id', requireMember, async (c) => {
         rollbackOnFailure: data.rollbackOnFailure,
       });
     } catch (err) {
-      console.error('Docker service update failed:', err);
+      logger.error({ err }, 'Docker service update failed');
       // Don't fail the DB update, but inform the client
       return c.json({
         ...updated,
@@ -360,7 +361,7 @@ serviceRoutes.delete('/:id', requireMember, async (c) => {
     try {
       await dockerService.removeService(svc.dockerServiceId);
     } catch (err) {
-      console.error('Docker service removal failed:', err);
+      logger.error({ err }, 'Docker service removal failed');
     }
   }
 
@@ -402,7 +403,7 @@ serviceRoutes.post('/:id/restart', requireMember, async (c) => {
 
     return c.json({ message: 'Service restart initiated' });
   } catch (err) {
-    console.error('Service restart failed:', err);
+    logger.error({ err }, 'Service restart failed');
     return c.json({ error: 'Failed to restart service' }, 500);
   }
 });
@@ -454,7 +455,7 @@ serviceRoutes.post('/:id/redeploy', requireMember, async (c) => {
         .set({ status: 'running', updatedAt: new Date() })
         .where(eq(services.id, serviceId));
     } catch (err) {
-      console.error('Redeployment failed:', err);
+      logger.error({ err }, 'Redeployment failed');
 
       await db
         .update(deployments)
@@ -469,6 +470,90 @@ serviceRoutes.post('/:id/redeploy', requireMember, async (c) => {
   }
 
   return c.json({ message: 'Redeployment initiated', deploymentId: deployment?.id });
+});
+
+// POST /:id/stop — stop a running service (scale to 0)
+serviceRoutes.post('/:id/stop', requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+  });
+
+  if (!svc) {
+    return c.json({ error: 'Service not found' }, 404);
+  }
+
+  if (svc.status === 'deploying') {
+    return c.json({ error: 'Cannot stop a service that is currently deploying' }, 409);
+  }
+
+  if (svc.status === 'stopped') {
+    return c.json({ error: 'Service is already stopped' }, 400);
+  }
+
+  if (svc.dockerServiceId) {
+    try {
+      await dockerService.scaleService(svc.dockerServiceId, 0);
+    } catch (err) {
+      logger.error({ err }, 'Docker scale-to-zero failed');
+      return c.json({ error: 'Failed to stop service in Docker' }, 500);
+    }
+  }
+
+  await db
+    .update(services)
+    .set({ status: 'stopped', stoppedAt: new Date(), updatedAt: new Date() })
+    .where(eq(services.id, serviceId));
+
+  await invalidateCache(`GET:/services:${accountId}`);
+
+  return c.json({ message: 'Service stopped' });
+});
+
+// POST /:id/start — start a stopped service (restore replicas)
+serviceRoutes.post('/:id/start', requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+  });
+
+  if (!svc) {
+    return c.json({ error: 'Service not found' }, 404);
+  }
+
+  if (svc.status !== 'stopped') {
+    return c.json({ error: 'Service is not stopped' }, 400);
+  }
+
+  if (svc.dockerServiceId) {
+    try {
+      await dockerService.scaleService(svc.dockerServiceId, svc.replicas ?? 1);
+    } catch (err) {
+      logger.error({ err }, 'Docker scale-up failed');
+      return c.json({ error: 'Failed to start service in Docker' }, 500);
+    }
+  }
+
+  await db
+    .update(services)
+    .set({ status: 'running', stoppedAt: null, updatedAt: new Date() })
+    .where(eq(services.id, serviceId));
+
+  await invalidateCache(`GET:/services:${accountId}`);
+
+  return c.json({ message: 'Service started' });
 });
 
 // GET /:id/logs — stream service logs
@@ -504,7 +589,7 @@ serviceRoutes.get('/:id/logs', async (c) => {
     const logs = Buffer.concat(chunks).toString('utf-8');
     return c.json({ logs });
   } catch (err) {
-    console.error('Log fetch failed:', err);
+    logger.error({ err }, 'Log fetch failed');
     return c.json({ error: 'Failed to fetch logs' }, 500);
   }
 });

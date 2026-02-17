@@ -4,6 +4,7 @@ import { db, domainTldPricing, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { insertReturning, updateReturning } from '@fleet/db';
 import { registrarService } from '../services/registrar.service.js';
+import { logger } from '../services/logger.js';
 
 const domainPricingRoutes = new Hono<{
   Variables: {
@@ -220,7 +221,7 @@ domainPricingRoutes.post('/sync', async (c) => {
 
     return c.json({ message: `Synced ${synced} TLD prices from provider` });
   } catch (err) {
-    console.error('Price sync failed:', err);
+    logger.error({ err }, 'Price sync failed');
     return c.json({ error: 'Failed to sync prices', details: err instanceof Error ? err.message : String(err) }, 500);
   }
 });

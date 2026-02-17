@@ -61,10 +61,12 @@ const emailError = computed(() => {
   return ''
 })
 
+const dockerSkipped = ref(false)
+
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
-      return dockerState.value?.available && dockerState.value?.swarm === 'active'
+      return dockerSkipped.value || (dockerState.value?.available && dockerState.value?.swarm === 'active')
     case 2:
       return (
         name.value.length > 0 &&
@@ -357,8 +359,8 @@ async function goToDashboard() {
                   </button>
                 </div>
 
-                <!-- Refresh button -->
-                <div v-if="!dockerState.available || dockerState.swarm !== 'active'" class="flex justify-center">
+                <!-- Refresh & Skip -->
+                <div v-if="!dockerState.available || dockerState.swarm !== 'active'" class="flex flex-col items-center gap-3">
                   <button
                     @click="detectDocker"
                     :disabled="dockerLoading"
@@ -366,6 +368,12 @@ async function goToDashboard() {
                   >
                     <RefreshCw class="w-4 h-4" />
                     Re-check
+                  </button>
+                  <button
+                    @click="dockerSkipped = true; nextStep()"
+                    class="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline underline-offset-2 transition-colors"
+                  >
+                    Skip — I'll configure Docker later
                   </button>
                 </div>
               </template>
@@ -466,6 +474,9 @@ async function goToDashboard() {
                 <div v-if="platformName"><span class="font-medium text-gray-900 dark:text-white">Platform:</span> {{ platformName }}</div>
                 <div v-if="dockerState?.swarm === 'active'">
                   <span class="font-medium text-gray-900 dark:text-white">Swarm:</span> Active ({{ dockerState.role ?? 'manager' }})
+                </div>
+                <div v-else-if="dockerSkipped" class="text-yellow-600 dark:text-yellow-400">
+                  <span class="font-medium text-gray-900 dark:text-white">Docker:</span> Skipped — configure in Admin Settings
                 </div>
               </div>
             </div>
