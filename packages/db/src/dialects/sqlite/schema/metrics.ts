@@ -5,7 +5,7 @@ import {
   integer,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
-import { nodes } from './nodes.js';
+import { nodes } from './nodes';
 
 export const nodeMetrics = sqliteTable('node_metrics', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

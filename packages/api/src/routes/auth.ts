@@ -17,7 +17,7 @@ const JWT_SECRET_KEY = () => {
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
-async function generateTokens(payload: { userId: string; email: string; isSuper: boolean }) {
+export async function generateTokens(payload: { userId: string; email: string; isSuper: boolean; impersonatingAccountId?: string }) {
   const secret = JWT_SECRET_KEY();
 
   const accessToken = await new SignJWT({ ...payload })
@@ -26,7 +26,12 @@ async function generateTokens(payload: { userId: string; email: string; isSuper:
     .setExpirationTime(ACCESS_TOKEN_EXPIRY)
     .sign(secret);
 
-  const refreshToken = await new SignJWT({ userId: payload.userId, type: 'refresh' })
+  const refreshPayload: Record<string, unknown> = { userId: payload.userId, type: 'refresh' };
+  if (payload.impersonatingAccountId) {
+    refreshPayload.impersonatingAccountId = payload.impersonatingAccountId;
+  }
+
+  const refreshToken = await new SignJWT(refreshPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(REFRESH_TOKEN_EXPIRY)
@@ -207,10 +212,13 @@ auth.post('/refresh', async (c) => {
       return c.json({ error: 'User not found' }, 401);
     }
 
+    const impersonatingAccountId = payload['impersonatingAccountId'] as string | undefined;
+
     const tokens = await generateTokens({
       userId: user.id,
       email: user.email!,
       isSuper: user.isSuper ?? false,
+      impersonatingAccountId,
     });
 
     return c.json({ tokens });

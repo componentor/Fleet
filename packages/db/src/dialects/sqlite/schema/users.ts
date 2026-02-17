@@ -6,7 +6,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

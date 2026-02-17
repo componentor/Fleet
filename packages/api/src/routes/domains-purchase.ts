@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, domainRegistrations, eq, and } from '@fleet/db';
+import { db, domainRegistrations, domainTldPricing, accounts, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { registrarService } from '../services/registrar.service.js';
+import { stripeService } from '../services/stripe.service.js';
+import { requireAdmin } from '../middleware/rbac.js';
 
 const domainPurchase = new Hono<{
   Variables: {
@@ -17,7 +19,7 @@ domainPurchase.use('*', authMiddleware);
 domainPurchase.use('*', tenantMiddleware);
 
 // ────────────────────────────────────────────────────────────────────────────
-// GET /search — search available domains
+// GET /search — search available domains (with TLD pricing overlay)
 // ────────────────────────────────────────────────────────────────────────────
 domainPurchase.get('/search', async (c) => {
   const query = c.req.query('q');
@@ -33,7 +35,36 @@ domainPurchase.get('/search', async (c) => {
 
   try {
     const results = await registrarService.searchDomains(query.trim(), tlds);
-    return c.json({ query: query.trim(), results });
+
+    // Overlay with sell prices from domainTldPricing
+    const pricingEntries = await db.query.domainTldPricing.findMany();
+    const pricingMap = new Map(pricingEntries.map((p) => [p.tld, p]));
+
+    const enriched = results
+      .map((r) => {
+        const tld = r.domain.split('.').slice(1).join('.');
+        const pricing = pricingMap.get(tld);
+
+        if (pricing) {
+          // Only show TLDs that are enabled
+          if (!pricing.enabled) return null;
+
+          return {
+            ...r,
+            price: {
+              registration: pricing.sellRegistrationPrice / 100,
+              renewal: pricing.sellRenewalPrice / 100,
+              currency: pricing.currency,
+            },
+          };
+        }
+
+        // No pricing configured — show provider price as-is
+        return r;
+      })
+      .filter(Boolean);
+
+    return c.json({ query: query.trim(), results: enriched });
   } catch (err) {
     console.error('Domain search failed:', err);
     return c.json(
@@ -47,7 +78,75 @@ domainPurchase.get('/search', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// POST /register — purchase / register a domain
+// POST /checkout — create Stripe checkout session for domain purchase
+// ────────────────────────────────────────────────────────────────────────────
+const checkoutSchema = z.object({
+  domain: z.string().min(3).max(253),
+  years: z.number().int().min(1).max(10).default(1),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+});
+
+domainPurchase.post('/checkout', requireAdmin, async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = checkoutSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  const { domain, years, successUrl, cancelUrl } = parsed.data;
+  const tld = domain.split('.').slice(1).join('.').toLowerCase();
+
+  // Look up sell price
+  const pricing = await db.query.domainTldPricing.findFirst({
+    where: eq(domainTldPricing.tld, tld),
+  });
+
+  if (!pricing || !pricing.enabled) {
+    return c.json({ error: `Domain TLD .${tld} is not available for purchase` }, 400);
+  }
+
+  const priceInCents = pricing.sellRegistrationPrice * years;
+
+  // Get or create Stripe customer
+  const account = await db.query.accounts.findFirst({
+    where: eq(accounts.id, accountId),
+  });
+
+  if (!account) {
+    return c.json({ error: 'Account not found' }, 404);
+  }
+
+  let stripeCustomerId = account.stripeCustomerId;
+  if (!stripeCustomerId) {
+    const user = c.get('user');
+    const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+    stripeCustomerId = customer.id;
+    await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+  }
+
+  // Create Stripe checkout session
+  const session = await stripeService.createDomainCheckoutSession(
+    stripeCustomerId,
+    domain,
+    priceInCents,
+    pricing.currency,
+    years,
+    accountId,
+    successUrl,
+    cancelUrl,
+  );
+
+  return c.json({ url: session.url });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /register — direct register (for non-Stripe flows or after webhook)
 // ────────────────────────────────────────────────────────────────────────────
 const registerDomainSchema = z.object({
   domain: z.string().min(3).max(253),
@@ -62,12 +161,12 @@ const registerDomainSchema = z.object({
     city: z.string().min(1),
     state: z.string().min(1),
     postalCode: z.string().min(1),
-    country: z.string().length(2), // ISO 3166-1 alpha-2
+    country: z.string().length(2),
     organization: z.string().optional(),
   }),
 });
 
-domainPurchase.post('/register', async (c) => {
+domainPurchase.post('/register', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -105,13 +204,15 @@ domainPurchase.post('/register', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// POST /:id/renew — renew a domain registration
+// POST /:id/renew-checkout — create Stripe checkout for domain renewal
 // ────────────────────────────────────────────────────────────────────────────
-const renewSchema = z.object({
+const renewCheckoutSchema = z.object({
   years: z.number().int().min(1).max(10).default(1),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
 });
 
-domainPurchase.post('/:id/renew', async (c) => {
+domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const registrationId = c.req.param('id');
 
@@ -119,7 +220,72 @@ domainPurchase.post('/:id/renew', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Verify ownership
+  const existing = await db.query.domainRegistrations.findFirst({
+    where: and(
+      eq(domainRegistrations.id, registrationId),
+      eq(domainRegistrations.accountId, accountId),
+    ),
+  });
+
+  if (!existing) {
+    return c.json({ error: 'Domain registration not found' }, 404);
+  }
+
+  const body = await c.req.json();
+  const parsed = renewCheckoutSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  const { years, successUrl, cancelUrl } = parsed.data;
+  const tld = existing.domain.split('.').slice(1).join('.');
+
+  const pricing = await db.query.domainTldPricing.findFirst({
+    where: eq(domainTldPricing.tld, tld),
+  });
+
+  const priceInCents = pricing
+    ? pricing.sellRenewalPrice * years
+    : 1499 * years; // Fallback
+
+  const account = await db.query.accounts.findFirst({
+    where: eq(accounts.id, accountId),
+  });
+
+  if (!account?.stripeCustomerId) {
+    return c.json({ error: 'No Stripe customer configured' }, 400);
+  }
+
+  const session = await stripeService.createDomainCheckoutSession(
+    account.stripeCustomerId,
+    existing.domain,
+    priceInCents,
+    pricing?.currency ?? 'USD',
+    years,
+    accountId,
+    successUrl,
+    cancelUrl,
+    registrationId,
+  );
+
+  return c.json({ url: session.url });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /:id/renew — direct renew (for non-Stripe or after webhook)
+// ────────────────────────────────────────────────────────────────────────────
+const renewSchema = z.object({
+  years: z.number().int().min(1).max(10).default(1),
+});
+
+domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
+  const accountId = c.get('accountId');
+  const registrationId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
   const existing = await db.query.domainRegistrations.findFirst({
     where: and(
       eq(domainRegistrations.id, registrationId),

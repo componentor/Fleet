@@ -4,6 +4,7 @@ import { db, emailTemplates, insertReturning, updateReturning, deleteReturning, 
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 const emails = new Hono<{
   Variables: {
@@ -116,7 +117,7 @@ const updateTemplateSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-emails.patch('/templates/:slug', async (c) => {
+emails.patch('/templates/:slug', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const slug = c.req.param('slug');
@@ -187,7 +188,7 @@ const testEmailSchema = z.object({
   variables: z.record(z.string()).optional(),
 });
 
-emails.post('/templates/:slug/test', async (c) => {
+emails.post('/templates/:slug/test', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const slug = c.req.param('slug');
 
@@ -244,7 +245,7 @@ emails.post('/templates/:slug/test', async (c) => {
 
 // POST /templates/:slug/reset — reset template to default
 // Deletes the account-specific override so the default is used again.
-emails.post('/templates/:slug/reset', async (c) => {
+emails.post('/templates/:slug/reset', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const slug = c.req.param('slug');

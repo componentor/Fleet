@@ -4,6 +4,7 @@ import { db, services, deployments, insertReturning, updateReturning, eq, and } 
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 const serviceRoutes = new Hono<{
   Variables: {
@@ -90,7 +91,7 @@ const createServiceSchema = z.object({
   autoDeploy: z.boolean().default(false),
 });
 
-serviceRoutes.post('/', async (c) => {
+serviceRoutes.post('/', requireMember, async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -261,7 +262,7 @@ const updateServiceSchema = z.object({
   }).nullable().optional(),
 });
 
-serviceRoutes.patch('/:id', async (c) => {
+serviceRoutes.patch('/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -335,7 +336,7 @@ serviceRoutes.patch('/:id', async (c) => {
 });
 
 // DELETE /:id — destroy service
-serviceRoutes.delete('/:id', async (c) => {
+serviceRoutes.delete('/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -368,7 +369,7 @@ serviceRoutes.delete('/:id', async (c) => {
 });
 
 // POST /:id/restart — restart service (force update)
-serviceRoutes.post('/:id/restart', async (c) => {
+serviceRoutes.post('/:id/restart', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -402,7 +403,7 @@ serviceRoutes.post('/:id/restart', async (c) => {
 });
 
 // POST /:id/redeploy — rebuild and redeploy
-serviceRoutes.post('/:id/redeploy', async (c) => {
+serviceRoutes.post('/:id/redeploy', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 

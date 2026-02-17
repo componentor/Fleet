@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, accounts, userAccounts, users, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { generateTokens } from './auth.js';
 
 const accountRoutes = new Hono<{
   Variables: {
@@ -307,19 +308,40 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, async (c) => {
   return c.json({ message: 'Successfully disconnected from parent account' });
 });
 
-// POST /:id/impersonate — super user or parent enters account's panel
+// POST /:id/impersonate — super user enters account's panel
 accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
+  const user = c.get('user');
   const account = c.get('account');
 
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
   }
 
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can impersonate accounts' }, 403);
+  }
+
+  const fullUser = await db.query.users.findFirst({
+    where: eq(users.id, user.userId),
+  });
+
+  if (!fullUser) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  const tokens = await generateTokens({
+    userId: fullUser.id,
+    email: fullUser.email!,
+    isSuper: fullUser.isSuper ?? false,
+    impersonatingAccountId: account.id,
+  });
+
   return c.json({
+    token: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
     accountId: account.id,
     name: account.name,
     slug: account.slug,
-    message: 'Impersonation context set',
   });
 });
 
@@ -504,6 +526,30 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
   }
 
   return c.json({ message: 'Member removed successfully' });
+});
+
+// GET /:id/my-role — get current user's role in this account
+accountRoutes.get('/:id/my-role', tenantMiddleware, async (c) => {
+  const account = c.get('account');
+  if (!account) {
+    return c.json({ error: 'Account not found' }, 404);
+  }
+
+  const user = c.get('user');
+
+  if (user.isSuper) {
+    return c.json({ role: 'owner' });
+  }
+
+  const membership = await db.query.userAccounts.findFirst({
+    where: and(eq(userAccounts.userId, user.userId), eq(userAccounts.accountId, account.id)),
+  });
+
+  if (!membership) {
+    return c.json({ role: 'viewer' });
+  }
+
+  return c.json({ role: membership.role ?? 'member' });
 });
 
 // GET /:id/activity — account-scoped audit log

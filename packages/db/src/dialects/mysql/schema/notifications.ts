@@ -6,8 +6,8 @@ import {
   timestamp,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { users } from './users.js';
+import { accounts } from './accounts';
+import { users } from './users';
 
 export const notifications = mysqlTable('notifications', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

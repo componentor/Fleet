@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Rocket, Github, FileCode2, Loader2, Plus, X } from 'lucide-vue-next'
+import { Rocket, Github, FileCode2, Store, Loader2, Plus, X } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 
 const router = useRouter()
@@ -111,7 +111,7 @@ async function deployGithub() {
     </div>
 
     <!-- Deploy method selection -->
-    <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-2xl">
+    <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-4xl">
       <button
         @click="deployMethod = 'docker'"
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all group"
@@ -133,6 +133,17 @@ async function deployGithub() {
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">From GitHub</h3>
         <p class="text-sm text-gray-500 dark:text-gray-400">Deploy from a GitHub repository with automatic builds.</p>
       </button>
+
+      <RouterLink
+        to="/panel/marketplace"
+        class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-green-300 dark:hover:border-green-600 hover:shadow-md transition-all group"
+      >
+        <div class="w-12 h-12 rounded-lg bg-green-600 flex items-center justify-center mb-4">
+          <Store class="w-6 h-6 text-white" />
+        </div>
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">From Marketplace</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Deploy a pre-configured app from the marketplace.</p>
+      </RouterLink>
     </div>
 
     <!-- Docker image deploy form -->

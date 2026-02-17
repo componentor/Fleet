@@ -4,6 +4,7 @@ import { db, sshKeys, sshAccessRules, services, insertReturning, updateReturning
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { sshService } from '../services/ssh.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 const sshRoutes = new Hono<{
   Variables: {
@@ -36,7 +37,7 @@ const addKeySchema = z.object({
   publicKey: z.string().min(1),
 });
 
-sshRoutes.post('/keys', async (c) => {
+sshRoutes.post('/keys', requireMember, async (c) => {
   const user = c.get('user');
   const body = await c.req.json();
   const parsed = addKeySchema.safeParse(body);
@@ -92,7 +93,7 @@ sshRoutes.get('/keys/:id', async (c) => {
 });
 
 // DELETE /keys/:id — remove SSH key
-sshRoutes.delete('/keys/:id', async (c) => {
+sshRoutes.delete('/keys/:id', requireMember, async (c) => {
   const user = c.get('user');
   const keyId = c.req.param('id');
 
@@ -141,7 +142,7 @@ const updateRulesSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-sshRoutes.put('/services/:serviceId/rules', async (c) => {
+sshRoutes.put('/services/:serviceId/rules', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
 

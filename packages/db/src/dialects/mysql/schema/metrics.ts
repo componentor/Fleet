@@ -7,7 +7,7 @@ import {
   timestamp,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
-import { nodes } from './nodes.js';
+import { nodes } from './nodes';
 
 export const nodeMetrics = mysqlTable('node_metrics', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

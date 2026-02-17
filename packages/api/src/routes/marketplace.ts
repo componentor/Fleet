@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 const marketplace = new Hono<{
   Variables: {
@@ -60,7 +61,7 @@ const deploySchema = z.object({
   config: z.record(z.string()).default({}),
 });
 
-marketplace.post('/deploy', async (c) => {
+marketplace.post('/deploy', requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -105,7 +106,7 @@ const createTemplateSchema = z.object({
   isBuiltin: z.boolean().optional(),
 });
 
-marketplace.post('/templates', async (c) => {
+marketplace.post('/templates', requireMember, async (c) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
@@ -144,7 +145,7 @@ const updateTemplateSchema = z.object({
   composeTemplate: z.string().min(1).optional(),
 });
 
-marketplace.patch('/templates/:slug', async (c) => {
+marketplace.patch('/templates/:slug', requireMember, async (c) => {
   const user = c.get('user');
   const slug = c.req.param('slug');
 
@@ -177,7 +178,7 @@ marketplace.patch('/templates/:slug', async (c) => {
 });
 
 // DELETE /templates/:slug — delete a template
-marketplace.delete('/templates/:slug', async (c) => {
+marketplace.delete('/templates/:slug', requireMember, async (c) => {
   const user = c.get('user');
   const slug = c.req.param('slug');
 

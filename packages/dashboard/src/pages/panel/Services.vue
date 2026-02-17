@@ -2,8 +2,10 @@
 import { onMounted } from 'vue'
 import { Box, Plus, ArrowRight, Loader2 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
+import { useRole } from '@/composables/useRole'
 
 const store = useServicesStore()
+const { canWrite } = useRole()
 
 function statusColor(status: string) {
   switch (status) {
@@ -38,6 +40,7 @@ onMounted(() => {
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Services</h1>
       </div>
       <router-link
+        v-if="canWrite"
         to="/panel/deploy"
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
@@ -57,6 +60,7 @@ onMounted(() => {
       <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">No services yet</h3>
       <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">Deploy your first service to get started.</p>
       <router-link
+        v-if="canWrite"
         to="/panel/deploy"
         class="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >

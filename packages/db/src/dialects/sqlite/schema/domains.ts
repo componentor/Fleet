@@ -5,8 +5,8 @@ import {
   integer,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { users } from './users.js';
+import { accounts } from './accounts';
+import { users } from './users';
 
 export const dnsZones = sqliteTable('dns_zones', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -61,7 +61,23 @@ export const domainRegistrations = sqliteTable('domain_registrations', {
   expiresAt: integer('expires_at', { mode: 'timestamp' }),
   autoRenew: integer('auto_renew', { mode: 'boolean' }).default(true),
   registrarDomainId: text('registrar_domain_id'),
+  stripePaymentId: text('stripe_payment_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+export const domainTldPricing = sqliteTable('domain_tld_pricing', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  tld: text('tld').notNull().unique(),
+  providerRegistrationPrice: integer('provider_registration_price').notNull(),
+  providerRenewalPrice: integer('provider_renewal_price').notNull(),
+  markupType: text('markup_type').notNull().default('percentage'),
+  markupValue: integer('markup_value').notNull().default(20),
+  sellRegistrationPrice: integer('sell_registration_price').notNull(),
+  sellRenewalPrice: integer('sell_renewal_price').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  currency: text('currency').notNull().default('USD'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({

@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { Archive, RotateCw, Trash2, Plus, Clock, Play, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
+const { canWrite } = useRole()
 
 const activeTab = ref<'backups' | 'schedules'>('backups')
 const backups = ref<any[]>([])
@@ -143,6 +145,7 @@ onMounted(async () => {
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Backups</h1>
       </div>
       <button
+        v-if="canWrite"
         @click="createBackup"
         :disabled="creatingBackup"
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -230,7 +233,7 @@ onMounted(async () => {
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ backup.storageBackend || 'nfs' }}</td>
-                <td class="px-6 py-4 text-right">
+                <td v-if="canWrite" class="px-6 py-4 text-right">
                   <div class="flex items-center justify-end gap-2">
                     <button
                       v-if="backup.status === 'completed'"
@@ -258,7 +261,7 @@ onMounted(async () => {
 
     <!-- Schedules -->
     <div v-if="activeTab === 'schedules'">
-      <div class="mb-4 flex justify-end">
+      <div v-if="canWrite" class="mb-4 flex justify-end">
         <button
           @click="showAddSchedule = true"
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
@@ -349,7 +352,7 @@ onMounted(async () => {
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(schedule.lastRunAt) }}</td>
-                <td class="px-6 py-4 text-right">
+                <td v-if="canWrite" class="px-6 py-4 text-right">
                   <div class="flex items-center justify-end gap-2">
                     <button
                       @click="runSchedule(schedule.id)"

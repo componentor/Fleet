@@ -9,7 +9,7 @@ import {
   timestamp,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const services = mysqlTable('services', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

@@ -25,6 +25,7 @@ import updateRoutes from './routes/updates.js';
 import setupRoutes from './routes/setup.js';
 import notificationRoutes from './routes/notifications.js';
 import apiKeyRoutes from './routes/api-keys.js';
+import domainPricingRoutes from './routes/domain-pricing.js';
 
 export const app = new Hono();
 
@@ -69,6 +70,7 @@ api.route('/updates', updateRoutes);
 api.route('/setup', setupRoutes);
 api.route('/notifications', notificationRoutes);
 api.route('/api-keys', apiKeyRoutes);
+api.route('/domain-pricing', domainPricingRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(

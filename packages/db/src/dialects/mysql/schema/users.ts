@@ -7,7 +7,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const users = mysqlTable('users', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

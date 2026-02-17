@@ -8,8 +8,8 @@ import {
   timestamp,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
-import { users } from './users.js';
-import { services } from './services.js';
+import { users } from './users';
+import { services } from './services';
 
 export const sshKeys = mysqlTable('ssh_keys', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

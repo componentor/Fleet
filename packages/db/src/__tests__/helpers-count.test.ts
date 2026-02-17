@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, schema, resetDb } from './setup.js';
-import { insertReturning, countSql } from '../helpers.js';
+import { db, schema, resetDb } from './setup';
+import { insertReturning, countSql } from '../helpers';
 
 describe('countSql', () => {
   beforeEach(() => resetDb());

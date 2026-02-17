@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, schema, resetDb } from './setup.js';
-import { insertReturning, updateReturning } from '../helpers.js';
+import { db, schema, resetDb } from './setup';
+import { insertReturning, updateReturning } from '../helpers';
 import { eq } from 'drizzle-orm';
 
 describe('updateReturning', () => {

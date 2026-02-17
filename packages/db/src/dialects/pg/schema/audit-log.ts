@@ -6,8 +6,8 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { users } from './users.js';
-import { accounts } from './accounts.js';
+import { users } from './users';
+import { accounts } from './accounts';
 
 export const auditLog = pgTable('audit_log', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

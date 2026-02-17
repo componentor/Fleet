@@ -8,8 +8,8 @@ import {
   timestamp,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { users } from './users.js';
+import { accounts } from './accounts';
+import { users } from './users';
 
 export const dnsZones = mysqlTable('dns_zones', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -64,7 +64,23 @@ export const domainRegistrations = mysqlTable('domain_registrations', {
   expiresAt: timestamp('expires_at'),
   autoRenew: boolean('auto_renew').default(true),
   registrarDomainId: varchar('registrar_domain_id', { length: 255 }),
+  stripePaymentId: varchar('stripe_payment_id', { length: 255 }),
   createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const domainTldPricing = mysqlTable('domain_tld_pricing', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  tld: varchar('tld', { length: 63 }).notNull().unique(),
+  providerRegistrationPrice: int('provider_registration_price').notNull(),
+  providerRenewalPrice: int('provider_renewal_price').notNull(),
+  markupType: varchar('markup_type', { length: 20 }).notNull().default('percentage'),
+  markupValue: int('markup_value').notNull().default(20),
+  sellRegistrationPrice: int('sell_registration_price').notNull(),
+  sellRenewalPrice: int('sell_renewal_price').notNull(),
+  enabled: boolean('enabled').default(true),
+  currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({

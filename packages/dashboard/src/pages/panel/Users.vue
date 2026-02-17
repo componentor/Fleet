@@ -3,8 +3,10 @@ import { ref, onMounted } from 'vue'
 import { Users, UserPlus, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
+const { canAdmin } = useRole()
 const accountStore = useAccountStore()
 
 const members = ref<any[]>([])
@@ -77,6 +79,7 @@ onMounted(() => {
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Team Members</h1>
       </div>
       <button
+        v-if="canAdmin"
         @click="showInvite = true"
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
@@ -160,7 +163,7 @@ onMounted(() => {
                 </span>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(member.joinedAt) }}</td>
-              <td class="px-6 py-4 text-right">
+              <td v-if="canAdmin" class="px-6 py-4 text-right">
                 <button
                   v-if="member.role !== 'owner'"
                   @click="removeMember(member.id)"

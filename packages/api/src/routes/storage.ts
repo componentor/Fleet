@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { nfsService } from '../services/nfs.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 const storage = new Hono<{
   Variables: {
@@ -50,7 +51,7 @@ const createVolumeSchema = z.object({
   nodeId: z.string().uuid().optional(),
 });
 
-storage.post('/volumes', async (c) => {
+storage.post('/volumes', requireMember, async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -98,7 +99,7 @@ storage.get('/volumes/:id', async (c) => {
 });
 
 // DELETE /volumes/:id — delete a volume
-storage.delete('/volumes/:id', async (c) => {
+storage.delete('/volumes/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const volumeId = c.req.param('id');
 

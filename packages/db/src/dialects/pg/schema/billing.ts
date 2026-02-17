@@ -9,7 +9,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const billingPlans = pgTable('billing_plans', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

@@ -5,6 +5,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { githubService } from '../services/github.service.js';
 import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 // Helper: get GitHub access token for the service's account owner
 async function getGitHubTokenForService(accountId: string): Promise<string | null> {
@@ -273,7 +274,7 @@ authenticatedRoutes.get('/:id', async (c) => {
 });
 
 // POST /trigger — manually trigger a deployment for a service
-authenticatedRoutes.post('/trigger', async (c) => {
+authenticatedRoutes.post('/trigger', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
 
@@ -326,7 +327,7 @@ authenticatedRoutes.post('/trigger', async (c) => {
 });
 
 // POST /:id/rollback — rollback to a previous deployment
-authenticatedRoutes.post('/:id/rollback', async (c) => {
+authenticatedRoutes.post('/:id/rollback', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const deploymentId = c.req.param('id');
 

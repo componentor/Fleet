@@ -261,7 +261,8 @@ sqlite.exec(`
     storage_backend TEXT DEFAULT 'nfs',
     enabled INTEGER DEFAULT 1,
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    last_run_at INTEGER
   );
 
   CREATE TABLE email_templates (
@@ -605,6 +606,17 @@ vi.mock('../services/notification.service.js', () => ({
     getUnreadCount: vi.fn().mockResolvedValue(0),
     markRead: vi.fn().mockResolvedValue(undefined),
     markAllRead: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+// ── Mock scheduler service ──
+vi.mock('../services/scheduler.service.js', () => ({
+  schedulerService: {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    shutdown: vi.fn(),
+    onScheduleCreated: vi.fn().mockResolvedValue(undefined),
+    onScheduleUpdated: vi.fn().mockResolvedValue(undefined),
+    onScheduleDeleted: vi.fn(),
   },
 }));
 

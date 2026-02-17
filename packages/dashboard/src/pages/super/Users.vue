@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { Shield, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useAuthStore } from '@/stores/auth'
 
 const api = useApi()
+const authStore = useAuthStore()
 
 const users = ref<any[]>([])
 const loading = ref(true)
@@ -111,7 +113,12 @@ onMounted(() => {
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(user.createdAt) }}</td>
               <td class="px-6 py-4 text-right">
+                <span
+                  v-if="user.id === authStore.user?.id"
+                  class="text-xs font-medium text-gray-400 dark:text-gray-500"
+                >You</span>
                 <button
+                  v-else
                   @click="toggleSuper(user.id, user.isSuper)"
                   :class="[
                     'text-xs font-medium hover:underline',

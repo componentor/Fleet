@@ -5,7 +5,7 @@ import {
   integer,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const emailTemplates = sqliteTable('email_templates', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

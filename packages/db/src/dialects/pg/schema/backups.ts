@@ -9,8 +9,8 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { services } from './services.js';
+import { accounts } from './accounts';
+import { services } from './services';
 
 export const backups = pgTable('backups', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -41,6 +41,7 @@ export const backupSchedules = pgTable('backup_schedules', {
   enabled: boolean('enabled').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  lastRunAt: timestamp('last_run_at'),
 });
 
 export const backupsRelations = relations(backups, ({ one }) => ({

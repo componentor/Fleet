@@ -5,8 +5,8 @@ import {
   json,
   timestamp,
 } from 'drizzle-orm/mysql-core';
-import { users } from './users.js';
-import { accounts } from './accounts.js';
+import { users } from './users';
+import { accounts } from './accounts';
 
 export const auditLog = mysqlTable('audit_log', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

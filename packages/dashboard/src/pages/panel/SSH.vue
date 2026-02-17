@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { Key, Plus, Trash2, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
+const { canWrite } = useRole()
 
 const sshKeys = ref<any[]>([])
 const loading = ref(true)
@@ -75,7 +77,7 @@ onMounted(() => {
 
     <div class="space-y-8">
       <!-- Add key form -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div v-if="canWrite" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Add SSH Key</h3>
         </div>
@@ -142,7 +144,7 @@ onMounted(() => {
                 <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ key.name }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ key.fingerprint }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(key.createdAt) }}</td>
-                <td class="px-6 py-4 text-right">
+                <td v-if="canWrite" class="px-6 py-4 text-right">
                   <button
                     @click="removeKey(key.id)"
                     class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"

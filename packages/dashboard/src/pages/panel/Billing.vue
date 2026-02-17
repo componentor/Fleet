@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { CreditCard, Box, Globe, HardDrive, Loader2, ExternalLink } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
+const { canOwner } = useRole()
 
 const loading = ref(true)
 const subscription = ref<any>(null)
@@ -82,6 +84,7 @@ onMounted(() => {
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Current Plan</h2>
           <button
+            v-if="canOwner"
             @click="openPortal"
             :disabled="portalLoading"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"

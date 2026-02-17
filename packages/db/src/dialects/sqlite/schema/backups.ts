@@ -5,8 +5,8 @@ import {
   integer,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { services } from './services.js';
+import { accounts } from './accounts';
+import { services } from './services';
 
 export const backups = sqliteTable('backups', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -37,6 +37,7 @@ export const backupSchedules = sqliteTable('backup_schedules', {
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
 });
 
 export const backupsRelations = relations(backups, ({ one }) => ({

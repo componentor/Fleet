@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Settings, Save, Loader2 } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const api = useApi()
@@ -15,6 +15,8 @@ const sections = [
   { id: 'general', label: 'General' },
   { id: 'stripe', label: 'Stripe Configuration' },
   { id: 'email', label: 'Email Configuration' },
+  { id: 'registrar', label: 'Domain Registrar' },
+  { id: 'pricing', label: 'Domain Pricing' },
 ]
 
 // General settings
@@ -37,6 +39,20 @@ const smtpFrom = ref('')
 const resendApiKey = ref('')
 const resendFrom = ref('')
 
+// Registrar settings
+const registrarProvider = ref('resellerclub')
+const registrarResellerId = ref('')
+const registrarApiKey = ref('')
+const registrarConfigured = ref(false)
+const registrarApiKeyMasked = ref('')
+const testingConnection = ref(false)
+const testResult = ref<{ success: boolean; message: string } | null>(null)
+
+// Domain pricing
+const pricingEntries = ref<any[]>([])
+const pricingLoading = ref(false)
+const syncing = ref(false)
+
 async function fetchSettings() {
   loading.value = true
   try {
@@ -54,6 +70,32 @@ async function fetchSettings() {
     // Settings may not exist yet
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchRegistrar() {
+  try {
+    const data = await api.get<any>('/settings/registrar')
+    registrarConfigured.value = data.configured ?? false
+    if (data.configured) {
+      registrarProvider.value = data.provider ?? 'resellerclub'
+      registrarApiKeyMasked.value = data.apiKeyMasked ?? ''
+      const config = data.config as Record<string, string> | null
+      registrarResellerId.value = config?.resellerId ?? ''
+    }
+  } catch {
+    // Not configured
+  }
+}
+
+async function fetchPricing() {
+  pricingLoading.value = true
+  try {
+    pricingEntries.value = await api.get<any[]>('/domain-pricing')
+  } catch {
+    pricingEntries.value = []
+  } finally {
+    pricingLoading.value = false
   }
 }
 
@@ -128,8 +170,81 @@ async function saveEmail() {
   }
 }
 
+async function saveRegistrar() {
+  if (!registrarApiKey.value) {
+    error.value = 'API key is required'
+    return
+  }
+  saving.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings/registrar', {
+      provider: registrarProvider.value,
+      apiKey: registrarApiKey.value,
+      resellerId: registrarResellerId.value || undefined,
+    })
+    success.value = 'Domain registrar saved'
+    registrarApiKey.value = ''
+    await fetchRegistrar()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save registrar configuration'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function testConnection() {
+  testingConnection.value = true
+  testResult.value = null
+  try {
+    const result = await api.post<any>('/settings/registrar/test', {})
+    testResult.value = { success: result.success, message: result.success ? `Connected to ${result.provider}` : result.error ?? 'Test failed' }
+  } catch (err: any) {
+    testResult.value = { success: false, message: err?.body?.error || 'Connection test failed' }
+  } finally {
+    testingConnection.value = false
+  }
+}
+
+async function syncPrices() {
+  syncing.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const result = await api.post<any>('/domain-pricing/sync', {})
+    success.value = result.message
+    await fetchPricing()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to sync prices'
+  } finally {
+    syncing.value = false
+  }
+}
+
+async function updatePricingEntry(entry: any) {
+  try {
+    await api.patch(`/domain-pricing/${entry.id}`, {
+      markupType: entry.markupType,
+      markupValue: entry.markupValue,
+      enabled: entry.enabled,
+    })
+    await fetchPricing()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to update pricing'
+  }
+}
+
+function formatCents(cents: number): string {
+  return (cents / 100).toFixed(2)
+}
+
 onMounted(() => {
   fetchSettings()
+  fetchRegistrar()
+  fetchPricing()
 })
 </script>
 
@@ -206,7 +321,7 @@ onMounted(() => {
         <div v-if="activeSection === 'stripe'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Stripe Configuration</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Connect Stripe for payment processing. Keys are stored securely and not displayed after saving.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Connect Stripe for payment processing.</p>
           </div>
           <form @submit.prevent="saveStripe" class="p-6 space-y-5">
             <div>
@@ -290,6 +405,150 @@ onMounted(() => {
               </button>
             </div>
           </form>
+        </div>
+
+        <!-- Domain Registrar -->
+        <div v-if="activeSection === 'registrar'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Domain Registrar</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure a domain registrar for purchasing domains.</p>
+          </div>
+          <form @submit.prevent="saveRegistrar" class="p-6 space-y-5">
+            <div v-if="registrarConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p class="text-sm text-green-700 dark:text-green-300">Registrar configured: <strong>{{ registrarProvider }}</strong> ({{ registrarApiKeyMasked }})</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Provider</label>
+              <select v-model="registrarProvider" class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
+                <option value="resellerclub">ResellerClub</option>
+              </select>
+            </div>
+
+            <div v-if="registrarProvider === 'resellerclub'">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Reseller ID</label>
+              <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Key</label>
+              <input v-model="registrarApiKey" type="password" placeholder="Enter API key" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                @click="testConnection"
+                :disabled="testingConnection"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+              >
+                <Loader2 v-if="testingConnection" class="w-4 h-4 animate-spin" />
+                <RefreshCw v-else class="w-4 h-4" />
+                Test Connection
+              </button>
+              <div v-if="testResult" class="flex items-center gap-1.5 text-sm">
+                <Check v-if="testResult.success" class="w-4 h-4 text-green-600" />
+                <X v-else class="w-4 h-4 text-red-600" />
+                <span :class="testResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                  {{ testResult.message }}
+                </span>
+              </div>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ saving ? 'Saving...' : 'Save Changes' }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Domain Pricing -->
+        <div v-if="activeSection === 'pricing'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Domain Pricing</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure prices for each TLD sold to customers.</p>
+            </div>
+            <button
+              @click="syncPrices"
+              :disabled="syncing"
+              class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              <Loader2 v-if="syncing" class="w-3.5 h-3.5 animate-spin" />
+              <RefreshCw v-else class="w-3.5 h-3.5" />
+              Sync from Provider
+            </button>
+          </div>
+
+          <div v-if="pricingLoading" class="p-8 flex items-center justify-center">
+            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          </div>
+
+          <div v-else-if="pricingEntries.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+            No TLD pricing configured. Click "Sync from Provider" to fetch prices.
+          </div>
+
+          <div v-else class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-gray-200 dark:border-gray-700">
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">TLD</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Provider Price</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Markup</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Sell Price</th>
+                  <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Enabled</th>
+                  <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                <tr v-for="entry in pricingEntries" :key="entry.id" class="hover:bg-gray-50 dark:hover:bg-gray-750">
+                  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900 dark:text-white">.{{ entry.tld }}</td>
+                  <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                    ${{ formatCents(entry.providerRegistrationPrice) }} / ${{ formatCents(entry.providerRenewalPrice) }}
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-2">
+                      <select
+                        v-model="entry.markupType"
+                        class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs"
+                      >
+                        <option value="percentage">%</option>
+                        <option value="fixed_amount">+ $</option>
+                        <option value="fixed_price">= $</option>
+                      </select>
+                      <input
+                        v-model.number="entry.markupValue"
+                        type="number"
+                        min="0"
+                        class="w-20 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs"
+                      />
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
+                    ${{ formatCents(entry.sellRegistrationPrice) }} / ${{ formatCents(entry.sellRenewalPrice) }}
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      v-model="entry.enabled"
+                      class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+                    />
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <button
+                      @click="updatePricingEntry(entry)"
+                      class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                      Save
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

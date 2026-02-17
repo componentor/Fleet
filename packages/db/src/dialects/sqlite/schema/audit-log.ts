@@ -5,8 +5,8 @@ import {
   integer,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import { users } from './users.js';
-import { accounts } from './accounts.js';
+import { users } from './users';
+import { accounts } from './accounts';
 
 export const auditLog = sqliteTable('audit_log', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

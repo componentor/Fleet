@@ -1,6 +1,6 @@
 import { eq, sql, type SQL } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { getDialect } from './config.js';
+import { getDialect } from './config';
 
 // The db instance is set after the dialect is loaded (see index.ts)
 let _db: any;

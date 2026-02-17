@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { RouterView, RouterLink, useRoute } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { useAuth } from '@/composables/useAuth'
 import { useAccount } from '@/composables/useAccount'
+import { useRole } from '@/composables/useRole'
 import {
   LayoutDashboard,
   Layers,
@@ -14,6 +15,7 @@ import {
   HardDrive,
   Archive,
   Key,
+  KeyRound,
   Users,
   UserPlus,
   CreditCard,
@@ -26,12 +28,32 @@ import {
   Monitor,
   ChevronDown,
   ArrowLeft,
+  ShieldAlert,
 } from 'lucide-vue-next'
+import NotificationBell from '@/components/NotificationBell.vue'
 
 const route = useRoute()
 const { theme, toggle } = useTheme()
 const { user, isSuper, logout } = useAuth()
 const { currentAccount, accounts, switchAccount } = useAccount()
+const { canAdmin, canOwner } = useRole()
+
+const isImpersonating = computed(() => !!localStorage.getItem('fleet_impersonating'))
+
+function stopImpersonating() {
+  const originalToken = localStorage.getItem('fleet_original_token')
+  const originalRefresh = localStorage.getItem('fleet_original_refresh_token')
+  const originalAccountId = localStorage.getItem('fleet_original_account_id')
+  if (originalToken) localStorage.setItem('fleet_token', originalToken)
+  if (originalRefresh) localStorage.setItem('fleet_refresh_token', originalRefresh)
+  if (originalAccountId) localStorage.setItem('fleet_account_id', originalAccountId)
+  else localStorage.removeItem('fleet_account_id')
+  localStorage.removeItem('fleet_original_token')
+  localStorage.removeItem('fleet_original_refresh_token')
+  localStorage.removeItem('fleet_original_account_id')
+  localStorage.removeItem('fleet_impersonating')
+  window.location.href = '/admin/accounts'
+}
 
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
@@ -47,10 +69,11 @@ const navItems = [
   { name: 'Storage', path: '/panel/storage', icon: HardDrive },
   { name: 'Backups', path: '/panel/backups', icon: Archive },
   { name: 'SSH Keys', path: '/panel/ssh', icon: Key },
+  { name: 'API Keys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
   { name: 'Sub-Accounts', path: '/panel/sub-accounts', icon: UserPlus },
   { name: 'Users', path: '/panel/users', icon: Users },
-  { name: 'Billing', path: '/panel/billing', icon: CreditCard },
-  { name: 'Settings', path: '/panel/settings', icon: Settings },
+  { name: 'Billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
+  { name: 'Settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
 ]
 
 function isActive(path: string) {
@@ -95,7 +118,7 @@ function handleSwitchAccount(id: string) {
 
       <nav class="mt-4 px-3 space-y-1 overflow-y-auto flex-1">
         <RouterLink
-          v-for="item in navItems"
+          v-for="item in navItems.filter(i => (!i.requireAdmin || canAdmin) && (!i.requireOwner || canOwner))"
           :key="item.path"
           :to="item.path"
           :class="[
@@ -185,6 +208,9 @@ function handleSwitchAccount(id: string) {
             <Monitor v-else class="w-5 h-5" />
           </button>
 
+          <!-- Notifications -->
+          <NotificationBell />
+
           <!-- User menu -->
           <div class="relative">
             <button
@@ -226,6 +252,20 @@ function handleSwitchAccount(id: string) {
           </div>
         </div>
       </header>
+
+      <!-- Impersonation banner -->
+      <div v-if="isImpersonating" class="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-sm">
+        <div class="flex items-center gap-2">
+          <ShieldAlert class="w-4 h-4" />
+          <span>You are impersonating <strong>{{ currentAccount?.name ?? 'an account' }}</strong></span>
+        </div>
+        <button
+          @click="stopImpersonating"
+          class="px-3 py-1 rounded bg-white/20 hover:bg-white/30 font-medium transition-colors"
+        >
+          Stop Impersonating
+        </button>
+      </div>
 
       <!-- Page content -->
       <main class="p-6">

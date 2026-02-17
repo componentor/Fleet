@@ -7,7 +7,7 @@ import {
   json,
   timestamp,
 } from 'drizzle-orm/mysql-core';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const appTemplates = mysqlTable('app_templates', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

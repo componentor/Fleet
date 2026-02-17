@@ -2,8 +2,8 @@ process.env['DB_DIALECT'] = 'sqlite';
 
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '../dialects/sqlite/schema/index.js';
-import { _setDb } from '../helpers.js';
+import * as schema from '../dialects/sqlite/schema/index';
+import { _setDb } from '../helpers';
 
 const sqlite = new Database(':memory:');
 

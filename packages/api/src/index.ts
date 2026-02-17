@@ -2,12 +2,14 @@ import { serve } from '@hono/node-server'
 import { app, injectWebSocket } from './app.js'
 import { updateService } from './services/update.service.js'
 import { templateService } from './services/template.service.js'
+import { schedulerService } from './services/scheduler.service.js'
 import { db, platformSettings, eq } from '@fleet/db'
 
 // Register shutdown handlers early — before any async work
 let server: ReturnType<typeof serve> | undefined
 function shutdown() {
   updateService.stopPeriodicCheck()
+  schedulerService.shutdown()
   try { server?.close() } catch {}
   process.exit(0)
 }
@@ -32,6 +34,11 @@ if (!process.env['JWT_SECRET']) {
 
 // Sync built-in marketplace templates from disk into DB
 try { await templateService.syncBuiltinTemplates() } catch {}
+
+// Initialize background job scheduler (backup schedules, health checks, cleanup)
+try { await schedulerService.initialize() } catch (err) {
+  console.error('Scheduler initialization failed:', err)
+}
 
 server = serve({
   fetch: app.fetch,

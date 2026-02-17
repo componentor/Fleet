@@ -3,9 +3,11 @@ import { ref, onMounted } from 'vue'
 import { KeyRound, Plus, Trash2, Loader2, Copy, Check, Eye, EyeOff } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
 const toast = useToast()
+const { canAdmin } = useRole()
 
 const apiKeys = ref<any[]>([])
 const loading = ref(true)
@@ -94,7 +96,7 @@ onMounted(() => {
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">API Keys</h1>
       </div>
       <button
-        v-if="!showForm"
+        v-if="!showForm && canAdmin"
         @click="showForm = true"
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
@@ -198,7 +200,7 @@ onMounted(() => {
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ key.prefix }}...</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never' }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(key.createdAt) }}</td>
-                <td class="px-6 py-4 text-right">
+                <td v-if="canAdmin" class="px-6 py-4 text-right">
                   <button
                     @click="revokeKey(key.id)"
                     class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"

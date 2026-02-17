@@ -1,9 +1,9 @@
-import { getDialect } from './config.js';
-import { _setDb } from './helpers.js';
+import { getDialect } from './config';
+import { _setDb } from './helpers';
 
 // PG types used as the compile-time contract for all dialects.
 // At runtime, the actual objects come from the active dialect.
-import type * as PgSchema from './dialects/pg/schema/index.js';
+import type * as PgSchema from './dialects/pg/schema/index';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 
 const dialect = getDialect();
@@ -60,6 +60,7 @@ export const dnsZonesRelations = _schema.dnsZonesRelations;
 export const dnsRecordsRelations = _schema.dnsRecordsRelations;
 export const domainRegistrarsRelations = _schema.domainRegistrarsRelations;
 export const domainRegistrationsRelations = _schema.domainRegistrationsRelations;
+export const domainTldPricing = _schema.domainTldPricing as typeof PgSchema.domainTldPricing;
 
 // nodes.ts
 export const nodes = _schema.nodes as typeof PgSchema.nodes;
@@ -113,8 +114,8 @@ export const apiKeys = _schema.apiKeys as typeof PgSchema.apiKeys;
 export const apiKeysRelations = _schema.apiKeysRelations;
 
 // --- Helper exports ---
-export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql } from './helpers.js';
-export { getDialect } from './config.js';
+export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql } from './helpers';
+export { getDialect } from './config';
 
 // --- Re-export drizzle-orm operators so consumers use the same instance ---
 export { eq, and, or, not, like, ilike, isNull, isNotNull, inArray, notInArray, between, sql, asc, desc, gte, lte, gt, lt } from 'drizzle-orm';

@@ -7,7 +7,7 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
-import { nodes } from './nodes.js';
+import { nodes } from './nodes';
 
 export const nodeMetrics = pgTable('node_metrics', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

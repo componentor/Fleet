@@ -1,44 +1,25 @@
+import type { DnsProvider, DnsProviderResult } from './dns-provider.js';
+
 const POWERDNS_API_URL =
   process.env['POWERDNS_API_URL'] ?? 'http://powerdns:8081';
 const POWERDNS_API_KEY = process.env['POWERDNS_API_KEY'] ?? '';
 
-interface PowerDnsZone {
-  id: string;
-  name: string;
-  kind: string;
-  serial: number;
-  notified_serial: number;
-  masters: string[];
-  dnssec: boolean;
-  account: string;
-  url: string;
-  rrsets: PowerDnsRrset[];
-}
-
-interface PowerDnsRrset {
-  name: string;
-  type: string;
-  ttl: number;
-  changetype?: string;
-  records: Array<{
-    content: string;
-    disabled: boolean;
-    set_ptr?: boolean;
-  }>;
-  comments?: Array<{
-    content: string;
-    account: string;
-    modified_at: number;
-  }>;
-}
-
-export class DnsService {
+export class PowerDnsProvider implements DnsProvider {
+  name = 'powerdns';
   private baseUrl: string;
   private apiKey: string;
 
   constructor() {
     this.baseUrl = POWERDNS_API_URL;
     this.apiKey = POWERDNS_API_KEY;
+  }
+
+  isConfigured(): boolean {
+    return !!this.apiKey;
+  }
+
+  private canonicalize(domain: string): string {
+    return domain.endsWith('.') ? domain : `${domain}.`;
   }
 
   private async request<T>(
@@ -63,7 +44,6 @@ export class DnsService {
       );
     }
 
-    // DELETE returns 204 No Content
     if (response.status === 204) {
       return undefined as T;
     }
@@ -71,65 +51,39 @@ export class DnsService {
     return response.json() as Promise<T>;
   }
 
-  /**
-   * Ensure domain ends with a dot (FQDN) as required by PowerDNS.
-   */
-  private canonicalize(domain: string): string {
-    return domain.endsWith('.') ? domain : `${domain}.`;
-  }
-
-  /**
-   * Create a new DNS zone in PowerDNS.
-   */
   async createZone(
     domain: string,
     nameservers: string[] = ['ns1.fleet.local.', 'ns2.fleet.local.'],
-  ): Promise<PowerDnsZone> {
-    const canonicalDomain = this.canonicalize(domain);
-
-    const zone = await this.request<PowerDnsZone>('/zones', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: canonicalDomain,
-        kind: 'Native',
-        nameservers: nameservers.map((ns) => this.canonicalize(ns)),
-        soa_edit_api: 'INCEPTION-INCREMENT',
-      }),
-    });
-
-    return zone;
+  ): Promise<DnsProviderResult> {
+    try {
+      const canonicalDomain = this.canonicalize(domain);
+      await this.request('/zones', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: canonicalDomain,
+          kind: 'Native',
+          nameservers: nameservers.map((ns) => this.canonicalize(ns)),
+          soa_edit_api: 'INCEPTION-INCREMENT',
+        }),
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
-  /**
-   * Delete a DNS zone from PowerDNS.
-   */
-  async deleteZone(domain: string): Promise<void> {
-    const canonicalDomain = this.canonicalize(domain);
-
-    await this.request<void>(`/zones/${canonicalDomain}`, {
-      method: 'DELETE',
-    });
+  async deleteZone(domain: string): Promise<DnsProviderResult> {
+    try {
+      const canonicalDomain = this.canonicalize(domain);
+      await this.request<void>(`/zones/${canonicalDomain}`, {
+        method: 'DELETE',
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
-  /**
-   * Get zone details including all record sets.
-   */
-  async getZone(domain: string): Promise<PowerDnsZone> {
-    const canonicalDomain = this.canonicalize(domain);
-
-    return this.request<PowerDnsZone>(`/zones/${canonicalDomain}`);
-  }
-
-  /**
-   * List all zones managed by PowerDNS.
-   */
-  async listZones(): Promise<PowerDnsZone[]> {
-    return this.request<PowerDnsZone[]>('/zones');
-  }
-
-  /**
-   * Create a DNS record in a zone by adding it to the appropriate RRset.
-   */
   async createRecord(
     domain: string,
     name: string,
@@ -137,38 +91,33 @@ export class DnsService {
     content: string,
     ttl: number = 3600,
     priority?: number,
-  ): Promise<void> {
-    const canonicalDomain = this.canonicalize(domain);
-    const canonicalName = this.canonicalize(name);
+  ): Promise<DnsProviderResult> {
+    try {
+      const canonicalDomain = this.canonicalize(domain);
+      const canonicalName = this.canonicalize(name);
+      const recordContent =
+        type === 'MX' && priority != null ? `${priority} ${content}` : content;
 
-    // For MX records, PowerDNS expects priority as part of the content
-    const recordContent =
-      type === 'MX' && priority != null ? `${priority} ${content}` : content;
-
-    await this.request<void>(`/zones/${canonicalDomain}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        rrsets: [
-          {
-            name: canonicalName,
-            type,
-            ttl,
-            changetype: 'REPLACE',
-            records: [
-              {
-                content: recordContent,
-                disabled: false,
-              },
-            ],
-          },
-        ],
-      }),
-    });
+      await this.request<void>(`/zones/${canonicalDomain}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          rrsets: [
+            {
+              name: canonicalName,
+              type,
+              ttl,
+              changetype: 'REPLACE',
+              records: [{ content: recordContent, disabled: false }],
+            },
+          ],
+        }),
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
-  /**
-   * Update a DNS record in a zone. Replaces the entire RRset for the given name/type.
-   */
   async updateRecord(
     domain: string,
     name: string,
@@ -176,129 +125,36 @@ export class DnsService {
     content: string,
     ttl: number = 3600,
     priority?: number,
-  ): Promise<void> {
-    // Update is the same as create in PowerDNS — REPLACE changetype overwrites
-    await this.createRecord(domain, name, type, content, ttl, priority);
+  ): Promise<DnsProviderResult> {
+    return this.createRecord(domain, name, type, content, ttl, priority);
   }
 
-  /**
-   * Delete a specific DNS record (RRset) from a zone.
-   */
   async deleteRecord(
     domain: string,
     name: string,
     type: string,
-  ): Promise<void> {
-    const canonicalDomain = this.canonicalize(domain);
-    const canonicalName = this.canonicalize(name);
-
-    await this.request<void>(`/zones/${canonicalDomain}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        rrsets: [
-          {
-            name: canonicalName,
-            type,
-            changetype: 'DELETE',
-          },
-        ],
-      }),
-    });
-  }
-
-  /**
-   * Verify domain ownership by checking for a specific TXT record.
-   * Returns true if the verification TXT record is found.
-   */
-  async verifyDomain(
-    domain: string,
-    expectedToken: string,
-  ): Promise<boolean> {
+  ): Promise<DnsProviderResult> {
     try {
-      const zone = await this.getZone(domain);
-      const verificationName = `_fleet-verify.${this.canonicalize(domain)}`;
+      const canonicalDomain = this.canonicalize(domain);
+      const canonicalName = this.canonicalize(name);
 
-      const txtRrset = zone.rrsets.find(
-        (rrset) =>
-          rrset.type === 'TXT' && rrset.name === verificationName,
-      );
-
-      if (!txtRrset) return false;
-
-      // TXT records in PowerDNS are stored with surrounding quotes
-      return txtRrset.records.some((record) => {
-        const cleanContent = record.content.replace(/^"(.*)"$/, '$1');
-        return cleanContent === expectedToken;
+      await this.request<void>(`/zones/${canonicalDomain}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          rrsets: [
+            {
+              name: canonicalName,
+              type,
+              changetype: 'DELETE',
+            },
+          ],
+        }),
       });
-    } catch {
-      return false;
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
-  }
-
-  /**
-   * Sync a zone by notifying secondaries (triggers AXFR/IXFR).
-   */
-  async syncWithProvider(domain: string): Promise<void> {
-    const canonicalDomain = this.canonicalize(domain);
-
-    await this.request<void>(`/zones/${canonicalDomain}/notify`, {
-      method: 'PUT',
-    });
-  }
-
-  /**
-   * Get all records for a zone as a flat list.
-   */
-  async listRecords(
-    domain: string,
-  ): Promise<
-    Array<{
-      name: string;
-      type: string;
-      content: string;
-      ttl: number;
-      disabled: boolean;
-      priority?: number;
-    }>
-  > {
-    const zone = await this.getZone(domain);
-
-    const records: Array<{
-      name: string;
-      type: string;
-      content: string;
-      ttl: number;
-      disabled: boolean;
-      priority?: number;
-    }> = [];
-
-    for (const rrset of zone.rrsets) {
-      for (const record of rrset.records) {
-        let content = record.content;
-        let priority: number | undefined;
-
-        // Extract priority from MX content
-        if (rrset.type === 'MX') {
-          const parts = record.content.split(' ');
-          if (parts.length >= 2) {
-            priority = parseInt(parts[0]!, 10);
-            content = parts.slice(1).join(' ');
-          }
-        }
-
-        records.push({
-          name: rrset.name,
-          type: rrset.type,
-          content,
-          ttl: rrset.ttl,
-          disabled: record.disabled,
-          priority,
-        });
-      }
-    }
-
-    return records;
   }
 }
 
-export const dnsService = new DnsService();
+export const dnsService = new PowerDnsProvider();

@@ -204,15 +204,26 @@ export class RegistrarService {
     });
 
     if (registrar) {
-      // In a real system, you'd instantiate the right provider based on registrar.provider
-      // e.g., new NamecheapProvider(registrar.apiKey, registrar.apiSecret)
-      // For now, we fall back to the simulated provider
-      this.provider = new SimulatedRegistrarProvider();
+      const config = (registrar.config ?? {}) as Record<string, string>;
+      switch (registrar.provider) {
+        case 'resellerclub': {
+          const { ResellerClubProvider } = await import('./resellerclub.provider.js');
+          const resellerId = config['resellerId'] ?? registrar.apiKey;
+          this.provider = new ResellerClubProvider(resellerId, registrar.apiSecret ?? registrar.apiKey);
+          break;
+        }
+        default:
+          this.provider = new SimulatedRegistrarProvider();
+      }
     } else {
       this.provider = new SimulatedRegistrarProvider();
     }
 
     return this.provider;
+  }
+
+  resetProvider() {
+    this.provider = null;
   }
 
   /**

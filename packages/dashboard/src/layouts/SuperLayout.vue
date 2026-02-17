@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Search,
 } from 'lucide-vue-next'
+import NotificationBell from '@/components/NotificationBell.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -149,6 +150,9 @@ function goToPanel() {
             <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
             <Monitor v-else class="w-5 h-5" />
           </button>
+
+          <!-- Notifications -->
+          <NotificationBell />
 
           <!-- User menu -->
           <div class="relative">

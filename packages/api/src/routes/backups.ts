@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { backupService } from '../services/backup.service.js';
+import { schedulerService } from '../services/scheduler.service.js';
+import { requireMember } from '../middleware/rbac.js';
 
 const backupRoutes = new Hono<{
   Variables: {
@@ -39,7 +41,7 @@ const createBackupSchema = z.object({
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
 });
 
-backupRoutes.post('/', async (c) => {
+backupRoutes.post('/', requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -94,7 +96,7 @@ const createScheduleSchema = z.object({
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
 });
 
-backupRoutes.post('/schedules', async (c) => {
+backupRoutes.post('/schedules', requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -114,6 +116,8 @@ backupRoutes.post('/schedules', async (c) => {
       ...parsed.data,
     });
 
+    await schedulerService.onScheduleCreated(schedule.id);
+
     return c.json(schedule, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -131,7 +135,7 @@ const updateScheduleSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-backupRoutes.patch('/schedules/:id', async (c) => {
+backupRoutes.patch('/schedules/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const scheduleId = c.req.param('id');
 
@@ -156,11 +160,13 @@ backupRoutes.patch('/schedules/:id', async (c) => {
     return c.json({ error: 'Schedule not found' }, 404);
   }
 
+  await schedulerService.onScheduleUpdated(scheduleId);
+
   return c.json(updated);
 });
 
 // DELETE /schedules/:id — delete backup schedule
-backupRoutes.delete('/schedules/:id', async (c) => {
+backupRoutes.delete('/schedules/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const scheduleId = c.req.param('id');
 
@@ -174,11 +180,13 @@ backupRoutes.delete('/schedules/:id', async (c) => {
     return c.json({ error: 'Schedule not found' }, 404);
   }
 
+  schedulerService.onScheduleDeleted(scheduleId);
+
   return c.json({ message: 'Schedule deleted' });
 });
 
 // POST /schedules/:id/run — manually trigger a scheduled backup
-backupRoutes.post('/schedules/:id/run', async (c) => {
+backupRoutes.post('/schedules/:id/run', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const scheduleId = c.req.param('id');
 
@@ -228,7 +236,7 @@ backupRoutes.get('/:id', async (c) => {
 });
 
 // DELETE /:id — delete backup
-backupRoutes.delete('/:id', async (c) => {
+backupRoutes.delete('/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const backupId = c.req.param('id');
 
@@ -252,7 +260,7 @@ backupRoutes.delete('/:id', async (c) => {
 });
 
 // POST /:id/restore — restore from backup
-backupRoutes.post('/:id/restore', async (c) => {
+backupRoutes.post('/:id/restore', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const backupId = c.req.param('id');
 

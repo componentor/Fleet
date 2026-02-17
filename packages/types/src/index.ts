@@ -15,3 +15,4 @@ export * from './marketplace.js';
 export * from './audit.js';
 export * from './notification.js';
 export * from './api-key.js';
+export * from './rbac.js';

@@ -256,22 +256,22 @@ onMounted(() => {
                     <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all"
-                        :class="nodeMetrics[node.id].cpuPercent > 80 ? 'bg-red-500' : nodeMetrics[node.id].cpuPercent > 50 ? 'bg-yellow-500' : 'bg-green-500'"
-                        :style="{ width: `${Math.min(100, nodeMetrics[node.id].cpuPercent)}%` }"
+                        :class="(nodeMetrics[node.id]?.cpuPercent ?? 0) > 80 ? 'bg-red-500' : (nodeMetrics[node.id]?.cpuPercent ?? 0) > 50 ? 'bg-yellow-500' : 'bg-green-500'"
+                        :style="{ width: `${Math.min(100, nodeMetrics[node.id]?.cpuPercent ?? 0)}%` }"
                       ></div>
                     </div>
-                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id].cpuPercent) }}%</span>
+                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id]?.cpuPercent ?? 0) }}%</span>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">MEM</span>
                     <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all"
-                        :class="nodeMetrics[node.id].memoryPercent > 80 ? 'bg-red-500' : nodeMetrics[node.id].memoryPercent > 50 ? 'bg-yellow-500' : 'bg-blue-500'"
-                        :style="{ width: `${Math.min(100, nodeMetrics[node.id].memoryPercent)}%` }"
+                        :class="(nodeMetrics[node.id]?.memoryPercent ?? 0) > 80 ? 'bg-red-500' : (nodeMetrics[node.id]?.memoryPercent ?? 0) > 50 ? 'bg-yellow-500' : 'bg-blue-500'"
+                        :style="{ width: `${Math.min(100, nodeMetrics[node.id]?.memoryPercent ?? 0)}%` }"
                       ></div>
                     </div>
-                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id].memoryPercent) }}%</span>
+                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id]?.memoryPercent ?? 0) }}%</span>
                   </div>
                 </div>
                 <span v-else class="text-xs text-gray-400 dark:text-gray-500">No data</span>

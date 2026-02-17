@@ -8,7 +8,7 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const emailTemplates = pgTable('email_templates', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

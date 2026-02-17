@@ -6,7 +6,14 @@ import { useApi } from '@/composables/useApi'
 export const useAuthStore = defineStore('auth', () => {
   const api = useApi()
 
-  const user = ref<User | null>(null)
+  // Hydrate user from cache so name/isSuper are available immediately on page reload
+  const cachedUser = localStorage.getItem('fleet_user')
+  let initialUser: User | null = null
+  if (cachedUser) {
+    try { initialUser = JSON.parse(cachedUser) } catch { /* ignore */ }
+  }
+
+  const user = ref<User | null>(initialUser)
   const token = ref<string | null>(localStorage.getItem('fleet_token'))
   const refreshTokenValue = ref<string | null>(localStorage.getItem('fleet_refresh_token'))
   const loading = ref(false)

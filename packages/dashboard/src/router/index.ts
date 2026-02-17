@@ -138,6 +138,11 @@ const panelRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/panel/SSH.vue'),
       },
       {
+        path: 'api-keys',
+        name: 'ApiKeys',
+        component: () => import('@/pages/panel/ApiKeys.vue'),
+      },
+      {
         path: 'sub-accounts',
         name: 'panel-sub-accounts',
         component: () => import('@/pages/panel/SubAccounts.vue'),

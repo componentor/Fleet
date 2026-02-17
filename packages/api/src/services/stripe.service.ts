@@ -98,6 +98,52 @@ export class StripeService {
   }
 
   /**
+   * Create a one-time Stripe Checkout session for domain purchase/renewal.
+   */
+  async createDomainCheckoutSession(
+    customerId: string,
+    domain: string,
+    amountCents: number,
+    currency: string,
+    years: number,
+    accountId: string,
+    successUrl: string,
+    cancelUrl: string,
+    registrationId?: string,
+  ): Promise<Stripe.Checkout.Session> {
+    const metadata: Record<string, string> = {
+      type: registrationId ? 'domain_renewal' : 'domain_registration',
+      domain,
+      years: String(years),
+      accountId,
+    };
+    if (registrationId) {
+      metadata['registrationId'] = registrationId;
+    }
+
+    return getStripe().checkout.sessions.create({
+      customer: customerId,
+      mode: 'payment',
+      line_items: [
+        {
+          price_data: {
+            currency: currency.toLowerCase(),
+            product_data: {
+              name: registrationId ? `Domain Renewal: ${domain}` : `Domain Registration: ${domain}`,
+              description: `${years} year${years > 1 ? 's' : ''}`,
+            },
+            unit_amount: amountCents,
+          },
+          quantity: 1,
+        },
+      ],
+      metadata,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    });
+  }
+
+  /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */
   constructWebhookEvent(

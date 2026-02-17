@@ -4,6 +4,7 @@ import { hash } from 'argon2';
 import { db, apiKeys, insertReturning, deleteReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { requireAdmin } from '../middleware/rbac.js';
 
 const apiKeyRoutes = new Hono<{
   Variables: {
@@ -38,7 +39,7 @@ apiKeyRoutes.get('/', async (c) => {
 });
 
 // POST / — create a new API key
-apiKeyRoutes.post('/', async (c) => {
+apiKeyRoutes.post('/', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
@@ -74,12 +75,12 @@ apiKeyRoutes.post('/', async (c) => {
 });
 
 // DELETE /:id — revoke an API key
-apiKeyRoutes.delete('/:id', async (c) => {
+apiKeyRoutes.delete('/:id', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const keyId = c.req.param('id');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const [deleted] = await deleteReturning(apiKeys, and(eq(apiKeys.id, keyId), eq(apiKeys.accountId, accountId)));
+  const [deleted] = await deleteReturning(apiKeys, and(eq(apiKeys.id, keyId), eq(apiKeys.accountId, accountId))!);
   if (!deleted) return c.json({ error: 'API key not found' }, 404);
 
   return c.json({ message: 'API key revoked' });

@@ -6,8 +6,8 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { users } from './users.js';
+import { accounts } from './accounts';
+import { users } from './users';
 
 export const notifications = pgTable('notifications', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

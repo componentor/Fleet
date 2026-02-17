@@ -4,8 +4,10 @@ import { useRouter } from 'vue-router'
 import { Settings, Save, AlertTriangle, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
+const { canAdmin, canOwner } = useRole()
 const router = useRouter()
 const accountStore = useAccountStore()
 
@@ -130,7 +132,7 @@ onMounted(() => {
             />
             <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">This is used in URLs and API calls.</p>
           </div>
-          <div class="pt-2 flex justify-end">
+          <div v-if="canAdmin" class="pt-2 flex justify-end">
             <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
               <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
               <Save v-else class="w-4 h-4" />
@@ -141,7 +143,7 @@ onMounted(() => {
       </div>
 
       <!-- Danger zone -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-800 shadow-sm">
+      <div v-if="canOwner" class="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-800 shadow-sm">
         <div class="px-6 py-4 border-b border-red-200 dark:border-red-800">
           <div class="flex items-center gap-2">
             <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400" />

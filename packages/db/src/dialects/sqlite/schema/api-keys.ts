@@ -5,8 +5,8 @@ import {
   integer,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { users } from './users.js';
+import { accounts } from './accounts';
+import { users } from './users';
 
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

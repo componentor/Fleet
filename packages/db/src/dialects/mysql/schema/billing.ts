@@ -9,7 +9,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/mysql-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
+import { accounts } from './accounts';
 
 export const billingPlans = mysqlTable('billing_plans', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

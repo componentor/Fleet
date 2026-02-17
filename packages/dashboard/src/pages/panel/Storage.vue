@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { HardDrive, Plus, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useRole } from '@/composables/useRole'
 
 const api = useApi()
+const { canWrite } = useRole()
 
 const volumes = ref<any[]>([])
 const loading = ref(true)
@@ -72,6 +74,7 @@ onMounted(() => {
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Storage</h1>
       </div>
       <button
+        v-if="canWrite"
         @click="showCreate = true"
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
@@ -148,7 +151,7 @@ onMounted(() => {
               <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white font-mono">{{ volume.name }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ volume.driver || 'local' }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(volume.createdAt) }}</td>
-              <td class="px-6 py-4 text-right">
+              <td v-if="canWrite" class="px-6 py-4 text-right">
                 <button
                   @click="deleteVolume(volume.name)"
                   class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"

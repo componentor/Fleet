@@ -8,8 +8,8 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
-import { accounts } from './accounts.js';
-import { users } from './users.js';
+import { accounts } from './accounts';
+import { users } from './users';
 
 export const dnsZones = pgTable('dns_zones', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -64,7 +64,23 @@ export const domainRegistrations = pgTable('domain_registrations', {
   expiresAt: timestamp('expires_at'),
   autoRenew: boolean('auto_renew').default(true),
   registrarDomainId: varchar('registrar_domain_id'),
+  stripePaymentId: varchar('stripe_payment_id'),
   createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const domainTldPricing = pgTable('domain_tld_pricing', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  tld: varchar('tld', { length: 63 }).notNull().unique(),
+  providerRegistrationPrice: integer('provider_registration_price').notNull(),
+  providerRenewalPrice: integer('provider_renewal_price').notNull(),
+  markupType: varchar('markup_type', { length: 20 }).notNull().default('percentage'),
+  markupValue: integer('markup_value').notNull().default(20),
+  sellRegistrationPrice: integer('sell_registration_price').notNull(),
+  sellRenewalPrice: integer('sell_renewal_price').notNull(),
+  enabled: boolean('enabled').default(true),
+  currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({

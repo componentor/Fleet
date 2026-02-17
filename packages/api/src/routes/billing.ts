@@ -12,6 +12,7 @@ import {
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { stripeService } from '../services/stripe.service.js';
+import { requireOwner } from '../middleware/rbac.js';
 
 type BillingEnv = {
   Variables: {
@@ -51,7 +52,7 @@ const checkoutSchema = z.object({
   cancelUrl: z.string().url(),
 });
 
-authed.post('/checkout', async (c) => {
+authed.post('/checkout', requireOwner, async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -207,7 +208,7 @@ const portalSchema = z.object({
   returnUrl: z.string().url(),
 });
 
-authed.post('/portal', async (c) => {
+authed.post('/portal', requireOwner, async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -261,15 +262,65 @@ billing.post('/webhook', async (c) => {
   // Handle the event
   switch (event.type) {
     case 'checkout.session.completed': {
-      const session = event.data.object as { customer?: string; subscription?: string };
-      if (session.customer && session.subscription) {
-        // Find the account by Stripe customer ID and create a local subscription record
+      const session = event.data.object as {
+        customer?: string;
+        subscription?: string;
+        metadata?: Record<string, string>;
+        payment_intent?: string;
+      };
+
+      // Handle domain purchase/renewal
+      if (session.metadata?.type === 'domain_registration') {
+        try {
+          const { registrarService } = await import('../services/registrar.service.js');
+          const { domainRegistrations: domRegTable, insertReturning: insert, updateReturning: update } = await import('@fleet/db');
+
+          // Create a placeholder contact for the registration
+          const contact = {
+            firstName: 'Domain',
+            lastName: 'Owner',
+            email: 'domains@fleet.local',
+            phone: '0000000000',
+            address1: 'N/A',
+            city: 'N/A',
+            state: 'N/A',
+            postalCode: '00000',
+            country: 'US',
+          };
+
+          const registration = await registrarService.registerDomain(
+            session.metadata.domain!,
+            Number(session.metadata.years) || 1,
+            contact,
+            session.metadata.accountId!,
+          );
+
+          // Update with stripe payment ID
+          if (registration?.id && session.payment_intent) {
+            await db.update(domRegTable)
+              .set({ stripePaymentId: session.payment_intent as string })
+              .where(eq(domRegTable.id, registration.id));
+          }
+        } catch (err) {
+          console.error('Domain registration after payment failed:', err);
+        }
+      } else if (session.metadata?.type === 'domain_renewal') {
+        try {
+          const { registrarService } = await import('../services/registrar.service.js');
+          await registrarService.renewDomain(
+            session.metadata.registrationId!,
+            Number(session.metadata.years) || 1,
+          );
+        } catch (err) {
+          console.error('Domain renewal after payment failed:', err);
+        }
+      } else if (session.customer && session.subscription) {
+        // Subscription checkout
         const account = await db.query.accounts.findFirst({
           where: eq(accounts.stripeCustomerId, session.customer),
         });
 
         if (account) {
-          // Find the first plan for this account to associate with the subscription
           const plan = await db.query.billingPlans.findFirst({
             where: eq(billingPlans.accountId, account.id),
           });

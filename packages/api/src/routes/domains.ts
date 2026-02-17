@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { resolve as dnsResolve } from 'node:dns/promises';
 import { db, dnsZones, dnsRecords, insertReturning, updateReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { dnsService } from '../services/dns.service.js';
+import { dnsManager } from '../services/dns-provider-manager.js';
+import { requireMember } from '../middleware/rbac.js';
 import { randomUUID } from 'crypto';
 
 const dnsRoutes = new Hono<{
@@ -37,7 +39,7 @@ dnsRoutes.get('/zones', async (c) => {
   return c.json(zones);
 });
 
-// POST /zones — add a domain (creates zone in PowerDNS + DB)
+// POST /zones — add a domain (creates zone in DB, syncs to providers best-effort)
 const createZoneSchema = z.object({
   domain: z
     .string()
@@ -50,7 +52,7 @@ const createZoneSchema = z.object({
   nameservers: z.array(z.string()).optional(),
 });
 
-dnsRoutes.post('/zones', async (c) => {
+dnsRoutes.post('/zones', requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -81,27 +83,26 @@ dnsRoutes.post('/zones', async (c) => {
   // Generate a verification token
   const verificationToken = randomUUID();
 
-  // Create zone in PowerDNS
-  try {
-    await dnsService.createZone(domain, nameservers);
-  } catch (err) {
-    console.error('Failed to create PowerDNS zone:', err);
-    return c.json({ error: 'Failed to create DNS zone in provider' }, 500);
-  }
+  // Build the CNAME target for BYOD domains
+  const account = c.get('account');
+  const platformDomain = process.env['PLATFORM_DOMAIN'] ?? 'fleet.local';
+  const cnameTarget = `${account?.slug ?? accountId}.${platformDomain}`;
 
-  // Create a TXT verification record in PowerDNS
-  try {
-    await dnsService.createRecord(
-      domain,
-      `_fleet-verify.${domain}`,
-      'TXT',
-      `"${verificationToken}"`,
-      3600,
-    );
-  } catch (err) {
-    console.error('Failed to create verification TXT record:', err);
-    // Zone was created, continue — verification can be retried
-  }
+  // Sync to DNS providers (best-effort)
+  const warnings: string[] = [];
+
+  const zoneResult = await dnsManager.createZone(domain, nameservers);
+  warnings.push(...zoneResult.warnings);
+
+  // Create a TXT verification record in providers
+  const txtResult = await dnsManager.createRecord(
+    domain,
+    `_fleet-verify.${domain}`,
+    'TXT',
+    `"fleet-verify=${verificationToken}"`,
+    3600,
+  );
+  warnings.push(...txtResult.warnings);
 
   // Insert into DB
   const resolvedNameservers = nameservers ?? [
@@ -120,7 +121,15 @@ dnsRoutes.post('/zones', async (c) => {
     return c.json({ error: 'Failed to create zone record' }, 500);
   }
 
-  return c.json({ ...zone, verificationToken }, 201);
+  return c.json(
+    {
+      ...zone,
+      verificationToken,
+      cnameTarget,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    },
+    201,
+  );
 });
 
 // GET /zones/:id — zone details + records
@@ -149,7 +158,7 @@ dnsRoutes.get('/zones/:id', async (c) => {
 });
 
 // DELETE /zones/:id — remove domain
-dnsRoutes.delete('/zones/:id', async (c) => {
+dnsRoutes.delete('/zones/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const zoneId = c.req.param('id');
 
@@ -165,13 +174,8 @@ dnsRoutes.delete('/zones/:id', async (c) => {
     return c.json({ error: 'Zone not found' }, 404);
   }
 
-  // Remove from PowerDNS
-  try {
-    await dnsService.deleteZone(zone.domain);
-  } catch (err) {
-    console.error('Failed to delete PowerDNS zone:', err);
-    // Continue with DB cleanup even if PowerDNS removal fails
-  }
+  // Remove from providers (best-effort)
+  await dnsManager.deleteZone(zone.domain);
 
   // Delete all records for this zone first, then the zone itself
   await db.delete(dnsRecords).where(eq(dnsRecords.zoneId, zoneId));
@@ -180,8 +184,8 @@ dnsRoutes.delete('/zones/:id', async (c) => {
   return c.json({ message: 'Zone deleted' });
 });
 
-// POST /zones/:id/verify — verify domain ownership via TXT record
-dnsRoutes.post('/zones/:id/verify', async (c) => {
+// POST /zones/:id/verify — verify domain ownership via DNS TXT record
+dnsRoutes.post('/zones/:id/verify', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const zoneId = c.req.param('id');
 
@@ -201,13 +205,12 @@ dnsRoutes.post('/zones/:id/verify', async (c) => {
     return c.json({ message: 'Domain is already verified', verified: true });
   }
 
-  // Attempt to read the body for a token, or use a lookup approach
   let token: string | undefined;
   try {
     const body = await c.req.json();
     token = body.token;
   } catch {
-    // No body provided — that's fine
+    // No body provided
   }
 
   if (!token) {
@@ -220,14 +223,31 @@ dnsRoutes.post('/zones/:id/verify', async (c) => {
     );
   }
 
-  // Check PowerDNS for the verification TXT record
-  const verified = await dnsService.verifyDomain(zone.domain, token);
+  // Use Node's built-in dns.promises to verify the TXT record publicly
+  let verified = false;
+  try {
+    const records = await dnsResolve(
+      `_fleet-verify.${zone.domain}`,
+      'TXT',
+    ) as string[][];
+    const flat = records.flat();
+    verified = flat.some(
+      (txt) =>
+        txt === `fleet-verify=${token}` ||
+        txt === token,
+    );
+  } catch {
+    // DNS lookup failed — record not found yet
+  }
 
   if (!verified) {
     return c.json(
       {
         error:
-          'Verification failed. Ensure the TXT record _fleet-verify is configured correctly.',
+          'Verification failed. Ensure a TXT record for _fleet-verify.' +
+          zone.domain +
+          ' contains: fleet-verify=' +
+          token,
         verified: false,
       },
       422,
@@ -282,7 +302,6 @@ dnsRoutes.get('/zones/:id/records', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Verify zone belongs to account
   const zone = await db.query.dnsZones.findFirst({
     where: and(eq(dnsZones.id, zoneId), eq(dnsZones.accountId, accountId)),
   });
@@ -300,7 +319,7 @@ dnsRoutes.get('/zones/:id/records', async (c) => {
 });
 
 // POST /zones/:id/records — create a DNS record
-dnsRoutes.post('/zones/:id/records', async (c) => {
+dnsRoutes.post('/zones/:id/records', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const zoneId = c.req.param('id');
 
@@ -308,7 +327,6 @@ dnsRoutes.post('/zones/:id/records', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Verify zone belongs to account
   const zone = await db.query.dnsZones.findFirst({
     where: and(eq(dnsZones.id, zoneId), eq(dnsZones.accountId, accountId)),
   });
@@ -329,13 +347,8 @@ dnsRoutes.post('/zones/:id/records', async (c) => {
 
   const { type, name, content, ttl, priority } = parsed.data;
 
-  // Create in PowerDNS
-  try {
-    await dnsService.createRecord(zone.domain, name, type, content, ttl, priority);
-  } catch (err) {
-    console.error('Failed to create PowerDNS record:', err);
-    return c.json({ error: 'Failed to create DNS record in provider' }, 500);
-  }
+  // Sync to providers (best-effort)
+  const result = await dnsManager.createRecord(zone.domain, name, type, content, ttl, priority);
 
   // Insert into DB
   const [record] = await insertReturning(dnsRecords, {
@@ -351,11 +364,17 @@ dnsRoutes.post('/zones/:id/records', async (c) => {
     return c.json({ error: 'Failed to create record' }, 500);
   }
 
-  return c.json(record, 201);
+  return c.json(
+    {
+      ...record,
+      warnings: result.warnings.length > 0 ? result.warnings : undefined,
+    },
+    201,
+  );
 });
 
 // PATCH /records/:id — update a DNS record
-dnsRoutes.patch('/records/:id', async (c) => {
+dnsRoutes.patch('/records/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const recordId = c.req.param('id');
 
@@ -363,7 +382,6 @@ dnsRoutes.patch('/records/:id', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Find the record and its zone
   const record = await db.query.dnsRecords.findFirst({
     where: eq(dnsRecords.id, recordId),
     with: { zone: true },
@@ -373,7 +391,6 @@ dnsRoutes.patch('/records/:id', async (c) => {
     return c.json({ error: 'Record not found' }, 404);
   }
 
-  // Verify zone belongs to account
   if (record.zone.accountId !== accountId) {
     return c.json({ error: 'Record not found' }, 404);
   }
@@ -390,39 +407,29 @@ dnsRoutes.patch('/records/:id', async (c) => {
 
   const updates = parsed.data;
 
-  // Resolve final values (merge existing with updates)
   const finalName = updates.name ?? record.name;
   const finalType = updates.type ?? record.type;
   const finalContent = updates.content ?? record.content;
   const finalTtl = updates.ttl ?? record.ttl ?? 3600;
   const finalPriority = updates.priority ?? record.priority;
 
-  // If name or type changed, delete the old record in PowerDNS first
+  // If name or type changed, delete the old record in providers first
   if (
     (updates.name && updates.name !== record.name) ||
     (updates.type && updates.type !== record.type)
   ) {
-    try {
-      await dnsService.deleteRecord(record.zone.domain, record.name, record.type);
-    } catch (err) {
-      console.error('Failed to delete old PowerDNS record:', err);
-    }
+    await dnsManager.deleteRecord(record.zone.domain, record.name, record.type);
   }
 
-  // Update in PowerDNS
-  try {
-    await dnsService.updateRecord(
-      record.zone.domain,
-      finalName,
-      finalType,
-      finalContent,
-      finalTtl,
-      finalPriority ?? undefined,
-    );
-  } catch (err) {
-    console.error('Failed to update PowerDNS record:', err);
-    return c.json({ error: 'Failed to update DNS record in provider' }, 500);
-  }
+  // Update in providers (best-effort)
+  const result = await dnsManager.updateRecord(
+    record.zone.domain,
+    finalName,
+    finalType,
+    finalContent,
+    finalTtl,
+    finalPriority ?? undefined,
+  );
 
   // Update in DB
   const [updated] = await updateReturning(dnsRecords, {
@@ -434,11 +441,14 @@ dnsRoutes.patch('/records/:id', async (c) => {
     updatedAt: new Date(),
   }, eq(dnsRecords.id, recordId));
 
-  return c.json(updated);
+  return c.json({
+    ...updated,
+    warnings: result.warnings.length > 0 ? result.warnings : undefined,
+  });
 });
 
 // DELETE /records/:id — delete a DNS record
-dnsRoutes.delete('/records/:id', async (c) => {
+dnsRoutes.delete('/records/:id', requireMember, async (c) => {
   const accountId = c.get('accountId');
   const recordId = c.req.param('id');
 
@@ -446,7 +456,6 @@ dnsRoutes.delete('/records/:id', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Find the record and its zone
   const record = await db.query.dnsRecords.findFirst({
     where: eq(dnsRecords.id, recordId),
     with: { zone: true },
@@ -456,18 +465,12 @@ dnsRoutes.delete('/records/:id', async (c) => {
     return c.json({ error: 'Record not found' }, 404);
   }
 
-  // Verify zone belongs to account
   if (record.zone.accountId !== accountId) {
     return c.json({ error: 'Record not found' }, 404);
   }
 
-  // Delete from PowerDNS
-  try {
-    await dnsService.deleteRecord(record.zone.domain, record.name, record.type);
-  } catch (err) {
-    console.error('Failed to delete PowerDNS record:', err);
-    // Continue with DB cleanup
-  }
+  // Delete from providers (best-effort)
+  await dnsManager.deleteRecord(record.zone.domain, record.name, record.type);
 
   // Delete from DB
   await db.delete(dnsRecords).where(eq(dnsRecords.id, recordId));

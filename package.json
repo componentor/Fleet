@@ -18,7 +18,7 @@
     ]
   },
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev 2>/dev/null || true",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",

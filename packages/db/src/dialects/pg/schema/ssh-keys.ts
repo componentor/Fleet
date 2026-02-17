@@ -8,8 +8,8 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
-import { users } from './users.js';
-import { services } from './services.js';
+import { users } from './users';
+import { services } from './services';
 
 export const sshKeys = pgTable('ssh_keys', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

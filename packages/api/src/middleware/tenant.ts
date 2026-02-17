@@ -16,6 +16,7 @@ export const tenantMiddleware = createMiddleware<{
     user: AuthUser;
     account: AccountContext | null;
     accountId: string | null;
+    userRole: string;
   };
 }>(async (c, next) => {
   const user = c.get('user');
@@ -26,6 +27,7 @@ export const tenantMiddleware = createMiddleware<{
   if (user.isSuper && !accountIdHeader) {
     c.set('account', null);
     c.set('accountId', null);
+    c.set('userRole', 'owner');
     await next();
     return;
   }
@@ -56,6 +58,7 @@ export const tenantMiddleware = createMiddleware<{
   if (user.isSuper) {
     c.set('account', accountCtx);
     c.set('accountId', targetAccount.id);
+    c.set('userRole', 'owner');
     await next();
     return;
   }
@@ -69,6 +72,7 @@ export const tenantMiddleware = createMiddleware<{
   if (directAccess) {
     c.set('account', accountCtx);
     c.set('accountId', targetAccount.id);
+    c.set('userRole', directAccess.role ?? 'member');
     await next();
     return;
   }
@@ -97,6 +101,7 @@ export const tenantMiddleware = createMiddleware<{
 
   c.set('account', accountCtx);
   c.set('accountId', targetAccount.id);
+  c.set('userRole', 'member');
 
   await next();
 });

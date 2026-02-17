@@ -1,5 +1,5 @@
 import { sql as drizzleSql } from 'drizzle-orm';
-import { getDialect, getConnectionString } from './config.js';
+import { getDialect, getConnectionString } from './config';
 
 /**
  * Run all pending Drizzle migrations programmatically.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getDialect, getConnectionString } from '../config.js';
+import { getDialect, getConnectionString } from '../config';
 
 describe('getDialect', () => {
   const originalEnv = { ...process.env };
