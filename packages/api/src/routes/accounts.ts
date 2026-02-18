@@ -189,6 +189,13 @@ accountRoutes.patch('/:id', tenantMiddleware, requireAdmin, async (c) => {
     return c.json({ error: 'Validation failed' }, 400);
   }
 
+  const user = c.get('user');
+
+  // Only super admins can change account status (prevents self-un-suspend)
+  if (parsed.data.status && !user.isSuper) {
+    return c.json({ error: 'Only platform administrators can change account status' }, 403);
+  }
+
   const [updated] = await updateReturning(accounts, {
     ...parsed.data,
     updatedAt: new Date(),
@@ -539,6 +546,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     return c.json({ error: 'Account not found' }, 404);
   }
 
+  let inviterRole: string = 'owner'; // Super users treated as owner
   if (!authUser.isSuper) {
     const inviterMembership = await db.query.userAccounts.findFirst({
       where: (ua, { and, eq: e }) =>
@@ -548,6 +556,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     if (!inviterMembership || (inviterMembership.role !== 'owner' && inviterMembership.role !== 'admin')) {
       return c.json({ error: 'Only owners and admins can invite members' }, 403);
     }
+    inviterRole = inviterMembership.role ?? 'member';
   }
 
   const body = await c.req.json();
@@ -558,6 +567,12 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
   }
 
   const { email, role } = parsed.data;
+
+  // Prevent role escalation: admins cannot invite at admin level (only owners can)
+  const ROLE_LEVELS: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
+  if ((ROLE_LEVELS[role] ?? 0) >= (ROLE_LEVELS[inviterRole] ?? 0)) {
+    return c.json({ error: 'Cannot invite at a role equal to or higher than your own' }, 403);
+  }
 
   const targetUser = await db.query.users.findFirst({
     where: and(eq(users.email, email), isNull(users.deletedAt)),

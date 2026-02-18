@@ -146,6 +146,8 @@ async function verifyWsToken(token: string) {
   if (valkey) {
     const blocked = await valkey.get(`blocklist:${token}`);
     if (blocked) throw new Error('Token has been revoked');
+  } else if (process.env['NODE_ENV'] === 'production') {
+    throw new Error('Service temporarily unavailable');
   }
 
   return payload as { userId: string; email: string; isSuper: boolean };

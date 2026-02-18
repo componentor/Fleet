@@ -176,7 +176,7 @@ export class BackupService {
             id: service.id,
             name: service.name,
             image: service.image,
-            env: service.env,
+            // env intentionally excluded — may contain secrets
             ports: service.ports,
             volumes: service.volumes,
             domain: service.domain,
@@ -237,7 +237,7 @@ export class BackupService {
             id: s.id,
             name: s.name,
             image: s.image,
-            env: s.env,
+            // env intentionally excluded — may contain secrets
             ports: s.ports,
             volumes: s.volumes,
             domain: s.domain,

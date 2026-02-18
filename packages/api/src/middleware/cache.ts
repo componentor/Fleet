@@ -3,7 +3,9 @@ import { getValkey } from '../services/valkey.service.js';
 
 /**
  * Valkey-backed response cache middleware.
- * Caches JSON responses by method + path + accountId.
+ * Caches JSON responses by method + path + validated accountId.
+ * Uses the validated accountId from context (set by tenantMiddleware) to prevent
+ * cross-tenant cache poisoning. Must run after auth + tenant middleware.
  * Skipped gracefully when Valkey is unavailable.
  */
 export function cache(ttlSeconds: number) {
@@ -20,7 +22,8 @@ export function cache(ttlSeconds: number) {
       return;
     }
 
-    const accountId = c.req.header('x-account-id') ?? 'none';
+    // Use validated accountId from tenant middleware (not raw header)
+    const accountId = (c.get('accountId' as never) as string | undefined) ?? 'none';
     const cacheKey = `cache:${c.req.method}:${c.req.path}:${accountId}`;
 
     try {

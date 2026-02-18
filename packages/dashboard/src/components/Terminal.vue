@@ -18,7 +18,14 @@ function connectWebSocket(serviceId: string) {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const token = authStore.token
-  ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?token=${token}`)
+  const accountId = localStorage.getItem('fleet_account_id')
+  ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?token=${token}&accountId=${accountId}`)
+
+  ws.onopen = () => {
+    if (terminal && fitAddon) {
+      ws?.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }))
+    }
+  }
 
   ws.onmessage = (event) => {
     terminal?.write(event.data)
@@ -53,7 +60,15 @@ onMounted(() => {
   fitAddon.fit()
 
   terminal.onData((data) => {
-    ws?.send(data)
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input', data }))
+    }
+  })
+
+  terminal.onResize(({ cols, rows }) => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+    }
   })
 
   // Handle resize

@@ -9,6 +9,7 @@ const ROLE_LEVEL: Record<AccountRole, number> = { viewer: 0, member: 1, admin: 2
 const role = ref<AccountRole>('viewer')
 const loading = ref(false)
 let lastAccountId: string | null = null
+let watchRegistered = false
 
 export function useRole() {
   const api = useApi()
@@ -41,12 +42,15 @@ export function useRole() {
     }
   }
 
-  // Re-fetch when account changes
-  watch(() => accountStore.currentAccount?.id, (newId) => {
-    if (newId && newId !== lastAccountId) {
-      fetchRole()
-    }
-  }, { immediate: true })
+  // Register the watcher only once (module-level singleton — prevents accumulation)
+  if (!watchRegistered) {
+    watchRegistered = true
+    watch(() => accountStore.currentAccount?.id, (newId) => {
+      if (newId && newId !== lastAccountId) {
+        fetchRole()
+      }
+    }, { immediate: true })
+  }
 
   const canWrite = computed(() => ROLE_LEVEL[role.value] >= ROLE_LEVEL.member)
   const canAdmin = computed(() => ROLE_LEVEL[role.value] >= ROLE_LEVEL.admin)

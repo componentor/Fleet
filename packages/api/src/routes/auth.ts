@@ -127,7 +127,7 @@ const registerSchema = z.object({
 });
 
 auth.post('/register', authRateLimit, async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const parsed = registerSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -225,7 +225,7 @@ const loginSchema = z.object({
 });
 
 auth.post('/login', authRateLimit, async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const parsed = loginSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -375,6 +375,9 @@ auth.post('/refresh', refreshRateLimit, async (c) => {
 
 // POST /logout
 auth.post('/logout', authMiddleware, async (c) => {
+  const valkey = await getValkey();
+
+  // Blocklist the access token
   const authorization = c.req.header('Authorization');
   if (authorization?.startsWith('Bearer ')) {
     const token = authorization.slice(7);
@@ -382,19 +385,35 @@ auth.post('/logout', authMiddleware, async (c) => {
       const secret = JWT_SECRET_KEY();
       const { payload } = await jwtVerify(token, secret);
       const exp = payload.exp;
-      if (exp) {
+      if (exp && valkey) {
         const ttl = exp - Math.floor(Date.now() / 1000);
         if (ttl > 0) {
-          const valkey = await getValkey();
-          if (valkey) {
-            await valkey.setex(`blocklist:${token}`, ttl, '1');
-          }
+          await valkey.setex(`blocklist:${token}`, ttl, '1');
         }
       }
     } catch {
       // Token already invalid, that's fine
     }
   }
+
+  // Blocklist the refresh token to prevent reuse after logout
+  const refreshToken = getCookie(c, 'fleet_refresh');
+  if (refreshToken && valkey) {
+    try {
+      const secret = JWT_SECRET_KEY();
+      const { payload } = await jwtVerify(refreshToken, secret);
+      const exp = payload.exp;
+      if (exp) {
+        const ttl = exp - Math.floor(Date.now() / 1000);
+        if (ttl > 0) {
+          await valkey.setex(`blocklist:${refreshToken}`, ttl, '1');
+        }
+      }
+    } catch {
+      // Refresh token already invalid, that's fine
+    }
+  }
+
   clearRefreshTokenCookie(c);
   return c.json({ message: 'Logged out successfully' });
 });
@@ -1041,17 +1060,16 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
           });
         });
       } else {
-        // Atomically verify email and link OAuth provider
-        await safeTransaction(async (tx) => {
-          if (!user!.emailVerified) {
-            await tx.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
-          }
-          await tx.insert(oauthProviders).values({
-            userId: user!.id,
-            provider: 'github',
-            providerUserId,
-            accessToken: encrypt(tokenData.access_token),
-          });
+        // Only link OAuth to existing accounts with verified email to prevent account takeover
+        if (!user!.emailVerified) {
+          return c.redirect('/auth/callback?error=Email+not+verified.+Please+verify+your+email+first+then+link+your+account.');
+        }
+        // Link OAuth provider to existing verified user
+        await db.insert(oauthProviders).values({
+          userId: user!.id,
+          provider: 'github',
+          providerUserId,
+          accessToken: encrypt(tokenData.access_token),
         });
       }
 
@@ -1065,6 +1083,17 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
 
     if (!user) {
       return c.redirect('/auth/callback?error=User+not+found');
+    }
+
+    // 2FA check — if user has 2FA enabled, redirect to 2FA challenge
+    if (user.twoFactorEnabled) {
+      const secret = JWT_SECRET_KEY();
+      const tempToken = await new SignJWT({ userId: user.id, type: '2fa-challenge' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(secret);
+      return c.redirect(`/auth/2fa?tempToken=${encodeURIComponent(tempToken)}`);
     }
 
     const tokens = await generateTokens({
@@ -1261,17 +1290,16 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
           });
         });
       } else {
-        // Atomically verify email and link OAuth provider
-        await safeTransaction(async (tx) => {
-          if (!user!.emailVerified) {
-            await tx.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
-          }
-          await tx.insert(oauthProviders).values({
-            userId: user!.id,
-            provider: 'google',
-            providerUserId,
-            accessToken: encrypt(tokenData.access_token),
-          });
+        // Only link OAuth to existing accounts with verified email to prevent account takeover
+        if (!user!.emailVerified) {
+          return c.redirect('/auth/callback?error=Email+not+verified.+Please+verify+your+email+first+then+link+your+account.');
+        }
+        // Link OAuth provider to existing verified user
+        await db.insert(oauthProviders).values({
+          userId: user!.id,
+          provider: 'google',
+          providerUserId,
+          accessToken: encrypt(tokenData.access_token),
         });
       }
 
@@ -1284,6 +1312,17 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
 
     if (!user) {
       return c.redirect('/auth/callback?error=User+not+found');
+    }
+
+    // 2FA check — if user has 2FA enabled, redirect to 2FA challenge
+    if (user.twoFactorEnabled) {
+      const secret = JWT_SECRET_KEY();
+      const tempToken = await new SignJWT({ userId: user.id, type: '2fa-challenge' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(secret);
+      return c.redirect(`/auth/2fa?tempToken=${encodeURIComponent(tempToken)}`);
     }
 
     const tokens = await generateTokens({

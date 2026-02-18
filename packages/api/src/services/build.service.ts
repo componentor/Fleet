@@ -24,6 +24,8 @@ const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
 
 function scrubSecrets(log: string): string {
   return log
+    // Mask credentials embedded in URLs (e.g., https://x-access-token:TOKEN@github.com)
+    .replace(/\/\/[^@\s]+@/g, '//[REDACTED]@')
     // Mask environment variable assignments with sensitive names
     .replace(/(?:PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|API_KEY|AUTH|PRIVATE)[\s]*[=:]\s*\S+/gi, (match) => {
       const eqIdx = match.search(/[=:]/);

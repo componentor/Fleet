@@ -256,8 +256,8 @@ authed.delete('/subscription', requireOwner, requireScope('admin'), async (c) =>
     .set({ cancelledAt: new Date(), updatedAt: new Date() })
     .where(eq(subscriptions.id, sub.id));
 
-  // Suspend services immediately — don't wait for webhook
-  await suspendAccountServices(accountId);
+  // Services remain active until end of billing period.
+  // Suspension happens when Stripe fires customer.subscription.deleted webhook.
 
   return c.json({ message: 'Subscription will cancel at end of billing period' });
 });

@@ -1,4 +1,4 @@
-import { db, notifications, insertReturning, eq, and, countSql } from '@fleet/db';
+import { db, notifications, insertReturning, eq, and, countSql, isNull, or } from '@fleet/db';
 
 class NotificationService {
   async create(accountId: string, opts: {
@@ -28,6 +28,7 @@ class NotificationService {
       .where(and(
         eq(notifications.accountId, accountId),
         eq(notifications.read, false),
+        or(eq(notifications.userId, userId), isNull(notifications.userId)),
       ));
     return (result?.count as number) ?? 0;
   }
@@ -38,7 +39,11 @@ class NotificationService {
 
   async markAllRead(accountId: string, userId: string) {
     await db.update(notifications).set({ read: true }).where(
-      and(eq(notifications.accountId, accountId), eq(notifications.read, false))
+      and(
+        eq(notifications.accountId, accountId),
+        eq(notifications.read, false),
+        or(eq(notifications.userId, userId), isNull(notifications.userId)),
+      )
     );
   }
 }

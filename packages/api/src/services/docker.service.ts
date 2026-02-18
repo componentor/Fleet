@@ -157,6 +157,11 @@ export class DockerService {
     dockerServiceId: string,
     opts: Partial<CreateSwarmServiceOptions>,
   ): Promise<void> {
+    // Validate volume mounts if volumes are being updated (defense-in-depth)
+    if (opts.volumes) {
+      this.validateVolumeMounts(opts.volumes);
+    }
+
     const service = docker.getService(dockerServiceId);
     const info = await service.inspect();
     const version = info.Version.Index;
