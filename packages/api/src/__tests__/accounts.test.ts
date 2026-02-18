@@ -89,7 +89,7 @@ describe('Accounts', () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json() as any;
-    expect(body.message).toContain('deleted');
+    expect(body.message).toContain('deletion');
   });
 
   it('returns 401 without auth', async () => {

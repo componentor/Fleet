@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, services, deployments, oauthProviders, insertReturning, updateReturning, eq, and, isNull } from '@fleet/db';
+import { db, services, deployments, oauthProviders, insertReturning, updateReturning, eq, and, not, isNull } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
@@ -69,8 +69,8 @@ const createServiceSchema = z.object({
   replicas: z.number().int().min(1).max(100).default(1),
   env: z.record(z.string()).default({}),
   ports: z.array(z.object({
-    target: z.number().int(),
-    published: z.number().int().optional(),
+    target: z.number().int().min(1).max(65535),
+    published: z.number().int().min(1).max(65535).optional(),
     protocol: z.enum(['tcp', 'udp']).default('tcp'),
   })).default([]),
   volumes: z.array(z.object({
@@ -127,11 +127,12 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
   // Check for port collisions with other accounts' services
   if (data.ports.some((p) => p.published)) {
     const publishedPorts = data.ports.filter((p) => p.published).map((p) => p.published!);
-    const allServices = await db.query.services.findMany({
-      where: and(isNull(services.deletedAt)),
+    // Only fetch services from OTHER accounts (not the full table)
+    const otherServices = await db.query.services.findMany({
+      where: and(not(eq(services.accountId, accountId)), isNull(services.deletedAt)),
+      columns: { id: true, ports: true },
     });
-    for (const existing of allServices) {
-      if (existing.accountId === accountId) continue; // Same account is OK
+    for (const existing of otherServices) {
       const existingPorts = (existing.ports as any[])?.map((p: any) => p.published).filter(Boolean) ?? [];
       for (const port of publishedPorts) {
         if (existingPorts.includes(port)) {
@@ -306,8 +307,8 @@ const updateServiceSchema = z.object({
   replicas: z.number().int().min(1).max(100).optional(),
   env: z.record(z.string()).optional(),
   ports: z.array(z.object({
-    target: z.number().int(),
-    published: z.number().int().optional(),
+    target: z.number().int().min(1).max(65535),
+    published: z.number().int().min(1).max(65535).optional(),
     protocol: z.enum(['tcp', 'udp']).default('tcp'),
   })).optional(),
   domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),

@@ -7,6 +7,10 @@ import { emailService } from '../services/email.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { encrypt } from '../services/crypto.service.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
+import { logger } from '../services/logger.js';
+
+const settingsRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'settings' });
 
 const settings = new Hono<{
   Variables: {
@@ -100,7 +104,7 @@ const ALLOWED_ACCOUNT_SETTINGS = [
   'email:resendApiKey', 'email:resendFrom',
 ];
 
-settings.patch('/', requireAdmin, async (c) => {
+settings.patch('/', settingsRateLimit, requireAdmin, async (c) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
@@ -123,6 +127,7 @@ settings.patch('/', requireAdmin, async (c) => {
       await upsertSetting(key, value);
     }
 
+    logger.info({ keys: entries.map(([k]) => k), changedBy: user.userId }, 'Platform settings updated');
     return c.json({ message: 'Platform settings updated', updated: entries.map(([k]) => k) });
   }
 
@@ -158,7 +163,7 @@ const stripeSettingsSchema = z.object({
   webhookSecret: z.string().min(1).optional(),
 });
 
-settings.patch('/stripe', requireAdmin, async (c) => {
+settings.patch('/stripe', settingsRateLimit, requireAdmin, async (c) => {
   const user = c.get('user');
 
   if (!user.isSuper) {
@@ -181,6 +186,7 @@ settings.patch('/stripe', requireAdmin, async (c) => {
     await upsertSetting('stripe:webhookSecret', encrypt(data.webhookSecret));
   }
 
+  logger.info({ changedBy: user.userId }, 'Stripe configuration updated');
   return c.json({ message: 'Stripe configuration updated' });
 });
 
@@ -200,7 +206,7 @@ const emailSettingsSchema = z.object({
   resendFrom: z.string().email().optional(),
 });
 
-settings.patch('/email', requireAdmin, async (c) => {
+settings.patch('/email', settingsRateLimit, requireAdmin, async (c) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
@@ -243,6 +249,7 @@ settings.patch('/email', requireAdmin, async (c) => {
     // Reset the cached email provider so the next send picks up new config
     emailService.resetProvider();
 
+    logger.info({ changedBy: user.userId }, 'Email configuration updated');
     return c.json({ message: 'Email configuration updated' });
   }
 
@@ -300,7 +307,7 @@ const registrarSchema = z.object({
   resellerId: z.string().optional(),
 });
 
-settings.patch('/registrar', requireAdmin, async (c) => {
+settings.patch('/registrar', settingsRateLimit, requireAdmin, async (c) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure registrar' }, 403);
@@ -364,7 +371,7 @@ settings.post('/registrar/test', requireAdmin, async (c) => {
     const results = await provider.searchDomains('test', ['com']);
     return c.json({ success: true, provider: provider.name, results: results.length });
   } catch (err) {
-    return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    return c.json({ success: false, error: 'Registrar connection test failed' }, 500);
   }
 });
 

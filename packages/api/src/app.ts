@@ -7,6 +7,7 @@ import { Readable } from 'node:stream';
 import { db, services, eq, and, isNull, errorLog, userAccounts } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
 import { logger } from './services/logger.js';
+import { getValkey } from './services/valkey.service.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { securityHeaders } from './middleware/security.js';
 import { rateLimiter } from './middleware/rate-limit.js';
@@ -103,7 +104,7 @@ app.onError((err, c) => {
       ip,
       userAgent: c.req.header('user-agent') ?? null,
     })
-    .catch(() => {});
+    .catch((dbErr) => logger.error({ dbErr }, 'Failed to write error to error_log table'));
 
   logger.error({ err, path: c.req.path, method: c.req.method }, 'Unhandled error');
   return c.json({ error: 'Internal server error' }, 500);
@@ -136,6 +137,14 @@ async function verifyWsToken(token: string) {
 
   const secret = new TextEncoder().encode(jwtSecret);
   const { payload } = await jwtVerify(token, secret);
+
+  // Check token blocklist (revoked/logged-out tokens)
+  const valkey = await getValkey();
+  if (valkey) {
+    const blocked = await valkey.get(`blocklist:${token}`);
+    if (blocked) throw new Error('Token has been revoked');
+  }
+
   return payload as { userId: string; email: string; isSuper: boolean };
 }
 

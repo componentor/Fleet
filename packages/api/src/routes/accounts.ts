@@ -244,6 +244,7 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
 
   const descendants = await db.query.accounts.findMany({
     where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
+    limit: 1000,
   });
 
   const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
@@ -256,10 +257,23 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
         status: 'pending_deletion',
         updatedAt: new Date(),
       }).where(eq(accounts.id, accId));
+
+      // Mark all services as stopped within the same transaction
+      const accountServices = await tx.query.services.findMany({
+        where: and(eq(services.accountId, accId), isNull(services.deletedAt)),
+      });
+
+      for (const svc of accountServices) {
+        await tx.update(services).set({
+          status: 'stopped',
+          stoppedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(services.id, svc.id));
+      }
     }
   });
 
-  // Stop all running services for these accounts (outside transaction for Docker calls)
+  // Scale down Docker services outside the transaction (Docker calls are not transactional)
   for (const accId of allAccountIds) {
     const accountServices = await db.query.services.findMany({
       where: and(eq(services.accountId, accId), isNull(services.deletedAt)),
@@ -273,11 +287,6 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
           logger.error({ err, serviceId: svc.id }, 'Failed to stop service during deletion scheduling');
         }
       }
-      await db.update(services).set({
-        status: 'stopped',
-        stoppedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(services.id, svc.id));
     }
   }
 
@@ -319,6 +328,7 @@ accountRoutes.post('/:id/revoke-deletion', tenantMiddleware, async (c) => {
 
   const descendants = await db.query.accounts.findMany({
     where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
+    limit: 1000,
   });
 
   const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
@@ -352,6 +362,7 @@ accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
   const descendants = await db.query.accounts.findMany({
     where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
     orderBy: (a, { asc }) => asc(a.depth),
+    limit: 1000,
   });
 
   if (!self) {
@@ -420,6 +431,7 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, async (c) => {
 
   const descendants = await db.query.accounts.findMany({
     where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
+    limit: 1000,
   });
 
   for (const desc of descendants) {

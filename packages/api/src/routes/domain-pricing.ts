@@ -222,7 +222,7 @@ domainPricingRoutes.post('/sync', async (c) => {
     return c.json({ message: `Synced ${synced} TLD prices from provider` });
   } catch (err) {
     logger.error({ err }, 'Price sync failed');
-    return c.json({ error: 'Failed to sync prices', details: err instanceof Error ? err.message : String(err) }, 500);
+    return c.json({ error: 'Failed to sync prices' }, 500);
   }
 });
 

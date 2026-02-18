@@ -1,5 +1,5 @@
 import chalk from 'chalk'
-import { loadConfig, saveConfig, clearConfig } from './config.js'
+import { loadConfig, saveConfig, clearConfig, getAccountId } from './config.js'
 
 interface ApiRequestOptions {
   headers?: Record<string, string>
@@ -20,8 +20,18 @@ export async function apiRequest<T = any>(
     ...options.headers,
   }
 
-  if (!options.skipAuth && config.accessToken) {
-    headers['Authorization'] = `Bearer ${config.accessToken}`
+  if (!options.skipAuth) {
+    if (config.apiKey) {
+      headers['X-API-Key'] = config.apiKey
+    } else if (config.accessToken) {
+      headers['Authorization'] = `Bearer ${config.accessToken}`
+    }
+  }
+
+  // Add account context
+  const accountId = getAccountId()
+  if (accountId) {
+    headers['X-Account-Id'] = accountId
   }
 
   let response: Response
@@ -35,8 +45,8 @@ export async function apiRequest<T = any>(
     throw new Error(`Could not connect to Fleet API at ${config.apiUrl}`)
   }
 
-  // Handle 401 — attempt token refresh
-  if (response.status === 401 && !options.skipAuth && config.refreshToken) {
+  // Handle 401 — attempt token refresh (only for JWT auth, not API keys)
+  if (response.status === 401 && !options.skipAuth && !config.apiKey && config.refreshToken) {
     const refreshed = await tryRefreshToken(config.apiUrl, config.refreshToken)
     if (refreshed) {
       // Retry the original request with new token
@@ -109,9 +119,21 @@ async function tryRefreshToken(
 
 export function requireAuth(): void {
   const config = loadConfig()
-  if (!config.accessToken) {
+  if (!config.accessToken && !config.apiKey) {
     console.error(chalk.red('Error: You are not logged in.'))
     console.error(chalk.yellow('Run: fleet login'))
     process.exit(1)
   }
+}
+
+/**
+ * Build a WebSocket URL for the given API path, with auth token and accountId.
+ */
+export function buildWsUrl(path: string): string {
+  const config = loadConfig()
+  const base = config.apiUrl.replace(/^http/, 'ws')
+  const token = config.accessToken || ''
+  const accountId = getAccountId() || ''
+  const sep = path.includes('?') ? '&' : '?'
+  return `${base}${path}${sep}token=${encodeURIComponent(token)}&accountId=${encodeURIComponent(accountId)}`
 }

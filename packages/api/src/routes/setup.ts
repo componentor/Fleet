@@ -115,7 +115,7 @@ setup.post('/swarm-init', async (c) => {
       const updatedDocker = await detectDocker();
       return c.json({ ok: true, docker: updatedDocker }, 201);
     } catch (err: any) {
-      return c.json({ error: err.message || 'Failed to initialize Swarm' }, 500);
+      return c.json({ error: 'Failed to initialize Swarm' }, 500);
     }
   } finally {
     setupInProgress = false;

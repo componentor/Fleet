@@ -153,7 +153,7 @@ authed.post('/checkout', requireOwner, requireScope('admin'), async (c) => {
     return c.json(result);
   } catch (err) {
     logger.error({ err }, 'Failed to create checkout session');
-    return c.json({ error: err instanceof Error ? err.message : 'Checkout failed' }, 400);
+    return c.json({ error: 'Checkout failed' }, 400);
   }
 });
 

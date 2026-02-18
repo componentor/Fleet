@@ -13,6 +13,7 @@ import { restartCommand } from './commands/restart.js'
 import { destroyCommand } from './commands/destroy.js'
 import { domainsCommand } from './commands/domains.js'
 import { backupsCommand } from './commands/backups.js'
+import { sshCommand } from './commands/ssh.js'
 import { sshKeysCommand } from './commands/ssh-keys.js'
 import { marketplaceCommand } from './commands/marketplace.js'
 import { initCommand } from './commands/init.js'
@@ -38,6 +39,7 @@ program.addCommand(stopCommand)
 program.addCommand(startCommand)
 program.addCommand(restartCommand)
 program.addCommand(destroyCommand)
+program.addCommand(sshCommand)
 
 // Resource commands
 program.addCommand(domainsCommand)

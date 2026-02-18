@@ -6,6 +6,9 @@ import { templateService } from '../services/template.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { cache } from '../middleware/cache.js';
 import { logger } from '../services/logger.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
+
+const deployRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'marketplace-deploy' });
 
 const marketplace = new Hono<{
   Variables: {
@@ -69,7 +72,7 @@ const deploySchema = z.object({
   })).optional(),
 });
 
-marketplace.post('/deploy', requireMember, async (c) => {
+marketplace.post('/deploy', deployRateLimit, requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -92,17 +95,17 @@ marketplace.post('/deploy', requireMember, async (c) => {
     });
     return c.json(result, 201);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = err instanceof Error ? err.message : '';
 
     if (message.includes('not found')) {
-      return c.json({ error: message }, 404);
+      return c.json({ error: 'Template not found' }, 404);
     }
     if (message.includes('Missing required variable')) {
-      return c.json({ error: message }, 400);
+      return c.json({ error: 'Missing required template variables' }, 400);
     }
 
     logger.error({ err }, 'Template deployment failed');
-    return c.json({ error: message || 'Failed to deploy template' }, 500);
+    return c.json({ error: 'Failed to deploy template' }, 500);
   }
 });
 
@@ -141,9 +144,8 @@ marketplace.post('/templates', requireMember, async (c) => {
 
     return c.json(template, 201);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     logger.error({ err }, 'Template creation failed');
-    return c.json({ error: 'Failed to create template', details: message }, 500);
+    return c.json({ error: 'Failed to create template' }, 500);
   }
 });
 
@@ -182,9 +184,8 @@ marketplace.patch('/templates/:slug', requireMember, async (c) => {
     const updated = await templateService.updateTemplate(template.id, parsed.data);
     return c.json(updated);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     logger.error({ err }, 'Template update failed');
-    return c.json({ error: 'Failed to update template', details: message }, 500);
+    return c.json({ error: 'Failed to update template' }, 500);
   }
 });
 

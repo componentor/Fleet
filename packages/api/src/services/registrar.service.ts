@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { db, domainRegistrars, domainRegistrations, insertReturning, updateReturning, eq } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
 import { logger } from './logger.js';
@@ -149,7 +150,7 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
   ): Promise<{ registrarDomainId: string; expiresAt: Date }> {
     logger.warn({ domain }, 'Domain registration SIMULATED - no real registrar configured');
     // In a real implementation, this would call the registrar's API
-    const registrarDomainId = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const registrarDomainId = `sim-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const expiresAt = new Date();
     expiresAt.setFullYear(expiresAt.getFullYear() + years);
 

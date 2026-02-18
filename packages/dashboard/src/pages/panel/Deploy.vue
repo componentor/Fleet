@@ -316,14 +316,17 @@ watch(
   },
 )
 
-// Handle OAuth return
+// Handle OAuth return — token is now in URL fragment (#) to prevent server-side leakage
 onMounted(() => {
-  if (route.query.github_connected) {
-    const token = route.query.token as string | undefined
-    const refreshToken = route.query.refresh_token as string | undefined
-    if (token && refreshToken) {
-      authStore.setTokens({ accessToken: token, refreshToken })
+  const hashParams = new URLSearchParams(window.location.hash.slice(1))
+  const isGithubConnected = hashParams.get('github_connected') || route.query.github_connected
+  if (isGithubConnected) {
+    const token = hashParams.get('token') || (route.query.token as string | undefined)
+    if (token) {
+      authStore.setTokens({ accessToken: token, refreshToken: '' })
     }
+    // Clear fragment and query params
+    window.location.hash = ''
     router.replace({ query: {} })
     githubConnected.value = true
     deployMethod.value = 'github'

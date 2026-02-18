@@ -72,8 +72,9 @@ export const authMiddleware = createMiddleware<{
       });
       if (!creator) continue;
 
-      // Update lastUsedAt (fire and forget)
-      db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, candidate.id)).catch(() => {});
+      // Update lastUsedAt (fire and forget — log failures)
+      db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, candidate.id))
+        .catch((err) => console.error('Failed to update API key lastUsedAt:', err));
 
       c.set('user', {
         userId: creator.id,

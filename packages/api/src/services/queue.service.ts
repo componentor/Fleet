@@ -11,6 +11,7 @@ const connection = getValkeyConnectionOpts();
 let _deploymentQueue: Queue | null = null;
 let _backupQueue: Queue | null = null;
 let _maintenanceQueue: Queue | null = null;
+let _emailQueue: Queue | null = null;
 let _available = false;
 
 export function isQueueAvailable(): boolean {
@@ -30,6 +31,19 @@ export function getBackupQueue(): Queue {
 export function getMaintenanceQueue(): Queue {
   if (!_maintenanceQueue) _maintenanceQueue = new Queue('fleet-maintenance', { connection });
   return _maintenanceQueue;
+}
+
+export function getEmailQueue(): Queue {
+  if (!_emailQueue) _emailQueue = new Queue('fleet-email', {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 30_000 },
+      removeOnComplete: 100,
+      removeOnFail: 500,
+    },
+  });
+  return _emailQueue;
 }
 
 // --- Worker Registry ---
@@ -58,19 +72,22 @@ export async function initWorkers(): Promise<void> {
     { createDeploymentWorker },
     { createBackupWorker },
     { createMaintenanceWorker },
+    { createEmailWorker },
   ] = await Promise.all([
     import('../workers/deployment.worker.js'),
     import('../workers/backup.worker.js'),
     import('../workers/maintenance.worker.js'),
+    import('../workers/email.worker.js'),
   ]);
 
   workers.push(
     createDeploymentWorker(connection),
     createBackupWorker(connection),
     createMaintenanceWorker(connection),
+    createEmailWorker(connection),
   );
 
-  logger.info(`Queue workers started: ${workers.length} workers across 3 queues`);
+  logger.info(`Queue workers started: ${workers.length} workers across 4 queues`);
 }
 
 /**
@@ -86,5 +103,6 @@ export async function shutdownWorkers(): Promise<void> {
     _deploymentQueue?.close().catch(() => {}),
     _backupQueue?.close().catch(() => {}),
     _maintenanceQueue?.close().catch(() => {}),
+    _emailQueue?.close().catch(() => {}),
   ]);
 }

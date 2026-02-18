@@ -20,8 +20,8 @@ notificationRoutes.get('/', async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10), 100);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '20', 10)), 100);
   const offset = (page - 1) * limit;
 
   const items = await db.query.notifications.findMany({

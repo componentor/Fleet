@@ -6,6 +6,9 @@ import { backupService } from '../services/backup.service.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
+
+const backupRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'backup' });
 
 const backupRoutes = new Hono<{
   Variables: {
@@ -42,7 +45,7 @@ const createBackupSchema = z.object({
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
 });
 
-backupRoutes.post('/', requireMember, async (c) => {
+backupRoutes.post('/', backupRateLimit, requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -70,9 +73,8 @@ backupRoutes.post('/', requireMember, async (c) => {
       sizeBytes: backup.sizeBytes.toString(),
     }, 201);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     logger.error({ err }, 'Backup creation failed');
-    return c.json({ error: 'Failed to create backup', details: message }, 500);
+    return c.json({ error: 'Failed to create backup' }, 500);
   }
 });
 
@@ -97,7 +99,7 @@ const createScheduleSchema = z.object({
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
 });
 
-backupRoutes.post('/schedules', requireMember, async (c) => {
+backupRoutes.post('/schedules', backupRateLimit, requireMember, async (c) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -121,9 +123,8 @@ backupRoutes.post('/schedules', requireMember, async (c) => {
 
     return c.json(schedule, 201);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     logger.error({ err }, 'Schedule creation failed');
-    return c.json({ error: 'Failed to create schedule', details: message }, 500);
+    return c.json({ error: 'Failed to create schedule' }, 500);
   }
 });
 
@@ -204,14 +205,14 @@ backupRoutes.post('/schedules/:id/run', requireMember, async (c) => {
       sizeBytes: backup.sizeBytes.toString(),
     }, 201);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = err instanceof Error ? err.message : '';
 
     if (message.includes('not found')) {
-      return c.json({ error: message }, 404);
+      return c.json({ error: 'Backup schedule not found' }, 404);
     }
 
     logger.error({ err }, 'Scheduled backup trigger failed');
-    return c.json({ error: 'Failed to trigger backup', details: message }, 500);
+    return c.json({ error: 'Failed to trigger backup' }, 500);
   }
 });
 
@@ -279,17 +280,17 @@ backupRoutes.post('/:id/restore', requireMember, async (c) => {
     const result = await backupService.restoreBackup(backupId);
     return c.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = err instanceof Error ? err.message : '';
 
     if (message.includes('not found')) {
-      return c.json({ error: message }, 404);
+      return c.json({ error: 'Backup not found' }, 404);
     }
     if (message.includes('Cannot restore')) {
-      return c.json({ error: message }, 400);
+      return c.json({ error: 'Backup cannot be restored in its current state' }, 400);
     }
 
     logger.error({ err }, 'Backup restore failed');
-    return c.json({ error: 'Failed to restore backup', details: message }, 500);
+    return c.json({ error: 'Failed to restore backup' }, 500);
   }
 });
 

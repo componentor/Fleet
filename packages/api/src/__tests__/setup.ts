@@ -31,6 +31,7 @@ sqlite.exec(`
     status TEXT DEFAULT 'active',
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
+    scheduled_deletion_at INTEGER,
     deleted_at INTEGER
   );
 
@@ -87,6 +88,7 @@ sqlite.exec(`
     github_repo TEXT,
     github_branch TEXT,
     auto_deploy INTEGER DEFAULT 0,
+    github_webhook_id INTEGER,
     domain TEXT,
     ssl_enabled INTEGER DEFAULT 1,
     status TEXT DEFAULT 'stopped',
@@ -100,11 +102,16 @@ sqlite.exec(`
     memory_limit INTEGER,
     cpu_reservation INTEGER,
     memory_reservation INTEGER,
+    source_type TEXT,
+    source_path TEXT,
+    stack_id TEXT,
     stopped_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
     deleted_at INTEGER
   );
+
+  CREATE INDEX idx_services_github_autodeploy ON services(github_repo, github_branch, auto_deploy);
 
   CREATE TABLE deployments (
     id TEXT PRIMARY KEY,
@@ -227,6 +234,7 @@ sqlite.exec(`
     current_period_start INTEGER,
     current_period_end INTEGER,
     cancelled_at INTEGER,
+    past_due_since INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
@@ -830,6 +838,25 @@ vi.mock('../services/scheduler.service.js', () => ({
   },
 }));
 
+// ── Mock queue service ──
+vi.mock('../services/queue.service.js', () => ({
+  isQueueAvailable: vi.fn().mockReturnValue(false),
+  getEmailQueue: vi.fn().mockReturnValue({
+    add: vi.fn().mockResolvedValue({ id: 'job-1' }),
+  }),
+  getDeploymentQueue: vi.fn().mockReturnValue({
+    add: vi.fn().mockResolvedValue({ id: 'job-1' }),
+  }),
+  getBackupQueue: vi.fn().mockReturnValue({
+    add: vi.fn().mockResolvedValue({ id: 'job-1' }),
+  }),
+  getMaintenanceQueue: vi.fn().mockReturnValue({
+    add: vi.fn().mockResolvedValue({ id: 'job-1' }),
+  }),
+  initWorkers: vi.fn().mockResolvedValue(undefined),
+  shutdownWorkers: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ── Mock nodemailer ──
 vi.mock('nodemailer', () => ({
   createTransport: vi.fn().mockReturnValue({
@@ -950,6 +977,17 @@ vi.mock('@fleet/db', () => ({
   upsertIgnore,
   countSql,
   getDialect: () => 'sqlite',
+  safeTransaction: async (fn: (tx: any) => Promise<any>) => {
+    sqlite.exec('BEGIN');
+    try {
+      const result = await fn(testDb);
+      sqlite.exec('COMMIT');
+      return result;
+    } catch (err) {
+      sqlite.exec('ROLLBACK');
+      throw err;
+    }
+  },
 
   // Drizzle-orm operators
   eq: drizzleOrm.eq,

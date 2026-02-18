@@ -1,15 +1,24 @@
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 
 export interface FleetConfig {
   apiUrl: string
   accessToken?: string
   refreshToken?: string
+  apiKey?: string
+  accountId?: string
+}
+
+export interface ProjectConfig {
+  service?: string
+  accountId?: string
+  apiUrl?: string
 }
 
 const CONFIG_DIR = join(homedir(), '.fleet')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+const PROJECT_CONFIG_NAME = '.fleet.json'
 
 const DEFAULT_CONFIG: FleetConfig = {
   apiUrl: 'http://localhost:3000',
@@ -40,5 +49,45 @@ export function clearConfig(): void {
 }
 
 export function getApiUrl(): string {
+  const project = loadProjectConfig()
+  if (project?.apiUrl) return project.apiUrl
   return loadConfig().apiUrl
+}
+
+export function getAccountId(): string | undefined {
+  const project = loadProjectConfig()
+  if (project?.accountId) return project.accountId
+  return loadConfig().accountId
+}
+
+/**
+ * Walk up from CWD to find a .fleet.json project config file.
+ */
+export function loadProjectConfig(): ProjectConfig | null {
+  let dir = process.cwd()
+  const root = resolve('/')
+
+  while (dir !== root) {
+    const configPath = join(dir, PROJECT_CONFIG_NAME)
+    if (existsSync(configPath)) {
+      try {
+        const data = readFileSync(configPath, 'utf-8')
+        return JSON.parse(data) as ProjectConfig
+      } catch {
+        return null
+      }
+    }
+    const parent = resolve(dir, '..')
+    if (parent === dir) break
+    dir = parent
+  }
+  return null
+}
+
+/**
+ * Write a .fleet.json project config file in the given directory.
+ */
+export function writeProjectConfig(dir: string, config: ProjectConfig): void {
+  const configPath = join(dir, PROJECT_CONFIG_NAME)
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
 }

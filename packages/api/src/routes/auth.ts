@@ -13,6 +13,8 @@ import { logger } from '../services/logger.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { emailService } from '../services/email.service.js';
 import { getValkey } from '../services/valkey.service.js';
+import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
+import type { EmailJobData } from '../workers/email.worker.js';
 
 const auth = new Hono();
 
@@ -63,6 +65,18 @@ const verifyEmailRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, ke
 const resetPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'reset-password' });
 const forgotPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'forgot-password' });
 const refreshRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'refresh' });
+const oauthRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'oauth' });
+
+/** Queue an email via BullMQ if available, otherwise send directly (fire-and-forget). */
+async function queueEmail(data: EmailJobData): Promise<void> {
+  if (isQueueAvailable()) {
+    await getEmailQueue().add('send-email', data);
+  } else {
+    // Fallback: direct send for local dev without Valkey
+    emailService.sendTemplateEmail(data.templateSlug, data.to, data.variables, data.accountId)
+      .catch((err) => logger.error({ err }, `Failed to send ${data.templateSlug} email`));
+  }
+}
 
 /** Generate a random token, return raw + SHA256 hash for storage. */
 function generateSecureToken(): { raw: string; hashed: string } {
@@ -176,12 +190,16 @@ auth.post('/register', authRateLimit, async (c) => {
     return c.json({ error: 'Failed to create user' }, 500);
   }
 
-  // Send verification email AFTER transaction commits (fire-and-forget)
+  // Send verification email AFTER transaction commits (queued with retry)
   const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
-  emailService.sendTemplateEmail('email-verification', email, {
-    userName: name,
-    verifyUrl: `${appUrl}/verify-email?token=${verifyToken.raw}`,
-  }).catch((err) => logger.error({ err }, 'Failed to send verification email'));
+  queueEmail({
+    templateSlug: 'email-verification',
+    to: email,
+    variables: {
+      userName: name,
+      verifyUrl: `${appUrl}/verify-email?token=${verifyToken.raw}`,
+    },
+  }).catch((err) => logger.error({ err }, 'Failed to queue verification email'));
 
   // Generate tokens
   const tokens = await generateTokens({
@@ -275,9 +293,15 @@ auth.post('/refresh', refreshRateLimit, async (c) => {
       if (blocked) {
         return c.json({ error: 'Refresh token has been revoked' }, 401);
       }
+    } else if (process.env['NODE_ENV'] === 'production') {
+      // In production, failing to check the blocklist is a security risk — reject the refresh
+      return c.json({ error: 'Service temporarily unavailable' }, 503);
     }
   } catch {
-    // If Valkey is down, allow refresh (graceful degradation)
+    if (process.env['NODE_ENV'] === 'production') {
+      return c.json({ error: 'Service temporarily unavailable' }, 503);
+    }
+    // In dev, allow graceful degradation
   }
 
   try {
@@ -461,9 +485,13 @@ auth.post('/resend-verification', authMiddleware, async (c) => {
   }).where(eq(users.id, user.id));
 
   const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
-  await emailService.sendTemplateEmail('email-verification', user.email!, {
-    userName: user.name ?? 'User',
-    verifyUrl: `${appUrl}/verify-email?token=${verifyToken.raw}`,
+  await queueEmail({
+    templateSlug: 'email-verification',
+    to: user.email!,
+    variables: {
+      userName: user.name ?? 'User',
+      verifyUrl: `${appUrl}/verify-email?token=${verifyToken.raw}`,
+    },
   });
 
   return c.json({ message: 'Verification email sent' });
@@ -494,11 +522,15 @@ auth.post('/forgot-password', forgotPasswordRateLimit, async (c) => {
     }).where(eq(users.id, user.id));
 
     const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
-    emailService.sendTemplateEmail('password-reset', email, {
-      userName: user.name ?? 'User',
-      resetUrl: `${appUrl}/reset-password?token=${resetToken.raw}`,
-      expiresIn: '1 hour',
-    }).catch((err) => logger.error({ err }, 'Failed to send password reset email'));
+    queueEmail({
+      templateSlug: 'password-reset',
+      to: email,
+      variables: {
+        userName: user.name ?? 'User',
+        resetUrl: `${appUrl}/reset-password?token=${resetToken.raw}`,
+        expiresIn: '1 hour',
+      },
+    }).catch((err) => logger.error({ err }, 'Failed to queue password reset email'));
   }
 
   return c.json({ message: 'If an account exists with that email, a password reset link will be sent.' });
@@ -513,8 +545,8 @@ auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
     return c.json({ error: 'Token and new password are required' }, 400);
   }
 
-  if (password.length < 8) {
-    return c.json({ error: 'Password must be at least 8 characters' }, 400);
+  if (password.length < 8 || password.length > 128) {
+    return c.json({ error: 'Password must be between 8 and 128 characters' }, 400);
   }
 
   const hashed = hashToken(token);
@@ -786,7 +818,7 @@ auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
 // --- OAuth Routes ---
 
 // GET /github — redirect to GitHub OAuth
-auth.get('/github', async (c) => {
+auth.get('/github', oauthRateLimit, async (c) => {
   const clientId = process.env['GITHUB_CLIENT_ID'];
   if (!clientId) {
     return c.json({ error: 'GitHub OAuth is not configured' }, 500);
@@ -804,38 +836,42 @@ auth.get('/github', async (c) => {
   const nonce = crypto.randomBytes(16).toString('hex');
   try {
     const valkey = await getValkey();
-    if (valkey) {
-      await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ returnTo }));
-      params.set('state', nonce);
+    if (!valkey) {
+      return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
     }
+    await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ returnTo }));
+    params.set('state', nonce);
   } catch {
-    // If Valkey is unavailable, proceed without state — returnTo will be ignored (fail-secure)
+    return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
   }
 
   return c.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
 });
 
 // GET /github/callback
-auth.get('/github/callback', async (c) => {
+auth.get('/github/callback', oauthRateLimit, async (c) => {
   const code = c.req.query('code');
   const stateParam = c.req.query('state') || '';
 
   // Verify state nonce from Valkey for CSRF protection, then extract returnTo
   let returnTo = '';
-  if (stateParam) {
-    try {
-      const valkey = await getValkey();
-      if (valkey) {
-        const stored = await valkey.get(`oauth:state:${stateParam}`);
-        if (stored) {
-          await valkey.del(`oauth:state:${stateParam}`);
-          const parsed = JSON.parse(stored);
-          returnTo = parsed.returnTo || '';
-        }
-      }
-    } catch {
-      // Valkey unavailable — returnTo stays empty (fail-secure)
+  if (!stateParam) {
+    return c.redirect('/auth/callback?error=Invalid+OAuth+state');
+  }
+  try {
+    const valkey = await getValkey();
+    if (!valkey) {
+      return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
     }
+    const stored = await valkey.get(`oauth:state:${stateParam}`);
+    if (!stored) {
+      return c.redirect('/auth/callback?error=Invalid+OAuth+state');
+    }
+    await valkey.del(`oauth:state:${stateParam}`);
+    const parsed = JSON.parse(stored);
+    returnTo = parsed.returnTo || '';
+  } catch {
+    return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
   }
 
   // Validate returnTo is a safe relative path (prevent open redirect)
@@ -1014,16 +1050,16 @@ auth.get('/github/callback', async (c) => {
 
     setRefreshTokenCookie(c, tokens.refreshToken);
 
-    // If returnTo is set, redirect there with github_connected flag + access token only
+    // Use fragment (#) instead of query params (?) to keep tokens out of server logs,
+    // browser history, and Referer headers. Fragments are never sent to the server.
     if (returnTo) {
-      const sep = returnTo.includes('?') ? '&' : '?';
       return c.redirect(
-        `${returnTo}${sep}github_connected=true&token=${tokens.accessToken}`,
+        `${returnTo}#github_connected=true&token=${tokens.accessToken}`,
       );
     }
 
     return c.redirect(
-      `/auth/callback?token=${tokens.accessToken}`,
+      `/auth/callback#token=${tokens.accessToken}`,
     );
   } catch (err) {
     logger.error({ err }, 'GitHub OAuth error');
@@ -1032,7 +1068,7 @@ auth.get('/github/callback', async (c) => {
 });
 
 // GET /google — redirect to Google OAuth
-auth.get('/google', async (c) => {
+auth.get('/google', oauthRateLimit, async (c) => {
   const clientId = process.env['GOOGLE_CLIENT_ID'];
   if (!clientId) {
     return c.json({ error: 'Google OAuth is not configured' }, 500);
@@ -1050,39 +1086,39 @@ auth.get('/google', async (c) => {
   const nonce = crypto.randomBytes(16).toString('hex');
   try {
     const valkey = await getValkey();
-    if (valkey) {
-      await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ provider: 'google' }));
-      params.set('state', nonce);
+    if (!valkey) {
+      return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
     }
+    await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ provider: 'google' }));
+    params.set('state', nonce);
   } catch {
-    // If Valkey is unavailable, proceed without state (graceful degradation)
+    return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
   }
 
   return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
 });
 
 // GET /google/callback
-auth.get('/google/callback', async (c) => {
+auth.get('/google/callback', oauthRateLimit, async (c) => {
   const code = c.req.query('code');
   const stateParam = c.req.query('state') || '';
 
-  // Verify state nonce from Valkey for CSRF protection
-  if (stateParam) {
-    try {
-      const valkey = await getValkey();
-      if (valkey) {
-        const stored = await valkey.get(`oauth:state:${stateParam}`);
-        if (stored) {
-          await valkey.del(`oauth:state:${stateParam}`);
-        } else {
-          // Nonce not found — possible CSRF attack
-          return c.redirect('/auth/callback?error=Invalid+OAuth+state');
-        }
-      }
-    } catch {
-      // Valkey unavailable — fail-secure, reject OAuth flow
+  // Verify state nonce from Valkey for CSRF protection (required)
+  if (!stateParam) {
+    return c.redirect('/auth/callback?error=Invalid+OAuth+state');
+  }
+  try {
+    const valkey = await getValkey();
+    if (!valkey) {
       return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
     }
+    const stored = await valkey.get(`oauth:state:${stateParam}`);
+    if (!stored) {
+      return c.redirect('/auth/callback?error=Invalid+OAuth+state');
+    }
+    await valkey.del(`oauth:state:${stateParam}`);
+  } catch {
+    return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
   }
 
   if (!code) {
@@ -1234,7 +1270,7 @@ auth.get('/google/callback', async (c) => {
     setRefreshTokenCookie(c, tokens.refreshToken);
 
     return c.redirect(
-      `/auth/callback?token=${tokens.accessToken}`,
+      `/auth/callback#token=${tokens.accessToken}`,
     );
   } catch (err) {
     logger.error({ err }, 'Google OAuth error');

@@ -5,6 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { sshService } from '../services/ssh.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { logger } from '../services/logger.js';
 
 const sshRoutes = new Hono<{
   Variables: {
@@ -73,6 +74,7 @@ sshRoutes.post('/keys', requireMember, async (c) => {
     fingerprint,
   });
 
+  logger.info({ userId: user.userId, keyId: key.id, fingerprint }, 'SSH key added');
   return c.json(key, 201);
 });
 
@@ -106,6 +108,7 @@ sshRoutes.delete('/keys/:id', requireMember, async (c) => {
   }
 
   await db.delete(sshKeys).where(eq(sshKeys.id, keyId));
+  logger.info({ userId: user.userId, keyId }, 'SSH key removed');
   return c.json({ message: 'SSH key removed' });
 });
 

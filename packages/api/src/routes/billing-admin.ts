@@ -121,7 +121,7 @@ billingAdmin.post('/plans/:id/sync-stripe', async (c) => {
     return c.json({ message: 'Plan synced to Stripe' });
   } catch (err) {
     logger.error({ err, planId: id }, 'Failed to sync plan to Stripe');
-    return c.json({ error: err instanceof Error ? err.message : 'Sync failed' }, 500);
+    return c.json({ error: 'Failed to sync plan to Stripe' }, 500);
   }
 });
 

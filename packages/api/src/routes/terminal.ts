@@ -75,6 +75,10 @@ terminalRoutes.post('/exec/:serviceId', async (c) => {
     return c.json({ error: 'command array is required' }, 400);
   }
 
+  if (command.length > 50 || command.some(arg => typeof arg !== 'string' || arg.length > 1000)) {
+    return c.json({ error: 'Command exceeds allowed size limits' }, 400);
+  }
+
   // Check IP allowlist
   const clientIp = c.req.header('X-Forwarded-For')?.split(',')[0]?.trim()
     ?? c.req.header('X-Real-IP')
@@ -87,7 +91,7 @@ terminalRoutes.post('/exec/:serviceId', async (c) => {
   if (accessRules?.enabled && accessRules.allowedIps) {
     const allowed = sshService.isIpAllowed(clientIp, accessRules.allowedIps as string[]);
     if (!allowed) {
-      return c.json({ error: `Access denied from IP: ${clientIp}` }, 403);
+      return c.json({ error: 'Access denied: your IP is not in the allowlist' }, 403);
     }
   }
 

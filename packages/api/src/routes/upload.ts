@@ -215,7 +215,7 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
     }, 201);
   } finally {
     // Clean up temp file
-    await rm(tmpPath, { force: true }).catch(() => {});
+    await rm(tmpPath, { force: true }).catch((err) => logger.warn({ err, tmpPath }, 'Failed to clean up temp file'));
   }
 });
 
@@ -312,7 +312,7 @@ uploadRoutes.post('/:serviceId/rebuild', requireMember, requireScope('write'), a
       deploymentId: deployment!.id,
     });
   } finally {
-    await rm(tmpPath, { force: true }).catch(() => {});
+    await rm(tmpPath, { force: true }).catch((err) => logger.warn({ err, tmpPath }, 'Failed to clean up temp file'));
   }
 });
 

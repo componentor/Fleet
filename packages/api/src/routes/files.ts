@@ -77,7 +77,7 @@ fileRoutes.get('/:serviceId/read', async (c) => {
     return c.json({ ...result, path });
   } catch (err: any) {
     if (err.message?.includes('too large')) {
-      return c.json({ error: err.message }, 413);
+      return c.json({ error: 'File too large' }, 413);
     }
     if (err.message?.includes('traversal')) {
       return c.json({ error: 'Invalid path' }, 400);
@@ -157,7 +157,7 @@ fileRoutes.delete('/:serviceId/delete', requireMember, requireScope('write'), as
     return c.json({ message: 'Deleted', path });
   } catch (err: any) {
     if (err.message?.includes('traversal') || err.message?.includes('root directory')) {
-      return c.json({ error: err.message }, 400);
+      return c.json({ error: 'Invalid path' }, 400);
     }
     return c.json({ error: 'Failed to delete' }, 500);
   }
@@ -177,7 +177,9 @@ fileRoutes.get('/:serviceId/download', async (c) => {
 
   try {
     const { stream, filename } = uploadService.downloadFile(svc!.sourcePath!, path);
-    c.header('Content-Disposition', `attachment; filename="${filename}"`);
+    // Sanitize filename to prevent header injection
+    const safeFilename = filename.replace(/["\r\n\\]/g, '_');
+    c.header('Content-Disposition', `attachment; filename="${safeFilename}"`);
     c.header('Content-Type', 'application/octet-stream');
     return c.body(stream as any);
   } catch (err: any) {
@@ -205,7 +207,8 @@ fileRoutes.get('/:serviceId/download-archive', async (c) => {
   try {
     const archive = await uploadService.createArchive(svc!.sourcePath!, format);
     const ext = format === 'zip' ? 'zip' : 'tar.gz';
-    c.header('Content-Disposition', `attachment; filename="${svc!.name}-source.${ext}"`);
+    const safeName = svc!.name.replace(/["\r\n\\]/g, '_');
+    c.header('Content-Disposition', `attachment; filename="${safeName}-source.${ext}"`);
     c.header('Content-Type', format === 'zip' ? 'application/zip' : 'application/gzip');
 
     const stream = createReadStream(archive.path);

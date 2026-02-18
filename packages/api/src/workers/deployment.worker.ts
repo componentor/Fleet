@@ -5,6 +5,7 @@ import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
+import { logger } from '../services/logger.js';
 
 export interface DeploymentJobData {
   deploymentId: string;
@@ -41,7 +42,9 @@ async function getGitHubTokenForService(accountId: string): Promise<string | nul
 async function publishProgress(deploymentId: string, status: string, log: string) {
   const valkey = await getValkey();
   if (valkey) {
-    await valkey.publish(`deploy:${deploymentId}`, JSON.stringify({ status, log })).catch(() => {});
+    await valkey.publish(`deploy:${deploymentId}`, JSON.stringify({ status, log })).catch((err) => {
+      logger.error({ err, deploymentId }, 'Failed to publish deployment progress');
+    });
   }
 }
 
@@ -137,7 +140,9 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
           })
           .where(eq(deployments.id, deploymentId))
           .then(() => publishProgress(deploymentId, info.status, info.log))
-          .catch(() => {});
+          .catch((err) => {
+            logger.error({ err, deploymentId }, 'Failed to update deployment status in DB');
+          });
 
         if (info.status === 'succeeded') {
           unsubscribe();

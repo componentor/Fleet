@@ -29,6 +29,7 @@ sqlite.exec(`
     status TEXT DEFAULT 'active',
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
+    scheduled_deletion_at INTEGER,
     deleted_at INTEGER
   );
 
@@ -47,6 +48,7 @@ sqlite.exec(`
     two_factor_enabled INTEGER DEFAULT 0,
     two_factor_secret TEXT,
     two_factor_backup_codes TEXT,
+    security_changed_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
     deleted_at INTEGER
@@ -84,6 +86,7 @@ sqlite.exec(`
     github_repo TEXT,
     github_branch TEXT,
     auto_deploy INTEGER DEFAULT 0,
+    github_webhook_id INTEGER,
     domain TEXT,
     ssl_enabled INTEGER DEFAULT 1,
     status TEXT DEFAULT 'stopped',
@@ -97,11 +100,16 @@ sqlite.exec(`
     memory_limit INTEGER,
     cpu_reservation INTEGER,
     memory_reservation INTEGER,
+    source_type TEXT,
+    source_path TEXT,
+    stack_id TEXT,
     stopped_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
     deleted_at INTEGER
   );
+
+  CREATE INDEX idx_services_github_autodeploy ON services(github_repo, github_branch, auto_deploy);
 
   CREATE TABLE deployments (
     id TEXT PRIMARY KEY,
@@ -156,7 +164,23 @@ sqlite.exec(`
     expires_at INTEGER,
     auto_renew INTEGER DEFAULT 1,
     registrar_domain_id TEXT,
+    stripe_payment_id TEXT,
     created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE domain_tld_pricing (
+    id TEXT PRIMARY KEY,
+    tld TEXT NOT NULL UNIQUE,
+    provider_registration_price INTEGER NOT NULL,
+    provider_renewal_price INTEGER NOT NULL,
+    markup_type TEXT NOT NULL DEFAULT 'percentage',
+    markup_value INTEGER NOT NULL DEFAULT 20,
+    sell_registration_price INTEGER NOT NULL,
+    sell_renewal_price INTEGER NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE nodes (
@@ -167,6 +191,7 @@ sqlite.exec(`
     role TEXT DEFAULT 'worker',
     status TEXT DEFAULT 'active',
     labels TEXT DEFAULT '{}',
+    location TEXT,
     nfs_server INTEGER DEFAULT 0,
     last_heartbeat INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
@@ -175,14 +200,21 @@ sqlite.exec(`
 
   CREATE TABLE billing_plans (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
     name TEXT NOT NULL,
-    stripe_price_id TEXT,
+    slug TEXT UNIQUE NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_default INTEGER DEFAULT 0,
+    is_free INTEGER DEFAULT 0,
+    visible INTEGER DEFAULT 1,
     cpu_limit INTEGER NOT NULL,
     memory_limit INTEGER NOT NULL,
     container_limit INTEGER NOT NULL,
     storage_limit INTEGER NOT NULL,
+    bandwidth_limit INTEGER,
     price_cents INTEGER NOT NULL,
+    stripe_product_id TEXT,
+    stripe_price_ids TEXT DEFAULT '{}',
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
@@ -190,36 +222,92 @@ sqlite.exec(`
   CREATE TABLE subscriptions (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    plan_id TEXT NOT NULL REFERENCES billing_plans(id),
-    stripe_subscription_id TEXT,
+    plan_id TEXT REFERENCES billing_plans(id),
+    billing_model TEXT DEFAULT 'fixed',
+    stripe_subscription_id TEXT UNIQUE,
+    stripe_customer_id TEXT,
+    billing_cycle TEXT DEFAULT 'monthly',
     status TEXT DEFAULT 'active',
+    trial_ends_at INTEGER,
+    current_period_start INTEGER,
+    current_period_end INTEGER,
+    cancelled_at INTEGER,
+    past_due_since INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE billing_config (
+    id TEXT PRIMARY KEY,
+    billing_model TEXT DEFAULT 'fixed' NOT NULL,
+    allow_user_choice INTEGER DEFAULT 0,
+    allowed_cycles TEXT DEFAULT '["monthly","yearly"]',
+    cycle_discounts TEXT DEFAULT '{}',
+    trial_days INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE usage_records (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id),
+    period_start INTEGER,
+    period_end INTEGER,
     containers INTEGER DEFAULT 0,
     cpu_seconds INTEGER DEFAULT 0,
     memory_mb_hours INTEGER DEFAULT 0,
     storage_gb INTEGER DEFAULT 0,
+    bandwidth_gb INTEGER DEFAULT 0,
     recorded_at INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE pricing_config (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
-    container_fee INTEGER DEFAULT 0,
-    cpu_fee INTEGER DEFAULT 0,
-    memory_fee INTEGER DEFAULT 0,
-    storage_fee INTEGER DEFAULT 0,
-    bandwidth_fee INTEGER DEFAULT 0,
+    cpu_cents_per_hour INTEGER DEFAULT 0,
+    memory_cents_per_gb_hour INTEGER DEFAULT 0,
+    storage_cents_per_gb_month INTEGER DEFAULT 0,
+    bandwidth_cents_per_gb INTEGER DEFAULT 0,
+    container_cents_per_hour INTEGER DEFAULT 0,
     domain_markup_percent INTEGER DEFAULT 0,
-    backup_storage_fee INTEGER DEFAULT 0,
+    backup_storage_cents_per_gb INTEGER DEFAULT 0,
+    location_pricing_enabled INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT (unixepoch())
   );
-  CREATE UNIQUE INDEX pricing_config_account_idx ON pricing_config(account_id);
+
+  CREATE TABLE location_multipliers (
+    id TEXT PRIMARY KEY,
+    location_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    multiplier INTEGER DEFAULT 100,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE resource_limits (
+    id TEXT PRIMARY KEY,
+    account_id TEXT REFERENCES accounts(id),
+    max_cpu_per_container INTEGER,
+    max_memory_per_container INTEGER,
+    max_replicas INTEGER,
+    max_containers INTEGER,
+    max_storage_gb INTEGER,
+    max_bandwidth_gb INTEGER,
+    max_nfs_storage_gb INTEGER,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE account_billing_overrides (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id),
+    discount_percent INTEGER DEFAULT 0,
+    custom_price_cents INTEGER,
+    notes TEXT,
+    cpu_cents_per_hour_override INTEGER,
+    memory_cents_per_gb_hour_override INTEGER,
+    storage_cents_per_gb_month_override INTEGER,
+    bandwidth_cents_per_gb_override INTEGER,
+    container_cents_per_hour_override INTEGER,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
 
   CREATE TABLE ssh_keys (
     id TEXT PRIMARY KEY,
@@ -275,7 +363,8 @@ sqlite.exec(`
     storage_backend TEXT DEFAULT 'nfs',
     enabled INTEGER DEFAULT 1,
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    last_run_at INTEGER
   );
 
   CREATE TABLE email_templates (
@@ -322,6 +411,69 @@ sqlite.exec(`
     value TEXT NOT NULL,
     updated_at INTEGER DEFAULT (unixepoch())
   );
+
+  CREATE TABLE node_metrics (
+    id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL REFERENCES nodes(id),
+    hostname TEXT NOT NULL,
+    cpu_count INTEGER NOT NULL,
+    mem_total INTEGER NOT NULL,
+    mem_used INTEGER NOT NULL,
+    mem_free INTEGER NOT NULL,
+    container_count INTEGER NOT NULL,
+    recorded_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE notifications (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES users(id),
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id TEXT,
+    read INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE api_keys (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id),
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    scopes TEXT DEFAULT '["*"]',
+    last_used_at INTEGER,
+    expires_at INTEGER,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE error_log (
+    id TEXT PRIMARY KEY,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    stack TEXT,
+    method TEXT,
+    path TEXT,
+    status_code INTEGER,
+    user_id TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    metadata TEXT,
+    resolved INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE webhook_events (
+    id TEXT PRIMARY KEY,
+    stripe_event_id TEXT UNIQUE NOT NULL,
+    event_type TEXT NOT NULL,
+    processed_at INTEGER DEFAULT (unixepoch()),
+    payload TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
 `);
 
 export const db = drizzle(sqlite, { schema });
@@ -336,6 +488,11 @@ export { schema };
  * Child/dependent tables come first so FK constraints are not violated.
  */
 const allTableNames = [
+  'webhook_events',
+  'error_log',
+  'api_keys',
+  'notifications',
+  'node_metrics',
   'email_log',
   'email_templates',
   'backup_schedules',
@@ -343,10 +500,15 @@ const allTableNames = [
   'audit_log',
   'ssh_access_rules',
   'ssh_keys',
+  'account_billing_overrides',
+  'resource_limits',
+  'billing_config',
+  'location_multipliers',
   'pricing_config',
   'usage_records',
   'subscriptions',
   'billing_plans',
+  'domain_tld_pricing',
   'domain_registrations',
   'domain_registrars',
   'dns_records',

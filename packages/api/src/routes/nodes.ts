@@ -4,12 +4,15 @@ import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte,
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
 import os from 'node:os';
+
+const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 6, keyPrefix: 'heartbeat' });
 
 const nodeRoutes = new Hono();
 
 // ── Heartbeat from agent (requires NODE_AUTH_TOKEN in production) ──
-nodeRoutes.post('/:id/heartbeat', async (c) => {
+nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
   const expectedToken = process.env['NODE_AUTH_TOKEN'];
 
   if (expectedToken) {
@@ -40,7 +43,9 @@ nodeRoutes.post('/:id/heartbeat', async (c) => {
       status: 'active',
     });
     node = created;
-    logger.info(`Auto-registered dev node: ${node.id} (${node.hostname})`);
+    if (node) {
+      logger.info(`Auto-registered dev node: ${node.id} (${node.hostname})`);
+    }
   }
 
   if (!node) {

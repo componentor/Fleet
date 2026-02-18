@@ -237,7 +237,6 @@ emails.post('/templates/:slug/test', requireMember, async (c) => {
     return c.json(
       {
         error: 'Failed to send test email',
-        details: err instanceof Error ? err.message : String(err),
       },
       500,
     );

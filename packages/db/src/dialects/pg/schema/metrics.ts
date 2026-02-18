@@ -22,6 +22,7 @@ export const nodeMetrics = pgTable('node_metrics', {
   recordedAt: timestamp('recorded_at').defaultNow(),
 }, (table) => [
   index('idx_node_metrics_node_id').on(table.nodeId),
+  index('idx_node_metrics_node_recorded').on(table.nodeId, table.recordedAt),
 ]);
 
 export const nodeMetricsRelations = relations(nodeMetrics, ({ one }) => ({

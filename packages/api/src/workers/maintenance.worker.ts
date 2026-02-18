@@ -272,7 +272,9 @@ async function executeDatabaseBackup(): Promise<void> {
       const maxBackups = parseInt(process.env['DB_BACKUP_RETENTION'] ?? '30', 10);
       while (files.length > maxBackups) {
         const old = files.shift()!;
-        await rmFile(`${backupDir}/${old}`).catch(() => {});
+        await rmFile(`${backupDir}/${old}`).catch((err) => {
+          logger.error({ err, file: old }, 'Failed to remove old backup file');
+        });
       }
 
       logger.info({ backupFile }, 'PostgreSQL database backup completed');

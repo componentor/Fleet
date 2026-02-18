@@ -20,6 +20,7 @@ export const nodeMetrics = sqliteTable('node_metrics', {
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_node_metrics_node_id').on(table.nodeId),
+  index('idx_node_metrics_node_recorded').on(table.nodeId, table.recordedAt),
 ]);
 
 export const nodeMetricsRelations = relations(nodeMetrics, ({ one }) => ({

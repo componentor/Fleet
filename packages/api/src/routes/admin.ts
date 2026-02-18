@@ -5,6 +5,7 @@ import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
+import { logger } from '../services/logger.js';
 
 const adminRoutes = new Hono<{
   Variables: { user: AuthUser };
@@ -152,6 +153,8 @@ adminRoutes.patch('/users/:id/super', async (c) => {
   }
 
   const [updated] = await updateReturning(users, { isSuper: !targetUser.isSuper, securityChangedAt: new Date(), updatedAt: new Date() }, eq(users.id, targetUserId));
+
+  logger.info({ targetUserId, newIsSuper: !targetUser.isSuper, changedBy: authUser.userId }, 'Super user status toggled');
 
   return c.json({
     id: updated!.id,

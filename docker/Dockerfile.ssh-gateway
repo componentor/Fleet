@@ -25,4 +25,6 @@ COPY --from=build /app/packages/api/dist ./dist
 COPY --from=deps /app/node_modules ./node_modules
 EXPOSE 2222
 USER sshgateway
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:2222/health || exit 1
 CMD ["node", "dist/ssh-gateway.js"]

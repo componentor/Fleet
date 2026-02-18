@@ -6,6 +6,10 @@ import { db, apiKeys, insertReturning, deleteReturning, eq, and } from '@fleet/d
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin } from '../middleware/rbac.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
+import { logger } from '../services/logger.js';
+
+const apiKeyRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'api-key' });
 
 const VALID_SCOPES = ['read', 'write', 'admin'] as const;
 
@@ -48,7 +52,7 @@ const createApiKeySchema = z.object({
   scopes: z.array(z.enum(['read', 'write', 'admin'])).min(1).default(['read', 'write']),
 });
 
-apiKeyRoutes.post('/', requireAdmin, async (c) => {
+apiKeyRoutes.post('/', apiKeyRateLimit, requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
@@ -98,6 +102,7 @@ apiKeyRoutes.delete('/:id', requireAdmin, async (c) => {
   const [deleted] = await deleteReturning(apiKeys, and(eq(apiKeys.id, keyId), eq(apiKeys.accountId, accountId))!);
   if (!deleted) return c.json({ error: 'API key not found' }, 404);
 
+  logger.info({ keyId, accountId, revokedBy: c.get('user').userId }, 'API key revoked');
   return c.json({ message: 'API key revoked' });
 });
 

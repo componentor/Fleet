@@ -85,7 +85,7 @@ domainPurchase.get('/search', async (c) => {
     return c.json(
       {
         error: 'Domain search failed',
-        details: err instanceof Error ? err.message : String(err),
+        details: undefined,
       },
       500,
     );
@@ -217,7 +217,7 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
     return c.json(
       {
         error: 'Domain registration failed',
-        details: err instanceof Error ? err.message : String(err),
+        details: undefined,
       },
       500,
     );
@@ -343,7 +343,7 @@ domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
     return c.json(
       {
         error: 'Domain renewal failed',
-        details: err instanceof Error ? err.message : String(err),
+        details: undefined,
       },
       500,
     );
