@@ -4,6 +4,7 @@ import { verify } from 'argon2';
 import { db, accounts, userAccounts, users, services, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and, isNull, isNotNull, safeTransaction } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { requireAdmin, requireOwner } from '../middleware/rbac.js';
 import { generateTokens, setRefreshTokenCookie } from './auth.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { dockerService } from '../services/docker.service.js';
@@ -73,6 +74,11 @@ accountRoutes.post('/', async (c) => {
 
   if (!parentId) {
     parentId = c.req.header('X-Account-Id') ?? undefined;
+  }
+
+  // Only super admins can create top-level (root) accounts
+  if (!parentId && !user.isSuper) {
+    return c.json({ error: 'Only platform administrators can create top-level accounts' }, 403);
   }
 
   let parentPath = '';
@@ -164,7 +170,7 @@ accountRoutes.get('/:id', tenantMiddleware, cache(60), async (c) => {
 });
 
 // PATCH /:id — update account
-accountRoutes.patch('/:id', tenantMiddleware, async (c) => {
+accountRoutes.patch('/:id', tenantMiddleware, requireAdmin, async (c) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -394,7 +400,7 @@ accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
 });
 
 // POST /:id/disconnect — disconnect from parent
-accountRoutes.post('/:id/disconnect', tenantMiddleware, async (c) => {
+accountRoutes.post('/:id/disconnect', tenantMiddleware, requireOwner, async (c) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);

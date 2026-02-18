@@ -467,8 +467,22 @@ authed.patch('/payment-methods/:id/default', requireOwner, async (c) => {
 // DELETE /payment-methods/:id — remove a payment method
 authed.delete('/payment-methods/:id', requireOwner, async (c) => {
   const paymentMethodId = c.req.param('id');
+  const accountId = c.get('accountId');
+
+  // Verify the payment method belongs to this account's Stripe customer
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+  if (!account?.stripeCustomerId) {
+    return c.json({ error: 'No billing account found' }, 400);
+  }
 
   try {
+    const methods = await stripeService.listPaymentMethods(account.stripeCustomerId);
+    if (!methods.data.some((pm: any) => pm.id === paymentMethodId)) {
+      return c.json({ error: 'Payment method not found' }, 404);
+    }
+
     await stripeService.detachPaymentMethod(paymentMethodId);
     return c.json({ message: 'Payment method removed' });
   } catch (err) {

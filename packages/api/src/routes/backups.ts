@@ -93,7 +93,7 @@ backupRoutes.get('/schedules', async (c) => {
 // POST /schedules — create backup schedule
 const createScheduleSchema = z.object({
   serviceId: z.string().uuid().optional(),
-  cron: z.string().min(1),
+  cron: z.string().min(1).regex(/^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$/, 'Invalid cron expression'),
   retentionDays: z.number().int().min(1).max(365).default(30),
   retentionCount: z.number().int().min(1).max(100).default(10),
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
@@ -130,7 +130,7 @@ backupRoutes.post('/schedules', backupRateLimit, requireMember, async (c) => {
 
 // PATCH /schedules/:id — update backup schedule
 const updateScheduleSchema = z.object({
-  cron: z.string().min(1).optional(),
+  cron: z.string().min(1).regex(/^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$/, 'Invalid cron expression').optional(),
   retentionDays: z.number().int().min(1).max(365).optional(),
   retentionCount: z.number().int().min(1).max(100).optional(),
   storageBackend: z.enum(['nfs', 'local']).optional(),

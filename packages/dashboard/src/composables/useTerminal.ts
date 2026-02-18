@@ -89,9 +89,10 @@ export function useTerminal() {
 
     ws.onopen = () => {
       connectionState.value = 'connected'
+      const wasReconnecting = reconnectAttempts > 0
       reconnectAttempts = 0
 
-      if (reconnectAttempts === 0) {
+      if (!wasReconnecting) {
         terminal?.writeln('Connected to terminal...')
       } else {
         terminal?.writeln('\r\nReconnected.')

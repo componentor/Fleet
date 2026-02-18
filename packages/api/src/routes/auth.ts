@@ -435,7 +435,7 @@ auth.get('/me/accounts', authMiddleware, async (c) => {
 
 // POST /verify-email
 auth.post('/verify-email', verifyEmailRateLimit, async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const token = body?.token;
   if (!token || typeof token !== 'string') {
     return c.json({ error: 'Token is required' }, 400);
@@ -511,7 +511,7 @@ auth.post('/resend-verification', resendVerificationRateLimit, authMiddleware, a
 
 // POST /forgot-password
 auth.post('/forgot-password', forgotPasswordRateLimit, async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const email = body?.email;
 
   // Always return 200 to prevent email enumeration
@@ -548,7 +548,7 @@ auth.post('/forgot-password', forgotPasswordRateLimit, async (c) => {
 
 // POST /reset-password
 auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const { token, password } = body ?? {};
 
   if (!token || !password || typeof token !== 'string' || typeof password !== 'string') {
@@ -634,7 +634,7 @@ auth.post('/2fa/setup', twoFactorSetupRateLimit, authMiddleware, async (c) => {
 // POST /2fa/enable — verify code and enable 2FA
 auth.post('/2fa/enable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
   const authUser = c.get('user');
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const code = body?.code;
 
   if (!code || typeof code !== 'string') {
@@ -682,7 +682,7 @@ auth.post('/2fa/enable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
 // POST /2fa/disable — disable 2FA
 auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
   const authUser = c.get('user');
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const code = body?.code;
 
   if (!code || typeof code !== 'string') {
@@ -734,18 +734,8 @@ auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => 
     return c.json({ error: 'Invalid verification code' }, 400);
   }
 
-  // Disable 2FA atomically — consume backup code if used, invalidate existing sessions
+  // Disable 2FA atomically — wipe secret and backup codes, invalidate sessions
   await safeTransaction(async (tx) => {
-    if (usedBackupCodeIndex >= 0) {
-      // Re-read to avoid stale data, then consume the backup code
-      const freshUser = await tx.query.users.findFirst({
-        where: eq(users.id, user.id),
-      });
-      const freshCodes = (freshUser?.twoFactorBackupCodes as string[] | null) ?? [];
-      if (usedBackupCodeIndex < freshCodes.length) {
-        freshCodes.splice(usedBackupCodeIndex, 1);
-      }
-    }
     await tx.update(users).set({
       twoFactorEnabled: false,
       twoFactorSecret: null,
@@ -760,7 +750,7 @@ auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => 
 
 // POST /2fa/verify — verify 2FA during login flow
 auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
   const { tempToken, code } = body ?? {};
 
   if (!tempToken || !code || typeof tempToken !== 'string' || typeof code !== 'string') {

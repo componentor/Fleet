@@ -55,6 +55,9 @@ const corsOrigin = process.env['CORS_ORIGIN'] || process.env['APP_URL'];
 if (process.env['NODE_ENV'] === 'production' && !corsOrigin) {
   throw new Error('CORS_ORIGIN or APP_URL must be set in production');
 }
+if (process.env['NODE_ENV'] === 'production' && corsOrigin === '*') {
+  throw new Error('CORS_ORIGIN must not be wildcard (*) in production');
+}
 app.use('*', cors({
   origin: corsOrigin || '*',
   credentials: true,

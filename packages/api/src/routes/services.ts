@@ -83,7 +83,7 @@ const createServiceSchema = z.object({
   nodeConstraint: z.string().nullable().optional(),
   placementConstraints: z.array(z.string()).default([]),
   updateParallelism: z.number().int().min(1).default(1),
-  updateDelay: z.string().default('10s'),
+  updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').default('10s'),
   rollbackOnFailure: z.boolean().default(true),
   healthCheck: z.object({
     cmd: z.string().max(1000),
@@ -91,7 +91,7 @@ const createServiceSchema = z.object({
     timeout: z.number().int().min(1),
     retries: z.number().int().min(1).max(20),
   }).nullable().optional(),
-  githubRepo: z.string().nullable().optional(),
+  githubRepo: z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/, 'Must be in owner/repo format').nullable().optional(),
   githubBranch: z.string().nullable().optional(),
   autoDeploy: z.boolean().default(false),
   sourceType: z.enum(['docker', 'github', 'upload', 'marketplace']).nullable().optional(),
@@ -316,7 +316,7 @@ const updateServiceSchema = z.object({
   placementConstraints: z.array(z.string()).optional(),
   nodeConstraint: z.string().nullable().optional(),
   updateParallelism: z.number().int().min(1).optional(),
-  updateDelay: z.string().optional(),
+  updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
   rollbackOnFailure: z.boolean().optional(),
   healthCheck: z.object({
     cmd: z.string().max(1000),
@@ -325,7 +325,7 @@ const updateServiceSchema = z.object({
     retries: z.number().int().min(1).max(20),
   }).nullable().optional(),
   autoDeploy: z.boolean().optional(),
-  githubBranch: z.string().min(1).optional(),
+  githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
 });
 
 /**
