@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { hash, verify } from 'argon2';
-import { db, users, userAccounts, updateReturning, eq } from '@fleet/db';
+import { db, users, userAccounts, updateReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 
 const userRoutes = new Hono<{
@@ -15,7 +15,7 @@ userRoutes.get('/me', async (c) => {
   const authUser = c.get('user');
 
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user) {
@@ -84,7 +84,7 @@ userRoutes.put('/me/password', async (c) => {
   }
 
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user || !user.passwordHash) {
@@ -100,7 +100,7 @@ userRoutes.put('/me/password', async (c) => {
 
   await db
     .update(users)
-    .set({ passwordHash: newHash, updatedAt: new Date() })
+    .set({ passwordHash: newHash, securityChangedAt: new Date(), updatedAt: new Date() })
     .where(eq(users.id, authUser.userId));
 
   return c.json({ message: 'Password updated successfully' });

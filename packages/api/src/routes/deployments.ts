@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, services, deployments, oauthProviders, insertReturning, eq, and } from '@fleet/db';
+import { db, services, deployments, oauthProviders, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { githubService } from '../services/github.service.js';
@@ -69,6 +69,7 @@ webhookRoutes.post('/github/webhook', async (c) => {
       eq(services.githubRepo, repoFullName),
       eq(services.githubBranch, branch),
       eq(services.autoDeploy, true),
+      isNull(services.deletedAt),
     ),
   });
 
@@ -79,35 +80,44 @@ webhookRoutes.post('/github/webhook', async (c) => {
   const results: Array<{ serviceId: string; deploymentId: string; status: string }> = [];
 
   for (const svc of matchingServices) {
-    // Create deployment record
-    const [deployment] = await insertReturning(deployments, {
-      serviceId: svc.id,
-      commitSha,
-      status: 'building',
-      log: `Auto-deploy triggered by push to ${branch}\nCommit: ${commitSha}\n${commitMessage}\n`,
+    // Create deployment record within a transaction for atomicity
+    await db.transaction(async (tx) => {
+      const [deployment] = await tx.insert(deployments).values({
+        serviceId: svc.id,
+        commitSha,
+        status: 'building',
+        log: `Auto-deploy triggered by push to ${branch}\nCommit: ${commitSha}\n${commitMessage}\n`,
+      }).returning();
+
+      if (!deployment) return;
+
+      results.push({
+        serviceId: svc.id,
+        deploymentId: deployment.id,
+        status: 'building',
+      });
     });
+  }
 
-    if (!deployment) continue;
-
-    // Update service status
-    await db
-      .update(services)
+  // Batch update all matched services to 'deploying' status (N+1 fix)
+  if (matchingServices.length > 0) {
+    const serviceIds = matchingServices.map(s => s.id);
+    await db.update(services)
       .set({ status: 'deploying', updatedAt: new Date() })
-      .where(eq(services.id, svc.id));
+      .where(inArray(services.id, serviceIds));
+  }
 
-    // Queue build pipeline via BullMQ (or run in-process if Valkey unavailable)
-    await enqueueOrRunDeployment({
-      deploymentId: deployment.id,
-      serviceId: svc.id,
-      accountId: svc.accountId,
-      commitSha,
-    });
-
-    results.push({
-      serviceId: svc.id,
-      deploymentId: deployment.id,
-      status: 'building',
-    });
+  // Queue build pipelines after DB updates are complete
+  for (const result of results) {
+    const svc = matchingServices.find(s => s.id === result.serviceId);
+    if (svc) {
+      await enqueueOrRunDeployment({
+        deploymentId: result.deploymentId,
+        serviceId: svc.id,
+        accountId: svc.accountId,
+        commitSha,
+      });
+    }
   }
 
   return c.json({ message: `Triggered ${results.length} deployment(s)`, results });
@@ -140,7 +150,7 @@ authenticatedRoutes.get('/', async (c) => {
 
   // Verify the service belongs to this account
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -199,7 +209,7 @@ authenticatedRoutes.post('/trigger', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, services, sshAccessRules, eq, and } from '@fleet/db';
+import { db, services, sshAccessRules, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
@@ -27,7 +27,7 @@ terminalRoutes.get('/info/:serviceId', async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -92,7 +92,7 @@ terminalRoutes.post('/exec/:serviceId', async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc || !svc.dockerServiceId) {

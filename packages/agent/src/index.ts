@@ -5,6 +5,12 @@ import { logger } from './logger.js'
 const HEARTBEAT_INTERVAL = 30_000 // 30 seconds
 const API_URL = process.env.API_URL || 'http://localhost:3000'
 const NODE_ID = process.env.NODE_ID || 'unknown'
+const NODE_AUTH_TOKEN = process.env.NODE_AUTH_TOKEN
+
+if (!NODE_AUTH_TOKEN) {
+  logger.error('NODE_AUTH_TOKEN is required — set it to match the API server')
+  process.exit(1)
+}
 
 // Register shutdown handlers early — before any async work
 let monitor: NodeMonitor | undefined
@@ -18,7 +24,7 @@ process.on('SIGTERM', shutdown)
 
 logger.info(`Starting Fleet agent for node: ${NODE_ID}`)
 
-monitor = new NodeMonitor(API_URL, NODE_ID)
+monitor = new NodeMonitor(API_URL, NODE_ID, NODE_AUTH_TOKEN)
 const nfs = new NfsManager()
 
 // Start health reporting

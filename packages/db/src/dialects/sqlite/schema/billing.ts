@@ -36,7 +36,7 @@ export const subscriptions = sqliteTable('subscriptions', {
   planId: text('plan_id')
     .references(() => billingPlans.id),
   billingModel: text('billing_model').default('fixed'),
-  stripeSubscriptionId: text('stripe_subscription_id'),
+  stripeSubscriptionId: text('stripe_subscription_id').unique(),
   stripeCustomerId: text('stripe_customer_id'),
   billingCycle: text('billing_cycle').default('monthly'),
   status: text('status').default('active'),

@@ -22,7 +22,7 @@ import {
   isNull,
   webhookEvents,
 } from '@fleet/db';
-import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { stripeService } from '../services/stripe.service.js';
 import { stripeSyncService } from '../services/stripe-sync.service.js';
@@ -94,7 +94,7 @@ const checkoutSchema = z.object({
   cancelUrl: z.string().url(),
 });
 
-authed.post('/checkout', requireOwner, async (c) => {
+authed.post('/checkout', requireOwner, requireScope('admin'), async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -107,6 +107,10 @@ authed.post('/checkout', requireOwner, async (c) => {
   }
 
   const { billingModel, billingCycle, planId, successUrl, cancelUrl } = parsed.data;
+
+  if (billingModel === 'usage' || billingModel === 'hybrid') {
+    return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
+  }
 
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
@@ -121,7 +125,7 @@ authed.post('/checkout', requireOwner, async (c) => {
 
   // Get or create Stripe customer
   const account = await db.query.accounts.findFirst({
-    where: eq(accounts.id, accountId),
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
   });
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -187,7 +191,7 @@ const changeCycleSchema = z.object({
   cycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
 });
 
-authed.patch('/subscription/cycle', requireOwner, async (c) => {
+authed.patch('/subscription/cycle', requireOwner, requireScope('admin'), async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -223,7 +227,7 @@ authed.patch('/subscription/cycle', requireOwner, async (c) => {
 });
 
 // DELETE /subscription — cancel subscription at period end
-authed.delete('/subscription', requireOwner, async (c) => {
+authed.delete('/subscription', requireOwner, requireScope('admin'), async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -250,6 +254,9 @@ authed.delete('/subscription', requireOwner, async (c) => {
   await db.update(subscriptions)
     .set({ cancelledAt: new Date(), updatedAt: new Date() })
     .where(eq(subscriptions.id, sub.id));
+
+  // Suspend services immediately — don't wait for webhook
+  await suspendAccountServices(accountId);
 
   return c.json({ message: 'Subscription will cancel at end of billing period' });
 });
@@ -308,7 +315,7 @@ authed.get('/invoices', async (c) => {
   }
 
   const account = await db.query.accounts.findFirst({
-    where: eq(accounts.id, accountId),
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
   });
 
   if (!account?.stripeCustomerId) {
@@ -355,7 +362,7 @@ authed.post('/portal', requireOwner, async (c) => {
   }
 
   const account = await db.query.accounts.findFirst({
-    where: eq(accounts.id, accountId),
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
   });
 
   if (!account?.stripeCustomerId) {
@@ -426,6 +433,11 @@ authed.patch('/config', async (c) => {
   }
 
   const data = parsed.data;
+
+  if (data.billingModel === 'usage' || data.billingModel === 'hybrid') {
+    return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
+  }
+
   const existing = await db.query.billingConfig.findFirst();
 
   if (existing) {
@@ -586,7 +598,7 @@ authed.get('/resource-limits', async (c) => {
 /** Suspend all running services for an account (e.g., after payment failure). */
 async function suspendAccountServices(accountId: string) {
   const accountServices = await db.query.services.findMany({
-    where: and(eq(services.accountId, accountId), eq(services.status, 'running')),
+    where: and(eq(services.accountId, accountId), eq(services.status, 'running'), isNull(services.deletedAt)),
   });
 
   for (const svc of accountServices) {
@@ -626,20 +638,20 @@ billing.post('/webhook', async (c) => {
     return c.json({ error: 'Invalid signature' }, 400);
   }
 
-  // Idempotency: check if we already processed this event
-  const existing = await db.query.webhookEvents.findFirst({
-    where: eq(webhookEvents.stripeEventId, event.id),
-  });
-  if (existing) {
-    return c.json({ received: true, duplicate: true });
+  // Atomic idempotency check — INSERT with conflict handling
+  try {
+    await db.insert(webhookEvents).values({
+      stripeEventId: event.id,
+      eventType: event.type,
+      processedAt: new Date(),
+    });
+  } catch (err: any) {
+    // If insert fails due to unique constraint on stripeEventId, it's a duplicate
+    if (err?.message?.includes('UNIQUE') || err?.message?.includes('unique') || err?.message?.includes('duplicate')) {
+      return c.json({ received: true, duplicate: true });
+    }
+    throw err; // Re-throw unexpected errors
   }
-
-  // Record the event before processing
-  await db.insert(webhookEvents).values({
-    stripeEventId: event.id,
-    eventType: event.type,
-    processedAt: new Date(),
-  }).catch(() => {}); // ignore duplicates from race conditions
 
   switch (event.type) {
     case 'checkout.session.completed': {
@@ -704,7 +716,7 @@ billing.post('/webhook', async (c) => {
         }
       } else if (session.customer && session.subscription) {
         const account = await db.query.accounts.findFirst({
-          where: eq(accounts.stripeCustomerId, session.customer),
+          where: and(eq(accounts.stripeCustomerId, session.customer), isNull(accounts.deletedAt)),
         });
 
         if (account) {
@@ -714,6 +726,18 @@ billing.post('/webhook', async (c) => {
 
           // Wrap subscription creation + account update in a transaction
           await db.transaction(async (tx) => {
+            // Check for existing active subscription
+            const existingSub = await tx.query.subscriptions.findFirst({
+              where: and(
+                eq(subscriptions.accountId, account.id),
+                eq(subscriptions.status, 'active'),
+              ),
+            });
+            if (existingSub) {
+              logger.warn({ accountId: account.id, existingSubId: existingSub.id }, 'Blocked duplicate active subscription');
+              return; // Don't create another active subscription
+            }
+
             await tx.insert(subscriptions).values({
               accountId: account.id,
               planId,
@@ -754,38 +778,44 @@ billing.post('/webhook', async (c) => {
     }
 
     case 'invoice.payment_failed': {
-      const invoice = event.data.object as {
-        id: string;
-        subscription?: string;
-        customer?: string;
-        attempt_count?: number;
-        next_payment_attempt?: number | null;
-      };
+      const invoice = event.data.object as any;
+      const subId = invoice.subscription as string;
+      if (!subId) break;
 
-      if (invoice.subscription) {
-        // Find the subscription in our DB
-        const sub = await db.query.subscriptions.findFirst({
-          where: eq(subscriptions.stripeSubscriptionId, invoice.subscription),
-        });
+      const dbSub = await db.query.subscriptions.findFirst({
+        where: eq(subscriptions.stripeSubscriptionId, subId),
+      });
+      if (!dbSub) break;
 
-        if (sub) {
-          // Update subscription status to past_due
-          await db.update(subscriptions)
-            .set({ status: 'past_due', updatedAt: new Date() })
-            .where(eq(subscriptions.id, sub.id));
+      if (!invoice.next_payment_attempt) {
+        // Final attempt failed — mark as past_due but don't suspend immediately
+        // Give 7-day grace period
+        await db.update(subscriptions)
+          .set({
+            status: 'past_due',
+            updatedAt: new Date()
+          })
+          .where(eq(subscriptions.id, dbSub.id));
 
-          // If this is the final attempt (no more retries), suspend services
-          if (!invoice.next_payment_attempt) {
-            await suspendAccountServices(sub.accountId);
-            logger.error({ accountId: sub.accountId, invoiceId: invoice.id }, 'Final payment attempt failed — services suspended');
-          } else {
-            logger.warn({
-              accountId: sub.accountId,
-              invoiceId: invoice.id,
-              attemptCount: invoice.attempt_count,
-            }, 'Payment failed, Stripe will retry');
-          }
-        }
+        logger.warn({ accountId: dbSub.accountId, subscriptionId: dbSub.id },
+          'Final payment attempt failed — subscription marked past_due (7-day grace period)');
+
+        // Create a notification for the account owner
+        try {
+          const { notifications } = await import('@fleet/db');
+          await db.insert(notifications).values({
+            id: crypto.randomUUID(),
+            accountId: dbSub.accountId,
+            type: 'billing',
+            title: 'Payment Failed',
+            message: 'Your payment has failed after all retry attempts. Please update your payment method within 7 days to avoid service suspension.',
+            read: false,
+          });
+        } catch { /* notification is best-effort */ }
+      } else {
+        // Not final — just log warning
+        logger.warn({ accountId: dbSub.accountId, attempt: invoice.attempt_count },
+          'Payment attempt failed — Stripe will retry');
       }
       break;
     }
@@ -835,6 +865,45 @@ billing.post('/webhook', async (c) => {
         await suspendAccountServices(dbSub.accountId);
         logger.info({ accountId: dbSub.accountId }, 'Subscription cancelled — services suspended');
       }
+      break;
+    }
+
+    case 'charge.dispute.created': {
+      const dispute = event.data.object as any;
+      const customerId = dispute.customer as string;
+      if (!customerId) break;
+
+      // Find the account with this Stripe customer
+      const disputeAccount = await db.query.accounts.findFirst({
+        where: eq(accounts.stripeCustomerId, customerId),
+      });
+      if (!disputeAccount) break;
+
+      // Suspend services immediately on dispute
+      await suspendAccountServices(disputeAccount.id);
+
+      logger.error({ accountId: disputeAccount.id, disputeId: dispute.id, amount: dispute.amount },
+        'Charge dispute received — services suspended');
+
+      // Create notification
+      try {
+        const { notifications } = await import('@fleet/db');
+        await db.insert(notifications).values({
+          id: crypto.randomUUID(),
+          accountId: disputeAccount.id,
+          type: 'billing',
+          title: 'Payment Dispute Received',
+          message: 'A payment dispute has been filed. Your services have been suspended pending resolution. Please contact support.',
+          read: false,
+        });
+      } catch { /* best-effort */ }
+      break;
+    }
+
+    case 'charge.refunded': {
+      const refundCharge = event.data.object as any;
+      logger.info({ chargeId: refundCharge.id, amount: refundCharge.amount_refunded },
+        'Charge refunded');
       break;
     }
 

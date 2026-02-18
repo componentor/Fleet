@@ -41,7 +41,7 @@ export const subscriptions = mysqlTable('subscriptions', {
   planId: varchar('plan_id', { length: 36 })
     .references(() => billingPlans.id),
   billingModel: varchar('billing_model', { length: 255 }).default('fixed'),
-  stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
+  stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }).unique(),
   stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
   billingCycle: varchar('billing_cycle', { length: 255 }).default('monthly'),
   status: varchar('status', { length: 255 }).default('active'),

@@ -9,6 +9,7 @@ import {
   nodes,
   eq,
   and,
+  isNull,
   gte,
   lte,
   sql,
@@ -33,7 +34,7 @@ class UsageService {
     try {
       // Get all running services grouped by account
       const runningServices = await db.query.services.findMany({
-        where: eq(services.status, 'running'),
+        where: and(eq(services.status, 'running'), isNull(services.deletedAt)),
       });
 
       if (runningServices.length === 0) return;
@@ -268,7 +269,7 @@ class UsageService {
    */
   private async getAccountLocationMultiplier(accountId: string): Promise<number> {
     const accountServices = await db.query.services.findMany({
-      where: and(eq(services.accountId, accountId), eq(services.status, 'running')),
+      where: and(eq(services.accountId, accountId), eq(services.status, 'running'), isNull(services.deletedAt)),
     });
 
     if (accountServices.length === 0) return 1.0;

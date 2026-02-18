@@ -8,6 +8,13 @@
       "when": 1771333384932,
       "tag": "0000_left_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771419784932,
+      "tag": "0001_add_soft_deletes_and_fixes",
+      "breakpoints": true
     }
   ]
 }

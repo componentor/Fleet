@@ -41,7 +41,7 @@ export const subscriptions = pgTable('subscriptions', {
   planId: uuid('plan_id')
     .references(() => billingPlans.id),
   billingModel: varchar('billing_model').default('fixed'),
-  stripeSubscriptionId: varchar('stripe_subscription_id'),
+  stripeSubscriptionId: varchar('stripe_subscription_id').unique(),
   stripeCustomerId: varchar('stripe_customer_id'),
   billingCycle: varchar('billing_cycle').default('monthly'),
   status: varchar('status').default('active'),

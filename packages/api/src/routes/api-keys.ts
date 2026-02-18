@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 import { hash } from 'argon2';
 import { db, apiKeys, insertReturning, deleteReturning, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin } from '../middleware/rbac.js';
+
+const VALID_SCOPES = ['read', 'write', 'admin'] as const;
 
 const apiKeyRoutes = new Hono<{
   Variables: {
@@ -39,29 +42,40 @@ apiKeyRoutes.get('/', async (c) => {
 });
 
 // POST / — create a new API key
+const createApiKeySchema = z.object({
+  name: z.string().min(1),
+  expiresInDays: z.number().int().min(1).optional(),
+  scopes: z.array(z.enum(['read', 'write', 'admin'])).min(1).default(['read', 'write']),
+});
+
 apiKeyRoutes.post('/', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json() as { name: string; expiresInDays?: number };
-  if (!body.name) return c.json({ error: 'name is required' }, 400);
+  const body = await c.req.json();
+  const parsed = createApiKeySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed' }, 400);
+  }
+
+  const { name, expiresInDays, scopes } = parsed.data;
 
   const rawKey = `fleet_${randomBytes(32).toString('hex')}`;
   const keyPrefix = rawKey.slice(0, 14);
   const keyHash = await hash(rawKey);
 
-  const expiresAt = body.expiresInDays
-    ? new Date(Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000)
+  const expiresAt = expiresInDays
+    ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
   const [created] = await insertReturning(apiKeys, {
     accountId,
     createdBy: user.userId,
-    name: body.name,
+    name,
     keyPrefix,
     keyHash,
-    scopes: ['*'],
+    scopes,
     expiresAt,
   });
 
@@ -70,6 +84,7 @@ apiKeyRoutes.post('/', requireAdmin, async (c) => {
     name: created.name,
     key: rawKey,
     keyPrefix,
+    scopes,
     createdAt: created.createdAt,
   }, 201);
 });

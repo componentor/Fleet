@@ -9,15 +9,18 @@ const nodeRoutes = new Hono();
 
 // ── Heartbeat from agent (requires NODE_AUTH_TOKEN) ──
 nodeRoutes.post('/:id/heartbeat', async (c) => {
-  const nodeToken = c.req.header('X-Node-Token');
   const expectedToken = process.env['NODE_AUTH_TOKEN'];
 
-  if (expectedToken) {
-    if (!nodeToken || nodeToken !== expectedToken) {
-      return c.json({ error: 'Invalid or missing X-Node-Token header' }, 401);
-    }
-  } else {
-    logger.warn('NODE_AUTH_TOKEN is not set — heartbeat endpoint is unprotected (dev mode)');
+  if (!expectedToken) {
+    logger.error('NODE_AUTH_TOKEN is not configured — rejecting heartbeat');
+    return c.json({ error: 'Server misconfiguration: NODE_AUTH_TOKEN is not set' }, 500);
+  }
+
+  const authHeader = c.req.header('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!bearerToken || bearerToken !== expectedToken) {
+    return c.json({ error: 'Invalid or missing Authorization header' }, 401);
   }
 
   const nodeId = c.req.param('id');

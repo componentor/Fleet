@@ -25,6 +25,7 @@ export const users = mysqlTable('users', {
   twoFactorEnabled: boolean('two_factor_enabled').default(false),
   twoFactorSecret: varchar('two_factor_secret', { length: 255 }),
   twoFactorBackupCodes: json('two_factor_backup_codes').$type<string[] | null>(),
+  securityChangedAt: timestamp('security_changed_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   deletedAt: timestamp('deleted_at'),

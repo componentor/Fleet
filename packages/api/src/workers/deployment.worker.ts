@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, services, deployments, oauthProviders, eq, and } from '@fleet/db';
+import { db, services, deployments, oauthProviders, eq, and, isNull } from '@fleet/db';
 import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
@@ -45,7 +45,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
   const { deploymentId, serviceId, accountId, commitSha } = job.data;
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -161,6 +161,6 @@ export async function processDeploymentInline(data: DeploymentJobData): Promise<
 export function createDeploymentWorker(connection: ConnectionOptions): Worker {
   return new Worker<DeploymentJobData>('fleet-deployment', processDeployment, {
     connection,
-    concurrency: 10,
+    concurrency: 50,
   });
 }

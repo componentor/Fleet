@@ -49,6 +49,7 @@ sqlite.exec(`
     two_factor_enabled INTEGER DEFAULT 0,
     two_factor_secret TEXT,
     two_factor_backup_codes TEXT,
+    security_changed_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
     deleted_at INTEGER
@@ -529,6 +530,7 @@ vi.mock('../services/docker.service.js', () => ({
     }),
     listServices: vi.fn().mockResolvedValue([]),
     scaleService: vi.fn().mockResolvedValue(undefined),
+    ensureNetwork: vi.fn().mockResolvedValue('network-id'),
     createNetwork: vi.fn().mockResolvedValue('network-id'),
     removeNetwork: vi.fn().mockResolvedValue(undefined),
   },

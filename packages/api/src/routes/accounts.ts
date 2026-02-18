@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { verify } from 'argon2';
 import { db, accounts, userAccounts, users, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -77,7 +78,7 @@ accountRoutes.post('/', async (c) => {
 
   if (parentId) {
     const parent = await db.query.accounts.findFirst({
-      where: eq(accounts.id, parentId),
+      where: and(eq(accounts.id, parentId), isNull(accounts.deletedAt)),
     });
 
     if (!parent) {
@@ -103,7 +104,7 @@ accountRoutes.post('/', async (c) => {
   const path = parentPath ? `${parentPath}.${slug}` : slug;
 
   const existingSlug = await db.query.accounts.findFirst({
-    where: eq(accounts.slug, slug),
+    where: and(eq(accounts.slug, slug), isNull(accounts.deletedAt)),
   });
 
   if (existingSlug) {
@@ -149,7 +150,7 @@ accountRoutes.get('/:id', tenantMiddleware, cache(60), async (c) => {
   }
 
   const fullAccount = await db.query.accounts.findFirst({
-    where: eq(accounts.id, account.id),
+    where: and(eq(accounts.id, account.id), isNull(accounts.deletedAt)),
   });
 
   if (fullAccount) {
@@ -204,6 +205,26 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
 
   const user = c.get('user');
 
+  // Require password confirmation
+  const body = await c.req.json().catch(() => ({}));
+  const { password } = body as { password?: string };
+  if (!password) {
+    return c.json({ error: 'Password confirmation required to delete account' }, 400);
+  }
+
+  // Verify password against the authenticated user
+  const dbUser = await db.query.users.findFirst({
+    where: and(eq(users.id, user.userId), isNull(users.deletedAt)),
+  });
+  if (!dbUser?.passwordHash) {
+    return c.json({ error: 'Cannot verify identity' }, 400);
+  }
+
+  const valid = await verify(dbUser.passwordHash, password);
+  if (!valid) {
+    return c.json({ error: 'Invalid password' }, 403);
+  }
+
   if (!user.isSuper) {
     const membership = await db.query.userAccounts.findFirst({
       where: (ua, { and, eq: e }) =>
@@ -216,7 +237,7 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
   }
 
   const descendants = await db.query.accounts.findMany({
-    where: like(accounts.path, `${account.path}.%`),
+    where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
   });
 
   const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
@@ -244,11 +265,11 @@ accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
   }
 
   const self = await db.query.accounts.findFirst({
-    where: eq(accounts.id, account.id),
+    where: and(eq(accounts.id, account.id), isNull(accounts.deletedAt)),
   });
 
   const descendants = await db.query.accounts.findMany({
-    where: like(accounts.path, `${account.path}.%`),
+    where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
     orderBy: (a, { asc }) => asc(a.depth),
   });
 
@@ -288,7 +309,7 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, async (c) => {
   }
 
   const fullAccount = await db.query.accounts.findFirst({
-    where: eq(accounts.id, account.id),
+    where: and(eq(accounts.id, account.id), isNull(accounts.deletedAt)),
   });
 
   if (!fullAccount) {
@@ -317,7 +338,7 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, async (c) => {
     .where(eq(accounts.id, fullAccount.id));
 
   const descendants = await db.query.accounts.findMany({
-    where: like(accounts.path, `${oldPath}.%`),
+    where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
   });
 
   for (const desc of descendants) {
@@ -352,7 +373,7 @@ accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
   }
 
   const fullUser = await db.query.users.findFirst({
-    where: eq(users.id, user.userId),
+    where: and(eq(users.id, user.userId), isNull(users.deletedAt)),
   });
 
   if (!fullUser) {
@@ -435,7 +456,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
   const { email, role } = parsed.data;
 
   const targetUser = await db.query.users.findFirst({
-    where: eq(users.email, email),
+    where: and(eq(users.email, email), isNull(users.deletedAt)),
   });
 
   if (!targetUser) {

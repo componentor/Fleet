@@ -75,8 +75,8 @@ adminRoutes.get('/stats', async (c) => {
 
 // GET /accounts — list all accounts (paginated)
 adminRoutes.get('/accounts', async (c) => {
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10), 100);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const allAccounts = await db.query.accounts.findMany({
@@ -104,8 +104,8 @@ adminRoutes.get('/accounts', async (c) => {
 
 // GET /users — list all users
 adminRoutes.get('/users', async (c) => {
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10), 100);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const allUsers = await db.query.users.findMany({
@@ -144,14 +144,14 @@ adminRoutes.patch('/users/:id/super', async (c) => {
   }
 
   const targetUser = await db.query.users.findFirst({
-    where: eq(users.id, targetUserId),
+    where: and(eq(users.id, targetUserId), isNull(users.deletedAt)),
   });
 
   if (!targetUser) {
     return c.json({ error: 'User not found' }, 404);
   }
 
-  const [updated] = await updateReturning(users, { isSuper: !targetUser.isSuper, updatedAt: new Date() }, eq(users.id, targetUserId));
+  const [updated] = await updateReturning(users, { isSuper: !targetUser.isSuper, securityChangedAt: new Date(), updatedAt: new Date() }, eq(users.id, targetUserId));
 
   return c.json({
     id: updated!.id,
@@ -163,8 +163,8 @@ adminRoutes.patch('/users/:id/super', async (c) => {
 
 // GET /audit-log — platform-wide audit log
 adminRoutes.get('/audit-log', async (c) => {
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10), 100);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const logs = await db.query.auditLog.findMany({
@@ -190,8 +190,8 @@ adminRoutes.get('/audit-log', async (c) => {
 
 // GET /services — list all services across all accounts
 adminRoutes.get('/services', async (c) => {
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10), 100);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const allServices = await db.query.services.findMany({
@@ -281,8 +281,11 @@ adminRoutes.get('/status', async (c) => {
     docker = { status: 'disconnected', nodes: 0, managers: 0, workers: 0 };
   }
 
-  // --- Nodes from DB ---
-  const allNodes = await db.query.nodes.findMany({ limit: 1000 });
+  // --- Nodes from DB (paginated) ---
+  const nodesPage = Math.max(1, parseInt(c.req.query('nodesPage') ?? '1', 10));
+  const nodesLimit = Math.min(100, Math.max(1, parseInt(c.req.query('nodesLimit') ?? '100', 10)));
+  const nodesOffset = (nodesPage - 1) * nodesLimit;
+  const allNodes = await db.query.nodes.findMany({ limit: nodesLimit, offset: nodesOffset });
   const fiveMinAgo = new Date(Date.now() - 5 * 60_000);
   const nodeStatuses = allNodes.map((n) => ({
     id: n.id,
@@ -294,8 +297,11 @@ adminRoutes.get('/status', async (c) => {
     lastHeartbeat: n.lastHeartbeat,
   }));
 
-  // --- Services breakdown ---
-  const allServices = await db.query.services.findMany({ where: isNull(services.deletedAt), limit: 1000 });
+  // --- Services breakdown (use counts instead of loading all records) ---
+  const statusPage = Math.max(1, parseInt(c.req.query('servicesPage') ?? '1', 10));
+  const statusLimit = Math.min(100, Math.max(1, parseInt(c.req.query('servicesLimit') ?? '100', 10)));
+  const statusOffset = (statusPage - 1) * statusLimit;
+  const allServices = await db.query.services.findMany({ where: isNull(services.deletedAt), limit: statusLimit, offset: statusOffset });
   const servicesByStatus: Record<string, number> = {};
   for (const s of allServices) {
     const st = s.status ?? 'unknown';

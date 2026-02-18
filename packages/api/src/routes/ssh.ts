@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, sshKeys, sshAccessRules, services, insertReturning, updateReturning, eq, and } from '@fleet/db';
+import { db, sshKeys, sshAccessRules, services, insertReturning, updateReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { sshService } from '../services/ssh.service.js';
@@ -122,7 +122,7 @@ sshRoutes.get('/services/:serviceId/rules', async (c) => {
 
   // Verify service belongs to this account
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -159,7 +159,7 @@ sshRoutes.put('/services/:serviceId/rules', requireMember, async (c) => {
 
   // Verify service belongs to this account
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {

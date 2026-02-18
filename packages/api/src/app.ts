@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, eq, and, errorLog } from '@fleet/db';
+import { db, services, eq, and, isNull, errorLog, userAccounts } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
 import { logger } from './services/logger.js';
 import { requestLogger } from './middleware/request-logger.js';
@@ -165,15 +165,34 @@ api.get(
     return {
       async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
         try {
-          if (!token || !accountId) {
-            ws.close(4001, 'Missing token or accountId');
+          // Validate query parameters
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+          if (!accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
+            ws.close(4001, 'Invalid accountId format');
             return;
           }
 
-          await verifyWsToken(token);
+          const wsUser = await verifyWsToken(token);
+
+          // Verify user has access to this account
+          const membership = await db.query.userAccounts.findFirst({
+            where: and(
+              eq(userAccounts.userId, wsUser.userId),
+              eq(userAccounts.accountId, accountId),
+            ),
+          });
+
+          // Also allow super admins
+          if (!membership && !wsUser.isSuper) {
+            ws.close(4003, 'Access denied to this account');
+            return;
+          }
 
           const svc = await db.query.services.findFirst({
-            where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+            where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
           });
 
           if (!svc?.dockerServiceId) {
@@ -229,15 +248,34 @@ api.get(
     return {
       async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
         try {
-          if (!token || !accountId) {
-            ws.close(4001, 'Missing token or accountId');
+          // Validate query parameters
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+          if (!accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
+            ws.close(4001, 'Invalid accountId format');
             return;
           }
 
-          await verifyWsToken(token);
+          const wsUser = await verifyWsToken(token);
+
+          // Verify user has access to this account
+          const membership = await db.query.userAccounts.findFirst({
+            where: and(
+              eq(userAccounts.userId, wsUser.userId),
+              eq(userAccounts.accountId, accountId),
+            ),
+          });
+
+          // Also allow super admins
+          if (!membership && !wsUser.isSuper) {
+            ws.close(4003, 'Access denied to this account');
+            return;
+          }
 
           const svc = await db.query.services.findFirst({
-            where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+            where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
           });
 
           if (!svc?.dockerServiceId) {

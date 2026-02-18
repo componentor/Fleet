@@ -9,11 +9,13 @@ export class NodeMonitor {
   private intervalId: ReturnType<typeof setInterval> | null = null
   private apiUrl: string
   private nodeId: string
+  private authToken: string
   private consecutiveFailures = 0
 
-  constructor(apiUrl: string, nodeId: string) {
+  constructor(apiUrl: string, nodeId: string, authToken: string) {
     this.apiUrl = apiUrl
     this.nodeId = nodeId
+    this.authToken = authToken
   }
 
   start(intervalMs: number) {
@@ -72,7 +74,10 @@ export class NodeMonitor {
 
     const response = await fetch(`${this.apiUrl}/api/v1/nodes/${this.nodeId}/heartbeat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.authToken}`,
+      },
       body: JSON.stringify(metrics),
     })
 

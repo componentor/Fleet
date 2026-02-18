@@ -22,6 +22,19 @@ export interface BuildInfo {
 const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
 const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
 
+function scrubSecrets(log: string): string {
+  return log
+    // Mask environment variable assignments with sensitive names
+    .replace(/(?:PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|API_KEY|AUTH|PRIVATE)[\s]*[=:]\s*\S+/gi, (match) => {
+      const eqIdx = match.search(/[=:]/);
+      return match.slice(0, eqIdx + 1) + ' [REDACTED]';
+    })
+    // Mask Bearer tokens
+    .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+    // Mask base64-encoded strings that look like secrets (40+ chars)
+    .replace(/(?:eyJ|ghp_|gho_|github_pat_|sk-|pk_live_|pk_test_|sk_live_|sk_test_)\S{20,}/g, '[REDACTED]');
+}
+
 export class BuildService {
   private activeBuilds = new Map<string, { aborted: boolean; info: BuildInfo }>();
   private events = new EventEmitter();
@@ -37,6 +50,10 @@ export class BuildService {
     const buildId = randomUUID();
     const workDir = join(BUILD_DIR, buildId);
     const dockerfile = opts.dockerfile ?? 'Dockerfile';
+    // Validate dockerfile path — prevent directory traversal
+    if (dockerfile.includes('..') || dockerfile.startsWith('/') || dockerfile.includes('\\')) {
+      throw new Error('Invalid dockerfile path: must be relative without directory traversal');
+    }
     const fullImageTag = `${REGISTRY}/${opts.imageTag}`;
 
     const info: BuildInfo = {
@@ -88,7 +105,7 @@ export class BuildService {
         workDir,
         120_000, // 2 minute timeout for git clone
       );
-      info.log += cloneResult;
+      info.log += scrubSecrets(cloneResult);
 
       // 2. Build
       info.status = 'building';
@@ -102,7 +119,7 @@ export class BuildService {
       buildCmdArgs.push(workDir);
 
       const buildLog = await this.exec('docker', buildCmdArgs, workDir, 600_000); // 10 minute timeout for docker build
-      info.log += buildLog;
+      info.log += scrubSecrets(buildLog);
 
       // 3. Push
       info.status = 'pushing';
@@ -110,7 +127,7 @@ export class BuildService {
       this.events.emit(`build:${buildId}`, info);
 
       const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000); // 10 minute timeout for docker push
-      info.log += pushLog;
+      info.log += scrubSecrets(pushLog);
 
       // Done
       info.status = 'succeeded';

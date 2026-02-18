@@ -1,7 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import { jwtVerify } from 'jose';
 import { verify } from 'argon2';
-import { db, apiKeys, users, eq } from '@fleet/db';
+import { db, apiKeys, users, eq, and, isNull } from '@fleet/db';
 import { getValkey } from '../services/valkey.service.js';
 
 export interface AuthUser {
@@ -68,7 +68,7 @@ export const authMiddleware = createMiddleware<{
       if (!valid) continue;
 
       const creator = await db.query.users.findFirst({
-        where: eq(users.id, candidate.createdBy),
+        where: and(eq(users.id, candidate.createdBy), isNull(users.deletedAt)),
       });
       if (!creator) continue;
 
@@ -91,3 +91,16 @@ export const authMiddleware = createMiddleware<{
 
   return c.json({ error: 'Missing or invalid authorization header' }, 401);
 });
+
+export function requireScope(scope: string) {
+  return async (c: any, next: () => Promise<void>) => {
+    const scopes = c.get('apiKeyScopes' as never) as string[] | undefined;
+    // If not using API key (using JWT), allow all
+    if (!scopes) return next();
+    // Check if scopes include the required scope or '*' or 'admin'
+    if (scopes.includes('*') || scopes.includes('admin') || scopes.includes(scope)) {
+      return next();
+    }
+    return c.json({ error: `API key missing required scope: ${scope}` }, 403);
+  };
+}

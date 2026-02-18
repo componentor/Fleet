@@ -39,7 +39,41 @@ export interface ServiceTaskInfo {
 }
 
 export class DockerService {
+  private static readonly BLOCKED_MOUNT_SOURCES = [
+    'docker.sock',
+    '/var/run',
+    '/var/run/',
+    '/etc',
+    '/etc/',
+    '/proc',
+    '/proc/',
+    '/sys',
+    '/sys/',
+    '/dev',
+    '/dev/',
+  ];
+
+  private validateVolumeMounts(volumes: CreateSwarmServiceOptions['volumes']): void {
+    for (const v of volumes) {
+      const src = v.source.toLowerCase().trim();
+      // Block docker socket by name anywhere in the path
+      if (src.includes('docker.sock')) {
+        throw new Error('Mounting Docker socket is not allowed');
+      }
+      // Block sensitive host paths (exact match or sub-path)
+      for (const blocked of DockerService.BLOCKED_MOUNT_SOURCES) {
+        if (blocked === 'docker.sock') continue; // Already handled above
+        if (src === blocked || src === blocked.replace(/\/$/, '') || src.startsWith(blocked.endsWith('/') ? blocked : `${blocked}/`)) {
+          throw new Error(`Mounting host path '${v.source}' is not allowed — access to '${blocked}' is restricted`);
+        }
+      }
+    }
+  }
+
   async createService(opts: CreateSwarmServiceOptions): Promise<{ id: string }> {
+    // Validate volume mounts — block dangerous host paths
+    this.validateVolumeMounts(opts.volumes);
+
     const envArray = Object.entries(opts.env).map(([k, v]) => `${k}=${v}`);
 
     const serviceSpec: Dockerode.CreateServiceOptions = {

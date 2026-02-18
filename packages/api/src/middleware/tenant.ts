@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory';
-import { db, accounts, userAccounts, eq } from '@fleet/db';
+import { db, accounts, userAccounts, eq, and, isNull } from '@fleet/db';
 import type { AuthUser } from './auth.js';
 
 export interface AccountContext {
@@ -38,7 +38,7 @@ export const tenantMiddleware = createMiddleware<{
 
   // Fetch the target account
   const targetAccount = await db.query.accounts.findFirst({
-    where: eq(accounts.id, accountIdHeader),
+    where: and(eq(accounts.id, accountIdHeader), isNull(accounts.deletedAt)),
   });
 
   if (!targetAccount) {

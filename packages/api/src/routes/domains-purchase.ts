@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, domainRegistrations, domainTldPricing, accounts, eq, and } from '@fleet/db';
+import { db, domainRegistrations, domainTldPricing, accounts, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { registrarService } from '../services/registrar.service.js';
@@ -136,7 +136,7 @@ domainPurchase.post('/checkout', requireAdmin, async (c) => {
 
   // Get or create Stripe customer
   const account = await db.query.accounts.findFirst({
-    where: eq(accounts.id, accountId),
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
   });
 
   if (!account) {
@@ -276,7 +276,7 @@ domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
     : 1499 * years; // Fallback
 
   const account = await db.query.accounts.findFirst({
-    where: eq(accounts.id, accountId),
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
   });
 
   if (!account?.stripeCustomerId) {

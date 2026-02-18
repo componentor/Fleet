@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and } from '@fleet/db';
+import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
 import { getBackupQueue, isQueueAvailable } from './queue.service.js';
 import { logger } from './logger.js';
 
@@ -131,6 +131,7 @@ export class BackupService {
           where: and(
             eq(services.id, serviceId),
             eq(services.accountId, accountId),
+            isNull(services.deletedAt),
           ),
         });
 
@@ -192,7 +193,7 @@ export class BackupService {
       } else {
         // Full account backup — backup all services
         const accountServices = await db.query.services.findMany({
-          where: eq(services.accountId, accountId),
+          where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
         });
 
         for (const service of accountServices) {

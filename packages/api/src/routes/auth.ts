@@ -6,7 +6,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
-import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq } from '@fleet/db';
+import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq, and, isNull } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../services/logger.js';
@@ -58,6 +58,10 @@ function slugify(text: string): string {
 // Rate limit auth endpoints
 const authRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'auth' });
 const passwordResetRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'reset' });
+const twoFactorVerifyRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: '2fa-verify' });
+const verifyEmailRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'verify-email' });
+const resetPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'reset-password' });
+const forgotPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'forgot-password' });
 
 /** Generate a random token, return raw + SHA256 hash for storage. */
 function generateSecureToken(): { raw: string; hashed: string } {
@@ -117,7 +121,7 @@ auth.post('/register', authRateLimit, async (c) => {
 
   // Check if user already exists
   const existing = await db.query.users.findFirst({
-    where: eq(users.email, email),
+    where: and(eq(users.email, email), isNull(users.deletedAt)),
   });
 
   if (existing) {
@@ -210,7 +214,7 @@ auth.post('/login', authRateLimit, async (c) => {
   const { email, password } = parsed.data;
 
   const user = await db.query.users.findFirst({
-    where: eq(users.email, email),
+    where: and(eq(users.email, email), isNull(users.deletedAt)),
   });
 
   if (!user || !user.passwordHash) {
@@ -286,11 +290,19 @@ auth.post('/refresh', async (c) => {
     const userId = payload['userId'] as string;
 
     const user = await db.query.users.findFirst({
-      where: eq(users.id, userId),
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
     });
 
     if (!user) {
       return c.json({ error: 'User not found' }, 401);
+    }
+
+    // Check if the token was issued before a security change (password change, role toggle)
+    if (user.securityChangedAt) {
+      const iat = payload['iat'] as number | undefined;
+      if (iat && iat < Math.floor(user.securityChangedAt.getTime() / 1000)) {
+        return c.json({ error: 'Token invalidated — please log in again' }, 401);
+      }
     }
 
     const impersonatingAccountId = payload['impersonatingAccountId'] as string | undefined;
@@ -357,7 +369,7 @@ auth.get('/me', authMiddleware, async (c) => {
   const authUser = c.get('user');
 
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user) {
@@ -387,7 +399,7 @@ auth.get('/me/accounts', authMiddleware, async (c) => {
 // --- Email Verification ---
 
 // POST /verify-email
-auth.post('/verify-email', async (c) => {
+auth.post('/verify-email', verifyEmailRateLimit, async (c) => {
   const body = await c.req.json();
   const token = body?.token;
   if (!token || typeof token !== 'string') {
@@ -396,7 +408,7 @@ auth.post('/verify-email', async (c) => {
 
   const hashed = hashToken(token);
   const user = await db.query.users.findFirst({
-    where: eq(users.emailVerifyToken, hashed),
+    where: and(eq(users.emailVerifyToken, hashed), isNull(users.deletedAt)),
   });
 
   if (!user) {
@@ -421,7 +433,7 @@ auth.post('/verify-email', async (c) => {
 auth.post('/resend-verification', authMiddleware, async (c) => {
   const authUser = c.get('user');
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user) {
@@ -451,7 +463,7 @@ auth.post('/resend-verification', authMiddleware, async (c) => {
 // --- Password Reset ---
 
 // POST /forgot-password
-auth.post('/forgot-password', passwordResetRateLimit, async (c) => {
+auth.post('/forgot-password', forgotPasswordRateLimit, async (c) => {
   const body = await c.req.json();
   const email = body?.email;
 
@@ -461,7 +473,7 @@ auth.post('/forgot-password', passwordResetRateLimit, async (c) => {
   }
 
   const user = await db.query.users.findFirst({
-    where: eq(users.email, email),
+    where: and(eq(users.email, email), isNull(users.deletedAt)),
   });
 
   if (user) {
@@ -484,7 +496,7 @@ auth.post('/forgot-password', passwordResetRateLimit, async (c) => {
 });
 
 // POST /reset-password
-auth.post('/reset-password', async (c) => {
+auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
   const body = await c.req.json();
   const { token, password } = body ?? {};
 
@@ -498,7 +510,7 @@ auth.post('/reset-password', async (c) => {
 
   const hashed = hashToken(token);
   const user = await db.query.users.findFirst({
-    where: eq(users.passwordResetToken, hashed),
+    where: and(eq(users.passwordResetToken, hashed), isNull(users.deletedAt)),
   });
 
   if (!user) {
@@ -526,7 +538,7 @@ auth.post('/reset-password', async (c) => {
 auth.post('/2fa/setup', authMiddleware, async (c) => {
   const authUser = c.get('user');
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user) return c.json({ error: 'User not found' }, 404);
@@ -568,7 +580,7 @@ auth.post('/2fa/enable', authMiddleware, async (c) => {
   }
 
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user) return c.json({ error: 'User not found' }, 404);
@@ -616,7 +628,7 @@ auth.post('/2fa/disable', authMiddleware, async (c) => {
   }
 
   const user = await db.query.users.findFirst({
-    where: eq(users.id, authUser.userId),
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
   });
 
   if (!user) return c.json({ error: 'User not found' }, 404);
@@ -669,7 +681,7 @@ auth.post('/2fa/disable', authMiddleware, async (c) => {
 });
 
 // POST /2fa/verify — verify 2FA during login flow
-auth.post('/2fa/verify', async (c) => {
+auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
   const body = await c.req.json();
   const { tempToken, code } = body ?? {};
 
@@ -691,7 +703,7 @@ auth.post('/2fa/verify', async (c) => {
   }
 
   const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
   });
 
   if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
@@ -777,10 +789,7 @@ auth.get('/github', async (c) => {
       params.set('state', nonce);
     }
   } catch {
-    // If Valkey is unavailable, fall back to unsigned state (better than breaking OAuth)
-    if (returnTo) {
-      params.set('state', Buffer.from(JSON.stringify({ returnTo })).toString('base64url'));
-    }
+    // If Valkey is unavailable, proceed without state — returnTo will be ignored (fail-secure)
   }
 
   return c.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
@@ -793,7 +802,6 @@ auth.get('/github/callback', async (c) => {
 
   // Verify state nonce from Valkey for CSRF protection, then extract returnTo
   let returnTo = '';
-  let stateVerified = false;
   if (stateParam) {
     try {
       const valkey = await getValkey();
@@ -803,21 +811,10 @@ auth.get('/github/callback', async (c) => {
           await valkey.del(`oauth:state:${stateParam}`);
           const parsed = JSON.parse(stored);
           returnTo = parsed.returnTo || '';
-          stateVerified = true;
         }
       }
     } catch {
-      // Valkey unavailable — fall back to base64url decode (graceful degradation)
-    }
-
-    // Fallback: if Valkey didn't verify, try legacy base64url decode
-    if (!stateVerified) {
-      try {
-        const decoded = JSON.parse(Buffer.from(stateParam, 'base64url').toString());
-        returnTo = decoded.returnTo || '';
-      } catch {
-        // ignore invalid state
-      }
+      // Valkey unavailable — returnTo stays empty (fail-secure)
     }
   }
 
@@ -921,7 +918,7 @@ auth.get('/github/callback', async (c) => {
     } else {
       // Check if a user with this email exists
       let user = await db.query.users.findFirst({
-        where: eq(users.email, email),
+        where: and(eq(users.email, email), isNull(users.deletedAt)),
       });
 
       if (!user) {
@@ -977,7 +974,7 @@ auth.get('/github/callback', async (c) => {
 
     // Fetch full user for token
     const user = await db.query.users.findFirst({
-      where: eq(users.id, userId),
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
     });
 
     if (!user) {
@@ -1135,7 +1132,7 @@ auth.get('/google/callback', async (c) => {
         .where(eq(oauthProviders.id, existingOAuth.id));
     } else {
       let user = await db.query.users.findFirst({
-        where: eq(users.email, googleUser.email),
+        where: and(eq(users.email, googleUser.email), isNull(users.deletedAt)),
       });
 
       if (!user) {
@@ -1190,7 +1187,7 @@ auth.get('/google/callback', async (c) => {
     }
 
     const user = await db.query.users.findFirst({
-      where: eq(users.id, userId),
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
     });
 
     if (!user) {

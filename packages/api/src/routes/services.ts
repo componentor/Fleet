@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, services, deployments, insertReturning, updateReturning, eq, and, isNull } from '@fleet/db';
-import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
@@ -93,7 +93,7 @@ const createServiceSchema = z.object({
   autoDeploy: z.boolean().default(false),
 });
 
-serviceRoutes.post('/', requireMember, async (c) => {
+serviceRoutes.post('/', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -107,6 +107,34 @@ serviceRoutes.post('/', requireMember, async (c) => {
   }
 
   const data = parsed.data;
+
+  // Per-account service quota
+  const SERVICE_QUOTA = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
+  const existingCount = await db.query.services.findMany({
+    where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
+    columns: { id: true },
+  });
+  if (existingCount.length >= SERVICE_QUOTA) {
+    return c.json({ error: `Service limit reached (${SERVICE_QUOTA}). Please delete unused services or contact support.` }, 429);
+  }
+
+  // Check for port collisions with other accounts' services
+  if (data.ports.some((p) => p.published)) {
+    const publishedPorts = data.ports.filter((p) => p.published).map((p) => p.published!);
+    const allServices = await db.query.services.findMany({
+      where: and(isNull(services.deletedAt)),
+    });
+    for (const existing of allServices) {
+      if (existing.accountId === accountId) continue; // Same account is OK
+      const existingPorts = (existing.ports as any[])?.map((p: any) => p.published).filter(Boolean) ?? [];
+      for (const port of publishedPorts) {
+        if (existingPorts.includes(port)) {
+          return c.json({ error: `Port ${port} is already in use by another service` }, 409);
+        }
+      }
+    }
+  }
+
   const traefikLabels = buildTraefikLabels(data.name, data.domain ?? null, data.sslEnabled);
 
   // Build constraints
@@ -150,9 +178,11 @@ serviceRoutes.post('/', requireMember, async (c) => {
   let networkId: string | undefined;
   try {
     networkId = await dockerService.ensureNetwork(networkName);
-  } catch {
-    // Network creation failed, proceed without isolation
-    logger.warn({ accountId, networkName }, 'Failed to create account network');
+  } catch (err) {
+    logger.error({ err, accountId, networkName }, 'Failed to create account network — aborting deployment');
+    // Clean up the orphaned DB record since we cannot proceed without network isolation
+    await db.delete(services).where(eq(services.id, svc.id));
+    return c.json({ error: 'Failed to create network isolation. Deployment aborted.' }, 500);
   }
 
   // Deploy to Docker Swarm (external service — outside transaction)
@@ -219,7 +249,7 @@ serviceRoutes.get('/:id', async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
     with: { deployments: { orderBy: (d, { desc }) => desc(d.createdAt), limit: 10 } },
   });
 
@@ -274,7 +304,7 @@ const updateServiceSchema = z.object({
   }).nullable().optional(),
 });
 
-serviceRoutes.patch('/:id', requireMember, async (c) => {
+serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -290,7 +320,7 @@ serviceRoutes.patch('/:id', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -350,7 +380,7 @@ serviceRoutes.patch('/:id', requireMember, async (c) => {
 });
 
 // DELETE /:id — destroy service
-serviceRoutes.delete('/:id', requireMember, async (c) => {
+serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -359,7 +389,7 @@ serviceRoutes.delete('/:id', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -384,7 +414,7 @@ serviceRoutes.delete('/:id', requireMember, async (c) => {
 });
 
 // POST /:id/restart — restart service (force update)
-serviceRoutes.post('/:id/restart', requireMember, async (c) => {
+serviceRoutes.post('/:id/restart', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -393,7 +423,7 @@ serviceRoutes.post('/:id/restart', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -418,7 +448,7 @@ serviceRoutes.post('/:id/restart', requireMember, async (c) => {
 });
 
 // POST /:id/redeploy — rebuild and redeploy
-serviceRoutes.post('/:id/redeploy', requireMember, async (c) => {
+serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -427,7 +457,7 @@ serviceRoutes.post('/:id/redeploy', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -482,7 +512,7 @@ serviceRoutes.post('/:id/redeploy', requireMember, async (c) => {
 });
 
 // POST /:id/stop — stop a running service (scale to 0)
-serviceRoutes.post('/:id/stop', requireMember, async (c) => {
+serviceRoutes.post('/:id/stop', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -491,7 +521,7 @@ serviceRoutes.post('/:id/stop', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -526,7 +556,7 @@ serviceRoutes.post('/:id/stop', requireMember, async (c) => {
 });
 
 // POST /:id/start — start a stopped service (restore replicas)
-serviceRoutes.post('/:id/start', requireMember, async (c) => {
+serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('id');
 
@@ -535,7 +565,7 @@ serviceRoutes.post('/:id/start', requireMember, async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {
@@ -575,7 +605,7 @@ serviceRoutes.get('/:id/logs', async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc || !svc.dockerServiceId) {
@@ -613,7 +643,7 @@ serviceRoutes.get('/:id/deployments', async (c) => {
   }
 
   const svc = await db.query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.accountId, accountId)),
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
   });
 
   if (!svc) {

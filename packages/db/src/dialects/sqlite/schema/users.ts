@@ -23,6 +23,7 @@ export const users = sqliteTable('users', {
   twoFactorEnabled: integer('two_factor_enabled', { mode: 'boolean' }).default(false),
   twoFactorSecret: text('two_factor_secret'),
   twoFactorBackupCodes: text('two_factor_backup_codes', { mode: 'json' }).$type<string[] | null>(),
+  securityChangedAt: integer('security_changed_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),

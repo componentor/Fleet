@@ -35,6 +35,8 @@ export const useAccountStore = defineStore('account', () => {
     if (account) {
       currentAccount.value = account
       localStorage.setItem('fleet_account_id', id)
+      // Force refetch of account-specific data (services, billing, etc.)
+      window.location.reload()
     }
   }
 
