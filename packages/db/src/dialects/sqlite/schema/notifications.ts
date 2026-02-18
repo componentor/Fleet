@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -19,7 +20,9 @@ export const notifications = sqliteTable('notifications', {
   resourceId: text('resource_id'),
   read: integer('read', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_notifications_account_id').on(table.accountId),
+]);
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   account: one(accounts, { fields: [notifications.accountId], references: [accounts.id] }),

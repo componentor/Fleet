@@ -1,5 +1,6 @@
 import Docker from 'dockerode'
 import { cpus, freemem, totalmem, hostname } from 'node:os'
+import { logger } from './logger.js'
 
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || '/var/run/docker.sock'
 const docker = new Docker({ socketPath: DOCKER_SOCKET })
@@ -21,7 +22,7 @@ export class NodeMonitor {
         this.consecutiveFailures++
         // Only log every 5th failure to avoid spamming
         if (this.consecutiveFailures <= 1 || this.consecutiveFailures % 5 === 0) {
-          console.error(`[monitor] Heartbeat failed (${this.consecutiveFailures}x):`, err.message)
+          logger.error({ err: err.message, failures: this.consecutiveFailures }, 'Heartbeat failed')
         }
       })
     }, intervalMs)
@@ -29,7 +30,7 @@ export class NodeMonitor {
     // Send initial heartbeat
     this.sendHeartbeat().catch((err) => {
       this.consecutiveFailures++
-      console.error('[monitor] Initial heartbeat failed:', err.message)
+      logger.error({ err: err.message }, 'Initial heartbeat failed')
     })
   }
 

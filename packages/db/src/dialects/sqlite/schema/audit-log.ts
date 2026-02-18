@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users';
@@ -18,4 +19,7 @@ export const auditLog = sqliteTable('audit_log', {
   ipAddress: text('ip_address'),
   details: text('details', { mode: 'json' }).$default(() => ({})),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_audit_log_account_id').on(table.accountId),
+  index('idx_audit_log_created_at').on(table.createdAt),
+]);

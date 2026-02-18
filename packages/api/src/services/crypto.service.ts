@@ -1,4 +1,5 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { logger } from './logger.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -62,5 +63,5 @@ if (!getKey()) {
   if (process.env['NODE_ENV'] === 'production') {
     throw new Error(msg);
   }
-  console.warn(`[WARN] ${msg}`);
+  logger.warn(msg);
 }

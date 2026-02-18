@@ -4,6 +4,7 @@ import {
   varchar,
   boolean,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -20,7 +21,9 @@ export const notifications = pgTable('notifications', {
   resourceId: uuid('resource_id'),
   read: boolean('read').default(false),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_notifications_account_id').on(table.accountId),
+]);
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   account: one(accounts, { fields: [notifications.accountId], references: [accounts.id] }),

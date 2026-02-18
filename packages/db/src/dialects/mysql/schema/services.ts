@@ -7,6 +7,7 @@ import {
   int,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -42,7 +43,10 @@ export const services = mysqlTable('services', {
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_services_account_id').on(table.accountId),
+  index('idx_services_status').on(table.status),
+]);
 
 export const deployments = mysqlTable('deployments', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -54,7 +58,9 @@ export const deployments = mysqlTable('deployments', {
   log: text('log'),
   imageTag: varchar('image_tag', { length: 255 }),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_deployments_service_id').on(table.serviceId),
+]);
 
 export const servicesRelations = relations(services, ({ one, many }) => ({
   account: one(accounts, {

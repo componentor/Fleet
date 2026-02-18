@@ -729,21 +729,34 @@ auth.post('/2fa/verify', async (c) => {
 // --- OAuth Routes ---
 
 // GET /github — redirect to GitHub OAuth
-auth.get('/github', (c) => {
+auth.get('/github', async (c) => {
   const clientId = process.env['GITHUB_CLIENT_ID'];
   if (!clientId) {
     return c.json({ error: 'GitHub OAuth is not configured' }, 500);
   }
 
   const returnTo = c.req.query('returnTo') || '';
-  const state = returnTo ? Buffer.from(JSON.stringify({ returnTo })).toString('base64url') : '';
   const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/github/callback`;
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     scope: 'user:email repo',
   });
-  if (state) params.set('state', state);
+
+  // Generate a random nonce and store state in Valkey for CSRF protection
+  const nonce = crypto.randomBytes(16).toString('hex');
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ returnTo }));
+      params.set('state', nonce);
+    }
+  } catch {
+    // If Valkey is unavailable, fall back to unsigned state (better than breaking OAuth)
+    if (returnTo) {
+      params.set('state', Buffer.from(JSON.stringify({ returnTo })).toString('base64url'));
+    }
+  }
 
   return c.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
 });
@@ -753,14 +766,33 @@ auth.get('/github/callback', async (c) => {
   const code = c.req.query('code');
   const stateParam = c.req.query('state') || '';
 
-  // Parse returnTo from state
+  // Verify state nonce from Valkey for CSRF protection, then extract returnTo
   let returnTo = '';
+  let stateVerified = false;
   if (stateParam) {
     try {
-      const decoded = JSON.parse(Buffer.from(stateParam, 'base64url').toString());
-      returnTo = decoded.returnTo || '';
+      const valkey = await getValkey();
+      if (valkey) {
+        const stored = await valkey.get(`oauth:state:${stateParam}`);
+        if (stored) {
+          await valkey.del(`oauth:state:${stateParam}`);
+          const parsed = JSON.parse(stored);
+          returnTo = parsed.returnTo || '';
+          stateVerified = true;
+        }
+      }
     } catch {
-      // ignore invalid state
+      // Valkey unavailable — fall back to base64url decode (graceful degradation)
+    }
+
+    // Fallback: if Valkey didn't verify, try legacy base64url decode
+    if (!stateVerified) {
+      try {
+        const decoded = JSON.parse(Buffer.from(stateParam, 'base64url').toString());
+        returnTo = decoded.returnTo || '';
+      } catch {
+        // ignore invalid state
+      }
     }
   }
 
@@ -942,21 +974,58 @@ auth.get('/github/callback', async (c) => {
 });
 
 // GET /google — redirect to Google OAuth
-auth.get('/google', (c) => {
+auth.get('/google', async (c) => {
   const clientId = process.env['GOOGLE_CLIENT_ID'];
   if (!clientId) {
     return c.json({ error: 'Google OAuth is not configured' }, 500);
   }
 
   const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/google/callback`;
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid+email+profile`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+  });
 
-  return c.redirect(url);
+  // Generate a random nonce and store in Valkey for CSRF protection
+  const nonce = crypto.randomBytes(16).toString('hex');
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ provider: 'google' }));
+      params.set('state', nonce);
+    }
+  } catch {
+    // If Valkey is unavailable, proceed without state (graceful degradation)
+  }
+
+  return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
 });
 
 // GET /google/callback
 auth.get('/google/callback', async (c) => {
   const code = c.req.query('code');
+  const stateParam = c.req.query('state') || '';
+
+  // Verify state nonce from Valkey for CSRF protection
+  if (stateParam) {
+    try {
+      const valkey = await getValkey();
+      if (valkey) {
+        const stored = await valkey.get(`oauth:state:${stateParam}`);
+        if (stored) {
+          await valkey.del(`oauth:state:${stateParam}`);
+        } else {
+          // Nonce not found — possible CSRF attack
+          return c.redirect('/auth/callback?error=Invalid+OAuth+state');
+        }
+      }
+    } catch {
+      // Valkey unavailable — allow flow (graceful degradation)
+    }
+  }
+
   if (!code) {
     return c.redirect('/auth/callback?error=Missing+authorization+code');
   }

@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -42,7 +43,10 @@ export const services = pgTable('services', {
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_services_account_id').on(table.accountId),
+  index('idx_services_status').on(table.status),
+]);
 
 export const deployments = pgTable('deployments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -54,7 +58,9 @@ export const deployments = pgTable('deployments', {
   log: text('log').default(''),
   imageTag: varchar('image_tag'),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_deployments_service_id').on(table.serviceId),
+]);
 
 export const servicesRelations = relations(services, ({ one, many }) => ({
   account: one(accounts, {

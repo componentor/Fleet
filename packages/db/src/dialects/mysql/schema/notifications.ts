@@ -4,6 +4,7 @@ import {
   varchar,
   boolean,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -20,7 +21,9 @@ export const notifications = mysqlTable('notifications', {
   resourceId: varchar('resource_id', { length: 36 }),
   read: boolean('read').default(false),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_notifications_account_id').on(table.accountId),
+]);
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   account: one(accounts, { fields: [notifications.accountId], references: [accounts.id] }),

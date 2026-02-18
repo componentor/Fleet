@@ -93,6 +93,13 @@ settings.get('/', cache(300), async (c) => {
 // ────────────────────────────────────────────────────────────────────────────
 const updateSettingsSchema = z.record(z.unknown());
 
+const ALLOWED_ACCOUNT_SETTINGS = [
+  'notifications', 'timezone', 'language', 'theme',
+  'billing:plan', 'email:provider', 'email:smtpHost', 'email:smtpPort',
+  'email:smtpUser', 'email:smtpPass', 'email:smtpFrom',
+  'email:resendApiKey', 'email:resendFrom',
+];
+
 settings.patch('/', requireAdmin, async (c) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
@@ -123,7 +130,15 @@ settings.patch('/', requireAdmin, async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Account-scoped settings
+  // Account-scoped settings — validate keys against allowlist
+  const disallowedKeys = entries
+    .map(([k]) => k)
+    .filter((k) => !ALLOWED_ACCOUNT_SETTINGS.includes(k));
+
+  if (disallowedKeys.length > 0) {
+    return c.json({ error: 'Disallowed setting keys', keys: disallowedKeys }, 403);
+  }
+
   for (const [key, value] of entries) {
     await upsertSetting(`account:${accountId}:${key}`, value);
   }
@@ -159,11 +174,11 @@ settings.patch('/stripe', requireAdmin, async (c) => {
 
   const data = parsed.data;
 
-  await upsertSetting('stripe:publishableKey', data.publishableKey);
-  await upsertSetting('stripe:secretKey', data.secretKey);
+  await upsertSetting('stripe:publishableKey', data.publishableKey); // publishable key is public, no need to encrypt
+  await upsertSetting('stripe:secretKey', encrypt(data.secretKey));
 
   if (data.webhookSecret) {
-    await upsertSetting('stripe:webhookSecret', data.webhookSecret);
+    await upsertSetting('stripe:webhookSecret', encrypt(data.webhookSecret));
   }
 
   return c.json({ message: 'Stripe configuration updated' });
@@ -213,13 +228,13 @@ settings.patch('/email', requireAdmin, async (c) => {
       await upsertSetting('email:smtpUser', data.smtpUser);
     }
     if (data.smtpPass !== undefined) {
-      await upsertSetting('email:smtpPass', data.smtpPass);
+      await upsertSetting('email:smtpPass', encrypt(data.smtpPass));
     }
     if (data.smtpFrom !== undefined) {
       await upsertSetting('email:smtpFrom', data.smtpFrom);
     }
     if (data.resendApiKey !== undefined) {
-      await upsertSetting('email:resendApiKey', data.resendApiKey);
+      await upsertSetting('email:resendApiKey', encrypt(data.resendApiKey));
     }
     if (data.resendFrom !== undefined) {
       await upsertSetting('email:resendFrom', data.resendFrom);

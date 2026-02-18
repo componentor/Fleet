@@ -75,7 +75,7 @@ const createServiceSchema = z.object({
     target: z.string(),
     readonly: z.boolean().default(false),
   })).default([]),
-  domain: z.string().nullable().optional(),
+  domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
   sslEnabled: z.boolean().default(true),
   nodeConstraint: z.string().nullable().optional(),
   placementConstraints: z.array(z.string()).default([]),
@@ -249,7 +249,7 @@ const updateServiceSchema = z.object({
     published: z.number().int().optional(),
     protocol: z.enum(['tcp', 'udp']).default('tcp'),
   })).optional(),
-  domain: z.string().nullable().optional(),
+  domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
   sslEnabled: z.boolean().optional(),
   placementConstraints: z.array(z.string()).optional(),
   nodeConstraint: z.string().nullable().optional(),
@@ -573,7 +573,7 @@ serviceRoutes.get('/:id/logs', async (c) => {
     return c.json({ error: 'Service not found or has no Docker deployment' }, 404);
   }
 
-  const tail = parseInt(c.req.query('tail') ?? '100', 10);
+  const tail = Math.min(parseInt(c.req.query('tail') ?? '100', 10), 5000);
 
   try {
     const logStream = await dockerService.getServiceLogs(svc.dockerServiceId, {
@@ -614,6 +614,7 @@ serviceRoutes.get('/:id/deployments', async (c) => {
   const deploys = await db.query.deployments.findMany({
     where: eq(deployments.serviceId, serviceId),
     orderBy: (d, { desc }) => desc(d.createdAt),
+    limit: 100,
   });
 
   return c.json(deploys);

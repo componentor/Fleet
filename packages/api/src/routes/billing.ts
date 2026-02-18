@@ -12,6 +12,8 @@ import {
   locationMultipliers,
   resourceLimits,
   accountBillingOverrides,
+  userAccounts,
+  users,
   countSql,
   insertReturning,
   updateReturning,
@@ -27,6 +29,20 @@ import { stripeSyncService } from '../services/stripe-sync.service.js';
 import { usageService } from '../services/usage.service.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
+
+/** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
+function validateRedirectUrl(url: string): boolean {
+  const appUrl = process.env['APP_URL'];
+  if (!appUrl) return true; // Dev mode — allow any URL
+  if (url.startsWith('/')) return true; // Relative path
+  try {
+    const parsed = new URL(url);
+    const app = new URL(appUrl);
+    return parsed.origin === app.origin;
+  } catch {
+    return false;
+  }
+}
 
 type BillingEnv = {
   Variables: {
@@ -90,6 +106,11 @@ authed.post('/checkout', requireOwner, async (c) => {
   }
 
   const { billingModel, billingCycle, planId, successUrl, cancelUrl } = parsed.data;
+
+  // Validate redirect URLs against APP_URL to prevent open redirects
+  if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
+    return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
+  }
 
   // Verify billing model is allowed
   const config = await db.query.billingConfig.findFirst();
@@ -325,6 +346,11 @@ authed.post('/portal', requireOwner, async (c) => {
   const parsed = portalSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  // Validate return URL against APP_URL to prevent open redirects
+  if (!validateRedirectUrl(parsed.data.returnUrl)) {
+    return c.json({ error: 'Invalid return URL: must match application origin' }, 400);
   }
 
   const account = await db.query.accounts.findFirst({
@@ -606,15 +632,36 @@ billing.post('/webhook', async (c) => {
           const { registrarService } = await import('../services/registrar.service.js');
           const { domainRegistrations: domRegTable } = await import('@fleet/db');
 
+          // Look up the account owner to use real contact data for WHOIS
+          const domain = session.metadata.domain!;
+          const accountId = session.metadata.accountId!;
+          const ownerMembership = await db.query.userAccounts.findFirst({
+            where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+            with: { user: true },
+          });
+          const purchaseUser = ownerMembership?.user ?? null;
+
           const contact = {
-            firstName: 'Domain', lastName: 'Owner', email: 'domains@fleet.local',
-            phone: '0000000000', address1: 'N/A', city: 'N/A', state: 'N/A',
-            postalCode: '00000', country: 'US',
+            firstName: purchaseUser?.name?.split(' ')[0] ?? 'Account',
+            lastName: purchaseUser?.name?.split(' ').slice(1).join(' ') || 'Owner',
+            email: purchaseUser?.email ?? 'admin@' + domain,
+            phone: '0000000000',
+            address1: 'See account profile',
+            city: 'See account profile',
+            state: 'N/A',
+            postalCode: '00000',
+            country: 'US',
           };
 
+          // Warn if using simulated registrar in production after real payment
+          const provider = await registrarService.getProvider();
+          if (provider.name === 'simulated' && process.env['NODE_ENV'] === 'production') {
+            logger.error({ domain }, 'Domain registration after payment is using SIMULATED registrar! Configure a real registrar provider.');
+          }
+
           const registration = await registrarService.registerDomain(
-            session.metadata.domain!, Number(session.metadata.years) || 1,
-            contact, session.metadata.accountId!,
+            domain, Number(session.metadata.years) || 1,
+            contact, accountId,
           );
 
           if (registration?.id && session.payment_intent) {

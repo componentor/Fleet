@@ -8,6 +8,20 @@ import { stripeService } from '../services/stripe.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 
+/** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
+function validateRedirectUrl(url: string): boolean {
+  const appUrl = process.env['APP_URL'];
+  if (!appUrl) return true; // Dev mode — allow any URL
+  if (url.startsWith('/')) return true; // Relative path
+  try {
+    const parsed = new URL(url);
+    const app = new URL(appUrl);
+    return parsed.origin === app.origin;
+  } catch {
+    return false;
+  }
+}
+
 const domainPurchase = new Hono<{
   Variables: {
     user: AuthUser;
@@ -82,7 +96,7 @@ domainPurchase.get('/search', async (c) => {
 // POST /checkout — create Stripe checkout session for domain purchase
 // ────────────────────────────────────────────────────────────────────────────
 const checkoutSchema = z.object({
-  domain: z.string().min(3).max(253),
+  domain: z.string().min(3).max(253).regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/),
   years: z.number().int().min(1).max(10).default(1),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
@@ -101,6 +115,12 @@ domainPurchase.post('/checkout', requireAdmin, async (c) => {
   }
 
   const { domain, years, successUrl, cancelUrl } = parsed.data;
+
+  // Validate redirect URLs against APP_URL to prevent open redirects
+  if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
+    return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
+  }
+
   const tld = domain.split('.').slice(1).join('.').toLowerCase();
 
   // Look up sell price
@@ -239,6 +259,12 @@ domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
   }
 
   const { years, successUrl, cancelUrl } = parsed.data;
+
+  // Validate redirect URLs against APP_URL to prevent open redirects
+  if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
+    return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
+  }
+
   const tld = existing.domain.split('.').slice(1).join('.');
 
   const pricing = await db.query.domainTldPricing.findFirst({

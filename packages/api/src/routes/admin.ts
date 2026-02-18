@@ -273,7 +273,7 @@ adminRoutes.get('/status', async (c) => {
   }
 
   // --- Nodes from DB ---
-  const allNodes = await db.query.nodes.findMany();
+  const allNodes = await db.query.nodes.findMany({ limit: 1000 });
   const fiveMinAgo = new Date(Date.now() - 5 * 60_000);
   const nodeStatuses = allNodes.map((n) => ({
     id: n.id,
@@ -286,7 +286,7 @@ adminRoutes.get('/status', async (c) => {
   }));
 
   // --- Services breakdown ---
-  const allServices = await db.query.services.findMany();
+  const allServices = await db.query.services.findMany({ limit: 1000 });
   const servicesByStatus: Record<string, number> = {};
   for (const s of allServices) {
     const st = s.status ?? 'unknown';

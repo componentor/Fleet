@@ -9,6 +9,7 @@ import { requireMember } from '../middleware/rbac.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { DeploymentJobData } from '../workers/deployment.worker.js';
 import { logger } from '../services/logger.js';
+import { decrypt } from '../services/crypto.service.js';
 
 // Inline fallback for local dev when Valkey/BullMQ is not available.
 // Imports the worker's processor and runs it in-process.
@@ -374,7 +375,8 @@ authenticatedRoutes.get('/github/repos', async (c) => {
   }
 
   try {
-    const repos = await githubService.getRepositories(oauth.accessToken);
+    const token = decrypt(oauth.accessToken);
+    const repos = await githubService.getRepositories(token);
     return c.json(repos);
   } catch (err) {
     logger.error({ err }, 'Failed to fetch GitHub repos');
@@ -400,7 +402,8 @@ authenticatedRoutes.get('/github/repos/:owner/:repo/branches', async (c) => {
   }
 
   try {
-    const branches = await githubService.getBranches(oauth.accessToken, owner, repo);
+    const token = decrypt(oauth.accessToken);
+    const branches = await githubService.getBranches(token, owner, repo);
     return c.json(branches);
   } catch (err) {
     logger.error({ err }, 'Failed to fetch branches');

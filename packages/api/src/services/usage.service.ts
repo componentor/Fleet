@@ -19,6 +19,11 @@ import { logger } from './logger.js';
 
 const COLLECTION_INTERVAL_SECONDS = 300; // 5 minutes
 
+// Warn at startup if storage/bandwidth metrics are not yet implemented
+if (process.env['NODE_ENV'] === 'production') {
+  logger.warn('Storage and bandwidth usage metrics are not yet implemented. Usage-based billing will report 0 for these metrics.');
+}
+
 class UsageService {
   /**
    * Collect current resource usage for all accounts with running services.
@@ -67,8 +72,8 @@ class UsageService {
           containers: containerCount,
           cpuSeconds,
           memoryMbHours,
-          storageGb: 0, // TODO: integrate with actual storage metrics
-          bandwidthGb: 0, // TODO: integrate with network metrics
+          storageGb: 0, // FIXME(billing): integrate with actual storage metrics — usage-based billing reports 0 until implemented
+          bandwidthGb: 0, // FIXME(billing): integrate with network metrics — usage-based billing reports 0 until implemented
           recordedAt: now,
         });
       }

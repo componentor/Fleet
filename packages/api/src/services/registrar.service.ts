@@ -1,5 +1,6 @@
 import { db, domainRegistrars, domainRegistrations, insertReturning, updateReturning, eq } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
+import { logger } from './logger.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -146,6 +147,7 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
     years: number,
     _contact: DomainContact,
   ): Promise<{ registrarDomainId: string; expiresAt: Date }> {
+    logger.warn({ domain }, 'Domain registration SIMULATED - no real registrar configured');
     // In a real implementation, this would call the registrar's API
     const registrarDomainId = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const expiresAt = new Date();
@@ -190,14 +192,20 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
 
 export class RegistrarService {
   private provider: RegistrarProvider | null = null;
+  private providerLoadedAt: number = 0;
+  private static PROVIDER_TTL = 5 * 60 * 1000; // 5 minutes
 
   /**
    * Get or create the configured registrar provider.
    * In production, this would look at the domainRegistrars table for the
    * enabled registrar and instantiate the appropriate API client.
+   * The provider is cached with a TTL so configuration changes take effect.
    */
   async getProvider(): Promise<RegistrarProvider> {
-    if (this.provider) return this.provider;
+    const now = Date.now();
+    if (this.provider && (now - this.providerLoadedAt) < RegistrarService.PROVIDER_TTL) {
+      return this.provider;
+    }
 
     // Check if there's an enabled registrar configured in DB
     const registrar = await db.query.domainRegistrars.findFirst({
@@ -212,7 +220,10 @@ export class RegistrarService {
         case 'resellerclub': {
           const { ResellerClubProvider } = await import('./resellerclub.provider.js');
           const resellerId = config['resellerId'] ?? decryptedKey;
-          this.provider = new ResellerClubProvider(resellerId, decryptedSecret ?? decryptedKey);
+          this.provider = new ResellerClubProvider(resellerId, decryptedSecret ?? decryptedKey, {
+            customerId: config['customerId'],
+            sandbox: config['sandbox'] === 'true',
+          });
           break;
         }
         default:
@@ -222,11 +233,18 @@ export class RegistrarService {
       this.provider = new SimulatedRegistrarProvider();
     }
 
+    // Log a warning if falling back to simulated provider in production
+    if (this.provider.name === 'simulated' && process.env['NODE_ENV'] === 'production') {
+      logger.error('No real domain registrar configured! Domain operations will be simulated. Set up a registrar provider in platform settings.');
+    }
+
+    this.providerLoadedAt = now;
     return this.provider;
   }
 
   resetProvider() {
     this.provider = null;
+    this.providerLoadedAt = 0;
   }
 
   /**

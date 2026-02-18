@@ -1,23 +1,39 @@
 import type { RegistrarProvider, DomainSearchResult, DomainContact, DomainInfo } from './registrar.service.js';
+import { logger } from './logger.js';
 
-const RC_API = 'https://httpapi.com/api';
+const RC_API_PROD = 'https://httpapi.com/api';
+const RC_API_TEST = 'https://test.httpapi.com/api';
+const REQUEST_TIMEOUT = 15_000;
+
+export interface ResellerClubConfig {
+  resellerId: string;
+  apiKey: string;
+  customerId?: string;
+  sandbox?: boolean;
+}
 
 export class ResellerClubProvider implements RegistrarProvider {
   name = 'resellerclub';
   private resellerId: string;
   private apiKey: string;
+  private customerId: string;
+  private baseUrl: string;
 
-  constructor(resellerId: string, apiKey: string) {
+  constructor(resellerId: string, apiKey: string, config?: { customerId?: string; sandbox?: boolean }) {
     this.resellerId = resellerId;
     this.apiKey = apiKey;
+    this.customerId = config?.customerId ?? resellerId;
+    this.baseUrl = config?.sandbox ? RC_API_TEST : RC_API_PROD;
   }
 
-  private authParams(): string {
-    return `auth-userid=${encodeURIComponent(this.resellerId)}&api-key=${encodeURIComponent(this.apiKey)}`;
+  private getNameservers(): string[] {
+    const ns = process.env['NAMESERVERS'];
+    if (ns) return ns.split(',').map((s) => s.trim()).filter(Boolean);
+    return ['ns1.fleet.local', 'ns2.fleet.local'];
   }
 
-  private async request<T>(method: string, path: string, params?: Record<string, string>): Promise<T> {
-    const url = new URL(`${RC_API}${path}`);
+  private async request<T>(method: string, path: string, params?: Record<string, string>, multiParams?: Record<string, string[]>): Promise<T> {
+    const url = new URL(`${this.baseUrl}${path}`);
     url.searchParams.set('auth-userid', this.resellerId);
     url.searchParams.set('api-key', this.apiKey);
 
@@ -27,17 +43,37 @@ export class ResellerClubProvider implements RegistrarProvider {
       }
     }
 
-    const res = await fetch(url.toString(), {
-      method,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => 'Unknown error');
-      throw new Error(`ResellerClub API error ${res.status}: ${text}`);
+    if (multiParams) {
+      for (const [key, values] of Object.entries(multiParams)) {
+        for (const value of values) {
+          url.searchParams.append(key, value);
+        }
+      }
     }
 
-    return res.json() as Promise<T>;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+    try {
+      const res = await fetch(url.toString(), {
+        method,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'Unknown error');
+        throw new Error(`ResellerClub API error ${res.status}: ${text}`);
+      }
+
+      return res.json() as Promise<T>;
+    } catch (err) {
+      clearTimeout(timeout);
+      if ((err as Error).name === 'AbortError') {
+        throw new Error(`ResellerClub API timeout after ${REQUEST_TIMEOUT}ms: ${method} ${path}`);
+      }
+      throw err;
+    }
   }
 
   async searchDomains(query: string, tlds: string[]): Promise<DomainSearchResult[]> {
@@ -50,26 +86,12 @@ export class ResellerClubProvider implements RegistrarProvider {
 
     const effectiveTlds = tlds.length > 0 ? tlds : ['com', 'net', 'org', 'io', 'dev'];
 
-    const params: Record<string, string> = {
-      'domain-name': cleaned,
-    };
-
-    // ResellerClub expects tlds as tlds=com&tlds=net etc.
-    // But since we're using URLSearchParams we need to handle this differently
-    const url = new URL(`${RC_API}/domains/available.json`);
-    url.searchParams.set('auth-userid', this.resellerId);
-    url.searchParams.set('api-key', this.apiKey);
-    url.searchParams.set('domain-name', cleaned);
-    for (const tld of effectiveTlds) {
-      url.searchParams.append('tlds', tld);
-    }
-
-    const res = await fetch(url.toString());
-    if (!res.ok) {
-      throw new Error(`ResellerClub search failed: ${res.status}`);
-    }
-
-    const data = await res.json() as Record<string, any>;
+    const data = await this.request<Record<string, any>>(
+      'GET',
+      '/domains/available.json',
+      { 'domain-name': cleaned },
+      { tlds: effectiveTlds },
+    );
 
     const results: DomainSearchResult[] = [];
     for (const tld of effectiveTlds) {
@@ -117,62 +139,70 @@ export class ResellerClubProvider implements RegistrarProvider {
     years: number,
     contact: DomainContact,
   ): Promise<{ registrarDomainId: string; expiresAt: Date }> {
-    // First create a contact at ResellerClub
-    const contactUrl = new URL(`${RC_API}/contacts/add.json`);
-    contactUrl.searchParams.set('auth-userid', this.resellerId);
-    contactUrl.searchParams.set('api-key', this.apiKey);
-    contactUrl.searchParams.set('name', `${contact.firstName} ${contact.lastName}`);
-    contactUrl.searchParams.set('company', contact.organization || 'N/A');
-    contactUrl.searchParams.set('email', contact.email);
-    contactUrl.searchParams.set('address-line-1', contact.address1);
-    if (contact.address2) contactUrl.searchParams.set('address-line-2', contact.address2);
-    contactUrl.searchParams.set('city', contact.city);
-    contactUrl.searchParams.set('state', contact.state);
-    contactUrl.searchParams.set('zipcode', contact.postalCode);
-    contactUrl.searchParams.set('phone-cc', '1'); // Default US
-    contactUrl.searchParams.set('phone', contact.phone.replace(/\D/g, ''));
-    contactUrl.searchParams.set('country', contact.country);
-    contactUrl.searchParams.set('type', 'Contact');
-    contactUrl.searchParams.set('customer-id', this.resellerId);
+    // Extract phone country code from country (simplified — defaults to 1 for US)
+    const phoneCc = contact.country === 'US' || contact.country === 'CA' ? '1' : '1';
 
-    const contactRes = await fetch(contactUrl.toString(), { method: 'POST' });
-    const contactData = await contactRes.json() as any;
-    const contactId = String(contactData);
+    // Create a contact at ResellerClub
+    let contactId: string;
+    try {
+      const contactData = await this.request<any>('POST', '/contacts/add.json', {
+        'name': `${contact.firstName} ${contact.lastName}`,
+        'company': contact.organization || 'N/A',
+        'email': contact.email,
+        'address-line-1': contact.address1,
+        ...(contact.address2 ? { 'address-line-2': contact.address2 } : {}),
+        'city': contact.city,
+        'state': contact.state,
+        'zipcode': contact.postalCode,
+        'phone-cc': phoneCc,
+        'phone': contact.phone.replace(/\D/g, ''),
+        'country': contact.country,
+        'type': 'Contact',
+        'customer-id': this.customerId,
+      });
+      contactId = String(contactData);
+    } catch (err) {
+      logger.error({ err, domain }, 'Failed to create ResellerClub contact');
+      throw new Error(`Failed to create domain contact: ${(err as Error).message}`);
+    }
 
     // Register the domain
     const parts = domain.split('.');
     const domainName = parts[0]!;
     const tld = parts.slice(1).join('.');
+    const nameservers = this.getNameservers();
 
-    const regUrl = new URL(`${RC_API}/domains/register.json`);
-    regUrl.searchParams.set('auth-userid', this.resellerId);
-    regUrl.searchParams.set('api-key', this.apiKey);
-    regUrl.searchParams.set('domain-name', domainName);
-    regUrl.searchParams.set('tld', tld);
-    regUrl.searchParams.set('years', String(years));
-    regUrl.searchParams.set('ns', 'ns1.fleet.local');
-    regUrl.searchParams.append('ns', 'ns2.fleet.local');
-    regUrl.searchParams.set('customer-id', this.resellerId);
-    regUrl.searchParams.set('reg-contact-id', contactId);
-    regUrl.searchParams.set('admin-contact-id', contactId);
-    regUrl.searchParams.set('tech-contact-id', contactId);
-    regUrl.searchParams.set('billing-contact-id', contactId);
-    regUrl.searchParams.set('invoice-option', 'NoInvoice');
-    regUrl.searchParams.set('protect-privacy', 'true');
+    try {
+      const regData = await this.request<any>(
+        'POST',
+        '/domains/register.json',
+        {
+          'domain-name': domainName,
+          'tld': tld,
+          'years': String(years),
+          'customer-id': this.customerId,
+          'reg-contact-id': contactId,
+          'admin-contact-id': contactId,
+          'tech-contact-id': contactId,
+          'billing-contact-id': contactId,
+          'invoice-option': 'NoInvoice',
+          'protect-privacy': 'true',
+        },
+        { ns: nameservers },
+      );
 
-    const regRes = await fetch(regUrl.toString(), { method: 'POST' });
-    if (!regRes.ok) {
-      const text = await regRes.text();
-      throw new Error(`Domain registration failed: ${text}`);
+      const registrarDomainId = String(regData.entityid ?? regData);
+
+      const expiresAt = new Date();
+      expiresAt.setFullYear(expiresAt.getFullYear() + years);
+
+      logger.info({ domain, registrarDomainId, years }, 'Domain registered via ResellerClub');
+
+      return { registrarDomainId, expiresAt };
+    } catch (err) {
+      logger.error({ err, domain, years }, 'ResellerClub domain registration failed');
+      throw new Error(`Domain registration failed: ${(err as Error).message}`);
     }
-
-    const regData = await regRes.json() as any;
-    const registrarDomainId = String(regData.entityid || regData);
-
-    const expiresAt = new Date();
-    expiresAt.setFullYear(expiresAt.getFullYear() + years);
-
-    return { registrarDomainId, expiresAt };
   }
 
   async getDomainInfo(domain: string): Promise<DomainInfo> {
@@ -196,23 +226,31 @@ export class ResellerClubProvider implements RegistrarProvider {
     registrarDomainId: string,
     years: number,
   ): Promise<{ expiresAt: Date }> {
-    // Get current expiry first
-    const url = new URL(`${RC_API}/domains/renew.json`);
-    url.searchParams.set('auth-userid', this.resellerId);
-    url.searchParams.set('api-key', this.apiKey);
-    url.searchParams.set('order-id', registrarDomainId);
-    url.searchParams.set('years', String(years));
-    url.searchParams.set('exp-date', String(Math.floor(Date.now() / 1000)));
-    url.searchParams.set('invoice-option', 'NoInvoice');
-
-    const res = await fetch(url.toString(), { method: 'POST' });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Domain renewal failed: ${text}`);
+    // Get current domain details to find the actual expiry date
+    let currentExpiry: number;
+    try {
+      const details = await this.request<any>('GET', '/domains/details.json', {
+        'order-id': registrarDomainId,
+        'options': 'OrderDetails',
+      });
+      currentExpiry = details.endtime ?? Math.floor(Date.now() / 1000);
+    } catch {
+      // Fallback to current time if we can't get details
+      currentExpiry = Math.floor(Date.now() / 1000);
     }
 
-    const expiresAt = new Date();
+    const data = await this.request<any>('POST', '/domains/renew.json', {
+      'order-id': registrarDomainId,
+      'years': String(years),
+      'exp-date': String(currentExpiry),
+      'invoice-option': 'NoInvoice',
+    });
+
+    // Calculate new expiry from the actual current expiry
+    const expiresAt = new Date(currentExpiry * 1000);
     expiresAt.setFullYear(expiresAt.getFullYear() + years);
+
+    logger.info({ registrarDomainId, years, expiresAt }, 'Domain renewed via ResellerClub');
 
     return { expiresAt };
   }

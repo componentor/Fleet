@@ -4,6 +4,7 @@ import {
   varchar,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { users } from './users';
 import { accounts } from './accounts';
@@ -18,4 +19,7 @@ export const auditLog = mysqlTable('audit_log', {
   ipAddress: varchar('ip_address', { length: 255 }),
   details: json('details').$default(() => ({})),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_audit_log_account_id').on(table.accountId),
+  index('idx_audit_log_created_at').on(table.createdAt),
+]);

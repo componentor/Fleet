@@ -30,8 +30,10 @@ accountRoutes.get('/', async (c) => {
   if (user.isSuper) {
     const allAccounts = await db.query.accounts.findMany({
       orderBy: (a, { asc }) => asc(a.path),
+      limit: 500,
     });
-    return c.json(allAccounts);
+    const sanitized = allAccounts.map(({ stripeCustomerId, ...rest }) => rest);
+    return c.json(sanitized);
   }
 
   const memberships = await db.query.userAccounts.findMany({
@@ -39,7 +41,10 @@ accountRoutes.get('/', async (c) => {
     with: { account: true },
   });
 
-  return c.json(memberships.map((m) => ({ ...m.account, role: m.role })));
+  return c.json(memberships.map((m) => {
+    const { stripeCustomerId, ...rest } = m.account;
+    return { ...rest, role: m.role };
+  }));
 });
 
 // POST / — create a sub-account
@@ -138,6 +143,11 @@ accountRoutes.get('/:id', tenantMiddleware, cache(60), async (c) => {
     where: eq(accounts.id, account.id),
   });
 
+  if (fullAccount) {
+    const { stripeCustomerId, ...rest } = fullAccount;
+    return c.json(rest);
+  }
+
   return c.json(fullAccount);
 });
 
@@ -167,6 +177,11 @@ accountRoutes.patch('/:id', tenantMiddleware, async (c) => {
   }, eq(accounts.id, account.id));
 
   await invalidateCache(`GET:/accounts/${account.id}:*`);
+
+  if (updated) {
+    const { stripeCustomerId, ...rest } = updated;
+    return c.json(rest);
+  }
 
   return c.json(updated);
 });
@@ -358,6 +373,7 @@ accountRoutes.get('/:id/members', tenantMiddleware, async (c) => {
   const memberships = await db.query.userAccounts.findMany({
     where: eq(userAccounts.accountId, account.id),
     with: { user: true },
+    limit: 500,
   });
 
   const members = memberships.map((m) => ({
