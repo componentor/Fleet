@@ -18,7 +18,7 @@ export function useAuth() {
     await accountStore.fetchAccounts()
 
     const redirect = router.currentRoute.value.query.redirect as string | undefined
-    if (redirect) {
+    if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
       await router.push(redirect)
     } else if (store.isSuper) {
       await router.push('/admin')

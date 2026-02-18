@@ -50,8 +50,7 @@ export const domainRegistrars = mysqlTable('domain_registrars', {
   config: json('config').$default(() => ({})),
   enabled: boolean('enabled').default(true),
   createdBy: varchar('created_by', { length: 36 })
-    .references(() => users.id, { onDelete: 'set null' })
-    .notNull(),
+    .references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -61,8 +60,7 @@ export const domainRegistrations = mysqlTable('domain_registrations', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   registrarId: varchar('registrar_id', { length: 36 })
-    .references(() => domainRegistrars.id, { onDelete: 'set null' })
-    .notNull(),
+    .references(() => domainRegistrars.id, { onDelete: 'set null' }),
   domain: varchar('domain', { length: 255 }).notNull(),
   status: varchar('status', { length: 255 }).default('pending'),
   registeredAt: timestamp('registered_at'),

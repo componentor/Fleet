@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
@@ -185,10 +185,7 @@ export class BackupService {
           timestamp: new Date().toISOString(),
         };
 
-        await this.exec('sh', [
-          '-c',
-          `echo '${JSON.stringify(metadata).replace(/'/g, "'\\''")}' > "${metadataPath}"`,
-        ]);
+        await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
         contents.push({ type: 'metadata', name: 'service-metadata.json', path: metadataPath });
       } else {
         // Full account backup — backup all services
@@ -249,10 +246,7 @@ export class BackupService {
           timestamp: new Date().toISOString(),
         };
 
-        await this.exec('sh', [
-          '-c',
-          `echo '${JSON.stringify(metadata).replace(/'/g, "'\\''")}' > "${metadataPath}"`,
-        ]);
+        await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
         contents.push({ type: 'metadata', name: 'account-metadata.json', path: metadataPath });
       }
 

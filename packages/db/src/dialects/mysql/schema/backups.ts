@@ -47,6 +47,7 @@ export const backupSchedules = mysqlTable('backup_schedules', {
   updatedAt: timestamp('updated_at').defaultNow(),
   lastRunAt: timestamp('last_run_at'),
 }, (table) => [
+  index('idx_backup_schedules_account_id').on(table.accountId),
   index('idx_backup_schedules_service_id').on(table.serviceId),
 ]);
 

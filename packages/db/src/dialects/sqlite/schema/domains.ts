@@ -47,8 +47,7 @@ export const domainRegistrars = sqliteTable('domain_registrars', {
   config: text('config', { mode: 'json' }).$default(() => ({})),
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   createdBy: text('created_by')
-    .references(() => users.id, { onDelete: 'set null' })
-    .notNull(),
+    .references(() => users.id, { onDelete: 'set null' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
@@ -58,8 +57,7 @@ export const domainRegistrations = sqliteTable('domain_registrations', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   registrarId: text('registrar_id')
-    .references(() => domainRegistrars.id, { onDelete: 'set null' })
-    .notNull(),
+    .references(() => domainRegistrars.id, { onDelete: 'set null' }),
   domain: text('domain').notNull(),
   status: text('status').default('pending'),
   registeredAt: integer('registered_at', { mode: 'timestamp' }),

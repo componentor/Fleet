@@ -50,8 +50,7 @@ export const domainRegistrars = pgTable('domain_registrars', {
   config: jsonb('config').default({}),
   enabled: boolean('enabled').default(true),
   createdBy: uuid('created_by')
-    .references(() => users.id, { onDelete: 'set null' })
-    .notNull(),
+    .references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -61,8 +60,7 @@ export const domainRegistrations = pgTable('domain_registrations', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   registrarId: uuid('registrar_id')
-    .references(() => domainRegistrars.id, { onDelete: 'set null' })
-    .notNull(),
+    .references(() => domainRegistrars.id, { onDelete: 'set null' }),
   domain: varchar('domain').notNull(),
   status: varchar('status').default('pending'),
   registeredAt: timestamp('registered_at'),

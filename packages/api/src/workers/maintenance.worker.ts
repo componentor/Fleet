@@ -243,12 +243,66 @@ async function executeDatabaseBackup(): Promise<void> {
   const dbDialect = process.env['DB_DIALECT'] ?? 'sqlite';
   const backupDir = process.env['DB_BACKUP_DIR'] ?? '/var/fleet/backups/database';
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { mkdir } = await import('node:fs/promises');
-  const exec = promisify(execFile);
+  const { spawn } = await import('node:child_process');
+  const { mkdir, createWriteStream } = await import('node:fs/promises');
+  const { createWriteStream: fsCreateWriteStream } = await import('node:fs');
+  const { pipeline } = await import('node:stream/promises');
 
   await mkdir(backupDir, { recursive: true });
+
+  /** Pipe a command's stdout through gzip into a file without using a shell. */
+  function pipeToGzip(cmd: string, args: string[], outFile: string, timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const dump = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const gzip = spawn('gzip', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const out = fsCreateWriteStream(outFile);
+
+      dump.stdout.pipe(gzip.stdin);
+      gzip.stdout.pipe(out);
+
+      let stderrData = '';
+      dump.stderr.on('data', (d: Buffer) => { stderrData += d.toString(); });
+      gzip.stderr.on('data', (d: Buffer) => { stderrData += d.toString(); });
+
+      const timer = setTimeout(() => {
+        dump.kill('SIGKILL');
+        gzip.kill('SIGKILL');
+        reject(new Error(`Backup timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      let finished = 0;
+      const total = 3; // dump exit, gzip exit, out finish
+      function checkDone() {
+        finished++;
+        if (finished >= total) {
+          clearTimeout(timer);
+          resolve();
+        }
+      }
+
+      out.on('finish', checkDone);
+      dump.on('close', (code) => {
+        if (code !== 0) {
+          clearTimeout(timer);
+          reject(new Error(`${cmd} exited with code ${code}: ${stderrData}`));
+        } else {
+          checkDone();
+        }
+      });
+      gzip.on('close', (code) => {
+        if (code !== 0) {
+          clearTimeout(timer);
+          reject(new Error(`gzip exited with code ${code}: ${stderrData}`));
+        } else {
+          checkDone();
+        }
+      });
+
+      dump.on('error', (err) => { clearTimeout(timer); reject(err); });
+      gzip.on('error', (err) => { clearTimeout(timer); reject(err); });
+      out.on('error', (err) => { clearTimeout(timer); reject(err); });
+    });
+  }
 
   if (dbDialect === 'pg' || dbDialect === 'postgres') {
     const databaseUrl = process.env['DATABASE_URL'];
@@ -259,9 +313,7 @@ async function executeDatabaseBackup(): Promise<void> {
 
     const backupFile = `${backupDir}/fleet-pg-${timestamp}.sql.gz`;
     try {
-      await exec('sh', ['-c', `pg_dump "${databaseUrl}" | gzip > "${backupFile}"`], {
-        timeout: 5 * 60 * 1000, // 5 minute timeout
-      });
+      await pipeToGzip('pg_dump', [databaseUrl], backupFile, 5 * 60 * 1000);
 
       // Rotate old backups — keep last 30
       const { readdir, rm: rmFile } = await import('node:fs/promises');
@@ -290,9 +342,7 @@ async function executeDatabaseBackup(): Promise<void> {
 
     const backupFile = `${backupDir}/fleet-mysql-${timestamp}.sql.gz`;
     try {
-      await exec('sh', ['-c', `mysqldump --single-transaction "${databaseUrl}" | gzip > "${backupFile}"`], {
-        timeout: 5 * 60 * 1000,
-      });
+      await pipeToGzip('mysqldump', ['--single-transaction', databaseUrl], backupFile, 5 * 60 * 1000);
       logger.info({ backupFile }, 'MySQL database backup completed');
     } catch (err) {
       logger.error({ err }, 'MySQL database backup failed');

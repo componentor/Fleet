@@ -43,6 +43,7 @@ export const backupSchedules = sqliteTable('backup_schedules', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
 }, (table) => [
+  index('idx_backup_schedules_account_id').on(table.accountId),
   index('idx_backup_schedules_service_id').on(table.serviceId),
 ]);
 

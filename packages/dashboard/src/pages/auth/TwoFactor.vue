@@ -50,7 +50,7 @@ async function handleSubmit() {
 
     // Redirect to dashboard
     const redirect = route.query.redirect as string | undefined
-    if (redirect) {
+    if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
       await router.push(redirect)
     } else if (data.user?.isSuper) {
       await router.push('/admin')
