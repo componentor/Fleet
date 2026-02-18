@@ -30,6 +30,6 @@ async function processBackupJob(job: Job<BackupJobData>): Promise<void> {
 export function createBackupWorker(connection: ConnectionOptions): Worker {
   return new Worker<BackupJobData>('fleet-backup', processBackupJob, {
     connection,
-    concurrency: 1,
+    concurrency: 3,
   });
 }

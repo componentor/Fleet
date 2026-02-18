@@ -27,6 +27,7 @@ export const users = pgTable('users', {
   twoFactorBackupCodes: jsonb('two_factor_backup_codes').$type<string[] | null>(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const userAccounts = pgTable(
@@ -34,10 +35,10 @@ export const userAccounts = pgTable(
   {
     id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
     userId: uuid('user_id')
-      .references(() => users.id)
+      .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     accountId: uuid('account_id')
-      .references(() => accounts.id)
+      .references(() => accounts.id, { onDelete: 'cascade' })
       .notNull(),
     role: varchar('role').default('member'),
     createdAt: timestamp('created_at').defaultNow(),
@@ -55,7 +56,7 @@ export const oauthProviders = pgTable(
   {
     id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
     userId: uuid('user_id')
-      .references(() => users.id)
+      .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     provider: varchar('provider').notNull(),
     providerUserId: varchar('provider_user_id').notNull(),

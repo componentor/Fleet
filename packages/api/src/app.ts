@@ -36,6 +36,9 @@ import apiKeyRoutes from './routes/api-keys.js';
 import domainPricingRoutes from './routes/domain-pricing.js';
 import errorRoutes from './routes/errors.js';
 
+// Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
+// To scale horizontally: run multiple instances behind a load balancer.
+// Ensure CORS_ORIGIN, APP_URL, and all secrets are identical across instances.
 export const app = new Hono();
 
 // WebSocket support — export for use in index.ts
@@ -46,7 +49,10 @@ app.use('*', securityHeaders);
 
 // CORS
 app.use('*', cors({
-  origin: process.env['CORS_ORIGIN'] || (process.env['NODE_ENV'] === 'production' ? '' : '*'),
+  origin: process.env['CORS_ORIGIN'] || (process.env['NODE_ENV'] === 'production'
+    ? (process.env['APP_URL'] || 'http://localhost:3000')
+    : '*'),
+  credentials: true,
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Account-Id', 'X-API-Key'],
   maxAge: 86400,

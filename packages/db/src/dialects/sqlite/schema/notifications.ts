@@ -11,7 +11,7 @@ import { users } from './users';
 
 export const notifications = sqliteTable('notifications', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: text('account_id').references(() => accounts.id).notNull(),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   userId: text('user_id').references(() => users.id),
   type: text('type').notNull(),
   title: text('title').notNull(),

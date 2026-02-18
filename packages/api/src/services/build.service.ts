@@ -86,6 +86,7 @@ export class BuildService {
         'git',
         ['clone', '--depth', '1', '--branch', branch, cloneUrl, workDir],
         workDir,
+        120_000, // 2 minute timeout for git clone
       );
       info.log += cloneResult;
 
@@ -100,7 +101,7 @@ export class BuildService {
       }
       buildCmdArgs.push(workDir);
 
-      const buildLog = await this.exec('docker', buildCmdArgs, workDir);
+      const buildLog = await this.exec('docker', buildCmdArgs, workDir, 600_000); // 10 minute timeout for docker build
       info.log += buildLog;
 
       // 3. Push
@@ -108,7 +109,7 @@ export class BuildService {
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
-      const pushLog = await this.exec('docker', ['push', imageTag], workDir);
+      const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000); // 10 minute timeout for docker push
       info.log += pushLog;
 
       // Done
@@ -131,15 +132,19 @@ export class BuildService {
     }
   }
 
-  private async exec(cmd: string, args: string[], cwd: string): Promise<string> {
+  private async exec(cmd: string, args: string[], cwd: string, timeout?: number): Promise<string> {
     try {
       const { stdout, stderr } = await execFileAsync(cmd, args, {
         cwd,
         maxBuffer: 50 * 1024 * 1024, // 50MB
+        timeout,
       });
       return stdout + (stderr ? `\n${stderr}` : '');
     } catch (err: unknown) {
-      const execErr = err as { stdout?: string; stderr?: string; code?: number };
+      const execErr = err as { stdout?: string; stderr?: string; code?: number; killed?: boolean };
+      if (execErr.killed) {
+        throw new Error(`Command "${cmd} ${args.join(' ')}" timed out after ${timeout}ms`);
+      }
       const output = (execErr.stdout ?? '') + (execErr.stderr ?? '');
       throw new Error(`Command "${cmd} ${args.join(' ')}" failed with code ${execErr.code}\n${output}`);
     }

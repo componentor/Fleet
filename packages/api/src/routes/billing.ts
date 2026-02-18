@@ -27,6 +27,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { stripeService } from '../services/stripe.service.js';
 import { stripeSyncService } from '../services/stripe-sync.service.js';
 import { usageService } from '../services/usage.service.js';
+import { dockerService } from '../services/docker.service.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 
@@ -102,7 +103,7 @@ authed.post('/checkout', requireOwner, async (c) => {
   const body = await c.req.json();
   const parsed = checkoutSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { billingModel, billingCycle, planId, successUrl, cancelUrl } = parsed.data;
@@ -195,7 +196,7 @@ authed.patch('/subscription/cycle', requireOwner, async (c) => {
   const body = await c.req.json();
   const parsed = changeCycleSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { cycle } = parsed.data;
@@ -345,7 +346,7 @@ authed.post('/portal', requireOwner, async (c) => {
   const body = await c.req.json();
   const parsed = portalSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   // Validate return URL against APP_URL to prevent open redirects
@@ -421,7 +422,7 @@ authed.patch('/config', async (c) => {
   const body = await c.req.json();
   const parsed = billingConfigSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const data = parsed.data;
@@ -580,6 +581,28 @@ authed.get('/resource-limits', async (c) => {
   });
 });
 
+// ─── Service suspension helper ────────────────────────────────────────────────
+
+/** Suspend all running services for an account (e.g., after payment failure). */
+async function suspendAccountServices(accountId: string) {
+  const accountServices = await db.query.services.findMany({
+    where: and(eq(services.accountId, accountId), eq(services.status, 'running')),
+  });
+
+  for (const svc of accountServices) {
+    try {
+      if (svc.dockerServiceId) {
+        await dockerService.scaleService(svc.dockerServiceId, 0);
+      }
+      await db.update(services)
+        .set({ status: 'suspended', stoppedAt: new Date(), updatedAt: new Date() })
+        .where(eq(services.id, svc.id));
+    } catch (err) {
+      logger.error({ err, serviceId: svc.id }, 'Failed to suspend service');
+    }
+  }
+}
+
 // ─── Webhook route (unauthenticated, signature-verified) ─────────────────────
 
 billing.post('/webhook', async (c) => {
@@ -689,14 +712,21 @@ billing.post('/webhook', async (c) => {
           const billingCycle = session.metadata?.billingCycle ?? 'monthly';
           const planId = session.metadata?.planId ?? null;
 
-          await db.insert(subscriptions).values({
-            accountId: account.id,
-            planId,
-            billingModel,
-            billingCycle,
-            stripeSubscriptionId: session.subscription,
-            stripeCustomerId: session.customer,
-            status: 'active',
+          // Wrap subscription creation + account update in a transaction
+          await db.transaction(async (tx) => {
+            await tx.insert(subscriptions).values({
+              accountId: account.id,
+              planId,
+              billingModel,
+              billingCycle,
+              stripeSubscriptionId: session.subscription!,
+              stripeCustomerId: session.customer!,
+              status: 'active',
+            });
+
+            await tx.update(accounts)
+              .set({ updatedAt: new Date() })
+              .where(eq(accounts.id, account.id));
           });
         }
       }
@@ -719,6 +749,43 @@ billing.post('/webhook', async (c) => {
             updatedAt: new Date(),
           })
           .where(eq(subscriptions.stripeSubscriptionId, invoice.subscription));
+      }
+      break;
+    }
+
+    case 'invoice.payment_failed': {
+      const invoice = event.data.object as {
+        id: string;
+        subscription?: string;
+        customer?: string;
+        attempt_count?: number;
+        next_payment_attempt?: number | null;
+      };
+
+      if (invoice.subscription) {
+        // Find the subscription in our DB
+        const sub = await db.query.subscriptions.findFirst({
+          where: eq(subscriptions.stripeSubscriptionId, invoice.subscription),
+        });
+
+        if (sub) {
+          // Update subscription status to past_due
+          await db.update(subscriptions)
+            .set({ status: 'past_due', updatedAt: new Date() })
+            .where(eq(subscriptions.id, sub.id));
+
+          // If this is the final attempt (no more retries), suspend services
+          if (!invoice.next_payment_attempt) {
+            await suspendAccountServices(sub.accountId);
+            logger.error({ accountId: sub.accountId, invoiceId: invoice.id }, 'Final payment attempt failed — services suspended');
+          } else {
+            logger.warn({
+              accountId: sub.accountId,
+              invoiceId: invoice.id,
+              attemptCount: invoice.attempt_count,
+            }, 'Payment failed, Stripe will retry');
+          }
+        }
       }
       break;
     }
@@ -755,12 +822,18 @@ billing.post('/webhook', async (c) => {
     }
 
     case 'customer.subscription.deleted': {
-      const sub = event.data.object as { id?: string };
-      if (sub.id) {
-        await db
-          .update(subscriptions)
+      const sub = event.data.object as { id: string };
+      const dbSub = await db.query.subscriptions.findFirst({
+        where: eq(subscriptions.stripeSubscriptionId, sub.id),
+      });
+      if (dbSub) {
+        await db.update(subscriptions)
           .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
-          .where(eq(subscriptions.stripeSubscriptionId, sub.id));
+          .where(eq(subscriptions.id, dbSub.id));
+
+        // Suspend services after subscription cancellation
+        await suspendAccountServices(dbSub.accountId);
+        logger.info({ accountId: dbSub.accountId }, 'Subscription cancelled — services suspended');
       }
       break;
     }

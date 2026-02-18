@@ -17,22 +17,24 @@ let isRefreshing = false
 let refreshPromise: Promise<string | null> | null = null
 
 async function attemptRefresh(): Promise<string | null> {
-  const refreshToken = localStorage.getItem('fleet_refresh_token')
-  if (!refreshToken) return null
-
   try {
     const res = await fetch(`${BASE_URL}/auth/refresh`, {
       method: 'POST',
+      credentials: 'include', // sends httpOnly cookie
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({}), // empty body — cookie has the refresh token
     })
 
     if (!res.ok) return null
 
     const data = await res.json()
     const tokens = data.tokens as { accessToken: string; refreshToken: string }
-    localStorage.setItem('fleet_token', tokens.accessToken)
-    localStorage.setItem('fleet_refresh_token', tokens.refreshToken)
+
+    // Update in-memory token via auth store
+    const { useAuthStore } = await import('@/stores/auth')
+    const authStore = useAuthStore()
+    authStore.token = tokens.accessToken
+
     return tokens.accessToken
   } catch {
     return null
@@ -48,7 +50,16 @@ async function request<T>(
     'Content-Type': 'application/json',
   }
 
-  const token = localStorage.getItem('fleet_token')
+  // Read token from auth store (in-memory)
+  let token: string | null = null
+  try {
+    const { useAuthStore } = await import('@/stores/auth')
+    const authStore = useAuthStore()
+    token = authStore.token
+  } catch {
+    // Store not yet initialized
+  }
+
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
@@ -60,6 +71,7 @@ async function request<T>(
 
   const response = await fetch(`${BASE_URL}${path}`, {
     method,
+    credentials: 'include', // always send cookies
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
@@ -81,6 +93,7 @@ async function request<T>(
       const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` }
       const retryResponse = await fetch(`${BASE_URL}${path}`, {
         method,
+        credentials: 'include',
         headers: retryHeaders,
         body: body !== undefined ? JSON.stringify(body) : undefined,
       })
@@ -92,8 +105,13 @@ async function request<T>(
     }
 
     // Refresh failed — clear auth and redirect to login
-    localStorage.removeItem('fleet_token')
-    localStorage.removeItem('fleet_refresh_token')
+    try {
+      const { useAuthStore } = await import('@/stores/auth')
+      const authStore = useAuthStore()
+      authStore.clearAuth()
+    } catch {
+      // fallback
+    }
     localStorage.removeItem('fleet_user')
     window.location.href = '/login'
     throw new ApiError(401, 'Unauthorized', { error: 'Session expired' })

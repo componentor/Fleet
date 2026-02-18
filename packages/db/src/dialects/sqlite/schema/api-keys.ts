@@ -11,7 +11,7 @@ import { users } from './users';
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id').references(() => accounts.id).notNull(),
-  createdBy: text('created_by').references(() => users.id).notNull(),
+  createdBy: text('created_by').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
   keyPrefix: text('key_prefix').notNull(),
   keyHash: text('key_hash').notNull(),

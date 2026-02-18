@@ -28,7 +28,8 @@ sqlite.exec(`
     plan TEXT,
     status TEXT DEFAULT 'active',
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
   );
 
   CREATE TABLE users (
@@ -38,14 +39,23 @@ sqlite.exec(`
     name TEXT,
     avatar_url TEXT,
     is_super INTEGER DEFAULT 0,
+    email_verified INTEGER DEFAULT 0,
+    email_verify_token TEXT,
+    email_verify_expires INTEGER,
+    password_reset_token TEXT,
+    password_reset_expires INTEGER,
+    two_factor_enabled INTEGER DEFAULT 0,
+    two_factor_secret TEXT,
+    two_factor_backup_codes TEXT,
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
   );
 
   CREATE TABLE user_accounts (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     role TEXT DEFAULT 'member',
     created_at INTEGER DEFAULT (unixepoch())
   );
@@ -53,7 +63,7 @@ sqlite.exec(`
 
   CREATE TABLE oauth_providers (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider TEXT NOT NULL,
     provider_user_id TEXT NOT NULL,
     access_token TEXT,
@@ -63,7 +73,7 @@ sqlite.exec(`
 
   CREATE TABLE services (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     image TEXT NOT NULL,
     replicas INTEGER DEFAULT 1,
@@ -83,13 +93,19 @@ sqlite.exec(`
     update_delay TEXT DEFAULT '10s',
     rollback_on_failure INTEGER DEFAULT 1,
     health_check TEXT,
+    cpu_limit INTEGER,
+    memory_limit INTEGER,
+    cpu_reservation INTEGER,
+    memory_reservation INTEGER,
+    stopped_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
   );
 
   CREATE TABLE deployments (
     id TEXT PRIMARY KEY,
-    service_id TEXT NOT NULL REFERENCES services(id),
+    service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
     commit_sha TEXT,
     status TEXT DEFAULT 'pending',
     log TEXT DEFAULT '',
@@ -173,7 +189,7 @@ sqlite.exec(`
 
   CREATE TABLE subscriptions (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     plan_id TEXT NOT NULL REFERENCES billing_plans(id),
     stripe_subscription_id TEXT,
     status TEXT DEFAULT 'active',
@@ -225,8 +241,8 @@ sqlite.exec(`
 
   CREATE TABLE audit_log (
     id TEXT PRIMARY KEY,
-    user_id TEXT REFERENCES users(id),
-    account_id TEXT REFERENCES accounts(id),
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
     action TEXT NOT NULL,
     resource_type TEXT,
     resource_id TEXT,

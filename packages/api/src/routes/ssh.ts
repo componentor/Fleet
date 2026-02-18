@@ -43,7 +43,7 @@ sshRoutes.post('/keys', requireMember, async (c) => {
   const parsed = addKeySchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { name, publicKey } = parsed.data;
@@ -154,7 +154,7 @@ sshRoutes.put('/services/:serviceId/rules', requireMember, async (c) => {
   const parsed = updateRulesSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   // Verify service belongs to this account

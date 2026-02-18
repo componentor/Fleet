@@ -147,7 +147,7 @@ setup.post('/', async (c) => {
     const parsed = setupSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+      return c.json({ error: 'Validation failed' }, 400);
     }
 
     const { name, email, password, domain, platformName } = parsed.data;

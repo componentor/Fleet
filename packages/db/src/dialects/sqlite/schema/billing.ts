@@ -31,7 +31,7 @@ export const billingPlans = sqliteTable('billing_plans', {
 export const subscriptions = sqliteTable('subscriptions', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   planId: text('plan_id')
     .references(() => billingPlans.id),

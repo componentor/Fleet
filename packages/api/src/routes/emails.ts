@@ -127,7 +127,7 @@ emails.patch('/templates/:slug', requireMember, async (c) => {
   const parsed = updateTemplateSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const data = parsed.data;
@@ -197,7 +197,7 @@ emails.post('/templates/:slug/test', requireMember, async (c) => {
   const parsed = testEmailSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { to, variables } = parsed.data;

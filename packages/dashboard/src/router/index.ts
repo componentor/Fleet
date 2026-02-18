@@ -245,8 +245,15 @@ export const router = createRouter({
 let appInitialized = false
 
 router.beforeEach(async (to) => {
-  const token = localStorage.getItem('fleet_token')
-  const isAuthenticated = !!token
+  const { useAuthStore } = await import('@/stores/auth')
+  const authStore = useAuthStore()
+
+  // Ensure auth is initialized (silent refresh from httpOnly cookie)
+  if (!authStore.initialized) {
+    await authStore.init()
+  }
+
+  const isAuthenticated = authStore.isAuthenticated
 
   // Check if platform needs first-run setup (skip for setup routes themselves)
   if (!to.path.startsWith('/setup')) {
@@ -281,9 +288,7 @@ router.beforeEach(async (to) => {
   if (!appInitialized) {
     appInitialized = true
     try {
-      const { useAuthStore } = await import('@/stores/auth')
       const { useAccountStore } = await import('@/stores/account')
-      const authStore = useAuthStore()
       const accountStore = useAccountStore()
       await authStore.loadUser()
       if (authStore.isAuthenticated) {
@@ -296,13 +301,7 @@ router.beforeEach(async (to) => {
 
   // Check super user access for admin routes
   if (to.matched.some((record) => record.meta.requiresSuper)) {
-    try {
-      const userJson = localStorage.getItem('fleet_user')
-      const user = userJson ? JSON.parse(userJson) : null
-      if (!user?.isSuper) {
-        return { path: '/panel' }
-      }
-    } catch {
+    if (!authStore.isSuper) {
       return { path: '/panel' }
     }
   }

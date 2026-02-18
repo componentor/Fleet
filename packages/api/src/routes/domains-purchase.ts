@@ -111,7 +111,7 @@ domainPurchase.post('/checkout', requireAdmin, async (c) => {
   const body = await c.req.json();
   const parsed = checkoutSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { domain, years, successUrl, cancelUrl } = parsed.data;
@@ -198,7 +198,7 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
   const parsed = registerDomainSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { domain, years, contact } = parsed.data;
@@ -255,7 +255,7 @@ domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
   const body = await c.req.json();
   const parsed = renewCheckoutSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { years, successUrl, cancelUrl } = parsed.data;
@@ -328,7 +328,7 @@ domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
   const parsed = renewSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   try {

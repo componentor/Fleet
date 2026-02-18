@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, services, deployments, insertReturning, updateReturning, eq, and } from '@fleet/db';
+import { db, services, deployments, insertReturning, updateReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
@@ -52,7 +52,7 @@ serviceRoutes.get('/', cache(30), async (c) => {
   }
 
   const result = await db.query.services.findMany({
-    where: eq(services.accountId, accountId),
+    where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
     orderBy: (s, { desc }) => desc(s.createdAt),
   });
 
@@ -103,7 +103,7 @@ serviceRoutes.post('/', requireMember, async (c) => {
   const parsed = createServiceSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const data = parsed.data;
@@ -115,34 +115,47 @@ serviceRoutes.post('/', requireMember, async (c) => {
     constraints.push(`node.id == ${data.nodeConstraint}`);
   }
 
-  // Insert into DB first
-  const [svc] = await insertReturning(services, {
-    accountId,
-    name: data.name,
-    image: data.image,
-    replicas: data.replicas,
-    env: data.env,
-    ports: data.ports,
-    volumes: data.volumes,
-    domain: data.domain ?? null,
-    sslEnabled: data.sslEnabled,
-    nodeConstraint: data.nodeConstraint ?? null,
-    placementConstraints: data.placementConstraints,
-    updateParallelism: data.updateParallelism,
-    updateDelay: data.updateDelay,
-    rollbackOnFailure: data.rollbackOnFailure,
-    healthCheck: data.healthCheck ?? null,
-    githubRepo: data.githubRepo ?? null,
-    githubBranch: data.githubBranch ?? null,
-    autoDeploy: data.autoDeploy,
-    status: 'deploying',
+  // Insert into DB within a transaction
+  let svc: any;
+  await db.transaction(async (tx) => {
+    [svc] = await tx.insert(services).values({
+      accountId,
+      name: data.name,
+      image: data.image,
+      replicas: data.replicas,
+      env: data.env,
+      ports: data.ports,
+      volumes: data.volumes,
+      domain: data.domain ?? null,
+      sslEnabled: data.sslEnabled,
+      nodeConstraint: data.nodeConstraint ?? null,
+      placementConstraints: data.placementConstraints,
+      updateParallelism: data.updateParallelism,
+      updateDelay: data.updateDelay,
+      rollbackOnFailure: data.rollbackOnFailure,
+      healthCheck: data.healthCheck ?? null,
+      githubRepo: data.githubRepo ?? null,
+      githubBranch: data.githubBranch ?? null,
+      autoDeploy: data.autoDeploy,
+      status: 'deploying',
+    }).returning();
   });
 
   if (!svc) {
     return c.json({ error: 'Failed to create service record' }, 500);
   }
 
-  // Deploy to Docker Swarm
+  // Ensure account has an overlay network for isolation
+  const networkName = `fleet-account-${accountId}`;
+  let networkId: string | undefined;
+  try {
+    networkId = await dockerService.ensureNetwork(networkName);
+  } catch {
+    // Network creation failed, proceed without isolation
+    logger.warn({ accountId, networkName }, 'Failed to create account network');
+  }
+
+  // Deploy to Docker Swarm (external service — outside transaction)
   try {
     const swarmServiceName = `fleet-${accountId.slice(0, 8)}-${data.name}`;
 
@@ -171,6 +184,7 @@ serviceRoutes.post('/', requireMember, async (c) => {
       updateParallelism: data.updateParallelism,
       updateDelay: data.updateDelay,
       rollbackOnFailure: data.rollbackOnFailure,
+      networkId,
     });
 
     // Update DB with Docker service ID
@@ -185,16 +199,12 @@ serviceRoutes.post('/', requireMember, async (c) => {
 
     return c.json({ ...svc, dockerServiceId: result.id, status: 'running' }, 201);
   } catch (err) {
-    // Mark as failed if Docker deployment fails
-    await db
-      .update(services)
-      .set({ status: 'failed', updatedAt: new Date() })
-      .where(eq(services.id, svc.id));
+    // Rollback: delete the orphaned DB record since Docker creation failed
+    await db.delete(services).where(eq(services.id, svc.id));
 
     logger.error({ err }, 'Docker service creation failed');
     return c.json({
       error: 'Failed to deploy service to Docker Swarm',
-      serviceId: svc.id,
     }, 500);
   }
 });
@@ -276,7 +286,7 @@ serviceRoutes.patch('/:id', requireMember, async (c) => {
   const parsed = updateServiceSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const svc = await db.query.services.findFirst({
@@ -365,9 +375,8 @@ serviceRoutes.delete('/:id', requireMember, async (c) => {
     }
   }
 
-  // Delete deployments first, then service
-  await db.delete(deployments).where(eq(deployments.serviceId, serviceId));
-  await db.delete(services).where(eq(services.id, serviceId));
+  // Soft-delete the service (keep deployment history)
+  await db.update(services).set({ deletedAt: new Date(), status: 'deleted' }).where(eq(services.id, serviceId));
 
   await invalidateCache(`GET:/services:${accountId}`);
 

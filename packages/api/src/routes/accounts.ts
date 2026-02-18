@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, accounts, userAccounts, users, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and } from '@fleet/db';
+import { db, accounts, userAccounts, users, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { generateTokens } from './auth.js';
@@ -29,6 +29,7 @@ accountRoutes.get('/', async (c) => {
 
   if (user.isSuper) {
     const allAccounts = await db.query.accounts.findMany({
+      where: isNull(accounts.deletedAt),
       orderBy: (a, { asc }) => asc(a.path),
       limit: 500,
     });
@@ -61,7 +62,7 @@ accountRoutes.post('/', async (c) => {
   const parsed = createAccountSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { name, trustRevocable } = parsed.data;
@@ -109,25 +110,33 @@ accountRoutes.post('/', async (c) => {
     return c.json({ error: 'Account slug already exists' }, 409);
   }
 
-  const [account] = await insertReturning(accounts, {
-    name,
-    slug,
-    parentId: parentId ?? null,
-    path,
-    depth,
-    trustRevocable: trustRevocable ?? false,
-    status: 'active',
+  // Create account and link user as owner in a single transaction
+  let account: any;
+  await db.transaction(async (tx) => {
+    [account] = await tx.insert(accounts).values({
+      name,
+      slug,
+      parentId: parentId ?? null,
+      path,
+      depth,
+      trustRevocable: trustRevocable ?? false,
+      status: 'active',
+    }).returning();
+
+    if (!account) {
+      throw new Error('Failed to create account');
+    }
+
+    await tx.insert(userAccounts).values({
+      userId: user.userId,
+      accountId: account.id,
+      role: 'owner',
+    });
   });
 
   if (!account) {
     return c.json({ error: 'Failed to create account' }, 500);
   }
-
-  await db.insert(userAccounts).values({
-    userId: user.userId,
-    accountId: account.id,
-    role: 'owner',
-  });
 
   return c.json(account, 201);
 });
@@ -168,7 +177,7 @@ accountRoutes.patch('/:id', tenantMiddleware, async (c) => {
   const parsed = updateSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [updated] = await updateReturning(accounts, {
@@ -212,14 +221,17 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
 
   const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
 
-  for (const accountId of allAccountIds) {
-    await db.delete(userAccounts).where(eq(userAccounts.accountId, accountId));
-  }
+  // Soft-delete all accounts; hard-delete user-account links (they're just join records)
+  await db.transaction(async (tx) => {
+    for (const accountId of allAccountIds) {
+      await tx.delete(userAccounts).where(eq(userAccounts.accountId, accountId));
+    }
 
-  for (const desc of descendants.reverse()) {
-    await db.delete(accounts).where(eq(accounts.id, desc.id));
-  }
-  await db.delete(accounts).where(eq(accounts.id, account.id));
+    for (const desc of descendants.reverse()) {
+      await tx.update(accounts).set({ deletedAt: new Date() }).where(eq(accounts.id, desc.id));
+    }
+    await tx.update(accounts).set({ deletedAt: new Date() }).where(eq(accounts.id, account.id));
+  });
 
   return c.json({ message: 'Account and all sub-accounts deleted' });
 });
@@ -417,7 +429,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
   const parsed = inviteMemberSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { email, role } = parsed.data;
@@ -472,7 +484,7 @@ accountRoutes.patch('/:id/members/:userId', tenantMiddleware, async (c) => {
   const parsed = roleSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   if (!authUser.isSuper) {

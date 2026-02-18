@@ -70,7 +70,7 @@ billingAdmin.post('/plans', async (c) => {
   const body = await c.req.json();
   const parsed = createPlanSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [plan] = await insertReturning(billingPlans, parsed.data);
@@ -83,7 +83,7 @@ billingAdmin.patch('/plans/:id', async (c) => {
   const body = await c.req.json();
   const parsed = createPlanSchema.partial().safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [updated] = await updateReturning(billingPlans, {
@@ -169,7 +169,7 @@ billingAdmin.patch('/pricing', async (c) => {
   const body = await c.req.json();
   const parsed = pricingSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const existing = await db.query.pricingConfig.findFirst();
@@ -204,7 +204,7 @@ billingAdmin.post('/locations', async (c) => {
   const body = await c.req.json();
   const parsed = locationSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [location] = await insertReturning(locationMultipliers, parsed.data);
@@ -217,7 +217,7 @@ billingAdmin.patch('/locations/:id', async (c) => {
   const body = await c.req.json();
   const parsed = locationSchema.partial().safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [updated] = await updateReturning(locationMultipliers, parsed.data, eq(locationMultipliers.id, id));
@@ -270,7 +270,7 @@ billingAdmin.patch('/resource-limits', async (c) => {
   const body = await c.req.json();
   const parsed = resourceLimitsSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const existing = await db.query.resourceLimits.findFirst({
@@ -323,7 +323,7 @@ billingAdmin.patch('/resource-limits/:accountId', async (c) => {
   const body = await c.req.json();
   const parsed = resourceLimitsSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const existing = await db.query.resourceLimits.findFirst({
@@ -391,7 +391,7 @@ billingAdmin.patch('/account-overrides/:accountId', async (c) => {
   const body = await c.req.json();
   const parsed = overrideSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const existing = await db.query.accountBillingOverrides.findFirst({

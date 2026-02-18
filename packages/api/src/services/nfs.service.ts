@@ -37,7 +37,7 @@ export class NfsService {
     await execFile('chmod', ['0770', volumePath]);
 
     // Add to NFS exports with rw access for the local network
-    const exportLine = `${volumePath} *(rw,sync,no_subtree_check,no_root_squash)`;
+    const exportLine = `${volumePath} *(rw,sync,no_subtree_check,root_squash)`;
     await execFile('bash', [
       '-c',
       `grep -qF '${volumePath}' ${NFS_EXPORTS_FILE} || echo '${exportLine}' >> ${NFS_EXPORTS_FILE}`,

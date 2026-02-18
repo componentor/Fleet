@@ -11,7 +11,7 @@ import { accounts } from './accounts';
 export const services = sqliteTable('services', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   name: text('name').notNull(),
   image: text('image').notNull(),
@@ -39,6 +39,7 @@ export const services = sqliteTable('services', {
   stoppedAt: integer('stopped_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 }, (table) => [
   index('idx_services_account_id').on(table.accountId),
   index('idx_services_status').on(table.status),
@@ -47,7 +48,7 @@ export const services = sqliteTable('services', {
 export const deployments = sqliteTable('deployments', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   serviceId: text('service_id')
-    .references(() => services.id)
+    .references(() => services.id, { onDelete: 'cascade' })
     .notNull(),
   commitSha: text('commit_sha'),
   status: text('status').default('pending'),

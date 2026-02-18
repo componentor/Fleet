@@ -42,18 +42,15 @@ async function impersonate(accountId: string) {
   try {
     const result = await api.post<any>(`/accounts/${accountId}/impersonate`, {})
     if (result.token) {
-      // Save original tokens and account for "Stop Impersonating"
-      const currentToken = localStorage.getItem('fleet_token')
-      const currentRefresh = localStorage.getItem('fleet_refresh_token')
+      // Save original token and account for "Stop Impersonating"
+      const currentToken = authStore.token
       const currentAccountId = localStorage.getItem('fleet_account_id')
       if (currentToken) localStorage.setItem('fleet_original_token', currentToken)
-      if (currentRefresh) localStorage.setItem('fleet_original_refresh_token', currentRefresh)
       if (currentAccountId) localStorage.setItem('fleet_original_account_id', currentAccountId)
       localStorage.setItem('fleet_impersonating', result.accountId)
 
-      // Set impersonation tokens
-      localStorage.setItem('fleet_token', result.token)
-      if (result.refreshToken) localStorage.setItem('fleet_refresh_token', result.refreshToken)
+      // Set impersonation token (in-memory) and account
+      authStore.setToken(result.token)
       localStorage.setItem('fleet_account_id', accountId)
 
       window.location.href = '/panel'

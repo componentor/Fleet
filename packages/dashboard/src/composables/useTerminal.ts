@@ -2,6 +2,7 @@ import { ref, onUnmounted } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { useAuthStore } from '@/stores/auth'
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
@@ -64,7 +65,8 @@ export function useTerminal() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}`
-    const token = localStorage.getItem('fleet_token')
+    const authStore = useAuthStore()
+    const token = authStore.token
     const accountId = localStorage.getItem('fleet_account_id')
 
     ws = new WebSocket(`${wsUrl}?token=${token}&accountId=${accountId}`)

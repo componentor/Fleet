@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 
 export type LogStreamState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 
@@ -28,7 +29,8 @@ export function useLogStream() {
     state.value = reconnectAttempts > 0 ? 'reconnecting' : 'connecting'
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const token = localStorage.getItem('fleet_token')
+    const authStore = useAuthStore()
+    const token = authStore.token
     const accountId = localStorage.getItem('fleet_account_id')
     const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/logs/${serviceId}?token=${token}&accountId=${accountId}`
 

@@ -6,6 +6,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useAuth } from '@/composables/useAuth'
 import { useAccount } from '@/composables/useAccount'
 import { useRole } from '@/composables/useRole'
+import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard,
   Layers,
@@ -45,14 +46,15 @@ const isImpersonating = computed(() => !!localStorage.getItem('fleet_impersonati
 
 function stopImpersonating() {
   const originalToken = localStorage.getItem('fleet_original_token')
-  const originalRefresh = localStorage.getItem('fleet_original_refresh_token')
   const originalAccountId = localStorage.getItem('fleet_original_account_id')
-  if (originalToken) localStorage.setItem('fleet_token', originalToken)
-  if (originalRefresh) localStorage.setItem('fleet_refresh_token', originalRefresh)
+  if (originalToken) {
+    // Restore original access token in-memory via auth store
+    const authStore = useAuthStore()
+    authStore.setToken(originalToken)
+  }
   if (originalAccountId) localStorage.setItem('fleet_account_id', originalAccountId)
   else localStorage.removeItem('fleet_account_id')
   localStorage.removeItem('fleet_original_token')
-  localStorage.removeItem('fleet_original_refresh_token')
   localStorage.removeItem('fleet_original_account_id')
   localStorage.removeItem('fleet_impersonating')
   window.location.href = '/admin/accounts'

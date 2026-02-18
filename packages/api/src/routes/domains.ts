@@ -63,10 +63,7 @@ dnsRoutes.post('/zones', requireMember, async (c) => {
   const parsed = createZoneSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json(
-      { error: 'Validation failed', details: parsed.error.flatten() },
-      400,
-    );
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { domain, nameservers } = parsed.data;
@@ -338,10 +335,7 @@ dnsRoutes.post('/zones/:id/records', requireMember, async (c) => {
   const parsed = createRecordSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json(
-      { error: 'Validation failed', details: parsed.error.flatten() },
-      400,
-    );
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { type, name, content, ttl, priority } = parsed.data;
@@ -398,10 +392,7 @@ dnsRoutes.patch('/records/:id', requireMember, async (c) => {
   const parsed = updateRecordSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json(
-      { error: 'Validation failed', details: parsed.error.flatten() },
-      400,
-    );
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const updates = parsed.data;

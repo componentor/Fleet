@@ -61,7 +61,7 @@ domainPricingRoutes.post('/', async (c) => {
   const parsed = upsertSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const data = parsed.data;
@@ -121,7 +121,7 @@ domainPricingRoutes.patch('/:id', async (c) => {
   const parsed = patchSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const existing = await db.query.domainTldPricing.findFirst({

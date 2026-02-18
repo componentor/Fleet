@@ -12,7 +12,7 @@ import { users } from './users';
 
 export const notifications = pgTable('notifications', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  accountId: uuid('account_id').references(() => accounts.id).notNull(),
+  accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id),
   type: varchar('type').notNull(),
   title: varchar('title').notNull(),

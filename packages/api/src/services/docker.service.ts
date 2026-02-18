@@ -11,6 +11,8 @@ export interface CreateSwarmServiceOptions {
   volumes: Array<{ source: string; target: string; readonly?: boolean }>;
   labels: Record<string, string>;
   constraints: string[];
+  cpuLimit?: number;
+  memoryLimit?: number;
   healthCheck?: {
     cmd: string;
     interval: number;
@@ -65,7 +67,16 @@ export class DockerService {
           ReadOnly: true,
           User: '1000',
         },
-        Resources: {},
+        Resources: {
+          Limits: {
+            NanoCPUs: (opts.cpuLimit ?? 1) * 1e9,  // Convert CPU cores to nanocores
+            MemoryBytes: (opts.memoryLimit ?? 512) * 1024 * 1024,  // Convert MB to bytes
+          },
+          Reservations: {
+            NanoCPUs: Math.min((opts.cpuLimit ?? 1) * 0.25e9, 0.25e9),  // Reserve 25% of limit, min 0.25 CPU
+            MemoryBytes: Math.min((opts.memoryLimit ?? 512) * 0.25 * 1024 * 1024, 128 * 1024 * 1024),  // Reserve 25% of limit, min 128MB
+          },
+        },
         RestartPolicy: {
           Condition: 'on-failure',
           MaxAttempts: 3,
@@ -266,6 +277,23 @@ export class DockerService {
   }
 
   // Network management for account isolation
+
+  /**
+   * Ensure an overlay network exists, creating it if necessary.
+   * Returns the network ID for use in service specs.
+   */
+  async ensureNetwork(name: string): Promise<string> {
+    const networks = await docker.listNetworks({ filters: { name: [name] } });
+    const existing = networks.find((n: { Name: string }) => n.Name === name);
+    if (existing) return existing.Id;
+    const network = await docker.createNetwork({
+      Name: name,
+      Driver: 'overlay',
+      Attachable: true,
+    });
+    return network.id;
+  }
+
   async createNetwork(name: string, labels: Record<string, string> = {}): Promise<string> {
     const network = await docker.createNetwork({
       Name: name,

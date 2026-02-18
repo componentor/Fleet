@@ -12,8 +12,8 @@ import { accounts } from './accounts';
 
 export const auditLog = pgTable('audit_log', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid('user_id').references(() => users.id),
-  accountId: uuid('account_id').references(() => accounts.id),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
   action: varchar('action').notNull(),
   resourceType: varchar('resource_type'),
   resourceId: uuid('resource_id'),

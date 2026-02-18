@@ -24,6 +24,7 @@ export const accounts = pgTable('accounts', {
   status: varchar('status').default('active'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({

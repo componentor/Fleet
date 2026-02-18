@@ -20,6 +20,7 @@ export const accounts = sqliteTable('accounts', {
   status: text('status').default('active'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({

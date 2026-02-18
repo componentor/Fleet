@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, accounts, users, services, nodes, deployments, auditLog, updateReturning, countSql, eq, and } from '@fleet/db';
+import { db, accounts, users, services, nodes, deployments, auditLog, updateReturning, countSql, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';
@@ -25,15 +25,18 @@ adminRoutes.use('*', async (c, next) => {
 adminRoutes.get('/stats', async (c) => {
   const [accountCount] = await db
     .select({ count: countSql() })
-    .from(accounts);
+    .from(accounts)
+    .where(isNull(accounts.deletedAt));
 
   const [userCount] = await db
     .select({ count: countSql() })
-    .from(users);
+    .from(users)
+    .where(isNull(users.deletedAt));
 
   const [serviceCount] = await db
     .select({ count: countSql() })
-    .from(services);
+    .from(services)
+    .where(isNull(services.deletedAt));
 
   const [nodeCount] = await db
     .select({ count: countSql() })
@@ -42,7 +45,7 @@ adminRoutes.get('/stats', async (c) => {
   const [runningServices] = await db
     .select({ count: countSql() })
     .from(services)
-    .where(eq(services.status, 'running'));
+    .where(and(eq(services.status, 'running'), isNull(services.deletedAt)));
 
   let swarmInfo = null;
   try {
@@ -77,6 +80,7 @@ adminRoutes.get('/accounts', async (c) => {
   const offset = (page - 1) * limit;
 
   const allAccounts = await db.query.accounts.findMany({
+    where: isNull(accounts.deletedAt),
     orderBy: (a, { asc }) => asc(a.path),
     limit,
     offset,
@@ -84,7 +88,8 @@ adminRoutes.get('/accounts', async (c) => {
 
   const [total] = await db
     .select({ count: countSql() })
-    .from(accounts);
+    .from(accounts)
+    .where(isNull(accounts.deletedAt));
 
   return c.json({
     data: allAccounts,
@@ -104,6 +109,7 @@ adminRoutes.get('/users', async (c) => {
   const offset = (page - 1) * limit;
 
   const allUsers = await db.query.users.findMany({
+    where: isNull(users.deletedAt),
     orderBy: (u, { desc: d }) => d(u.createdAt),
     limit,
     offset,
@@ -111,7 +117,8 @@ adminRoutes.get('/users', async (c) => {
 
   const [total] = await db
     .select({ count: countSql() })
-    .from(users);
+    .from(users)
+    .where(isNull(users.deletedAt));
 
   // Don't expose password hashes
   const sanitized = allUsers.map(({ passwordHash, ...rest }) => rest);
@@ -188,6 +195,7 @@ adminRoutes.get('/services', async (c) => {
   const offset = (page - 1) * limit;
 
   const allServices = await db.query.services.findMany({
+    where: isNull(services.deletedAt),
     with: { account: true },
     orderBy: (s, { desc: d }) => d(s.createdAt),
     limit,
@@ -196,7 +204,8 @@ adminRoutes.get('/services', async (c) => {
 
   const [total] = await db
     .select({ count: countSql() })
-    .from(services);
+    .from(services)
+    .where(isNull(services.deletedAt));
 
   return c.json({
     data: allServices,
@@ -286,7 +295,7 @@ adminRoutes.get('/status', async (c) => {
   }));
 
   // --- Services breakdown ---
-  const allServices = await db.query.services.findMany({ limit: 1000 });
+  const allServices = await db.query.services.findMany({ where: isNull(services.deletedAt), limit: 1000 });
   const servicesByStatus: Record<string, number> = {};
   for (const s of allServices) {
     const st = s.status ?? 'unknown';

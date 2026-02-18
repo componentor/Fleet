@@ -96,7 +96,7 @@ updateRoutes.patch('/settings', async (c) => {
   const body = await c.req.json();
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Invalid settings', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Invalid settings' }, 400);
   }
 
   const updates: Record<string, unknown> = {};
@@ -159,7 +159,7 @@ updateRoutes.post('/perform', async (c) => {
   const body = await c.req.json();
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'version is required', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'version is required' }, 400);
   }
 
   const { version } = parsed.data;

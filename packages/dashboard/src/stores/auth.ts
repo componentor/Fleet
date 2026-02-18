@@ -14,31 +14,49 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const user = ref<User | null>(initialUser)
-  const token = ref<string | null>(localStorage.getItem('fleet_token'))
-  const refreshTokenValue = ref<string | null>(localStorage.getItem('fleet_refresh_token'))
+  const token = ref<string | null>(null) // In-memory only — never persisted to localStorage
   const loading = ref(false)
+  const initialized = ref(false)
 
   const isAuthenticated = computed(() => !!token.value)
   const isSuper = computed(() => user.value?.isSuper ?? false)
 
+  /** Silently refresh access token on app startup using httpOnly cookie */
+  async function init() {
+    if (initialized.value) return
+    try {
+      const res = await fetch('/api/v1/auth/refresh', {
+        method: 'POST',
+        credentials: 'include', // sends the httpOnly cookie
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}), // empty body — cookie has the refresh token
+      })
+      if (res.ok) {
+        const data = await res.json()
+        token.value = data.tokens.accessToken
+      } else {
+        token.value = null
+      }
+    } catch {
+      // Not logged in or refresh failed
+      token.value = null
+    } finally {
+      initialized.value = true
+    }
+  }
+
   function setTokens(tokens: AuthTokens) {
     token.value = tokens.accessToken
-    refreshTokenValue.value = tokens.refreshToken
-    localStorage.setItem('fleet_token', tokens.accessToken)
-    localStorage.setItem('fleet_refresh_token', tokens.refreshToken)
+    // Refresh token is stored in httpOnly cookie by the server — no localStorage
   }
 
   function setToken(newToken: string) {
     token.value = newToken
-    localStorage.setItem('fleet_token', newToken)
   }
 
   function clearAuth() {
     user.value = null
     token.value = null
-    refreshTokenValue.value = null
-    localStorage.removeItem('fleet_token')
-    localStorage.removeItem('fleet_refresh_token')
     localStorage.removeItem('fleet_user')
   }
 
@@ -79,15 +97,19 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refreshToken() {
-    if (!refreshTokenValue.value) {
-      clearAuth()
-      throw new Error('No refresh token')
-    }
     try {
-      const data = await api.post<{ tokens: AuthTokens }>('/auth/refresh', {
-        refreshToken: refreshTokenValue.value,
+      const res = await fetch('/api/v1/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
       })
-      setTokens(data.tokens)
+      if (!res.ok) {
+        clearAuth()
+        throw new Error('Token refresh failed')
+      }
+      const data = await res.json()
+      token.value = data.tokens.accessToken
       return data.tokens
     } catch {
       clearAuth()
@@ -121,8 +143,10 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     token,
     loading,
+    initialized,
     isAuthenticated,
     isSuper,
+    init,
     login,
     register,
     logout,
@@ -130,5 +154,6 @@ export const useAuthStore = defineStore('auth', () => {
     setToken,
     setTokens,
     loadUser,
+    clearAuth,
   }
 })

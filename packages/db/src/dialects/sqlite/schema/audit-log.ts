@@ -11,8 +11,8 @@ import { accounts } from './accounts';
 
 export const auditLog = sqliteTable('audit_log', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  userId: text('user_id').references(() => users.id),
-  accountId: text('account_id').references(() => accounts.id),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'set null' }),
   action: text('action').notNull(),
   resourceType: text('resource_type'),
   resourceId: text('resource_id'),

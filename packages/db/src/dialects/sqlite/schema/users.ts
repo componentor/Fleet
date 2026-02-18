@@ -25,6 +25,7 @@ export const users = sqliteTable('users', {
   twoFactorBackupCodes: text('two_factor_backup_codes', { mode: 'json' }).$type<string[] | null>(),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 
 export const userAccounts = sqliteTable(
@@ -32,10 +33,10 @@ export const userAccounts = sqliteTable(
   {
     id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
     userId: text('user_id')
-      .references(() => users.id)
+      .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     accountId: text('account_id')
-      .references(() => accounts.id)
+      .references(() => accounts.id, { onDelete: 'cascade' })
       .notNull(),
     role: text('role').default('member'),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
@@ -53,7 +54,7 @@ export const oauthProviders = sqliteTable(
   {
     id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
     userId: text('user_id')
-      .references(() => users.id)
+      .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     provider: text('provider').notNull(),
     providerUserId: text('provider_user_id').notNull(),

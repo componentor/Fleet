@@ -27,6 +27,7 @@ export const users = mysqlTable('users', {
   twoFactorBackupCodes: json('two_factor_backup_codes').$type<string[] | null>(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const userAccounts = mysqlTable(
@@ -34,10 +35,10 @@ export const userAccounts = mysqlTable(
   {
     id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
     userId: varchar('user_id', { length: 36 })
-      .references(() => users.id)
+      .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     accountId: varchar('account_id', { length: 36 })
-      .references(() => accounts.id)
+      .references(() => accounts.id, { onDelete: 'cascade' })
       .notNull(),
     role: varchar('role', { length: 255 }).default('member'),
     createdAt: timestamp('created_at').defaultNow(),
@@ -55,7 +56,7 @@ export const oauthProviders = mysqlTable(
   {
     id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
     userId: varchar('user_id', { length: 36 })
-      .references(() => users.id)
+      .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     provider: varchar('provider', { length: 255 }).notNull(),
     providerUserId: varchar('provider_user_id', { length: 255 }).notNull(),

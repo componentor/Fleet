@@ -2,10 +2,12 @@
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { useAuthStore } from '@/stores/auth'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{ serviceId: string }>()
 const terminalRef = ref<HTMLDivElement>()
+const authStore = useAuthStore()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let ws: WebSocket | null = null
@@ -15,7 +17,7 @@ function connectWebSocket(serviceId: string) {
   ws?.close()
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const token = localStorage.getItem('fleet_token')
+  const token = authStore.token
   ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?token=${token}`)
 
   ws.onmessage = (event) => {

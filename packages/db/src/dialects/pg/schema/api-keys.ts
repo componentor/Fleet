@@ -12,7 +12,7 @@ import { users } from './users';
 export const apiKeys = pgTable('api_keys', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id').references(() => accounts.id).notNull(),
-  createdBy: uuid('created_by').references(() => users.id).notNull(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name').notNull(),
   keyPrefix: varchar('key_prefix').notNull(),
   keyHash: varchar('key_hash').notNull(),

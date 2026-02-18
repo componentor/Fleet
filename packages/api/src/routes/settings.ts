@@ -108,7 +108,7 @@ settings.patch('/', requireAdmin, async (c) => {
   const parsed = updateSettingsSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const entries = Object.entries(parsed.data);
@@ -169,7 +169,7 @@ settings.patch('/stripe', requireAdmin, async (c) => {
   const parsed = stripeSettingsSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const data = parsed.data;
@@ -208,7 +208,7 @@ settings.patch('/email', requireAdmin, async (c) => {
   const parsed = emailSettingsSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const data = parsed.data;
@@ -309,7 +309,7 @@ settings.patch('/registrar', requireAdmin, async (c) => {
   const body = await c.req.json();
   const parsed = registrarSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { provider, apiKey, apiSecret, resellerId } = parsed.data;

@@ -15,7 +15,7 @@ import { accounts } from './accounts';
 export const services = mysqlTable('services', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   image: varchar('image', { length: 255 }).notNull(),
@@ -43,6 +43,7 @@ export const services = mysqlTable('services', {
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  deletedAt: timestamp('deleted_at'),
 }, (table) => [
   index('idx_services_account_id').on(table.accountId),
   index('idx_services_status').on(table.status),
@@ -51,7 +52,7 @@ export const services = mysqlTable('services', {
 export const deployments = mysqlTable('deployments', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   serviceId: varchar('service_id', { length: 36 })
-    .references(() => services.id)
+    .references(() => services.id, { onDelete: 'cascade' })
     .notNull(),
   commitSha: varchar('commit_sha', { length: 255 }),
   status: varchar('status', { length: 255 }).default('pending'),

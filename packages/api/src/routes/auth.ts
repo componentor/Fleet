@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { hash, verify } from 'argon2';
 import { SignJWT, jwtVerify } from 'jose';
+import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq } from '@fleet/db';
@@ -69,6 +70,20 @@ function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
+function setRefreshTokenCookie(c: any, refreshToken: string) {
+  setCookie(c, 'fleet_refresh', refreshToken, {
+    httpOnly: true,
+    secure: process.env['NODE_ENV'] === 'production',
+    sameSite: 'Lax',
+    path: '/api/v1/auth',
+    maxAge: 7 * 24 * 60 * 60, // 7 days
+  });
+}
+
+function clearRefreshTokenCookie(c: any) {
+  deleteCookie(c, 'fleet_refresh', { path: '/api/v1/auth' });
+}
+
 function userResponse(user: any) {
   return {
     id: user.id,
@@ -95,7 +110,7 @@ auth.post('/register', authRateLimit, async (c) => {
   const parsed = registerSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { name, email, password } = parsed.data;
@@ -115,42 +130,48 @@ auth.post('/register', authRateLimit, async (c) => {
   // Generate email verification token
   const verifyToken = generateSecureToken();
 
-  // Create user with verification token
-  const [user] = await insertReturning(users, {
-    email,
-    passwordHash,
-    name,
-    isSuper: false,
-    emailVerified: false,
-    emailVerifyToken: verifyToken.hashed,
-    emailVerifyExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+  // Create user, account, and link them in a single transaction
+  let user: any;
+  let account: any;
+  await db.transaction(async (tx) => {
+    [user] = await tx.insert(users).values({
+      email,
+      passwordHash,
+      name,
+      isSuper: false,
+      emailVerified: false,
+      emailVerifyToken: verifyToken.hashed,
+      emailVerifyExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+    }).returning();
+
+    if (!user) {
+      throw new Error('Failed to create user');
+    }
+
+    const slug = slugify(name) + '-' + user.id.slice(0, 8);
+    [account] = await tx.insert(accounts).values({
+      name: `${name}'s Account`,
+      slug,
+      parentId: null,
+      path: slug,
+      depth: 0,
+      status: 'active',
+    }).returning();
+
+    if (account) {
+      await tx.insert(userAccounts).values({
+        userId: user.id,
+        accountId: account.id,
+        role: 'owner',
+      });
+    }
   });
 
   if (!user) {
     return c.json({ error: 'Failed to create user' }, 500);
   }
 
-  // Create a personal account for the user
-  const slug = slugify(name) + '-' + user.id.slice(0, 8);
-  const [account] = await insertReturning(accounts, {
-    name: `${name}'s Account`,
-    slug,
-    parentId: null,
-    path: slug,
-    depth: 0,
-    status: 'active',
-  });
-
-  if (account) {
-    // Link user to account as owner
-    await db.insert(userAccounts).values({
-      userId: user.id,
-      accountId: account.id,
-      role: 'owner',
-    });
-  }
-
-  // Send verification email (fire-and-forget)
+  // Send verification email AFTER transaction commits (fire-and-forget)
   const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
   emailService.sendTemplateEmail('email-verification', email, {
     userName: name,
@@ -163,6 +184,8 @@ auth.post('/register', authRateLimit, async (c) => {
     email: user.email!,
     isSuper: user.isSuper ?? false,
   });
+
+  setRefreshTokenCookie(c, tokens.refreshToken);
 
   return c.json({
     tokens,
@@ -223,6 +246,8 @@ auth.post('/login', authRateLimit, async (c) => {
     isSuper: user.isSuper ?? false,
   });
 
+  setRefreshTokenCookie(c, tokens.refreshToken);
+
   return c.json({
     tokens,
     user: userResponse(user),
@@ -230,23 +255,18 @@ auth.post('/login', authRateLimit, async (c) => {
 });
 
 // POST /refresh
-const refreshSchema = z.object({
-  refreshToken: z.string().min(1),
-});
-
 auth.post('/refresh', async (c) => {
-  const body = await c.req.json();
-  const parsed = refreshSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Refresh token is required' }, 400);
+  const body = await c.req.json().catch(() => ({}));
+  const refreshToken = body.refreshToken || getCookie(c, 'fleet_refresh');
+  if (!refreshToken) {
+    return c.json({ error: 'Refresh token required' }, 400);
   }
 
   // Check if refresh token is blocklisted (was already rotated)
   try {
     const valkey = await getValkey();
     if (valkey) {
-      const blocked = await valkey.get(`blocklist:${parsed.data.refreshToken}`);
+      const blocked = await valkey.get(`blocklist:${refreshToken}`);
       if (blocked) {
         return c.json({ error: 'Refresh token has been revoked' }, 401);
       }
@@ -257,7 +277,7 @@ auth.post('/refresh', async (c) => {
 
   try {
     const secret = JWT_SECRET_KEY();
-    const { payload } = await jwtVerify(parsed.data.refreshToken, secret);
+    const { payload } = await jwtVerify(refreshToken, secret);
 
     if (payload['type'] !== 'refresh') {
       return c.json({ error: 'Invalid token type' }, 401);
@@ -290,13 +310,15 @@ auth.post('/refresh', async (c) => {
         if (oldExp) {
           const ttl = oldExp - Math.floor(Date.now() / 1000);
           if (ttl > 0) {
-            await valkey.setex(`blocklist:${parsed.data.refreshToken}`, ttl, '1');
+            await valkey.setex(`blocklist:${refreshToken}`, ttl, '1');
           }
         }
       }
     } catch {
       // Best effort - don't fail the refresh if blocklist fails
     }
+
+    setRefreshTokenCookie(c, tokens.refreshToken);
 
     return c.json({ tokens });
   } catch {
@@ -326,6 +348,7 @@ auth.post('/logout', authMiddleware, async (c) => {
       // Token already invalid, that's fine
     }
   }
+  clearRefreshTokenCookie(c);
   return c.json({ message: 'Logged out successfully' });
 });
 
@@ -723,6 +746,8 @@ auth.post('/2fa/verify', async (c) => {
     isSuper: user.isSuper ?? false,
   });
 
+  setRefreshTokenCookie(c, tokens.refreshToken);
+
   return c.json({ tokens, user: userResponse(user) });
 });
 
@@ -900,45 +925,54 @@ auth.get('/github/callback', async (c) => {
       });
 
       if (!user) {
-        // Create new user (OAuth = email already verified)
-        const [newUser] = await insertReturning(users, {
-          email,
-          name: githubUser.name ?? githubUser.login,
-          avatarUrl: githubUser.avatar_url,
-          isSuper: false,
-          emailVerified: true,
-        });
-        if (!newUser) throw new Error('Failed to create user');
-        user = newUser;
+        // Create new user, account, and link in a single transaction (OAuth = email already verified)
+        await db.transaction(async (tx) => {
+          const [newUser] = await tx.insert(users).values({
+            email,
+            name: githubUser.name ?? githubUser.login,
+            avatarUrl: githubUser.avatar_url,
+            isSuper: false,
+            emailVerified: true,
+          }).returning();
+          if (!newUser) throw new Error('Failed to create user');
+          user = newUser;
 
-        // Create personal account
-        const slug = slugify(newUser.name ?? newUser.email!) + '-' + newUser.id.slice(0, 8);
-        const [account] = await insertReturning(accounts, {
-          name: `${newUser.name ?? newUser.email}'s Account`,
-          slug,
-          path: slug,
-          depth: 0,
-          status: 'active',
-        });
+          const slug = slugify(newUser.name ?? newUser.email!) + '-' + newUser.id.slice(0, 8);
+          const [account] = await tx.insert(accounts).values({
+            name: `${newUser.name ?? newUser.email}'s Account`,
+            slug,
+            path: slug,
+            depth: 0,
+            status: 'active',
+          }).returning();
 
-        if (account) {
-          await db.insert(userAccounts).values({
+          if (account) {
+            await tx.insert(userAccounts).values({
+              userId: newUser.id,
+              accountId: account.id,
+              role: 'owner',
+            });
+          }
+
+          // Link OAuth provider within the same transaction
+          await tx.insert(oauthProviders).values({
             userId: newUser.id,
-            accountId: account.id,
-            role: 'owner',
+            provider: 'github',
+            providerUserId,
+            accessToken: encrypt(tokenData.access_token!),
           });
-        }
+        });
+      } else {
+        // Link OAuth provider to existing user
+        await db.insert(oauthProviders).values({
+          userId: user!.id,
+          provider: 'github',
+          providerUserId,
+          accessToken: encrypt(tokenData.access_token),
+        });
       }
 
       userId = user!.id;
-
-      // Link OAuth provider
-      await db.insert(oauthProviders).values({
-        userId,
-        provider: 'github',
-        providerUserId,
-        accessToken: encrypt(tokenData.access_token),
-      });
     }
 
     // Fetch full user for token
@@ -956,16 +990,18 @@ auth.get('/github/callback', async (c) => {
       isSuper: user.isSuper ?? false,
     });
 
-    // If returnTo is set, redirect there with github_connected flag + tokens
+    setRefreshTokenCookie(c, tokens.refreshToken);
+
+    // If returnTo is set, redirect there with github_connected flag + access token only
     if (returnTo) {
       const sep = returnTo.includes('?') ? '&' : '?';
       return c.redirect(
-        `${returnTo}${sep}github_connected=true&token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
+        `${returnTo}${sep}github_connected=true&token=${tokens.accessToken}`,
       );
     }
 
     return c.redirect(
-      `/auth/callback?token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
+      `/auth/callback?token=${tokens.accessToken}`,
     );
   } catch (err) {
     logger.error({ err }, 'GitHub OAuth error');
@@ -1103,42 +1139,54 @@ auth.get('/google/callback', async (c) => {
       });
 
       if (!user) {
-        const [newUser] = await insertReturning(users, {
-          email: googleUser.email,
-          name: googleUser.name,
-          avatarUrl: googleUser.picture,
-          isSuper: false,
-          emailVerified: true,
-        });
-        if (!newUser) throw new Error('Failed to create user');
-        user = newUser;
+        // Create new user, account, and link in a single transaction
+        await db.transaction(async (tx) => {
+          const [newUser] = await tx.insert(users).values({
+            email: googleUser.email,
+            name: googleUser.name,
+            avatarUrl: googleUser.picture,
+            isSuper: false,
+            emailVerified: true,
+          }).returning();
+          if (!newUser) throw new Error('Failed to create user');
+          user = newUser;
 
-        const slug = slugify(newUser.name ?? newUser.email!) + '-' + newUser.id.slice(0, 8);
-        const [account] = await insertReturning(accounts, {
-          name: `${newUser.name ?? newUser.email}'s Account`,
-          slug,
-          path: slug,
-          depth: 0,
-          status: 'active',
-        });
+          const slug = slugify(newUser.name ?? newUser.email!) + '-' + newUser.id.slice(0, 8);
+          const [account] = await tx.insert(accounts).values({
+            name: `${newUser.name ?? newUser.email}'s Account`,
+            slug,
+            path: slug,
+            depth: 0,
+            status: 'active',
+          }).returning();
 
-        if (account) {
-          await db.insert(userAccounts).values({
+          if (account) {
+            await tx.insert(userAccounts).values({
+              userId: newUser.id,
+              accountId: account.id,
+              role: 'owner',
+            });
+          }
+
+          // Link OAuth provider within the same transaction
+          await tx.insert(oauthProviders).values({
             userId: newUser.id,
-            accountId: account.id,
-            role: 'owner',
+            provider: 'google',
+            providerUserId,
+            accessToken: encrypt(tokenData.access_token!),
           });
-        }
+        });
+      } else {
+        // Link OAuth provider to existing user
+        await db.insert(oauthProviders).values({
+          userId: user!.id,
+          provider: 'google',
+          providerUserId,
+          accessToken: encrypt(tokenData.access_token),
+        });
       }
 
       userId = user!.id;
-
-      await db.insert(oauthProviders).values({
-        userId,
-        provider: 'google',
-        providerUserId,
-        accessToken: encrypt(tokenData.access_token),
-      });
     }
 
     const user = await db.query.users.findFirst({
@@ -1155,8 +1203,10 @@ auth.get('/google/callback', async (c) => {
       isSuper: user.isSuper ?? false,
     });
 
+    setRefreshTokenCookie(c, tokens.refreshToken);
+
     return c.redirect(
-      `/auth/callback?token=${tokens.accessToken}&refresh_token=${tokens.refreshToken}`,
+      `/auth/callback?token=${tokens.accessToken}`,
     );
   } catch (err) {
     logger.error({ err }, 'Google OAuth error');

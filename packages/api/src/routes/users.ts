@@ -45,7 +45,7 @@ userRoutes.patch('/me', async (c) => {
   const parsed = updateProfileSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [updated] = await updateReturning(users, {
@@ -80,7 +80,7 @@ userRoutes.put('/me/password', async (c) => {
   const parsed = changePasswordSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const user = await db.query.users.findFirst({

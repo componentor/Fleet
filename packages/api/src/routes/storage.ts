@@ -61,7 +61,7 @@ storage.post('/volumes', requireMember, async (c) => {
   const body = await c.req.json();
   const parsed = createVolumeSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { name, sizeGb, nodeId } = parsed.data;

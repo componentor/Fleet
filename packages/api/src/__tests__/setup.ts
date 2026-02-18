@@ -30,7 +30,8 @@ sqlite.exec(`
     plan TEXT,
     status TEXT DEFAULT 'active',
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
   );
 
   CREATE TABLE users (
@@ -49,13 +50,14 @@ sqlite.exec(`
     two_factor_secret TEXT,
     two_factor_backup_codes TEXT,
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
   );
 
   CREATE TABLE user_accounts (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     role TEXT DEFAULT 'member',
     created_at INTEGER DEFAULT (unixepoch())
   );
@@ -63,7 +65,7 @@ sqlite.exec(`
 
   CREATE TABLE oauth_providers (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider TEXT NOT NULL,
     provider_user_id TEXT NOT NULL,
     access_token TEXT,
@@ -73,7 +75,7 @@ sqlite.exec(`
 
   CREATE TABLE services (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     image TEXT NOT NULL,
     replicas INTEGER DEFAULT 1,
@@ -99,12 +101,13 @@ sqlite.exec(`
     memory_reservation INTEGER,
     stopped_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
-    updated_at INTEGER DEFAULT (unixepoch())
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
   );
 
   CREATE TABLE deployments (
     id TEXT PRIMARY KEY,
-    service_id TEXT NOT NULL REFERENCES services(id),
+    service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
     commit_sha TEXT,
     status TEXT DEFAULT 'pending',
     log TEXT DEFAULT '',
@@ -196,7 +199,7 @@ sqlite.exec(`
 
   CREATE TABLE subscriptions (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     plan_id TEXT REFERENCES billing_plans(id),
     billing_model TEXT DEFAULT 'fixed',
     stripe_subscription_id TEXT,
@@ -303,8 +306,8 @@ sqlite.exec(`
 
   CREATE TABLE audit_log (
     id TEXT PRIMARY KEY,
-    user_id TEXT REFERENCES users(id),
-    account_id TEXT REFERENCES accounts(id),
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
     action TEXT NOT NULL,
     resource_type TEXT,
     resource_id TEXT,
@@ -400,7 +403,7 @@ sqlite.exec(`
 
   CREATE TABLE notifications (
     id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     user_id TEXT REFERENCES users(id),
     type TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -414,7 +417,7 @@ sqlite.exec(`
   CREATE TABLE api_keys (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id),
-    created_by TEXT NOT NULL REFERENCES users(id),
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     key_prefix TEXT NOT NULL,
     key_hash TEXT NOT NULL,
@@ -452,6 +455,14 @@ sqlite.exec(`
 
 // Create drizzle instance with schema
 const testDb = drizzle(sqlite, { schema: sqliteSchema });
+
+// Patch transaction() to support async callbacks (production uses PG/MySQL which support async,
+// but better-sqlite3 is synchronous and rejects Promise-returning callbacks).
+// For tests, we execute the callback directly using testDb as the tx context.
+const originalTransaction = testDb.transaction.bind(testDb);
+(testDb as any).transaction = async function (cb: (tx: any) => Promise<any>) {
+  return cb(testDb);
+};
 
 // Wire up the helpers to use this test database
 _setDb(testDb);

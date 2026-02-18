@@ -101,7 +101,7 @@ adminNodeRoutes.post('/', async (c) => {
   const parsed = registerNodeSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const [node] = await insertReturning(nodes, {
@@ -164,7 +164,7 @@ adminNodeRoutes.patch('/:id', async (c) => {
   const parsed = updateNodeSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const node = await db.query.nodes.findFirst({

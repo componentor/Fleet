@@ -12,7 +12,7 @@ import { users } from './users';
 
 export const notifications = mysqlTable('notifications', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id).notNull(),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   userId: varchar('user_id', { length: 36 }).references(() => users.id),
   type: varchar('type', { length: 255 }).notNull(),
   title: varchar('title', { length: 255 }).notNull(),

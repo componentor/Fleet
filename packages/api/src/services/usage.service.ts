@@ -72,8 +72,8 @@ class UsageService {
           containers: containerCount,
           cpuSeconds,
           memoryMbHours,
-          storageGb: 0, // FIXME(billing): integrate with actual storage metrics — usage-based billing reports 0 until implemented
-          bandwidthGb: 0, // FIXME(billing): integrate with network metrics — usage-based billing reports 0 until implemented
+          storageGb: 0,   // WARNING: Not implemented — usage-based billing will undercharge
+          bandwidthGb: 0, // WARNING: Not implemented — usage-based billing will undercharge
           recordedAt: now,
         });
       }
@@ -187,6 +187,11 @@ class UsageService {
    * Called hourly for accounts on usage or hybrid billing model.
    */
   async reportUsageToStripe(): Promise<void> {
+    // GUARD: If storage/bandwidth metrics aren't implemented, warn loudly
+    if (process.env['NODE_ENV'] === 'production') {
+      logger.warn('Storage and bandwidth metrics are still returning 0 — usage-based billing will undercharge for these resources');
+    }
+
     try {
       const activeSubscriptions = await db.query.subscriptions.findMany({
         where: and(

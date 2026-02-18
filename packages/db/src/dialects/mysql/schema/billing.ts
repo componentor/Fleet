@@ -36,7 +36,7 @@ export const billingPlans = mysqlTable('billing_plans', {
 export const subscriptions = mysqlTable('subscriptions', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   planId: varchar('plan_id', { length: 36 })
     .references(() => billingPlans.id),

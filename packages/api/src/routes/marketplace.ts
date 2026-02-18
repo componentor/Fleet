@@ -74,7 +74,7 @@ marketplace.post('/deploy', requireMember, async (c) => {
   const parsed = deploySchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const { slug, config } = parsed.data;
@@ -117,7 +117,7 @@ marketplace.post('/templates', requireMember, async (c) => {
   const parsed = createTemplateSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   if (parsed.data.isBuiltin && !user.isSuper) {
@@ -166,7 +166,7 @@ marketplace.patch('/templates/:slug', requireMember, async (c) => {
   const parsed = updateTemplateSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   try {

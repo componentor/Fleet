@@ -14,7 +14,6 @@ const error = ref('')
 
 onMounted(async () => {
   const token = route.query.token as string | undefined
-  const refreshToken = route.query.refresh_token as string | undefined
 
   if (!token) {
     error.value = route.query.error as string || t('auth.noTokenReceived')
@@ -22,9 +21,10 @@ onMounted(async () => {
   }
 
   try {
+    // Access token comes in URL; refresh token is already in httpOnly cookie set by the server
     authStore.setTokens({
       accessToken: token,
-      refreshToken: refreshToken ?? '',
+      refreshToken: '', // stored in httpOnly cookie, not needed here
     })
     await authStore.loadUser()
     await router.replace('/panel')

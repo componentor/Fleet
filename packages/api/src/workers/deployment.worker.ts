@@ -161,6 +161,6 @@ export async function processDeploymentInline(data: DeploymentJobData): Promise<
 export function createDeploymentWorker(connection: ConnectionOptions): Worker {
   return new Worker<DeploymentJobData>('fleet-deployment', processDeployment, {
     connection,
-    concurrency: 2,
+    concurrency: 10,
   });
 }

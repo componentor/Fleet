@@ -144,7 +144,7 @@ setup_dirs() {
 
   # Setup NFS export
   if ! grep -q "$FLEET_DIR/nfs-exports" /etc/exports 2>/dev/null; then
-    echo "$FLEET_DIR/nfs-exports *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+    echo "$FLEET_DIR/nfs-exports *(rw,sync,no_subtree_check,root_squash)" >> /etc/exports
     exportfs -ra 2>/dev/null || true
   fi
   log "Directories created"

@@ -36,7 +36,7 @@ export const billingPlans = pgTable('billing_plans', {
 export const subscriptions = pgTable('subscriptions', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   planId: uuid('plan_id')
     .references(() => billingPlans.id),

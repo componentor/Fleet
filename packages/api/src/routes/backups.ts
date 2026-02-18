@@ -53,7 +53,7 @@ backupRoutes.post('/', requireMember, async (c) => {
   const parsed = createBackupSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   try {
@@ -108,7 +108,7 @@ backupRoutes.post('/schedules', requireMember, async (c) => {
   const parsed = createScheduleSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   try {
@@ -148,7 +148,7 @@ backupRoutes.patch('/schedules/:id', requireMember, async (c) => {
   const parsed = updateScheduleSchema.safeParse(body);
 
   if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+    return c.json({ error: 'Validation failed' }, 400);
   }
 
   const updated = await backupService.updateSchedule(
