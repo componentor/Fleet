@@ -179,6 +179,7 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
   }
 
   // Register GitHub webhook if autoDeploy is enabled
+  let webhookWarning: string | undefined;
   if (data.autoDeploy && data.githubRepo) {
     try {
       const webhookId = await manageWebhook({
@@ -193,6 +194,10 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to register GitHub webhook during service creation — auto-deploy may not work');
+      // Disable autoDeploy since webhook registration failed
+      await db.update(services).set({ autoDeploy: false }).where(eq(services.id, svc.id));
+      svc.autoDeploy = false;
+      webhookWarning = 'GitHub webhook registration failed — auto-deploy has been disabled. Re-enable it in service settings after connecting your GitHub account.';
     }
   }
 
@@ -240,7 +245,9 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
       })
       .where(eq(services.id, svc.id));
 
-    return c.json({ ...svc, dockerServiceId: result.id, status: 'running' }, 201);
+    const response: Record<string, unknown> = { ...svc, dockerServiceId: result.id, status: 'running' };
+    if (webhookWarning) response.warning = webhookWarning;
+    return c.json(response, 201);
   } catch (err) {
     logger.warn({ err }, 'Docker not available — service created but not started');
     await db
@@ -248,7 +255,8 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
       .set({ status: 'stopped', updatedAt: new Date() })
       .where(eq(services.id, svc.id));
 
-    return c.json({ ...svc, status: 'stopped' }, 201);
+    // Return 201 with stopped status so the client knows Docker deployment failed
+    return c.json({ ...svc, status: 'stopped', warning: 'Docker deployment failed — service saved but not running' }, 201);
   }
 });
 
@@ -418,14 +426,7 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
   // Build DB update payload (exclude autoDeploy/githubBranch from Docker update)
   const { autoDeploy: _ad, githubBranch: _gb, ...dockerFields } = data;
 
-  // Update DB
-  const [updated] = await updateReturning(services, {
-    ...data,
-    githubWebhookId,
-    updatedAt: new Date(),
-  }, eq(services.id, serviceId));
-
-  // Update Docker Swarm service if it exists (only for Docker-relevant fields)
+  // If Docker update is needed, try Docker FIRST to ensure atomicity
   if (svc.dockerServiceId && Object.keys(dockerFields).length > 0) {
     try {
       const traefikLabels = buildTraefikLabels(
@@ -455,14 +456,17 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
         rollbackOnFailure: dockerFields.rollbackOnFailure,
       });
     } catch (err) {
-      logger.error({ err }, 'Docker service update failed');
-      // Don't fail the DB update, but inform the client
-      return c.json({
-        ...updated,
-        warning: 'DB updated but Docker Swarm update failed',
-      });
+      logger.error({ err }, 'Docker service update failed — DB not updated');
+      return c.json({ error: 'Docker Swarm update failed — no changes applied' }, 500);
     }
   }
+
+  // Docker succeeded (or not needed) — now persist to DB
+  const [updated] = await updateReturning(services, {
+    ...data,
+    githubWebhookId,
+    updatedAt: new Date(),
+  }, eq(services.id, serviceId));
 
   await invalidateCache(`GET:/services:${accountId}`);
 
@@ -577,6 +581,11 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
 
   if (!svc) {
     return c.json({ error: 'Service not found' }, 404);
+  }
+
+  // Prevent duplicate deployments — reject if already deploying
+  if (svc.status === 'deploying') {
+    return c.json({ error: 'Service is already deploying. Wait for the current deployment to finish.' }, 409);
   }
 
   // Create deployment record

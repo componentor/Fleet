@@ -8,6 +8,7 @@ import {
   bigint,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -49,9 +50,13 @@ export const subscriptions = mysqlTable('subscriptions', {
   currentPeriodStart: timestamp('current_period_start'),
   currentPeriodEnd: timestamp('current_period_end'),
   cancelledAt: timestamp('cancelled_at'),
+  pastDueSince: timestamp('past_due_since'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_subscriptions_account_id').on(table.accountId),
+  index('idx_subscriptions_status').on(table.status),
+]);
 
 export const usageRecords = mysqlTable('usage_records', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -66,7 +71,9 @@ export const usageRecords = mysqlTable('usage_records', {
   storageGb: int('storage_gb').default(0),
   bandwidthGb: int('bandwidth_gb').default(0),
   recordedAt: timestamp('recorded_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_usage_records_account_id').on(table.accountId),
+]);
 
 export const pricingConfig = mysqlTable('pricing_config', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -110,7 +117,9 @@ export const resourceLimits = mysqlTable('resource_limits', {
   maxBandwidthGb: int('max_bandwidth_gb'),
   maxNfsStorageGb: int('max_nfs_storage_gb'),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_resource_limits_account_id').on(table.accountId),
+]);
 
 export const accountBillingOverrides = mysqlTable('account_billing_overrides', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

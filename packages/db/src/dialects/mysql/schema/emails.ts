@@ -6,6 +6,7 @@ import {
   boolean,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { accounts } from './accounts';
 
@@ -30,4 +31,7 @@ export const emailLog = mysqlTable('email_log', {
   sentAt: timestamp('sent_at'),
   error: text('error'),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_email_log_account_id').on(table.accountId),
+  index('idx_email_log_status').on(table.status),
+]);

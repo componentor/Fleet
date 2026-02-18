@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -18,7 +19,9 @@ export const dnsZones = sqliteTable('dns_zones', {
   nameservers: text('nameservers', { mode: 'json' }).$default(() => ([])),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_dns_zones_account_id').on(table.accountId),
+]);
 
 export const dnsRecords = sqliteTable('dns_records', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -32,7 +35,9 @@ export const dnsRecords = sqliteTable('dns_records', {
   priority: integer('priority'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_dns_records_zone_id').on(table.zoneId),
+]);
 
 export const domainRegistrars = sqliteTable('domain_registrars', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -63,7 +68,10 @@ export const domainRegistrations = sqliteTable('domain_registrations', {
   registrarDomainId: text('registrar_domain_id'),
   stripePaymentId: text('stripe_payment_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_domain_registrations_account_id').on(table.accountId),
+  index('idx_domain_registrations_registrar_id').on(table.registrarId),
+]);
 
 export const domainTldPricing = sqliteTable('domain_tld_pricing', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

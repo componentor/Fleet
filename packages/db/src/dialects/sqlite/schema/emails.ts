@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -28,4 +29,7 @@ export const emailLog = sqliteTable('email_log', {
   sentAt: integer('sent_at', { mode: 'timestamp' }),
   error: text('error'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_email_log_account_id').on(table.accountId),
+  index('idx_email_log_status').on(table.status),
+]);

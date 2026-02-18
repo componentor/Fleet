@@ -62,6 +62,7 @@ const twoFactorVerifyRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5,
 const verifyEmailRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'verify-email' });
 const resetPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'reset-password' });
 const forgotPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'forgot-password' });
+const refreshRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'refresh' });
 
 /** Generate a random token, return raw + SHA256 hash for storage. */
 function generateSecureToken(): { raw: string; hashed: string } {
@@ -259,7 +260,7 @@ auth.post('/login', authRateLimit, async (c) => {
 });
 
 // POST /refresh
-auth.post('/refresh', async (c) => {
+auth.post('/refresh', refreshRateLimit, async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const refreshToken = body.refreshToken || getCookie(c, 'fleet_refresh');
   if (!refreshToken) {
@@ -325,9 +326,17 @@ auth.post('/refresh', async (c) => {
             await valkey.setex(`blocklist:${refreshToken}`, ttl, '1');
           }
         }
+      } else if (process.env['NODE_ENV'] === 'production') {
+        // In production, failing to blocklist is a security risk — reject the refresh
+        logger.error('Valkey unavailable — cannot blocklist old refresh token');
+        return c.json({ error: 'Service temporarily unavailable' }, 503);
       }
-    } catch {
-      // Best effort - don't fail the refresh if blocklist fails
+    } catch (err) {
+      if (process.env['NODE_ENV'] === 'production') {
+        logger.error({ err }, 'Failed to blocklist old refresh token');
+        return c.json({ error: 'Service temporarily unavailable' }, 503);
+      }
+      // In dev, allow graceful degradation
     }
 
     setRefreshTokenCookie(c, tokens.refreshToken);

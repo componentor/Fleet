@@ -22,6 +22,7 @@ export const notifications = sqliteTable('notifications', {
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_notifications_account_id').on(table.accountId),
+  index('idx_notifications_user_id').on(table.userId),
 ]);
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({

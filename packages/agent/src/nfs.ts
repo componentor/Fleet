@@ -1,15 +1,33 @@
-import { mkdirSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, rmSync, statSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { logger } from './logger.js'
 
 export class NfsManager {
   private mountPoint = '/mnt/fleet-nfs'
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null
 
   async initialize() {
     logger.info('Initializing NFS manager')
-    // NFS mounts are configured during node join
-    // This manager monitors mount health and remounts if needed
     await this.checkMounts()
+
+    // Periodically check mount health every 60 seconds
+    this.healthCheckInterval = setInterval(() => {
+      this.checkAndRemount().catch((err) => {
+        logger.error({ err: (err as Error).message }, 'NFS health check failed')
+      })
+    }, 60_000)
+
+    if (this.healthCheckInterval && typeof this.healthCheckInterval === 'object' && 'unref' in this.healthCheckInterval) {
+      this.healthCheckInterval.unref()
+    }
+  }
+
+  stop() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+      this.healthCheckInterval = null
+    }
   }
 
   private validateName(name: string, label: string): void {
@@ -28,6 +46,22 @@ export class NfsManager {
       }
     } catch {
       logger.warn(`Mount ${this.mountPoint} is not active`)
+    }
+  }
+
+  private async checkAndRemount() {
+    if (!existsSync(this.mountPoint)) return
+
+    try {
+      statSync(this.mountPoint)
+    } catch {
+      logger.warn(`Mount ${this.mountPoint} appears stale, attempting remount`)
+      try {
+        execSync(`mount -o remount ${this.mountPoint}`, { timeout: 30_000 })
+        logger.info(`Successfully remounted ${this.mountPoint}`)
+      } catch (remountErr) {
+        logger.error({ err: (remountErr as Error).message }, `Failed to remount ${this.mountPoint}`)
+      }
     }
   }
 

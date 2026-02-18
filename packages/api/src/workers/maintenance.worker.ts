@@ -35,6 +35,10 @@ interface BillingGraceCheckData {
   type: 'billing-grace-check';
 }
 
+interface DatabaseBackupData {
+  type: 'database-backup';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -42,7 +46,8 @@ type MaintenanceJobData =
   | UsageCollectionData
   | StripeUsageReportData
   | AccountDeletionData
-  | BillingGraceCheckData;
+  | BillingGraceCheckData
+  | DatabaseBackupData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -212,10 +217,11 @@ async function enforceBillingGracePeriod(): Promise<void> {
   });
 
   for (const sub of overdueSubscriptions) {
-    // Check if the subscription has been past_due since before the grace cutoff
-    // Use updatedAt as proxy for when it became past_due
-    const updatedAt = sub.updatedAt ? new Date(sub.updatedAt) : null;
-    if (!updatedAt || updatedAt > graceCutoff) continue;
+    // Use pastDueSince if available, otherwise fall back to updatedAt
+    const pastDueDate = sub.pastDueSince
+      ? new Date(sub.pastDueSince)
+      : sub.updatedAt ? new Date(sub.updatedAt) : null;
+    if (!pastDueDate || pastDueDate > graceCutoff) continue;
 
     // Suspend the account
     try {
@@ -229,6 +235,76 @@ async function enforceBillingGracePeriod(): Promise<void> {
     } catch (err) {
       logger.error({ err, accountId: sub.accountId },
         'Failed to suspend account for billing grace period');
+    }
+  }
+}
+
+async function executeDatabaseBackup(): Promise<void> {
+  const dbDialect = process.env['DB_DIALECT'] ?? 'sqlite';
+  const backupDir = process.env['DB_BACKUP_DIR'] ?? '/var/fleet/backups/database';
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { mkdir } = await import('node:fs/promises');
+  const exec = promisify(execFile);
+
+  await mkdir(backupDir, { recursive: true });
+
+  if (dbDialect === 'pg' || dbDialect === 'postgres') {
+    const databaseUrl = process.env['DATABASE_URL'];
+    if (!databaseUrl) {
+      logger.warn('DATABASE_URL not set — skipping database backup');
+      return;
+    }
+
+    const backupFile = `${backupDir}/fleet-pg-${timestamp}.sql.gz`;
+    try {
+      await exec('sh', ['-c', `pg_dump "${databaseUrl}" | gzip > "${backupFile}"`], {
+        timeout: 5 * 60 * 1000, // 5 minute timeout
+      });
+
+      // Rotate old backups — keep last 30
+      const { readdir, rm: rmFile } = await import('node:fs/promises');
+      const files = (await readdir(backupDir))
+        .filter(f => f.startsWith('fleet-pg-') && f.endsWith('.sql.gz'))
+        .sort();
+
+      const maxBackups = parseInt(process.env['DB_BACKUP_RETENTION'] ?? '30', 10);
+      while (files.length > maxBackups) {
+        const old = files.shift()!;
+        await rmFile(`${backupDir}/${old}`).catch(() => {});
+      }
+
+      logger.info({ backupFile }, 'PostgreSQL database backup completed');
+    } catch (err) {
+      logger.error({ err }, 'PostgreSQL database backup failed');
+    }
+  } else if (dbDialect === 'mysql') {
+    const databaseUrl = process.env['DATABASE_URL'];
+    if (!databaseUrl) {
+      logger.warn('DATABASE_URL not set — skipping database backup');
+      return;
+    }
+
+    const backupFile = `${backupDir}/fleet-mysql-${timestamp}.sql.gz`;
+    try {
+      await exec('sh', ['-c', `mysqldump --single-transaction "${databaseUrl}" | gzip > "${backupFile}"`], {
+        timeout: 5 * 60 * 1000,
+      });
+      logger.info({ backupFile }, 'MySQL database backup completed');
+    } catch (err) {
+      logger.error({ err }, 'MySQL database backup failed');
+    }
+  } else {
+    // SQLite — just copy the file
+    const dbPath = process.env['SQLITE_PATH'] ?? './data/fleet.db';
+    const backupFile = `${backupDir}/fleet-sqlite-${timestamp}.db`;
+    try {
+      const { copyFile } = await import('node:fs/promises');
+      await copyFile(dbPath, backupFile);
+      logger.info({ backupFile }, 'SQLite database backup completed');
+    } catch (err) {
+      logger.error({ err }, 'SQLite database backup failed');
     }
   }
 }
@@ -255,6 +331,9 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'billing-grace-check':
       await enforceBillingGracePeriod();
+      break;
+    case 'database-backup':
+      await executeDatabaseBackup();
       break;
   }
 }

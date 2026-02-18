@@ -7,6 +7,7 @@ import {
   bigint,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -26,7 +27,10 @@ export const backups = pgTable('backups', {
   contents: jsonb('contents').default([]),
   createdAt: timestamp('created_at').defaultNow(),
   expiresAt: timestamp('expires_at'),
-});
+}, (table) => [
+  index('idx_backups_account_id').on(table.accountId),
+  index('idx_backups_service_id').on(table.serviceId),
+]);
 
 export const backupSchedules = pgTable('backup_schedules', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -42,7 +46,9 @@ export const backupSchedules = pgTable('backup_schedules', {
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   lastRunAt: timestamp('last_run_at'),
-});
+}, (table) => [
+  index('idx_backup_schedules_service_id').on(table.serviceId),
+]);
 
 export const backupsRelations = relations(backups, ({ one }) => ({
   account: one(accounts, {

@@ -1,5 +1,5 @@
 import pino from 'pino';
 
-// NOTE: pino must be added to dependencies in package.json:
-//   pnpm add pino (and @types/pino as devDependency)
-export const logger = pino({ name: 'fleet-agent' });
+const LOG_LEVEL = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
+
+export const logger = pino({ name: 'fleet-agent', level: LOG_LEVEL });

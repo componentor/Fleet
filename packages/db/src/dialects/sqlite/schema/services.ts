@@ -62,6 +62,7 @@ export const deployments = sqliteTable('deployments', {
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_deployments_service_id').on(table.serviceId),
+  index('idx_deployments_status').on(table.status),
 ]);
 
 export const servicesRelations = relations(services, ({ one, many }) => ({

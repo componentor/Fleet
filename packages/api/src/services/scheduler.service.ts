@@ -73,6 +73,16 @@ class SchedulerService {
       },
     );
 
+    // PostgreSQL database backup — daily at 2 AM UTC
+    await getMaintenanceQueue().add(
+      'database-backup',
+      { type: 'database-backup' },
+      {
+        repeat: { pattern: '0 2 * * *' },
+        jobId: 'system:database-backup',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -83,7 +93,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 6 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 7 system jobs (BullMQ)`,
     );
   }
 

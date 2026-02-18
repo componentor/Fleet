@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { nodes } from './nodes';
@@ -17,7 +18,9 @@ export const nodeMetrics = sqliteTable('node_metrics', {
   memFree: integer('mem_free').notNull(),
   containerCount: integer('container_count').notNull(),
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_node_metrics_node_id').on(table.nodeId),
+]);
 
 export const nodeMetricsRelations = relations(nodeMetrics, ({ one }) => ({
   node: one(nodes, { fields: [nodeMetrics.nodeId], references: [nodes.id] }),

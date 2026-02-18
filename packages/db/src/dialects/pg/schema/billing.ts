@@ -8,6 +8,7 @@ import {
   bigint,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -49,9 +50,13 @@ export const subscriptions = pgTable('subscriptions', {
   currentPeriodStart: timestamp('current_period_start'),
   currentPeriodEnd: timestamp('current_period_end'),
   cancelledAt: timestamp('cancelled_at'),
+  pastDueSince: timestamp('past_due_since'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_subscriptions_account_id').on(table.accountId),
+  index('idx_subscriptions_status').on(table.status),
+]);
 
 export const usageRecords = pgTable('usage_records', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -66,7 +71,9 @@ export const usageRecords = pgTable('usage_records', {
   storageGb: integer('storage_gb').default(0),
   bandwidthGb: integer('bandwidth_gb').default(0),
   recordedAt: timestamp('recorded_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_usage_records_account_id').on(table.accountId),
+]);
 
 export const pricingConfig = pgTable('pricing_config', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -110,7 +117,9 @@ export const resourceLimits = pgTable('resource_limits', {
   maxBandwidthGb: integer('max_bandwidth_gb'),
   maxNfsStorageGb: integer('max_nfs_storage_gb'),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_resource_limits_account_id').on(table.accountId),
+]);
 
 export const accountBillingOverrides = pgTable('account_billing_overrides', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

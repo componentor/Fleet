@@ -58,6 +58,37 @@ export class UploadService {
     const destPath = this.getServicePath(opts.accountId, opts.serviceId);
     await mkdir(destPath, { recursive: true });
 
+    // Pre-check: validate archive size before extraction to mitigate zip bombs.
+    // For zip files, check reported uncompressed size first.
+    if (opts.archiveType === 'zip') {
+      try {
+        const { stdout } = await execFile('unzip', ['-l', opts.archivePath], {
+          timeout: 30_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        // Last line of unzip -l contains total size, e.g. "  12345678  42 files"
+        const totalMatch = stdout.match(/^\s*(\d+)\s+\d+\s+files?/m);
+        if (totalMatch) {
+          const reportedSize = parseInt(totalMatch[1]!, 10);
+          if (reportedSize > MAX_EXTRACTED_SIZE) {
+            throw new Error(`Archive reported size (${Math.round(reportedSize / 1024 / 1024)} MB) exceeds maximum (${Math.round(MAX_EXTRACTED_SIZE / 1024 / 1024)} MB)`);
+          }
+        }
+
+        // Also check number of entries to prevent zip bomb with many small files
+        const MAX_ENTRIES = 50_000;
+        const entryMatch = stdout.match(/(\d+)\s+files?/);
+        if (entryMatch && parseInt(entryMatch[1]!, 10) > MAX_ENTRIES) {
+          throw new Error(`Archive contains too many entries (max ${MAX_ENTRIES})`);
+        }
+      } catch (err) {
+        if ((err as Error).message.includes('exceeds maximum') || (err as Error).message.includes('too many entries')) {
+          throw err;
+        }
+        // If unzip -l fails, proceed with caution but still extract with size monitoring
+      }
+    }
+
     if (opts.archiveType === 'zip') {
       await execFile('unzip', ['-o', '-q', opts.archivePath, '-d', destPath], {
         timeout: 120_000,
@@ -76,10 +107,20 @@ export class UploadService {
       });
     }
 
+    // Security: remove symlinks that point outside the dest BEFORE size check
+    await this.removeUnsafeSymlinks(destPath);
+
+    // Check total extracted size
+    const totalSize = await this.getDirectorySize(destPath);
+    if (totalSize > MAX_EXTRACTED_SIZE) {
+      await rm(destPath, { recursive: true, force: true });
+      throw new Error(`Extracted content exceeds maximum size (${Math.round(MAX_EXTRACTED_SIZE / 1024 / 1024)} MB)`);
+    }
+
     // If the archive extracted into a single subdirectory, hoist its contents up
     const entries = await readdir(destPath);
     if (entries.length === 1) {
-      const singleEntry = join(destPath, entries[0]);
+      const singleEntry = join(destPath, entries[0]!);
       const st = await stat(singleEntry);
       if (st.isDirectory()) {
         const innerEntries = await readdir(singleEntry);
@@ -88,16 +129,6 @@ export class UploadService {
         }
         await rm(singleEntry, { recursive: true, force: true });
       }
-    }
-
-    // Security: remove symlinks that point outside the dest
-    await this.removeUnsafeSymlinks(destPath);
-
-    // Check total extracted size
-    const totalSize = await this.getDirectorySize(destPath);
-    if (totalSize > MAX_EXTRACTED_SIZE) {
-      await rm(destPath, { recursive: true, force: true });
-      throw new Error(`Extracted content exceeds maximum size (${Math.round(MAX_EXTRACTED_SIZE / 1024 / 1024)} MB)`);
     }
 
     return destPath;

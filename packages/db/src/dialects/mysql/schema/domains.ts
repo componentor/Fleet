@@ -6,6 +6,7 @@ import {
   int,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -21,7 +22,9 @@ export const dnsZones = mysqlTable('dns_zones', {
   nameservers: json('nameservers').$default(() => ([])),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_dns_zones_account_id').on(table.accountId),
+]);
 
 export const dnsRecords = mysqlTable('dns_records', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -30,12 +33,14 @@ export const dnsRecords = mysqlTable('dns_records', {
     .notNull(),
   type: varchar('type', { length: 255 }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
-  content: varchar('content', { length: 255 }).notNull(),
+  content: varchar('content', { length: 16384 }).notNull(),
   ttl: int('ttl').default(3600),
   priority: int('priority'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_dns_records_zone_id').on(table.zoneId),
+]);
 
 export const domainRegistrars = mysqlTable('domain_registrars', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -66,7 +71,10 @@ export const domainRegistrations = mysqlTable('domain_registrations', {
   registrarDomainId: varchar('registrar_domain_id', { length: 255 }),
   stripePaymentId: varchar('stripe_payment_id', { length: 255 }),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_domain_registrations_account_id').on(table.accountId),
+  index('idx_domain_registrations_registrar_id').on(table.registrarId),
+]);
 
 export const domainTldPricing = mysqlTable('domain_tld_pricing', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),

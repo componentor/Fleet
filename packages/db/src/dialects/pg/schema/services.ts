@@ -66,6 +66,7 @@ export const deployments = pgTable('deployments', {
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
   index('idx_deployments_service_id').on(table.serviceId),
+  index('idx_deployments_status').on(table.status),
 ]);
 
 export const servicesRelations = relations(services, ({ one, many }) => ({

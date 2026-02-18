@@ -5,6 +5,7 @@ import {
   integer,
   bigint,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { nodes } from './nodes';
@@ -19,7 +20,9 @@ export const nodeMetrics = pgTable('node_metrics', {
   memFree: bigint('mem_free', { mode: 'number' }).notNull(),
   containerCount: integer('container_count').notNull(),
   recordedAt: timestamp('recorded_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_node_metrics_node_id').on(table.nodeId),
+]);
 
 export const nodeMetricsRelations = relations(nodeMetrics, ({ one }) => ({
   node: one(nodes, { fields: [nodeMetrics.nodeId], references: [nodes.id] }),

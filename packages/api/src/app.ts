@@ -49,11 +49,13 @@ export const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app }
 // Security headers
 app.use('*', securityHeaders);
 
-// CORS
+// CORS — in production, CORS_ORIGIN or APP_URL must be explicitly set
+const corsOrigin = process.env['CORS_ORIGIN'] || process.env['APP_URL'];
+if (process.env['NODE_ENV'] === 'production' && !corsOrigin) {
+  throw new Error('CORS_ORIGIN or APP_URL must be set in production');
+}
 app.use('*', cors({
-  origin: process.env['CORS_ORIGIN'] || (process.env['NODE_ENV'] === 'production'
-    ? (process.env['APP_URL'] || 'http://localhost:3000')
-    : '*'),
+  origin: corsOrigin || '*',
   credentials: true,
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Account-Id', 'X-API-Key'],
@@ -122,9 +124,16 @@ app.get('/health', (c) => {
 });
 
 // ── Helper: verify JWT from WebSocket query param ──
+// NOTE: WebSocket connections require token in query params due to browser WS API limitations.
+// Tokens are short-lived (15m access tokens) to mitigate query param logging risks.
 async function verifyWsToken(token: string) {
   const jwtSecret = process.env['JWT_SECRET'];
   if (!jwtSecret) throw new Error('JWT_SECRET not set');
+
+  // Basic JWT structure validation before cryptographic verification
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('Invalid token format');
+
   const secret = new TextEncoder().encode(jwtSecret);
   const { payload } = await jwtVerify(token, secret);
   return payload as { userId: string; email: string; isSuper: boolean };

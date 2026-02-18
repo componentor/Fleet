@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { users } from './users';
@@ -17,7 +18,9 @@ export const sshKeys = sqliteTable('ssh_keys', {
   publicKey: text('public_key').notNull(),
   fingerprint: text('fingerprint').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_ssh_keys_user_id').on(table.userId),
+]);
 
 export const sshAccessRules = sqliteTable('ssh_access_rules', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -28,7 +31,9 @@ export const sshAccessRules = sqliteTable('ssh_access_rules', {
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_ssh_access_rules_service_id').on(table.serviceId),
+]);
 
 export const sshKeysRelations = relations(sshKeys, ({ one }) => ({
   user: one(users, {

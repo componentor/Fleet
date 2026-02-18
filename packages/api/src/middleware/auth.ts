@@ -95,7 +95,8 @@ export const authMiddleware = createMiddleware<{
 export function requireScope(scope: string) {
   return async (c: any, next: () => Promise<void>) => {
     const scopes = c.get('apiKeyScopes' as never) as string[] | undefined;
-    // If not using API key (using JWT), allow all
+    // JWT-authenticated users get full access (scopes are an API key concept)
+    // but we still check if the user has the 'write' scope implicitly through RBAC
     if (!scopes) return next();
     // Check if scopes include the required scope or '*' or 'admin'
     if (scopes.includes('*') || scopes.includes('admin') || scopes.includes(scope)) {

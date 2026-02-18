@@ -6,6 +6,7 @@ import {
   boolean,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 import { users } from './users';
@@ -20,7 +21,9 @@ export const sshKeys = mysqlTable('ssh_keys', {
   publicKey: text('public_key').notNull(),
   fingerprint: varchar('fingerprint', { length: 255 }).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_ssh_keys_user_id').on(table.userId),
+]);
 
 export const sshAccessRules = mysqlTable('ssh_access_rules', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -31,7 +34,9 @@ export const sshAccessRules = mysqlTable('ssh_access_rules', {
   enabled: boolean('enabled').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_ssh_access_rules_service_id').on(table.serviceId),
+]);
 
 export const sshKeysRelations = relations(sshKeys, ({ one }) => ({
   user: one(users, {

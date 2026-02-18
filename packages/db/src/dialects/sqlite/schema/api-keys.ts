@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -14,12 +15,14 @@ export const apiKeys = sqliteTable('api_keys', {
   createdBy: text('created_by').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
   keyPrefix: text('key_prefix').notNull(),
-  keyHash: text('key_hash').notNull(),
+  keyHash: text('key_hash').notNull().unique(),
   scopes: text('scopes', { mode: 'json' }).$default(() => ['*']),
   lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
   expiresAt: integer('expires_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_api_keys_account_id').on(table.accountId),
+]);
 
 export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
   account: one(accounts, { fields: [apiKeys.accountId], references: [accounts.id] }),

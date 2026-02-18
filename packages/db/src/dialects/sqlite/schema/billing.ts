@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -44,9 +45,13 @@ export const subscriptions = sqliteTable('subscriptions', {
   currentPeriodStart: integer('current_period_start', { mode: 'timestamp' }),
   currentPeriodEnd: integer('current_period_end', { mode: 'timestamp' }),
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }),
+  pastDueSince: integer('past_due_since', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_subscriptions_account_id').on(table.accountId),
+  index('idx_subscriptions_status').on(table.status),
+]);
 
 export const usageRecords = sqliteTable('usage_records', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -61,7 +66,9 @@ export const usageRecords = sqliteTable('usage_records', {
   storageGb: integer('storage_gb').default(0),
   bandwidthGb: integer('bandwidth_gb').default(0),
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_usage_records_account_id').on(table.accountId),
+]);
 
 export const pricingConfig = sqliteTable('pricing_config', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -106,7 +113,9 @@ export const resourceLimits = sqliteTable('resource_limits', {
   maxBandwidthGb: integer('max_bandwidth_gb'),
   maxNfsStorageGb: integer('max_nfs_storage_gb'),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_resource_limits_account_id').on(table.accountId),
+]);
 
 // Per-account billing overrides (discounts, custom pricing, plan overrides)
 export const accountBillingOverrides = sqliteTable('account_billing_overrides', {

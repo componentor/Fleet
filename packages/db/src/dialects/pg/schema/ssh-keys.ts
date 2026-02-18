@@ -6,6 +6,7 @@ import {
   boolean,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { users } from './users';
@@ -20,7 +21,9 @@ export const sshKeys = pgTable('ssh_keys', {
   publicKey: text('public_key').notNull(),
   fingerprint: varchar('fingerprint').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_ssh_keys_user_id').on(table.userId),
+]);
 
 export const sshAccessRules = pgTable('ssh_access_rules', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -31,7 +34,9 @@ export const sshAccessRules = pgTable('ssh_access_rules', {
   enabled: boolean('enabled').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_ssh_access_rules_service_id').on(table.serviceId),
+]);
 
 export const sshKeysRelations = relations(sshKeys, ({ one }) => ({
   user: one(users, {

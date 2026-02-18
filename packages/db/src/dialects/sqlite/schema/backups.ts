@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -22,7 +23,10 @@ export const backups = sqliteTable('backups', {
   contents: text('contents', { mode: 'json' }).$default(() => ([])),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   expiresAt: integer('expires_at', { mode: 'timestamp' }),
-});
+}, (table) => [
+  index('idx_backups_account_id').on(table.accountId),
+  index('idx_backups_service_id').on(table.serviceId),
+]);
 
 export const backupSchedules = sqliteTable('backup_schedules', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -38,7 +42,9 @@ export const backupSchedules = sqliteTable('backup_schedules', {
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
-});
+}, (table) => [
+  index('idx_backup_schedules_service_id').on(table.serviceId),
+]);
 
 export const backupsRelations = relations(backups, ({ one }) => ({
   account: one(accounts, {

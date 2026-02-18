@@ -244,6 +244,11 @@ authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, a
     return c.json({ error: 'Service has no GitHub repository configured' }, 400);
   }
 
+  // Prevent duplicate deployments
+  if (svc.status === 'deploying') {
+    return c.json({ error: 'Service is already deploying. Wait for the current deployment to finish.' }, 409);
+  }
+
   // Create deployment record
   const [deployment] = await insertReturning(deployments, {
     serviceId: svc.id,
@@ -269,7 +274,7 @@ authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, a
     commitSha: null,
   });
 
-  return c.json({ message: 'Deployment triggered', deploymentId: deployment.id }, 201);
+  return c.json({ message: 'Deployment triggered', deploymentId: deployment.id }, 202);
 });
 
 // POST /:id/rollback — rollback to a previous deployment

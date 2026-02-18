@@ -23,6 +23,7 @@ export const notifications = pgTable('notifications', {
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
   index('idx_notifications_account_id').on(table.accountId),
+  index('idx_notifications_user_id').on(table.userId),
 ]);
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({

@@ -18,7 +18,12 @@ function getKey(): Buffer | null {
  */
 export function encrypt(plaintext: string): string {
   const key = getKey();
-  if (!key) return plaintext;
+  if (!key) {
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new Error('ENCRYPTION_KEY is required in production — cannot store sensitive data in plaintext');
+    }
+    return plaintext;
+  }
 
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, key, iv);
@@ -35,7 +40,12 @@ export function encrypt(plaintext: string): string {
  */
 export function decrypt(encrypted: string): string {
   const key = getKey();
-  if (!key) return encrypted;
+  if (!key) {
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new Error('ENCRYPTION_KEY is required in production — cannot decrypt sensitive data');
+    }
+    return encrypted;
+  }
 
   const parts = encrypted.split(':');
   if (parts.length !== 3) return encrypted;

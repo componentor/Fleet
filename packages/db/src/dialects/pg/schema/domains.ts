@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -21,7 +22,9 @@ export const dnsZones = pgTable('dns_zones', {
   nameservers: jsonb('nameservers').default([]),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_dns_zones_account_id').on(table.accountId),
+]);
 
 export const dnsRecords = pgTable('dns_records', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -35,7 +38,9 @@ export const dnsRecords = pgTable('dns_records', {
   priority: integer('priority'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_dns_records_zone_id').on(table.zoneId),
+]);
 
 export const domainRegistrars = pgTable('domain_registrars', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -66,7 +71,10 @@ export const domainRegistrations = pgTable('domain_registrations', {
   registrarDomainId: varchar('registrar_domain_id'),
   stripePaymentId: varchar('stripe_payment_id'),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_domain_registrations_account_id').on(table.accountId),
+  index('idx_domain_registrations_registrar_id').on(table.registrarId),
+]);
 
 export const domainTldPricing = pgTable('domain_tld_pricing', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
