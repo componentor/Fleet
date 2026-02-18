@@ -42,11 +42,11 @@ const { user, isSuper, logout } = useAuth()
 const { currentAccount, accounts, switchAccount } = useAccount()
 const { canAdmin, canOwner } = useRole()
 
-const isImpersonating = computed(() => !!localStorage.getItem('fleet_impersonating'))
+const isImpersonating = computed(() => !!sessionStorage.getItem('fleet_impersonating'))
 
 function stopImpersonating() {
-  const originalToken = localStorage.getItem('fleet_original_token')
-  const originalAccountId = localStorage.getItem('fleet_original_account_id')
+  const originalToken = sessionStorage.getItem('fleet_original_token')
+  const originalAccountId = sessionStorage.getItem('fleet_original_account_id')
   if (originalToken) {
     // Restore original access token in-memory via auth store
     const authStore = useAuthStore()
@@ -54,9 +54,9 @@ function stopImpersonating() {
   }
   if (originalAccountId) localStorage.setItem('fleet_account_id', originalAccountId)
   else localStorage.removeItem('fleet_account_id')
-  localStorage.removeItem('fleet_original_token')
-  localStorage.removeItem('fleet_original_account_id')
-  localStorage.removeItem('fleet_impersonating')
+  sessionStorage.removeItem('fleet_original_token')
+  sessionStorage.removeItem('fleet_original_account_id')
+  sessionStorage.removeItem('fleet_impersonating')
   window.location.href = '/admin/accounts'
 }
 

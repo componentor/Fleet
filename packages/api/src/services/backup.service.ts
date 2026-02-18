@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
 import { getBackupQueue, isQueueAvailable } from './queue.service.js';
@@ -301,12 +301,27 @@ export class BackupService {
 
     try {
       // Restore volume data
+      const storagePath = backup.storagePath;
       for (const item of backupContents) {
         if (item.type === 'volume') {
           // Extract volume name from the content entry
           const volumeName = item.name.includes('/')
             ? item.name.split('/').pop()!
             : item.name;
+
+          // Validate volume name — must be a safe Docker named volume
+          if (!volumeName || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(volumeName) || volumeName.includes('..')) {
+            logger.error({ volumeName, item }, 'Skipping restore: invalid volume name');
+            continue;
+          }
+
+          // Validate item.path is within the backup storage directory
+          const resolvedItemPath = resolve(item.path);
+          const safeDirPrefix = storagePath.endsWith('/') ? storagePath : storagePath + '/';
+          if (resolvedItemPath !== storagePath && !resolvedItemPath.startsWith(safeDirPrefix)) {
+            logger.error({ itemPath: item.path, storagePath }, 'Skipping restore: path outside backup directory');
+            continue;
+          }
 
           try {
             await this.exec('docker', [
@@ -315,7 +330,7 @@ export class BackupService {
               '-v',
               `${volumeName}:/target`,
               '-v',
-              `${item.path}:/backup/archive.tar.gz:ro`,
+              `${resolvedItemPath}:/backup/archive.tar.gz:ro`,
               'alpine',
               'sh',
               '-c',
@@ -337,7 +352,7 @@ export class BackupService {
     } catch (err) {
       await db
         .update(backups)
-        .set({ status: 'completed' })
+        .set({ status: 'failed' })
         .where(eq(backups.id, backupId));
       throw err;
     }

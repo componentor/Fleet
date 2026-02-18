@@ -39,6 +39,8 @@ export const authMiddleware = createMiddleware<{
         if (blocked) {
           return c.json({ error: 'Token has been revoked' }, 401);
         }
+      } else if (process.env['NODE_ENV'] === 'production') {
+        return c.json({ error: 'Service temporarily unavailable' }, 503);
       }
 
       c.set('user', {

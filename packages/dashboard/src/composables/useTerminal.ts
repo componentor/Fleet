@@ -17,6 +17,9 @@ export function useTerminal() {
   let reconnectAttempts = 0
   let currentServiceId: string | null = null
   let intentionalClose = false
+  let resizeObserver: ResizeObserver | null = null
+  let dataDisposable: { dispose(): void } | null = null
+  let resizeDisposable: { dispose(): void } | null = null
 
   const MAX_RECONNECT_ATTEMPTS = 5
   const BASE_DELAY_MS = 1000
@@ -41,12 +44,25 @@ export function useTerminal() {
     terminal.open(container)
     fitAddon.fit()
 
-    const resizeObserver = new ResizeObserver(() => {
+    resizeObserver = new ResizeObserver(() => {
       fitAddon?.fit()
     })
     resizeObserver.observe(container)
 
-    return { terminal, fitAddon, resizeObserver }
+    // Register input/resize handlers once (not per-connection)
+    dataDisposable = terminal.onData((data) => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data }))
+      }
+    })
+
+    resizeDisposable = terminal.onResize(({ cols, rows }) => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      }
+    })
+
+    return { terminal, fitAddon }
   }
 
   function connect(serviceId: string) {
@@ -118,17 +134,6 @@ export function useTerminal() {
       }
     }
 
-    terminal.onData((data) => {
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'input', data }))
-      }
-    })
-
-    terminal.onResize(({ cols, rows }) => {
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
-    })
   }
 
   function disconnect() {
@@ -145,6 +150,12 @@ export function useTerminal() {
 
   function dispose() {
     disconnect()
+    dataDisposable?.dispose()
+    dataDisposable = null
+    resizeDisposable?.dispose()
+    resizeDisposable = null
+    resizeObserver?.disconnect()
+    resizeObserver = null
     terminal?.dispose()
     terminal = null
     fitAddon = null

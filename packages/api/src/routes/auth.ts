@@ -698,6 +698,7 @@ auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => 
 
   // Verify TOTP code or backup code
   let verified = false;
+  let usedBackupCodeIndex = -1;
   if (user.twoFactorSecret) {
     const secretBase32 = decrypt(user.twoFactorSecret);
     const totp = new OTPAuth.TOTP({
@@ -720,6 +721,7 @@ auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => 
       try {
         if (await verify(backupCodes[i]!, code)) {
           verified = true;
+          usedBackupCodeIndex = i;
           break;
         }
       } catch {
@@ -732,12 +734,26 @@ auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => 
     return c.json({ error: 'Invalid verification code' }, 400);
   }
 
-  await db.update(users).set({
-    twoFactorEnabled: false,
-    twoFactorSecret: null,
-    twoFactorBackupCodes: null,
-    updatedAt: new Date(),
-  }).where(eq(users.id, user.id));
+  // Disable 2FA atomically — consume backup code if used, invalidate existing sessions
+  await safeTransaction(async (tx) => {
+    if (usedBackupCodeIndex >= 0) {
+      // Re-read to avoid stale data, then consume the backup code
+      const freshUser = await tx.query.users.findFirst({
+        where: eq(users.id, user.id),
+      });
+      const freshCodes = (freshUser?.twoFactorBackupCodes as string[] | null) ?? [];
+      if (usedBackupCodeIndex < freshCodes.length) {
+        freshCodes.splice(usedBackupCodeIndex, 1);
+      }
+    }
+    await tx.update(users).set({
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorBackupCodes: null,
+      securityChangedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(users.id, user.id));
+  });
 
   return c.json({ message: '2FA has been disabled' });
 });

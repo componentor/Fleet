@@ -66,9 +66,9 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     token.value = null
     localStorage.removeItem('fleet_user')
-    localStorage.removeItem('fleet_impersonating')
-    localStorage.removeItem('fleet_original_token')
-    localStorage.removeItem('fleet_original_account_id')
+    sessionStorage.removeItem('fleet_impersonating')
+    sessionStorage.removeItem('fleet_original_token')
+    sessionStorage.removeItem('fleet_original_account_id')
   }
 
   async function login(input: LoginInput) {

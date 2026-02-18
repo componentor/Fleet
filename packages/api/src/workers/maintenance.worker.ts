@@ -253,6 +253,7 @@ async function executeDatabaseBackup(): Promise<void> {
   /** Pipe a command's stdout through gzip into a file without using a shell. */
   function pipeToGzip(cmd: string, args: string[], outFile: string, timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
+      let rejected = false;
       const dump = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       const gzip = spawn('gzip', [], { stdio: ['pipe', 'pipe', 'pipe'] });
       const out = fsCreateWriteStream(outFile);
@@ -260,14 +261,24 @@ async function executeDatabaseBackup(): Promise<void> {
       dump.stdout.pipe(gzip.stdin);
       gzip.stdout.pipe(out);
 
+      const STDERR_MAX = 64 * 1024;
       let stderrData = '';
-      dump.stderr.on('data', (d: Buffer) => { stderrData += d.toString(); });
-      gzip.stderr.on('data', (d: Buffer) => { stderrData += d.toString(); });
+      dump.stderr.on('data', (d: Buffer) => { if (stderrData.length < STDERR_MAX) stderrData += d.toString(); });
+      gzip.stderr.on('data', (d: Buffer) => { if (stderrData.length < STDERR_MAX) stderrData += d.toString(); });
+
+      function rejectAndCleanup(err: Error) {
+        if (rejected) return;
+        rejected = true;
+        clearTimeout(timer);
+        out.destroy();
+        import('node:fs').then(fs => fs.unlink(outFile, () => {}));
+        reject(err);
+      }
 
       const timer = setTimeout(() => {
         dump.kill('SIGKILL');
         gzip.kill('SIGKILL');
-        reject(new Error(`Backup timed out after ${timeoutMs}ms`));
+        rejectAndCleanup(new Error(`Backup timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
       let finished = 0;
@@ -283,24 +294,22 @@ async function executeDatabaseBackup(): Promise<void> {
       out.on('finish', checkDone);
       dump.on('close', (code) => {
         if (code !== 0) {
-          clearTimeout(timer);
-          reject(new Error(`${cmd} exited with code ${code}: ${stderrData}`));
+          rejectAndCleanup(new Error(`${cmd} exited with code ${code}: ${stderrData}`));
         } else {
           checkDone();
         }
       });
       gzip.on('close', (code) => {
         if (code !== 0) {
-          clearTimeout(timer);
-          reject(new Error(`gzip exited with code ${code}: ${stderrData}`));
+          rejectAndCleanup(new Error(`gzip exited with code ${code}: ${stderrData}`));
         } else {
           checkDone();
         }
       });
 
-      dump.on('error', (err) => { clearTimeout(timer); reject(err); });
-      gzip.on('error', (err) => { clearTimeout(timer); reject(err); });
-      out.on('error', (err) => { clearTimeout(timer); reject(err); });
+      dump.on('error', (err) => rejectAndCleanup(err));
+      gzip.on('error', (err) => rejectAndCleanup(err));
+      out.on('error', (err) => rejectAndCleanup(err));
     });
   }
 
