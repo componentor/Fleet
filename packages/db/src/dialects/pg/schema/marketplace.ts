@@ -20,7 +20,7 @@ export const appTemplates = pgTable('app_templates', {
   composeTemplate: text('compose_template').notNull(),
   variables: jsonb('variables').default([]),
   isBuiltin: boolean('is_builtin').default(false),
-  accountId: uuid('account_id').references(() => accounts.id),
+  accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

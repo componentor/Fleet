@@ -6,11 +6,15 @@ import FileExplorer from '@/components/FileExplorer.vue'
 import { useApi, ApiError } from '@/composables/useApi'
 import { useLogStream } from '@/composables/useLogStream'
 import { useTerminal } from '@/composables/useTerminal'
+import { useToast } from '@/composables/useToast'
+import { useI18n } from 'vue-i18n'
 import '@xterm/xterm/css/xterm.css'
 
 const route = useRoute()
 const router = useRouter()
 const api = useApi()
+const toast = useToast()
+const { t } = useI18n()
 const serviceId = route.params.id as string
 const logStream = useLogStream()
 
@@ -121,7 +125,7 @@ async function stopService() {
     await api.post(`/services/${serviceId}/stop`, {})
     await fetchService()
   } catch {
-    // ignore
+    toast.error(t('service.stopFailed', 'Failed to stop service'))
   } finally {
     actionLoading.value = ''
   }
@@ -133,7 +137,7 @@ async function startService() {
     await api.post(`/services/${serviceId}/start`, {})
     await fetchService()
   } catch {
-    // ignore
+    toast.error(t('service.startFailed', 'Failed to start service'))
   } finally {
     actionLoading.value = ''
   }
@@ -145,7 +149,7 @@ async function restartService() {
     await api.post(`/services/${serviceId}/restart`, {})
     await fetchService()
   } catch {
-    // ignore
+    toast.error(t('service.restartFailed', 'Failed to restart service'))
   } finally {
     actionLoading.value = ''
   }
@@ -157,7 +161,7 @@ async function redeployService() {
     await api.post(`/services/${serviceId}/redeploy`, {})
     await fetchService()
   } catch {
-    // ignore
+    toast.error(t('service.redeployFailed', 'Failed to redeploy service'))
   } finally {
     actionLoading.value = ''
   }
@@ -170,7 +174,7 @@ async function deleteService() {
     await api.del(`/services/${serviceId}`)
     router.push('/panel/services')
   } catch {
-    // ignore
+    toast.error(t('service.deleteFailed', 'Failed to delete service'))
   } finally {
     actionLoading.value = ''
   }
@@ -186,7 +190,7 @@ async function saveSettings() {
     await api.patch(`/services/${serviceId}`, { env: envObj })
     await fetchService()
   } catch {
-    // ignore
+    toast.error(t('service.saveSettingsFailed', 'Failed to save settings'))
   } finally {
     settingsLoading.value = false
   }

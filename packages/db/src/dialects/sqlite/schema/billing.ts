@@ -34,7 +34,7 @@ export const subscriptions = sqliteTable('subscriptions', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   planId: text('plan_id')
-    .references(() => billingPlans.id),
+    .references(() => billingPlans.id, { onDelete: 'set null' }),
   billingModel: text('billing_model').default('fixed'),
   stripeSubscriptionId: text('stripe_subscription_id').unique(),
   stripeCustomerId: text('stripe_customer_id'),
@@ -51,7 +51,7 @@ export const subscriptions = sqliteTable('subscriptions', {
 export const usageRecords = sqliteTable('usage_records', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   periodStart: integer('period_start', { mode: 'timestamp' }),
   periodEnd: integer('period_end', { mode: 'timestamp' }),
@@ -97,7 +97,7 @@ export const billingConfig = sqliteTable('billing_config', {
 // Global resource limits (account_id NULL = global default, set = per-account override)
 export const resourceLimits = sqliteTable('resource_limits', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: text('account_id').references(() => accounts.id),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'cascade' }),
   maxCpuPerContainer: integer('max_cpu_per_container'), // millicores
   maxMemoryPerContainer: integer('max_memory_per_container'), // MB
   maxReplicas: integer('max_replicas'),
@@ -112,7 +112,7 @@ export const resourceLimits = sqliteTable('resource_limits', {
 export const accountBillingOverrides = sqliteTable('account_billing_overrides', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull()
     .unique(),
   discountPercent: integer('discount_percent').default(0), // global discount %

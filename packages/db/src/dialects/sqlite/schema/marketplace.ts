@@ -17,7 +17,7 @@ export const appTemplates = sqliteTable('app_templates', {
   composeTemplate: text('compose_template').notNull(),
   variables: text('variables', { mode: 'json' }).$default(() => ([])),
   isBuiltin: integer('is_builtin', { mode: 'boolean' }).default(false),
-  accountId: text('account_id').references(() => accounts.id),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'set null' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });

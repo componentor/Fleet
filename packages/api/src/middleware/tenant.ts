@@ -63,6 +63,11 @@ export const tenantMiddleware = createMiddleware<{
     return;
   }
 
+  // Block non-read operations on suspended accounts
+  if (accountCtx.status === 'suspended' && c.req.method !== 'GET') {
+    return c.json({ error: 'Account is suspended. Please resolve your billing to continue.' }, 403);
+  }
+
   // Check if user has direct access to this account
   const directAccess = await db.query.userAccounts.findFirst({
     where: (ua, { and, eq: e }) =>

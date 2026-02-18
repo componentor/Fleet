@@ -6,6 +6,7 @@ import { githubService } from '../services/github.service.js';
 import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { requireActiveSubscription } from '../middleware/subscription.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { DeploymentJobData } from '../workers/deployment.worker.js';
 import { logger } from '../services/logger.js';
@@ -216,7 +217,7 @@ authenticatedRoutes.get('/:id', async (c) => {
 });
 
 // POST /trigger — manually trigger a deployment for a service
-authenticatedRoutes.post('/trigger', requireMember, async (c) => {
+authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
 

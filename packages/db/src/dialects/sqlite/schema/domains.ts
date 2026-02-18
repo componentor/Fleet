@@ -11,7 +11,7 @@ import { users } from './users';
 export const dnsZones = sqliteTable('dns_zones', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   domain: text('domain').notNull(),
   verified: integer('verified', { mode: 'boolean' }).default(false),
@@ -23,7 +23,7 @@ export const dnsZones = sqliteTable('dns_zones', {
 export const dnsRecords = sqliteTable('dns_records', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   zoneId: text('zone_id')
-    .references(() => dnsZones.id)
+    .references(() => dnsZones.id, { onDelete: 'cascade' })
     .notNull(),
   type: text('type').notNull(),
   name: text('name').notNull(),
@@ -42,7 +42,7 @@ export const domainRegistrars = sqliteTable('domain_registrars', {
   config: text('config', { mode: 'json' }).$default(() => ({})),
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   createdBy: text('created_by')
-    .references(() => users.id)
+    .references(() => users.id, { onDelete: 'set null' })
     .notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
@@ -50,10 +50,10 @@ export const domainRegistrars = sqliteTable('domain_registrars', {
 export const domainRegistrations = sqliteTable('domain_registrations', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   registrarId: text('registrar_id')
-    .references(() => domainRegistrars.id)
+    .references(() => domainRegistrars.id, { onDelete: 'set null' })
     .notNull(),
   domain: text('domain').notNull(),
   status: text('status').default('pending'),

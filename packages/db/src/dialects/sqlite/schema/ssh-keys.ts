@@ -11,7 +11,7 @@ import { services } from './services';
 export const sshKeys = sqliteTable('ssh_keys', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: text('user_id')
-    .references(() => users.id)
+    .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
   name: text('name').notNull(),
   publicKey: text('public_key').notNull(),
@@ -22,7 +22,7 @@ export const sshKeys = sqliteTable('ssh_keys', {
 export const sshAccessRules = sqliteTable('ssh_access_rules', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   serviceId: text('service_id')
-    .references(() => services.id)
+    .references(() => services.id, { onDelete: 'cascade' })
     .notNull(),
   allowedIps: text('allowed_ips', { mode: 'json' }).$default(() => ([])),
   enabled: integer('enabled', { mode: 'boolean' }).default(true),

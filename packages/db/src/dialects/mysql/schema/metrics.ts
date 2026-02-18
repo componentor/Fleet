@@ -11,7 +11,7 @@ import { nodes } from './nodes';
 
 export const nodeMetrics = mysqlTable('node_metrics', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  nodeId: varchar('node_id', { length: 36 }).references(() => nodes.id).notNull(),
+  nodeId: varchar('node_id', { length: 36 }).references(() => nodes.id, { onDelete: 'cascade' }).notNull(),
   hostname: varchar('hostname', { length: 255 }).notNull(),
   cpuCount: int('cpu_count').notNull(),
   memTotal: bigint('mem_total', { mode: 'number' }).notNull(),

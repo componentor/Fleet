@@ -4,6 +4,7 @@ import { db, services, deployments, insertReturning, eq, and, isNull } from '@fl
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
+import { requireActiveSubscription } from '../middleware/subscription.js';
 import { dockerService } from '../services/docker.service.js';
 import { uploadService } from '../services/upload.service.js';
 import { logger } from '../services/logger.js';
@@ -46,7 +47,7 @@ function buildTraefikLabels(
 }
 
 // POST /deploy — upload and deploy a new service
-uploadRoutes.post('/deploy', requireMember, requireScope('write'), async (c) => {
+uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 

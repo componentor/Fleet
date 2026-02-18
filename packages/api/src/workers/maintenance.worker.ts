@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, eq, and, lt, like, isNull, isNotNull, safeTransaction } from '@fleet/db';
+import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, subscriptions, eq, and, lt, like, isNull, isNotNull, safeTransaction } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -31,13 +31,18 @@ interface AccountDeletionData {
   type: 'account-deletion';
 }
 
+interface BillingGraceCheckData {
+  type: 'billing-grace-check';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
   | BackupScheduleData
   | UsageCollectionData
   | StripeUsageReportData
-  | AccountDeletionData;
+  | AccountDeletionData
+  | BillingGraceCheckData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -195,6 +200,39 @@ async function executeScheduledDeletions(): Promise<void> {
   }
 }
 
+async function enforceBillingGracePeriod(): Promise<void> {
+  const GRACE_DAYS = 7;
+  const graceCutoff = new Date(Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000);
+
+  // Find subscriptions that have been past_due for longer than the grace period
+  const overdueSubscriptions = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.status, 'past_due'),
+    ),
+  });
+
+  for (const sub of overdueSubscriptions) {
+    // Check if the subscription has been past_due since before the grace cutoff
+    // Use updatedAt as proxy for when it became past_due
+    const updatedAt = sub.updatedAt ? new Date(sub.updatedAt) : null;
+    if (!updatedAt || updatedAt > graceCutoff) continue;
+
+    // Suspend the account
+    try {
+      await db.update(accounts).set({
+        status: 'suspended',
+        updatedAt: new Date(),
+      }).where(eq(accounts.id, sub.accountId));
+
+      logger.info({ accountId: sub.accountId, subscriptionId: sub.id },
+        'Account suspended due to billing grace period expiry');
+    } catch (err) {
+      logger.error({ err, accountId: sub.accountId },
+        'Failed to suspend account for billing grace period');
+    }
+  }
+}
+
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
   switch (job.name) {
     case 'health-check':
@@ -214,6 +252,9 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'account-deletion':
       await executeScheduledDeletions();
+      break;
+    case 'billing-grace-check':
+      await enforceBillingGracePeriod();
       break;
   }
 }

@@ -9,7 +9,7 @@ import { nodes } from './nodes';
 
 export const nodeMetrics = sqliteTable('node_metrics', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  nodeId: text('node_id').references(() => nodes.id).notNull(),
+  nodeId: text('node_id').references(() => nodes.id, { onDelete: 'cascade' }).notNull(),
   hostname: text('hostname').notNull(),
   cpuCount: integer('cpu_count').notNull(),
   memTotal: integer('mem_total').notNull(),

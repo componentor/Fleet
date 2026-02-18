@@ -14,7 +14,7 @@ import { users } from './users';
 export const dnsZones = mysqlTable('dns_zones', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   domain: varchar('domain', { length: 255 }).notNull(),
   verified: boolean('verified').default(false),
@@ -26,7 +26,7 @@ export const dnsZones = mysqlTable('dns_zones', {
 export const dnsRecords = mysqlTable('dns_records', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   zoneId: varchar('zone_id', { length: 36 })
-    .references(() => dnsZones.id)
+    .references(() => dnsZones.id, { onDelete: 'cascade' })
     .notNull(),
   type: varchar('type', { length: 255 }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -45,7 +45,7 @@ export const domainRegistrars = mysqlTable('domain_registrars', {
   config: json('config').$default(() => ({})),
   enabled: boolean('enabled').default(true),
   createdBy: varchar('created_by', { length: 36 })
-    .references(() => users.id)
+    .references(() => users.id, { onDelete: 'set null' })
     .notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -53,10 +53,10 @@ export const domainRegistrars = mysqlTable('domain_registrars', {
 export const domainRegistrations = mysqlTable('domain_registrations', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   registrarId: varchar('registrar_id', { length: 36 })
-    .references(() => domainRegistrars.id)
+    .references(() => domainRegistrars.id, { onDelete: 'set null' })
     .notNull(),
   domain: varchar('domain', { length: 255 }).notNull(),
   status: varchar('status', { length: 255 }).default('pending'),

@@ -14,7 +14,7 @@ import { users } from './users';
 export const dnsZones = pgTable('dns_zones', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   domain: varchar('domain', { length: 255 }).notNull(),
   verified: boolean('verified').default(false),
@@ -26,7 +26,7 @@ export const dnsZones = pgTable('dns_zones', {
 export const dnsRecords = pgTable('dns_records', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   zoneId: uuid('zone_id')
-    .references(() => dnsZones.id)
+    .references(() => dnsZones.id, { onDelete: 'cascade' })
     .notNull(),
   type: varchar('type').notNull(),
   name: varchar('name').notNull(),
@@ -45,7 +45,7 @@ export const domainRegistrars = pgTable('domain_registrars', {
   config: jsonb('config').default({}),
   enabled: boolean('enabled').default(true),
   createdBy: uuid('created_by')
-    .references(() => users.id)
+    .references(() => users.id, { onDelete: 'set null' })
     .notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -53,10 +53,10 @@ export const domainRegistrars = pgTable('domain_registrars', {
 export const domainRegistrations = pgTable('domain_registrations', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   registrarId: uuid('registrar_id')
-    .references(() => domainRegistrars.id)
+    .references(() => domainRegistrars.id, { onDelete: 'set null' })
     .notNull(),
   domain: varchar('domain').notNull(),
   status: varchar('status').default('pending'),

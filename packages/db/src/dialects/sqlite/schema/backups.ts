@@ -11,9 +11,9 @@ import { services } from './services';
 export const backups = sqliteTable('backups', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  serviceId: text('service_id').references(() => services.id),
+  serviceId: text('service_id').references(() => services.id, { onDelete: 'set null' }),
   type: text('type').default('manual'),
   status: text('status').default('pending'),
   storagePath: text('storage_path'),
@@ -27,9 +27,9 @@ export const backups = sqliteTable('backups', {
 export const backupSchedules = sqliteTable('backup_schedules', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: text('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  serviceId: text('service_id').references(() => services.id),
+  serviceId: text('service_id').references(() => services.id, { onDelete: 'set null' }),
   cron: text('cron').notNull(),
   retentionDays: integer('retention_days').default(30),
   retentionCount: integer('retention_count').default(10),

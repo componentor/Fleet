@@ -4,9 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { CreditCard, Box, HardDrive, Loader2, ExternalLink, Calendar, Gauge, Cpu, MemoryStick, Wifi, AlertTriangle, Trash2, Star, Plus } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
+import { useToast } from '@/composables/useToast'
 
 const { t } = useI18n()
 const api = useApi()
+const toast = useToast()
 const { canOwner: isOwner } = useRole()
 
 const loading = ref(true)
@@ -103,7 +105,7 @@ async function fetchAll() {
     selectedModel.value = configData.billingModel ?? 'fixed'
     if (plansData.length > 0) selectedPlan.value = plansData[0].id
   } catch {
-    // silently handle
+    toast.error(t('billing.loadFailed', 'Failed to load billing data'))
   } finally {
     loading.value = false
   }
@@ -124,7 +126,7 @@ async function checkout() {
     const res = await api.post<{ url: string }>('/billing/checkout', body)
     if (res.url) window.location.href = res.url
   } catch (err: any) {
-    alert(err?.body?.error || 'Checkout failed')
+    toast.error(err?.body?.error || t('billing.checkoutFailed', 'Checkout failed'))
   } finally {
     checkingOut.value = false
   }
@@ -136,7 +138,7 @@ async function cancelSubscription() {
     await api.del('/billing/subscription')
     await fetchAll()
   } catch (err: any) {
-    alert(err?.body?.error || 'Failed to cancel')
+    toast.error(err?.body?.error || t('billing.cancelFailed', 'Failed to cancel subscription'))
   }
 }
 
@@ -147,7 +149,7 @@ async function openPortal() {
     })
     if (res.url) window.location.href = res.url
   } catch {
-    alert('Failed to open billing portal')
+    toast.error(t('billing.portalFailed', 'Failed to open billing portal'))
   }
 }
 
@@ -160,7 +162,7 @@ async function setDefaultPaymentMethod(pmId: string) {
     await api.patch(`/billing/payment-methods/${pmId}/default`, {})
     defaultPaymentMethodId.value = pmId
   } catch {
-    alert(t('billing.setDefaultFailed'))
+    toast.error(t('billing.setDefaultFailed'))
   }
 }
 
@@ -171,7 +173,7 @@ async function removePaymentMethod(pmId: string) {
     paymentMethods.value = paymentMethods.value.filter(m => m.id !== pmId)
     if (defaultPaymentMethodId.value === pmId) defaultPaymentMethodId.value = null
   } catch {
-    alert(t('billing.removeMethodFailed'))
+    toast.error(t('billing.removeMethodFailed'))
   }
 }
 

@@ -6,6 +6,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
+import { requireActiveSubscription } from '../middleware/subscription.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
@@ -97,7 +98,7 @@ const createServiceSchema = z.object({
   sourcePath: z.string().nullable().optional(),
 });
 
-serviceRoutes.post('/', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) {

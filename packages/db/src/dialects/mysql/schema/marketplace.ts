@@ -19,7 +19,7 @@ export const appTemplates = mysqlTable('app_templates', {
   composeTemplate: text('compose_template').notNull(),
   variables: json('variables').$default(() => ([])),
   isBuiltin: boolean('is_builtin').default(false),
-  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });

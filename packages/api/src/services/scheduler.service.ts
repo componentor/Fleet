@@ -63,6 +63,16 @@ class SchedulerService {
       },
     );
 
+    // Billing grace period enforcement — daily at 5 AM UTC
+    await getMaintenanceQueue().add(
+      'billing-grace-check',
+      { type: 'billing-grace-check' },
+      {
+        repeat: { pattern: '0 5 * * *' },
+        jobId: 'system:billing-grace-check',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -73,7 +83,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 5 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 6 system jobs (BullMQ)`,
     );
   }
 

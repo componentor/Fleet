@@ -15,9 +15,9 @@ import { services } from './services';
 export const backups = pgTable('backups', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  serviceId: uuid('service_id').references(() => services.id),
+  serviceId: uuid('service_id').references(() => services.id, { onDelete: 'set null' }),
   type: varchar('type').default('manual'),
   status: varchar('status').default('pending'),
   storagePath: varchar('storage_path'),
@@ -31,9 +31,9 @@ export const backups = pgTable('backups', {
 export const backupSchedules = pgTable('backup_schedules', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  serviceId: uuid('service_id').references(() => services.id),
+  serviceId: uuid('service_id').references(() => services.id, { onDelete: 'set null' }),
   cron: varchar('cron').notNull(),
   retentionDays: integer('retention_days').default(30),
   retentionCount: integer('retention_count').default(10),

@@ -39,7 +39,7 @@ export const subscriptions = mysqlTable('subscriptions', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   planId: varchar('plan_id', { length: 36 })
-    .references(() => billingPlans.id),
+    .references(() => billingPlans.id, { onDelete: 'set null' }),
   billingModel: varchar('billing_model', { length: 255 }).default('fixed'),
   stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }).unique(),
   stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
@@ -56,7 +56,7 @@ export const subscriptions = mysqlTable('subscriptions', {
 export const usageRecords = mysqlTable('usage_records', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   periodStart: timestamp('period_start'),
   periodEnd: timestamp('period_end'),
@@ -101,7 +101,7 @@ export const billingConfig = mysqlTable('billing_config', {
 
 export const resourceLimits = mysqlTable('resource_limits', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'cascade' }),
   maxCpuPerContainer: int('max_cpu_per_container'),
   maxMemoryPerContainer: int('max_memory_per_container'),
   maxReplicas: int('max_replicas'),
@@ -115,7 +115,7 @@ export const resourceLimits = mysqlTable('resource_limits', {
 export const accountBillingOverrides = mysqlTable('account_billing_overrides', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull()
     .unique(),
   discountPercent: int('discount_percent').default(0),

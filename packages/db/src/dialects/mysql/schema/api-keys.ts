@@ -11,7 +11,7 @@ import { users } from './users';
 
 export const apiKeys = mysqlTable('api_keys', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id).notNull(),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   createdBy: varchar('created_by', { length: 36 }).references(() => users.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   keyPrefix: varchar('key_prefix', { length: 16 }).notNull(),

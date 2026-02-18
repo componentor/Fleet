@@ -11,7 +11,7 @@ import { nodes } from './nodes';
 
 export const nodeMetrics = pgTable('node_metrics', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  nodeId: uuid('node_id').references(() => nodes.id).notNull(),
+  nodeId: uuid('node_id').references(() => nodes.id, { onDelete: 'cascade' }).notNull(),
   hostname: varchar('hostname').notNull(),
   cpuCount: integer('cpu_count').notNull(),
   memTotal: bigint('mem_total', { mode: 'number' }).notNull(),

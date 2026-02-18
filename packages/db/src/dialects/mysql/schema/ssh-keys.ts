@@ -14,7 +14,7 @@ import { services } from './services';
 export const sshKeys = mysqlTable('ssh_keys', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: varchar('user_id', { length: 36 })
-    .references(() => users.id)
+    .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   publicKey: text('public_key').notNull(),
@@ -25,7 +25,7 @@ export const sshKeys = mysqlTable('ssh_keys', {
 export const sshAccessRules = mysqlTable('ssh_access_rules', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   serviceId: varchar('service_id', { length: 36 })
-    .references(() => services.id)
+    .references(() => services.id, { onDelete: 'cascade' })
     .notNull(),
   allowedIps: json('allowed_ips').$default(() => ([])),
   enabled: boolean('enabled').default(true),

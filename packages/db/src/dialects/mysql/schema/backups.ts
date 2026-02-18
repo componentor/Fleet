@@ -15,9 +15,9 @@ import { services } from './services';
 export const backups = mysqlTable('backups', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  serviceId: varchar('service_id', { length: 36 }).references(() => services.id),
+  serviceId: varchar('service_id', { length: 36 }).references(() => services.id, { onDelete: 'set null' }),
   type: varchar('type', { length: 255 }).default('manual'),
   status: varchar('status', { length: 255 }).default('pending'),
   storagePath: varchar('storage_path', { length: 255 }),
@@ -31,9 +31,9 @@ export const backups = mysqlTable('backups', {
 export const backupSchedules = mysqlTable('backup_schedules', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   accountId: varchar('account_id', { length: 36 })
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  serviceId: varchar('service_id', { length: 36 }).references(() => services.id),
+  serviceId: varchar('service_id', { length: 36 }).references(() => services.id, { onDelete: 'set null' }),
   cron: varchar('cron', { length: 255 }).notNull(),
   retentionDays: int('retention_days').default(30),
   retentionCount: int('retention_count').default(10),

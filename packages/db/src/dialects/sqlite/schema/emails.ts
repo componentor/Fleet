@@ -13,7 +13,7 @@ export const emailTemplates = sqliteTable('email_templates', {
   subject: text('subject').notNull(),
   bodyHtml: text('body_html').notNull(),
   variables: text('variables', { mode: 'json' }).$default(() => ([])),
-  accountId: text('account_id').references(() => accounts.id),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'set null' }),
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
@@ -23,7 +23,7 @@ export const emailLog = sqliteTable('email_log', {
   templateSlug: text('template_slug').notNull(),
   toEmail: text('to_email').notNull(),
   subject: text('subject').notNull(),
-  accountId: text('account_id').references(() => accounts.id),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'set null' }),
   status: text('status').default('queued'),
   sentAt: integer('sent_at', { mode: 'timestamp' }),
   error: text('error'),

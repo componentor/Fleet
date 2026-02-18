@@ -39,7 +39,7 @@ export const subscriptions = pgTable('subscriptions', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   planId: uuid('plan_id')
-    .references(() => billingPlans.id),
+    .references(() => billingPlans.id, { onDelete: 'set null' }),
   billingModel: varchar('billing_model').default('fixed'),
   stripeSubscriptionId: varchar('stripe_subscription_id').unique(),
   stripeCustomerId: varchar('stripe_customer_id'),
@@ -56,7 +56,7 @@ export const subscriptions = pgTable('subscriptions', {
 export const usageRecords = pgTable('usage_records', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   periodStart: timestamp('period_start'),
   periodEnd: timestamp('period_end'),
@@ -101,7 +101,7 @@ export const billingConfig = pgTable('billing_config', {
 
 export const resourceLimits = pgTable('resource_limits', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  accountId: uuid('account_id').references(() => accounts.id),
+  accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'cascade' }),
   maxCpuPerContainer: integer('max_cpu_per_container'),
   maxMemoryPerContainer: integer('max_memory_per_container'),
   maxReplicas: integer('max_replicas'),
@@ -115,7 +115,7 @@ export const resourceLimits = pgTable('resource_limits', {
 export const accountBillingOverrides = pgTable('account_billing_overrides', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   accountId: uuid('account_id')
-    .references(() => accounts.id)
+    .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull()
     .unique(),
   discountPercent: integer('discount_percent').default(0),
