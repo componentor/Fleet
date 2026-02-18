@@ -1008,6 +1008,7 @@ billing.post('/webhook', async (c) => {
     }
 
     default:
+      logger.info({ eventType: event.type }, 'Unhandled Stripe webhook event type');
       break;
   }
 

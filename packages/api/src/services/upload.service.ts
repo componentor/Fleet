@@ -401,6 +401,7 @@ export class UploadService {
    * Remove symlinks that point outside the base directory.
    */
   private async removeUnsafeSymlinks(dirPath: string): Promise<void> {
+    const safeDirPrefix = dirPath.endsWith('/') ? dirPath : dirPath + '/';
     const entries = await readdir(dirPath);
     for (const entry of entries) {
       const fullPath = join(dirPath, entry);
@@ -408,7 +409,8 @@ export class UploadService {
       if (st.isSymbolicLink()) {
         const target = await import('node:fs/promises').then(fs => fs.readlink(fullPath));
         const resolvedTarget = resolve(dirPath, target);
-        if (!resolvedTarget.startsWith(dirPath)) {
+        // Use trailing-slash prefix to prevent /srv/uploads-evil matching /srv/uploads
+        if (resolvedTarget !== dirPath && !resolvedTarget.startsWith(safeDirPrefix)) {
           await rm(fullPath);
         }
       } else if (st.isDirectory()) {

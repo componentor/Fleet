@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { resolve as dnsResolve } from 'node:dns/promises';
-import { db, dnsZones, dnsRecords, insertReturning, updateReturning, eq, and } from '@fleet/db';
+import { db, dnsZones, dnsRecords, insertReturning, updateReturning, safeTransaction, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dnsManager } from '../services/dns-provider-manager.js';
@@ -173,9 +173,11 @@ dnsRoutes.delete('/zones/:id', requireMember, async (c) => {
   // Remove from providers (best-effort)
   await dnsManager.deleteZone(zone.domain);
 
-  // Delete all records for this zone first, then the zone itself
-  await db.delete(dnsRecords).where(eq(dnsRecords.zoneId, zoneId));
-  await db.delete(dnsZones).where(eq(dnsZones.id, zoneId));
+  // Delete records and zone atomically
+  await safeTransaction(async (tx) => {
+    await tx.delete(dnsRecords).where(eq(dnsRecords.zoneId, zoneId));
+    await tx.delete(dnsZones).where(eq(dnsZones.id, zoneId));
+  });
 
   return c.json({ message: 'Zone deleted' });
 });

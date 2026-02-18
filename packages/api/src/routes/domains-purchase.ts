@@ -188,6 +188,12 @@ const registerDomainSchema = z.object({
 });
 
 domainPurchase.post('/register', requireAdmin, async (c) => {
+  const user = c.get('user');
+  // Direct registration bypasses Stripe — restrict to super admins only
+  if (!user.isSuper) {
+    return c.json({ error: 'Only platform administrators can register domains directly' }, 403);
+  }
+
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -306,6 +312,12 @@ const renewSchema = z.object({
 });
 
 domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
+  const user = c.get('user');
+  // Direct renewal bypasses Stripe — restrict to super admins only
+  if (!user.isSuper) {
+    return c.json({ error: 'Only platform administrators can renew domains directly' }, 403);
+  }
+
   const accountId = c.get('accountId');
   const registrationId = c.req.param('id');
 

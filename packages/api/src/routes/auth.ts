@@ -66,6 +66,8 @@ const resetPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, k
 const forgotPasswordRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'forgot-password' });
 const refreshRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'refresh' });
 const oauthRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'oauth' });
+const twoFactorSetupRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: '2fa-setup' });
+const resendVerificationRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 3, keyPrefix: 'resend-verify' });
 
 /** Queue an email via BullMQ if available, otherwise send directly (fire-and-forget). */
 async function queueEmail(data: EmailJobData): Promise<void> {
@@ -440,30 +442,38 @@ auth.post('/verify-email', verifyEmailRateLimit, async (c) => {
   }
 
   const hashed = hashToken(token);
-  const user = await db.query.users.findFirst({
-    where: and(eq(users.emailVerifyToken, hashed), isNull(users.deletedAt)),
+
+  // Use transaction to prevent TOCTOU race (same pattern as reset-password)
+  const result = await safeTransaction(async (tx) => {
+    const user = await tx.query.users.findFirst({
+      where: and(eq(users.emailVerifyToken, hashed), isNull(users.deletedAt)),
+    });
+
+    if (!user) return { error: 'Invalid or expired verification token' } as const;
+
+    if (user.emailVerifyExpires && new Date(user.emailVerifyExpires) < new Date()) {
+      return { error: 'Verification token has expired' } as const;
+    }
+
+    await tx.update(users).set({
+      emailVerified: true,
+      emailVerifyToken: null,
+      emailVerifyExpires: null,
+      updatedAt: new Date(),
+    }).where(eq(users.id, user.id));
+
+    return { success: true } as const;
   });
 
-  if (!user) {
-    return c.json({ error: 'Invalid or expired verification token' }, 400);
+  if ('error' in result) {
+    return c.json({ error: result.error }, 400);
   }
-
-  if (user.emailVerifyExpires && new Date(user.emailVerifyExpires) < new Date()) {
-    return c.json({ error: 'Verification token has expired' }, 400);
-  }
-
-  await db.update(users).set({
-    emailVerified: true,
-    emailVerifyToken: null,
-    emailVerifyExpires: null,
-    updatedAt: new Date(),
-  }).where(eq(users.id, user.id));
 
   return c.json({ message: 'Email verified successfully' });
 });
 
 // POST /resend-verification
-auth.post('/resend-verification', authMiddleware, async (c) => {
+auth.post('/resend-verification', resendVerificationRateLimit, authMiddleware, async (c) => {
   const authUser = c.get('user');
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
@@ -587,7 +597,7 @@ auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
 // --- Two-Factor Authentication (TOTP) ---
 
 // POST /2fa/setup — generate TOTP secret and QR code
-auth.post('/2fa/setup', authMiddleware, async (c) => {
+auth.post('/2fa/setup', twoFactorSetupRateLimit, authMiddleware, async (c) => {
   const authUser = c.get('user');
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
@@ -622,7 +632,7 @@ auth.post('/2fa/setup', authMiddleware, async (c) => {
 });
 
 // POST /2fa/enable — verify code and enable 2FA
-auth.post('/2fa/enable', authMiddleware, async (c) => {
+auth.post('/2fa/enable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
   const authUser = c.get('user');
   const body = await c.req.json();
   const code = body?.code;
@@ -670,7 +680,7 @@ auth.post('/2fa/enable', authMiddleware, async (c) => {
 });
 
 // POST /2fa/disable — disable 2FA
-auth.post('/2fa/disable', authMiddleware, async (c) => {
+auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
   const authUser = c.get('user');
   const body = await c.req.json();
   const code = body?.code;
@@ -778,20 +788,29 @@ auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
     verified = true;
   }
 
-  // Try backup codes
+  // Try backup codes (use transaction to prevent double-spend race condition)
   if (!verified) {
     const backupCodes = (user.twoFactorBackupCodes as string[] | null) ?? [];
     for (let i = 0; i < backupCodes.length; i++) {
       try {
         if (await verify(backupCodes[i]!, code)) {
           verified = true;
-          // Consume backup code
-          const remaining = [...backupCodes];
-          remaining.splice(i, 1);
-          await db.update(users).set({
-            twoFactorBackupCodes: remaining,
-            updatedAt: new Date(),
-          }).where(eq(users.id, user.id));
+          // Consume backup code atomically
+          await safeTransaction(async (tx) => {
+            const freshUser = await tx.query.users.findFirst({
+              where: eq(users.id, user.id),
+            });
+            const freshCodes = (freshUser?.twoFactorBackupCodes as string[] | null) ?? [];
+            const idx = freshCodes.indexOf(backupCodes[i]!);
+            if (idx !== -1) {
+              const remaining = [...freshCodes];
+              remaining.splice(idx, 1);
+              await tx.update(users).set({
+                twoFactorBackupCodes: remaining,
+                updatedAt: new Date(),
+              }).where(eq(users.id, user.id));
+            }
+          });
           break;
         }
       } catch {
@@ -1016,17 +1035,17 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
           });
         });
       } else {
-        // Verify the existing user's email is verified — block linking to unverified accounts
-        if (!user!.emailVerified) {
-          // Mark email as verified since OAuth provider confirmed same email
-          await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
-        }
-        // Link OAuth provider to existing user
-        await db.insert(oauthProviders).values({
-          userId: user!.id,
-          provider: 'github',
-          providerUserId,
-          accessToken: encrypt(tokenData.access_token),
+        // Atomically verify email and link OAuth provider
+        await safeTransaction(async (tx) => {
+          if (!user!.emailVerified) {
+            await tx.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
+          }
+          await tx.insert(oauthProviders).values({
+            userId: user!.id,
+            provider: 'github',
+            providerUserId,
+            accessToken: encrypt(tokenData.access_token),
+          });
         });
       }
 
@@ -1236,17 +1255,17 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
           });
         });
       } else {
-        // Verify the existing user's email is verified — block linking to unverified accounts
-        if (!user!.emailVerified) {
-          // Mark email as verified since OAuth provider confirmed same email
-          await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
-        }
-        // Link OAuth provider to existing user
-        await db.insert(oauthProviders).values({
-          userId: user!.id,
-          provider: 'google',
-          providerUserId,
-          accessToken: encrypt(tokenData.access_token),
+        // Atomically verify email and link OAuth provider
+        await safeTransaction(async (tx) => {
+          if (!user!.emailVerified) {
+            await tx.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
+          }
+          await tx.insert(oauthProviders).values({
+            userId: user!.id,
+            provider: 'google',
+            providerUserId,
+            accessToken: encrypt(tokenData.access_token),
+          });
         });
       }
 

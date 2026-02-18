@@ -19,8 +19,8 @@ errorRoutes.use('*', async (c, next) => {
 
 // GET / — paginated error list with filters
 errorRoutes.get('/', async (c) => {
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10), 100);
+  const page = Math.max(1, Math.min(parseInt(c.req.query('page') ?? '1', 10) || 1, 10000));
+  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '50', 10) || 50), 100);
   const offset = (page - 1) * limit;
   const level = c.req.query('level');
   const resolved = c.req.query('resolved');

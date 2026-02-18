@@ -7,7 +7,7 @@ const TAG_LENGTH = 16;
 
 function getKey(): Buffer | null {
   const hex = process.env['ENCRYPTION_KEY'];
-  if (!hex || hex.length !== 64) return null;
+  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)) return null;
   return Buffer.from(hex, 'hex');
 }
 

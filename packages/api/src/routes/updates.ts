@@ -58,7 +58,7 @@ updateRoutes.get('/check', async (c) => {
 
 // GET /releases — list available releases
 updateRoutes.get('/releases', async (c) => {
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '10', 10), 50);
+  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '10', 10) || 10), 50);
 
   try {
     const releases = await updateService.listReleases(limit);

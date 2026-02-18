@@ -300,7 +300,7 @@ adminNodeRoutes.post('/:id/activate', async (c) => {
 // GET /:id/metrics — query node metrics
 adminNodeRoutes.get('/:id/metrics', async (c) => {
   const nodeId = c.req.param('id');
-  const hours = Math.min(parseInt(c.req.query('hours') ?? '24', 10), 720);
+  const hours = Math.min(Math.max(1, parseInt(c.req.query('hours') ?? '24', 10) || 24), 720);
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
   const metrics = await db.query.nodeMetrics.findMany({

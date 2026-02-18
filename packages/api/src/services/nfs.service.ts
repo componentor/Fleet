@@ -1,10 +1,18 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile, writeFile } from 'node:fs/promises';
 
 const execFile = promisify(execFileCb);
 
 const NFS_BASE_PATH = process.env['NFS_BASE_PATH'] ?? '/srv/nfs';
 const NFS_EXPORTS_FILE = process.env['NFS_EXPORTS_FILE'] ?? '/etc/exports';
+
+/** Validate volume name to prevent path traversal and shell injection. */
+function validateVolumeName(name: string): void {
+  if (!name || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) || name.includes('..')) {
+    throw new Error('Invalid volume name');
+  }
+}
 
 export interface VolumeInfo {
   name: string;
@@ -25,6 +33,7 @@ export class NfsService {
     sizeGb: number,
     nodeId?: string,
   ): Promise<VolumeInfo> {
+    validateVolumeName(name);
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
     // Create the directory
@@ -36,12 +45,12 @@ export class NfsService {
     // Set permissions
     await execFile('chmod', ['0770', volumePath]);
 
-    // Add to NFS exports with rw access for the local network
+    // Add to NFS exports with rw access for the local network (no shell interpolation)
     const exportLine = `${volumePath} *(rw,sync,no_subtree_check,root_squash)`;
-    await execFile('bash', [
-      '-c',
-      `grep -qF '${volumePath}' ${NFS_EXPORTS_FILE} || echo '${exportLine}' >> ${NFS_EXPORTS_FILE}`,
-    ]);
+    const exportsContent = await readFile(NFS_EXPORTS_FILE, 'utf-8').catch(() => '');
+    if (!exportsContent.includes(volumePath)) {
+      await writeFile(NFS_EXPORTS_FILE, exportsContent.trimEnd() + '\n' + exportLine + '\n');
+    }
 
     // Re-export NFS shares
     await execFile('exportfs', ['-ra']);
@@ -60,13 +69,13 @@ export class NfsService {
    * Delete an NFS volume and remove its export entry.
    */
   async deleteVolume(name: string): Promise<void> {
+    validateVolumeName(name);
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
-    // Remove from NFS exports
-    await execFile('bash', [
-      '-c',
-      `sed -i '\\|${volumePath}|d' ${NFS_EXPORTS_FILE}`,
-    ]);
+    // Remove from NFS exports (no shell interpolation — use file read/write)
+    const exportsContent = await readFile(NFS_EXPORTS_FILE, 'utf-8').catch(() => '');
+    const filteredLines = exportsContent.split('\n').filter(line => !line.includes(volumePath));
+    await writeFile(NFS_EXPORTS_FILE, filteredLines.join('\n'));
 
     // Re-export NFS shares
     await execFile('exportfs', ['-ra']);
@@ -104,6 +113,7 @@ export class NfsService {
    * Get detailed info about a specific NFS volume including disk usage.
    */
   async getVolumeInfo(name: string): Promise<VolumeInfo> {
+    validateVolumeName(name);
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
     // Use df to get filesystem usage for the volume path

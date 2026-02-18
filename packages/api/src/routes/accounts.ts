@@ -419,35 +419,38 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, async (c) => {
   const newSlug = fullAccount.slug ?? '';
   const oldPath = fullAccount.path ?? '';
 
-  await db
-    .update(accounts)
-    .set({
-      parentId: null,
-      path: newSlug,
-      depth: 0,
-      updatedAt: new Date(),
-    })
-    .where(eq(accounts.id, fullAccount.id));
-
-  const descendants = await db.query.accounts.findMany({
-    where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
-    limit: 1000,
-  });
-
-  for (const desc of descendants) {
-    const descPath = desc.path ?? '';
-    const newDescPath = descPath.replace(oldPath, newSlug);
-    const newDepth = newDescPath.split('.').length - 1;
-
-    await db
+  // Update parent and all descendants atomically
+  await safeTransaction(async (tx) => {
+    await tx
       .update(accounts)
       .set({
-        path: newDescPath,
-        depth: newDepth,
+        parentId: null,
+        path: newSlug,
+        depth: 0,
         updatedAt: new Date(),
       })
-      .where(eq(accounts.id, desc.id));
-  }
+      .where(eq(accounts.id, fullAccount.id));
+
+    const descendants = await tx.query.accounts.findMany({
+      where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
+      limit: 1000,
+    });
+
+    for (const desc of descendants) {
+      const descPath = desc.path ?? '';
+      const newDescPath = descPath.replace(oldPath, newSlug);
+      const newDepth = newDescPath.split('.').length - 1;
+
+      await tx
+        .update(accounts)
+        .set({
+          path: newDescPath,
+          depth: newDepth,
+          updatedAt: new Date(),
+        })
+        .where(eq(accounts.id, desc.id));
+    }
+  });
 
   return c.json({ message: 'Successfully disconnected from parent account' });
 });
@@ -567,11 +570,18 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     return c.json({ error: 'User is already a member of this account' }, 409);
   }
 
-  await db.insert(userAccounts).values({
-    userId: targetUser.id,
-    accountId: account.id,
-    role,
-  });
+  try {
+    await db.insert(userAccounts).values({
+      userId: targetUser.id,
+      accountId: account.id,
+      role,
+    });
+  } catch (err: any) {
+    if (err?.message?.includes('unique') || err?.message?.includes('UNIQUE') || err?.message?.includes('duplicate')) {
+      return c.json({ error: 'User is already a member of this account' }, 409);
+    }
+    throw err;
+  }
 
   return c.json({
     id: targetUser.id,
@@ -708,8 +718,8 @@ accountRoutes.get('/:id/activity', tenantMiddleware, async (c) => {
     return c.json({ error: 'Access denied' }, 403);
   }
 
-  const page = parseInt(c.req.query('page') ?? '1', 10);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10), 100);
+  const page = Math.max(1, Math.min(parseInt(c.req.query('page') ?? '1', 10) || 1, 10000));
+  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20), 100);
   const offset = (page - 1) * limit;
 
   const logs = await db.query.auditLog.findMany({

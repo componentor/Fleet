@@ -3,6 +3,7 @@ import { jwtVerify } from 'jose';
 import { verify } from 'argon2';
 import { db, apiKeys, users, eq, and, isNull } from '@fleet/db';
 import { getValkey } from '../services/valkey.service.js';
+import { logger } from '../services/logger.js';
 
 export interface AuthUser {
   userId: string;
@@ -74,7 +75,7 @@ export const authMiddleware = createMiddleware<{
 
       // Update lastUsedAt (fire and forget — log failures)
       db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, candidate.id))
-        .catch((err) => console.error('Failed to update API key lastUsedAt:', err));
+        .catch((err) => logger.error({ err }, 'Failed to update API key lastUsedAt'));
 
       c.set('user', {
         userId: creator.id,
