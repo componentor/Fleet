@@ -5,8 +5,29 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1771333384010,
-      "tag": "0000_boring_blue_marvel",
+      "when": 1771412345213,
+      "tag": "0000_cloudy_reptil",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771500000000,
+      "tag": "0001_add_scheduled_deletion_and_stack",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771600000000,
+      "tag": "0002_add_source_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771700000000,
+      "tag": "0003_add_github_webhook_id",
       "breakpoints": true
     }
   ]

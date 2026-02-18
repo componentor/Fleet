@@ -23,6 +23,7 @@ export const services = sqliteTable('services', {
   githubRepo: text('github_repo'),
   githubBranch: text('github_branch'),
   autoDeploy: integer('auto_deploy', { mode: 'boolean' }).default(false),
+  githubWebhookId: integer('github_webhook_id'),
   domain: text('domain'),
   sslEnabled: integer('ssl_enabled', { mode: 'boolean' }).default(true),
   status: text('status').default('stopped'),
@@ -36,6 +37,9 @@ export const services = sqliteTable('services', {
   memoryLimit: integer('memory_limit'),
   cpuReservation: integer('cpu_reservation'),
   memoryReservation: integer('memory_reservation'),
+  sourceType: text('source_type'),
+  sourcePath: text('source_path'),
+  stackId: text('stack_id'),
   stoppedAt: integer('stopped_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
@@ -43,6 +47,7 @@ export const services = sqliteTable('services', {
 }, (table) => [
   index('idx_services_account_id').on(table.accountId),
   index('idx_services_status').on(table.status),
+  index('idx_services_stack_id').on(table.stackId),
 ]);
 
 export const deployments = sqliteTable('deployments', {

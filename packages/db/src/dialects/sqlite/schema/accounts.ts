@@ -20,6 +20,7 @@ export const accounts = sqliteTable('accounts', {
   status: text('status').default('active'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  scheduledDeletionAt: integer('scheduled_deletion_at', { mode: 'timestamp' }),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 });
 

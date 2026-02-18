@@ -41,6 +41,57 @@ detect_os() {
   log "Detected OS: $OS $OS_VERSION"
 }
 
+# ─── Install system dependencies ─────────────────────────────────────
+install_dependencies() {
+  log "Checking system dependencies..."
+
+  # Check what's already installed
+  local MISSING=""
+  for cmd in curl openssl tar gzip unzip jq; do
+    if command -v "$cmd" &>/dev/null; then
+      log "  ✓ $cmd already installed"
+    else
+      MISSING="$MISSING $cmd"
+    fi
+  done
+
+  if [ -z "$MISSING" ]; then
+    log "All required system dependencies are already installed"
+    return
+  fi
+
+  log "Installing missing dependencies:$MISSING"
+  case $OS in
+    ubuntu|debian)
+      apt-get update -qq
+      apt-get install -y -qq \
+        ca-certificates curl wget gnupg lsb-release \
+        openssl tar gzip unzip xz-utils \
+        jq htop net-tools iptables \
+        logrotate cron
+      ;;
+    centos|rocky|rhel|almalinux)
+      yum install -y -q epel-release 2>/dev/null || true
+      yum install -y -q \
+        ca-certificates curl wget gnupg2 \
+        openssl tar gzip unzip xz \
+        jq htop net-tools iptables \
+        logrotate cronie
+      ;;
+    fedora)
+      dnf install -y -q \
+        ca-certificates curl wget gnupg2 \
+        openssl tar gzip unzip xz \
+        jq htop net-tools iptables \
+        logrotate cronie
+      ;;
+    *)
+      warn "Unknown OS '$OS' — skipping dependency install."
+      ;;
+  esac
+  log "System dependencies installed"
+}
+
 # ─── Install Docker ──────────────────────────────────────────────────
 install_docker() {
   if command -v docker &>/dev/null; then
@@ -65,6 +116,14 @@ install_docker() {
       yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
       yum install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
       ;;
+    fedora)
+      dnf install -y -q dnf-plugins-core
+      dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+      dnf install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      ;;
+    *)
+      err "Unsupported OS for Docker install: $OS"
+      ;;
   esac
 
   systemctl enable docker
@@ -74,27 +133,35 @@ install_docker() {
 
 # ─── Configure Docker Security ───────────────────────────────────────
 configure_docker() {
-  log "Configuring Docker security..."
+  log "Configuring Docker daemon security..."
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'DAEMONJSON'
 {
-  "userns-remap": "default",
   "no-new-privileges": true,
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
     "max-file": "3"
   },
+  "default-ulimits": {
+    "nproc": { "Name": "nproc", "Hard": 1024, "Soft": 1024 },
+    "nofile": { "Name": "nofile", "Hard": 65536, "Soft": 65536 }
+  },
   "live-restore": true,
   "storage-driver": "overlay2"
 }
 DAEMONJSON
   systemctl restart docker
-  log "Docker configured"
+  log "Docker daemon configured with security hardening"
 }
 
 # ─── Install NFS client ──────────────────────────────────────────────
 install_nfs_client() {
+  if command -v mount.nfs &>/dev/null; then
+    log "NFS client is already installed"
+    return
+  fi
+
   log "Installing NFS client..."
   case $OS in
     ubuntu|debian)
@@ -102,6 +169,9 @@ install_nfs_client() {
       ;;
     centos|rocky|rhel|almalinux)
       yum install -y -q nfs-utils
+      ;;
+    fedora)
+      dnf install -y -q nfs-utils
       ;;
   esac
   log "NFS client installed"
@@ -126,10 +196,10 @@ start_wizard() {
     return
   fi
 
-  # Otherwise prompt
+  # Otherwise prompt (read from /dev/tty so this works when piped from curl)
   echo ""
-  read -rp "$(echo -e ${BLUE}Paste the swarm join token: ${NC})" JOIN_TOKEN
-  read -rp "$(echo -e ${BLUE}Enter manager address \(ip:2377\): ${NC})" MANAGER_ADDR
+  read -rp "$(echo -e ${BLUE}Paste the swarm join token: ${NC})" JOIN_TOKEN </dev/tty
+  read -rp "$(echo -e ${BLUE}Enter manager address \(ip:2377\): ${NC})" MANAGER_ADDR </dev/tty
 
   if [ -n "$JOIN_TOKEN" ] && [ -n "$MANAGER_ADDR" ]; then
     docker swarm join --token "$JOIN_TOKEN" "$MANAGER_ADDR"
@@ -144,25 +214,29 @@ configure_nfs_mount() {
   log "Configuring NFS mount..."
   mkdir -p /mnt/fleet-nfs
 
+  local NFS_SERVER=""
   if [ -n "${FLEET_NFS_SERVER:-}" ]; then
-    echo "$FLEET_NFS_SERVER:/opt/fleet/nfs-exports /mnt/fleet-nfs nfs defaults 0 0" >> /etc/fstab
-    mount -a
-    log "NFS mounted from $FLEET_NFS_SERVER"
+    NFS_SERVER="$FLEET_NFS_SERVER"
   else
-    read -rp "$(echo -e ${BLUE}Enter NFS server IP \(first node IP\): ${NC})" NFS_SERVER
-    if [ -n "$NFS_SERVER" ]; then
+    read -rp "$(echo -e ${BLUE}Enter NFS server IP \(first node IP\): ${NC})" NFS_SERVER </dev/tty
+  fi
+
+  if [ -n "$NFS_SERVER" ]; then
+    # Guard against duplicate fstab entries
+    if ! grep -q "/mnt/fleet-nfs" /etc/fstab 2>/dev/null; then
       echo "$NFS_SERVER:/opt/fleet/nfs-exports /mnt/fleet-nfs nfs defaults 0 0" >> /etc/fstab
-      mount -a
-      log "NFS mounted from $NFS_SERVER"
-    else
-      warn "Skipping NFS mount. Configure manually later."
     fi
+    mount -a
+    log "NFS mounted from $NFS_SERVER"
+  else
+    warn "Skipping NFS mount. Configure manually later."
   fi
 }
 
 # ─── Main ────────────────────────────────────────────────────────────
 main() {
   detect_os
+  install_dependencies
   install_docker
   configure_docker
   install_nfs_client

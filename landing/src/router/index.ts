@@ -9,6 +9,11 @@ const router = createRouter({
       name: 'home',
       component: HomeView,
     },
+    {
+      path: '/docs',
+      name: 'docs',
+      component: () => import('@/views/DocsView.vue'),
+    },
   ],
   scrollBehavior(to) {
     if (to.hash) {

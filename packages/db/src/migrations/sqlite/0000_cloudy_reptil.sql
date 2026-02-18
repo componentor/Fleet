@@ -11,7 +11,8 @@ CREATE TABLE `accounts` (
 	`plan` text,
 	`status` text DEFAULT 'active',
 	`created_at` integer DEFAULT (unixepoch()),
-	`updated_at` integer DEFAULT (unixepoch())
+	`updated_at` integer DEFAULT (unixepoch()),
+	`deleted_at` integer
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `accounts_slug_unique` ON `accounts` (`slug`);--> statement-breakpoint
@@ -27,7 +28,7 @@ CREATE TABLE `api_keys` (
 	`expires_at` integer,
 	`created_at` integer DEFAULT (unixepoch()),
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `audit_log` (
@@ -40,10 +41,12 @@ CREATE TABLE `audit_log` (
 	`ip_address` text,
 	`details` text,
 	`created_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
+CREATE INDEX `idx_audit_log_account_id` ON `audit_log` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_audit_log_created_at` ON `audit_log` (`created_at`);--> statement-breakpoint
 CREATE TABLE `backup_schedules` (
 	`id` text PRIMARY KEY NOT NULL,
 	`account_id` text NOT NULL,
@@ -176,10 +179,11 @@ CREATE TABLE `subscriptions` (
 	`cancelled_at` integer,
 	`created_at` integer DEFAULT (unixepoch()),
 	`updated_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`plan_id`) REFERENCES `billing_plans`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `subscriptions_stripe_subscription_id_unique` ON `subscriptions` (`stripe_subscription_id`);--> statement-breakpoint
 CREATE TABLE `usage_records` (
 	`id` text PRIMARY KEY NOT NULL,
 	`account_id` text NOT NULL,
@@ -194,6 +198,16 @@ CREATE TABLE `usage_records` (
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE TABLE `webhook_events` (
+	`id` text PRIMARY KEY NOT NULL,
+	`stripe_event_id` text NOT NULL,
+	`event_type` text NOT NULL,
+	`processed_at` integer DEFAULT (unixepoch()),
+	`payload` text,
+	`created_at` integer DEFAULT (unixepoch())
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `webhook_events_stripe_event_id_unique` ON `webhook_events` (`stripe_event_id`);--> statement-breakpoint
 CREATE TABLE `dns_records` (
 	`id` text PRIMARY KEY NOT NULL,
 	`zone_id` text NOT NULL,
@@ -288,6 +302,22 @@ CREATE TABLE `email_templates` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `email_templates_slug_unique` ON `email_templates` (`slug`);--> statement-breakpoint
+CREATE TABLE `error_log` (
+	`id` text PRIMARY KEY NOT NULL,
+	`level` text NOT NULL,
+	`message` text NOT NULL,
+	`stack` text,
+	`method` text,
+	`path` text,
+	`status_code` integer,
+	`user_id` text,
+	`ip` text,
+	`user_agent` text,
+	`metadata` text,
+	`resolved` integer DEFAULT false,
+	`created_at` integer DEFAULT (unixepoch())
+);
+--> statement-breakpoint
 CREATE TABLE `oauth_providers` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -295,7 +325,7 @@ CREATE TABLE `oauth_providers` (
 	`provider_user_id` text NOT NULL,
 	`access_token` text,
 	`created_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `oauth_provider_user_idx` ON `oauth_providers` (`provider`,`provider_user_id`);--> statement-breakpoint
@@ -305,8 +335,8 @@ CREATE TABLE `user_accounts` (
 	`account_id` text NOT NULL,
 	`role` text DEFAULT 'member',
 	`created_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `user_accounts_user_account_idx` ON `user_accounts` (`user_id`,`account_id`);--> statement-breakpoint
@@ -317,8 +347,18 @@ CREATE TABLE `users` (
 	`name` text,
 	`avatar_url` text,
 	`is_super` integer DEFAULT false,
+	`email_verified` integer DEFAULT false,
+	`email_verify_token` text,
+	`email_verify_expires` integer,
+	`password_reset_token` text,
+	`password_reset_expires` integer,
+	`two_factor_enabled` integer DEFAULT false,
+	`two_factor_secret` text,
+	`two_factor_backup_codes` text,
+	`security_changed_at` integer,
 	`created_at` integer DEFAULT (unixepoch()),
-	`updated_at` integer DEFAULT (unixepoch())
+	`updated_at` integer DEFAULT (unixepoch()),
+	`deleted_at` integer
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);--> statement-breakpoint
@@ -330,9 +370,10 @@ CREATE TABLE `deployments` (
 	`log` text DEFAULT '',
 	`image_tag` text,
 	`created_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `idx_deployments_service_id` ON `deployments` (`service_id`);--> statement-breakpoint
 CREATE TABLE `services` (
 	`id` text PRIMARY KEY NOT NULL,
 	`account_id` text NOT NULL,
@@ -362,9 +403,12 @@ CREATE TABLE `services` (
 	`stopped_at` integer,
 	`created_at` integer DEFAULT (unixepoch()),
 	`updated_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
+	`deleted_at` integer,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `idx_services_account_id` ON `services` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_services_status` ON `services` (`status`);--> statement-breakpoint
 CREATE TABLE `nodes` (
 	`id` text PRIMARY KEY NOT NULL,
 	`hostname` text NOT NULL,
@@ -449,6 +493,8 @@ CREATE TABLE `notifications` (
 	`resource_id` text,
 	`read` integer DEFAULT false,
 	`created_at` integer DEFAULT (unixepoch()),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
+--> statement-breakpoint
+CREATE INDEX `idx_notifications_account_id` ON `notifications` (`account_id`);

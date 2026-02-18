@@ -61,6 +61,12 @@ marketplace.get('/templates/:slug', async (c) => {
 const deploySchema = z.object({
   slug: z.string().min(1),
   config: z.record(z.string()).default({}),
+  composeOverride: z.string().optional(),
+  resourceOverrides: z.record(z.object({
+    replicas: z.number().int().min(0).max(100).optional(),
+    cpuLimit: z.number().int().min(0).optional(),
+    memoryLimit: z.number().int().min(0).optional(),
+  })).optional(),
 });
 
 marketplace.post('/deploy', requireMember, async (c) => {
@@ -77,10 +83,13 @@ marketplace.post('/deploy', requireMember, async (c) => {
     return c.json({ error: 'Validation failed' }, 400);
   }
 
-  const { slug, config } = parsed.data;
+  const { slug, config, composeOverride, resourceOverrides } = parsed.data;
 
   try {
-    const result = await templateService.deployTemplate(slug, accountId, config);
+    const result = await templateService.deployTemplate(slug, accountId, config, {
+      composeOverride,
+      resourceOverrides,
+    });
     return c.json(result, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -93,7 +102,7 @@ marketplace.post('/deploy', requireMember, async (c) => {
     }
 
     logger.error({ err }, 'Template deployment failed');
-    return c.json({ error: 'Failed to deploy template', details: message }, 500);
+    return c.json({ error: message || 'Failed to deploy template' }, 500);
   }
 });
 

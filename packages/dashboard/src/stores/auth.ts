@@ -24,6 +24,11 @@ export const useAuthStore = defineStore('auth', () => {
   /** Silently refresh access token on app startup using httpOnly cookie */
   async function init() {
     if (initialized.value) return
+    // Skip refresh if user never logged in (no cached user = no httpOnly cookie)
+    if (!cachedUser) {
+      initialized.value = true
+      return
+    }
     try {
       const res = await fetch('/api/v1/auth/refresh', {
         method: 'POST',
@@ -36,6 +41,9 @@ export const useAuthStore = defineStore('auth', () => {
         token.value = data.tokens.accessToken
       } else {
         token.value = null
+        // Cookie expired or invalid — clear cached user
+        user.value = null
+        localStorage.removeItem('fleet_user')
       }
     } catch {
       // Not logged in or refresh failed

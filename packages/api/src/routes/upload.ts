@@ -1,0 +1,318 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { db, services, deployments, insertReturning, eq, and, isNull } from '@fleet/db';
+import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
+import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { requireMember } from '../middleware/rbac.js';
+import { dockerService } from '../services/docker.service.js';
+import { uploadService } from '../services/upload.service.js';
+import { logger } from '../services/logger.js';
+import { getDeploymentQueue } from '../services/queue.service.js';
+import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
+import { writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+
+const uploadRoutes = new Hono<{
+  Variables: {
+    user: AuthUser;
+    account: AccountContext | null;
+    accountId: string | null;
+  };
+}>();
+
+uploadRoutes.use('*', authMiddleware);
+uploadRoutes.use('*', tenantMiddleware);
+
+function buildTraefikLabels(
+  serviceName: string,
+  domain: string | null,
+  sslEnabled: boolean,
+): Record<string, string> {
+  if (!domain) return { 'traefik.enable': 'false' };
+  const routerName = serviceName.replace(/[^a-zA-Z0-9]/g, '-');
+  const labels: Record<string, string> = {
+    'traefik.enable': 'true',
+    [`traefik.http.routers.${routerName}.rule`]: `Host(\`${domain}\`)`,
+    [`traefik.http.routers.${routerName}.entrypoints`]: 'websecure',
+    [`traefik.http.services.${routerName}.loadbalancer.server.port`]: '80',
+  };
+  if (sslEnabled) {
+    labels[`traefik.http.routers.${routerName}.tls`] = 'true';
+    labels[`traefik.http.routers.${routerName}.tls.certresolver`] = 'letsencrypt';
+  }
+  return labels;
+}
+
+// POST /deploy — upload and deploy a new service
+uploadRoutes.post('/deploy', requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const body = await c.req.parseBody({ all: true });
+  const file = body['file'] as File | undefined;
+  const name = body['name'] as string | undefined;
+  const buildFile = (body['buildFile'] as string) || '';
+  const replicas = parseInt((body['replicas'] as string) || '1', 10);
+  const domain = (body['domain'] as string) || null;
+  const sslEnabled = (body['sslEnabled'] as string) !== 'false';
+
+  let env: Record<string, string> = {};
+  let ports: Array<{ target: number; published: number; protocol: string }> = [];
+
+  try {
+    if (body['env']) env = JSON.parse(body['env'] as string);
+    if (body['ports']) ports = JSON.parse(body['ports'] as string);
+  } catch {
+    return c.json({ error: 'Invalid JSON in env or ports field' }, 400);
+  }
+
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: 'Archive file is required' }, 400);
+  }
+
+  if (!name || !/^[a-zA-Z0-9]([a-zA-Z0-9_.-]*[a-zA-Z0-9])?$/.test(name) || name.length > 63) {
+    return c.json({ error: 'Invalid service name' }, 400);
+  }
+
+  const archiveType = uploadService.detectArchiveType(file.name);
+  if (!archiveType) {
+    return c.json({ error: 'Unsupported file type. Supported: .zip, .tar, .tar.gz, .tgz' }, 400);
+  }
+
+  // Write uploaded file to temp location
+  const tmpPath = join(tmpdir(), `fleet-upload-${randomUUID()}${archiveType === 'zip' ? '.zip' : archiveType === 'tar' ? '.tar' : '.tar.gz'}`);
+
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await writeFile(tmpPath, buffer);
+
+    // Create a placeholder service ID for the storage path
+    const tempServiceId = randomUUID();
+
+    // Extract and store
+    const sourcePath = await uploadService.extractAndStore({
+      accountId,
+      serviceId: tempServiceId,
+      archivePath: tmpPath,
+      archiveType,
+    });
+
+    // Detect project files and build method (never fails)
+    const detection = await uploadService.detectProjectFiles(sourcePath, buildFile || undefined);
+
+    const traefikLabels = buildTraefikLabels(name, domain, sslEnabled);
+    const initialStatus = detection.buildMethod === 'none' ? 'stopped' : 'deploying';
+
+    // Create service record
+    const [svc] = await insertReturning(services, {
+      id: tempServiceId,
+      accountId,
+      name,
+      image: detection.buildMethod === 'none' ? 'pending' : 'building...',
+      replicas: detection.buildMethod === 'none' ? 0 : replicas,
+      env,
+      ports,
+      domain,
+      sslEnabled,
+      sourceType: 'upload',
+      sourcePath,
+      status: initialStatus,
+    });
+
+    if (!svc) {
+      await uploadService.deleteServiceFiles(accountId, tempServiceId);
+      return c.json({ error: 'Failed to create service record' }, 500);
+    }
+
+    // Try to create Docker Swarm service (non-fatal — service record is always kept)
+    try {
+      const networkName = `fleet-account-${accountId}`;
+      const networkId = await dockerService.ensureNetwork(networkName);
+
+      const swarmServiceName = `fleet-${accountId.slice(0, 8)}-${name}`;
+      const result = await dockerService.createService({
+        name: swarmServiceName,
+        image: 'alpine:latest', // Placeholder until build completes
+        replicas: 0, // Don't start until build is done
+        env,
+        ports: ports.map((p) => ({
+          target: p.target,
+          published: p.published ?? 0,
+          protocol: p.protocol || 'tcp',
+        })),
+        volumes: [],
+        labels: {
+          ...traefikLabels,
+          'fleet.account-id': accountId,
+          'fleet.service-id': svc.id,
+        },
+        constraints: [],
+        updateParallelism: 1,
+        updateDelay: '10s',
+        rollbackOnFailure: true,
+        networkId,
+      });
+
+      await db.update(services)
+        .set({ dockerServiceId: result.id })
+        .where(eq(services.id, svc.id));
+
+      svc.dockerServiceId = result.id;
+    } catch (err) {
+      logger.warn({ err }, 'Docker not available — service created but not started');
+      await db.update(services)
+        .set({ status: 'stopped' })
+        .where(eq(services.id, svc.id));
+    }
+
+    // Create deployment record
+    const [deployment] = await insertReturning(deployments, {
+      serviceId: svc.id,
+      status: 'building',
+    });
+
+    // Queue build job
+    const jobData: DeploymentJobData = {
+      deploymentId: deployment!.id,
+      serviceId: svc.id,
+      accountId,
+      commitSha: null,
+      sourceType: 'upload',
+      sourcePath,
+      buildMethod: detection.buildMethod,
+      buildFile: detection.buildFile ?? undefined,
+    };
+
+    try {
+      const queue = getDeploymentQueue();
+      if (queue) {
+        await queue.add('build-and-deploy', jobData, {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 5000 },
+        });
+      } else {
+        // Fallback: run inline
+        processDeploymentInline(jobData).catch((err) => {
+          logger.error({ err }, 'Inline deployment failed');
+        });
+      }
+    } catch {
+      // Fallback: run inline
+      processDeploymentInline(jobData).catch((err) => {
+        logger.error({ err }, 'Inline deployment failed');
+      });
+    }
+
+    return c.json({
+      service: { ...svc, sourceType: 'upload', sourcePath },
+      deploymentId: deployment!.id,
+      detectedFiles: detection.detectedFiles,
+      buildMethod: detection.buildMethod,
+      buildFile: detection.buildFile,
+    }, 201);
+  } finally {
+    // Clean up temp file
+    await rm(tmpPath, { force: true }).catch(() => {});
+  }
+});
+
+// POST /:serviceId/rebuild — replace source and rebuild
+uploadRoutes.post('/:serviceId/rebuild', requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+  if (svc.sourceType !== 'upload') return c.json({ error: 'Service is not an upload-deployed service' }, 400);
+
+  const body = await c.req.parseBody();
+  const file = body['file'] as File | undefined;
+  const buildFile = (body['buildFile'] as string) || '';
+
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: 'Archive file is required' }, 400);
+  }
+
+  const archiveType = uploadService.detectArchiveType(file.name);
+  if (!archiveType) {
+    return c.json({ error: 'Unsupported file type' }, 400);
+  }
+
+  const tmpPath = join(tmpdir(), `fleet-rebuild-${randomUUID()}${archiveType === 'zip' ? '.zip' : archiveType === 'tar' ? '.tar' : '.tar.gz'}`);
+
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await writeFile(tmpPath, buffer);
+
+    // Replace source files
+    const sourcePath = await uploadService.replaceSource({
+      accountId,
+      serviceId,
+      archivePath: tmpPath,
+      archiveType,
+    });
+
+    // Detect build files
+    const detection = await uploadService.detectProjectFiles(sourcePath, buildFile || undefined);
+
+    if (detection.buildMethod === 'none') {
+      return c.json({ error: 'No Dockerfile or docker-compose file found. Add one via the Files tab first.' }, 400);
+    }
+
+    // Update service status
+    await db.update(services)
+      .set({ status: 'deploying', sourcePath, updatedAt: new Date() })
+      .where(eq(services.id, serviceId));
+
+    // Create deployment record
+    const [deployment] = await insertReturning(deployments, {
+      serviceId,
+      status: 'building',
+    });
+
+    // Queue build job
+    const jobData: DeploymentJobData = {
+      deploymentId: deployment!.id,
+      serviceId,
+      accountId,
+      commitSha: null,
+      sourceType: 'upload',
+      sourcePath,
+      buildMethod: detection.buildMethod,
+      buildFile: detection.buildFile ?? undefined,
+    };
+
+    try {
+      const queue = getDeploymentQueue();
+      if (queue) {
+        await queue.add('build-and-deploy', jobData, {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 5000 },
+        });
+      } else {
+        processDeploymentInline(jobData).catch((err) => {
+          logger.error({ err }, 'Inline rebuild failed');
+        });
+      }
+    } catch {
+      processDeploymentInline(jobData).catch((err) => {
+        logger.error({ err }, 'Inline rebuild failed');
+      });
+    }
+
+    return c.json({
+      message: 'Rebuild triggered',
+      deploymentId: deployment!.id,
+    });
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {});
+  }
+});
+
+export default uploadRoutes;

@@ -40,6 +40,11 @@ export interface Service {
   updateDelay: string;
   rollbackOnFailure: boolean;
   healthCheck: HealthCheck | null;
+  cpuLimit: number | null;
+  memoryLimit: number | null;
+  cpuReservation: number | null;
+  memoryReservation: number | null;
+  stackId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

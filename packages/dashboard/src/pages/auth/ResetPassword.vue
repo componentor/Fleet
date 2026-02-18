@@ -40,7 +40,7 @@ async function handleSubmit() {
       router.push('/login')
     }, 3000)
   } catch (e: any) {
-    error.value = e?.body?.message ?? e?.message ?? 'Failed to reset password. The link may have expired.'
+    error.value = e?.body?.error ?? e?.body?.message ?? 'Failed to reset password. The link may have expired.'
   } finally {
     loading.value = false
   }

@@ -2,7 +2,9 @@
 import { ref, onMounted, computed } from 'vue'
 import { LayoutDashboard, Users, Server, Activity, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const api = useApi()
 const loading = ref(true)
 const stats = ref<any>(null)
@@ -25,10 +27,10 @@ async function fetchStats() {
 }
 
 const statCards = computed(() => [
-  { label: 'Total Accounts', value: stats.value?.accounts ?? 0, icon: Users, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-  { label: 'Active Services', value: `${stats.value?.runningServices ?? 0} / ${stats.value?.services ?? 0}`, icon: Activity, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
-  { label: 'Nodes', value: stats.value?.nodes ?? 0, icon: Server, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
-  { label: 'Users', value: stats.value?.users ?? 0, icon: Users, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
+  { label: t('super.dashboard.totalAccounts'), value: stats.value?.accounts ?? 0, icon: Users, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+  { label: t('super.dashboard.activeServices'), value: `${stats.value?.runningServices ?? 0} / ${stats.value?.services ?? 0}`, icon: Activity, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
+  { label: t('super.dashboard.nodes'), value: stats.value?.nodes ?? 0, icon: Server, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
+  { label: t('super.dashboard.users'), value: stats.value?.users ?? 0, icon: Users, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
 ])
 
 function formatDate(ts: any) {
@@ -46,7 +48,7 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <LayoutDashboard class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.dashboard.title') }}</h1>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -78,28 +80,28 @@ onMounted(() => {
         <!-- Swarm info -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Swarm Status</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.dashboard.swarmStatus') }}</h2>
           </div>
           <div class="p-6">
             <div v-if="stats?.swarm" class="space-y-3">
               <div class="flex items-center justify-between">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Status</span>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{{ $t('super.dashboard.status') }}</span>
                 <span class="inline-flex items-center gap-1.5">
                   <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                  <span class="text-sm font-medium text-gray-900 dark:text-white">Connected</span>
+                  <span class="text-sm font-medium text-gray-900 dark:text-white">{{ $t('super.dashboard.connected') }}</span>
                 </span>
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Swarm ID</span>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{{ $t('super.dashboard.swarmId') }}</span>
                 <span class="text-sm font-mono text-gray-900 dark:text-white">{{ stats.swarm.id?.slice(0, 12) }}...</span>
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Created</span>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{{ $t('super.dashboard.created') }}</span>
                 <span class="text-sm text-gray-900 dark:text-white">{{ formatDate(stats.swarm.createdAt) }}</span>
               </div>
             </div>
             <div v-else class="text-center py-4">
-              <p class="text-sm text-gray-500 dark:text-gray-400">Docker Swarm not connected</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.dashboard.swarmNotConnected') }}</p>
             </div>
           </div>
         </div>
@@ -107,11 +109,11 @@ onMounted(() => {
         <!-- Recent activity -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.dashboard.recentActivity') }}</h2>
           </div>
           <div class="p-6">
             <div v-if="recentLogs.length === 0" class="text-center py-4">
-              <p class="text-sm text-gray-500 dark:text-gray-400">No recent activity</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.dashboard.noRecentActivity') }}</p>
             </div>
             <div v-else class="space-y-3">
               <div v-for="log in recentLogs" :key="log.id" class="flex items-start gap-3 text-sm">

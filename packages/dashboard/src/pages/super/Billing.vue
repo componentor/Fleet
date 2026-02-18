@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
+const { t } = useI18n()
 const api = useApi()
 
 const loading = ref(true)
@@ -283,7 +285,7 @@ onMounted(() => { fetchAll() })
   <div>
     <div class="flex items-center gap-3 mb-8">
       <CreditCard class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Platform Billing</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.billing.platformBilling') }}</h1>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -301,12 +303,12 @@ onMounted(() => { fetchAll() })
       <!-- Section 1: Billing Model Configuration -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Billing Model</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose how customers are charged.</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.billingModel') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.billingModelDesc') }}</p>
         </div>
         <form @submit.prevent="saveBillingConfig" class="p-6 space-y-6">
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <button v-for="m in [{ id: 'fixed', title: 'Fixed Price', desc: 'Flat fee per billing cycle' }, { id: 'usage', title: 'Usage-Based', desc: 'Pay for consumed resources' }, { id: 'hybrid', title: 'Hybrid', desc: 'Base fee + overage charges' }]"
+            <button v-for="m in [{ id: 'fixed', title: t('super.billing.fixedPrice'), desc: t('super.billing.fixedPriceDesc') }, { id: 'usage', title: t('super.billing.usageBased'), desc: t('super.billing.usageBasedDesc') }, { id: 'hybrid', title: t('super.billing.hybrid'), desc: t('super.billing.hybridDesc') }]"
               :key="m.id" type="button" @click="billingModel = m.id"
               :class="['p-4 rounded-lg border-2 text-left transition-colors', billingModel === m.id ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300']"
             >
@@ -317,11 +319,11 @@ onMounted(() => { fetchAll() })
 
           <div class="flex items-center gap-3">
             <input id="allowUserChoice" type="checkbox" v-model="allowUserChoice" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-            <label for="allowUserChoice" class="text-sm text-gray-700 dark:text-gray-300">Allow end users to choose their billing model</label>
+            <label for="allowUserChoice" class="text-sm text-gray-700 dark:text-gray-300">{{ t('super.billing.allowUserChoice') }}</label>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Allowed Billing Cycles</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('super.billing.billingCycles') }}</label>
             <div class="flex flex-wrap gap-2">
               <button v-for="cycle in allCycles" :key="cycle.id" type="button" @click="toggleCycle(cycle.id)"
                 :class="['px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors', allowedCycles.includes(cycle.id) ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400']"
@@ -330,7 +332,7 @@ onMounted(() => { fetchAll() })
           </div>
 
           <div v-if="allowedCycles.length > 0">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Cycle Discounts</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('super.billing.cycleDiscounts') }}</label>
             <div class="space-y-3">
               <div v-for="cycle in allCycles.filter(c => allowedCycles.includes(c.id))" :key="cycle.id"
                 class="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600"
@@ -339,9 +341,9 @@ onMounted(() => { fetchAll() })
                 <select :value="getDiscountType(cycle.id)" @change="setDiscount(cycle.id, ($event.target as HTMLSelectElement).value, getDiscountValue(cycle.id))"
                   class="px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                  <option value="none">No discount</option>
-                  <option value="percentage">Percentage off</option>
-                  <option value="fixed">Fixed amount off</option>
+                  <option value="none">{{ t('super.billing.noDiscount') }}</option>
+                  <option value="percentage">{{ t('super.billing.percentOff') }}</option>
+                  <option value="fixed">{{ t('super.billing.fixedOff') }}</option>
                 </select>
                 <template v-if="getDiscountType(cycle.id) !== 'none'">
                   <div class="relative">
@@ -358,7 +360,7 @@ onMounted(() => { fetchAll() })
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Free Trial (days)</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.billing.freeTrial') }}</label>
             <input v-model.number="trialDays" type="number" min="0" placeholder="0" class="w-32 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
 
@@ -366,7 +368,7 @@ onMounted(() => { fetchAll() })
             <button type="submit" :disabled="savingConfig" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
               <Loader2 v-if="savingConfig" class="w-4 h-4 animate-spin" />
               <Save v-else class="w-4 h-4" />
-              {{ savingConfig ? 'Saving...' : 'Save Billing Config' }}
+              {{ savingConfig ? t('common.saving') : t('super.billing.saveBillingConfig') }}
             </button>
           </div>
         </form>
@@ -376,15 +378,15 @@ onMounted(() => { fetchAll() })
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <div>
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Plan Tiers</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Define pricing tiers with resource limits.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.planTiers') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.planTiersDesc') }}</p>
           </div>
           <div class="flex gap-2">
             <button @click="syncAllPlans" :disabled="syncing" class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors">
-              <RefreshCw :class="['w-4 h-4', syncing ? 'animate-spin' : '']" /> Sync All to Stripe
+              <RefreshCw :class="['w-4 h-4', syncing ? 'animate-spin' : '']" /> {{ t('super.billing.syncAllStripe') }}
             </button>
             <button @click="openPlanForm()" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors">
-              <Plus class="w-4 h-4" /> Add Plan
+              <Plus class="w-4 h-4" /> {{ t('super.billing.addPlan') }}
             </button>
           </div>
         </div>
@@ -394,56 +396,56 @@ onMounted(() => { fetchAll() })
           <form @submit.prevent="savePlan" class="space-y-4">
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div class="col-span-2">
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Name</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.planName') }}</label>
                 <input v-model="planForm.name" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Slug</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.planSlug') }}</label>
                 <input v-model="planForm.slug" required pattern="[a-z0-9-]+" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Monthly Price (cents)</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.monthlyPrice') }}</label>
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU Limit (mc)</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.cpuLimit') }}</label>
                 <input v-model.number="planForm.cpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (MB)</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.memoryLimit') }}</label>
                 <input v-model.number="planForm.memoryLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Containers</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.containerLimit') }}</label>
                 <input v-model.number="planForm.containerLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (GB)</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.storageLimit') }}</label>
                 <input v-model.number="planForm.storageLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bandwidth (GB)</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.bandwidthLimit') }}</label>
                 <input v-model.number="planForm.bandwidthLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
             </div>
             <div class="flex items-center gap-4">
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input type="checkbox" v-model="planForm.isFree" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> Free tier
+                <input type="checkbox" v-model="planForm.isFree" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> {{ t('super.billing.freeTier') }}
               </label>
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input type="checkbox" v-model="planForm.isDefault" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> Default plan
+                <input type="checkbox" v-model="planForm.isDefault" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> {{ t('super.billing.defaultPlan') }}
               </label>
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input type="checkbox" v-model="planForm.visible" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> Visible
+                <input type="checkbox" v-model="planForm.visible" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> {{ t('super.billing.visible') }}
               </label>
             </div>
             <div class="flex gap-2 justify-end">
-              <button type="button" @click="showPlanForm = false" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button type="button" @click="showPlanForm = false" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">{{ t('common.cancel') }}</button>
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                {{ editingPlan ? 'Update Plan' : 'Create Plan' }}
+                {{ editingPlan ? t('super.billing.updatePlan') : t('super.billing.createPlan') }}
               </button>
             </div>
           </form>
@@ -453,40 +455,40 @@ onMounted(() => { fetchAll() })
           <table v-if="plans.length > 0" class="w-full">
             <thead>
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                <th class="px-6 py-3">Name</th>
-                <th class="px-6 py-3">Slug</th>
-                <th class="px-6 py-3">Price</th>
-                <th class="px-6 py-3">CPU / Mem / Containers</th>
-                <th class="px-6 py-3">Stripe</th>
-                <th class="px-6 py-3">Actions</th>
+                <th class="px-6 py-3">{{ t('super.billing.planName') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.planSlug') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.price') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.cpuMemContainers') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.stripe') }}</th>
+                <th class="px-6 py-3">{{ t('common.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-for="plan in plans" :key="plan.id" :class="!plan.visible ? 'opacity-50' : ''">
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium">
                   {{ plan.name }}
-                  <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">Free</span>
-                  <span v-if="plan.isDefault" class="ml-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded">Default</span>
+                  <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">{{ t('super.billing.free') }}</span>
+                  <span v-if="plan.isDefault" class="ml-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded">{{ t('super.billing.default') }}</span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ plan.slug }}</td>
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ formatCents(plan.priceCents) }}/mo</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
                 <td class="px-6 py-4">
                   <span :class="plan.stripeProductId ? 'text-green-600 dark:text-green-400' : 'text-gray-400'" class="text-xs font-medium">
-                    {{ plan.stripeProductId ? 'Synced' : 'Not synced' }}
+                    {{ plan.stripeProductId ? t('super.billing.synced') : t('super.billing.notSynced') }}
                   </span>
                 </td>
                 <td class="px-6 py-4">
                   <div class="flex items-center gap-2">
-                    <button @click="openPlanForm(plan)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">Edit</button>
-                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Sync</button>
-                    <button @click="deletePlan(plan.id)" class="text-xs text-red-600 dark:text-red-400 hover:underline">Hide</button>
+                    <button @click="openPlanForm(plan)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ t('common.edit') }}</button>
+                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">{{ t('super.billing.sync') }}</button>
+                    <button @click="deletePlan(plan.id)" class="text-xs text-red-600 dark:text-red-400 hover:underline">{{ t('super.billing.hide') }}</button>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No plans created yet. Click "Add Plan" to create your first tier.</div>
+          <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('super.billing.noPlans') }}</div>
         </div>
       </div>
 
@@ -495,38 +497,38 @@ onMounted(() => { fetchAll() })
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div class="flex items-center gap-2">
             <Gauge class="w-5 h-5 text-orange-500" />
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Usage-Based Pricing</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.usagePricing') }}</h2>
           </div>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Set per-unit rates for resource consumption.</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.usagePricingDesc') }}</p>
         </div>
         <form @submit.prevent="savePricingConfig" class="p-6 space-y-5">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU (cents/hr)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.cpuPerCore') }}</label>
               <input v-model.number="pricing.cpuCentsPerHour" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (cents/GB-hr)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.memPerGb') }}</label>
               <input v-model.number="pricing.memoryCentsPerGbHour" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (cents/GB-mo)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.storagePerGb') }}</label>
               <input v-model.number="pricing.storageCentsPerGbMonth" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bandwidth (cents/GB)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.bandwidthPerGb') }}</label>
               <input v-model.number="pricing.bandwidthCentsPerGb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Container (cents/hr)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.buildMinute') }}</label>
               <input v-model.number="pricing.containerCentsPerHour" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Domain Markup (%)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.multiplier') }}</label>
               <input v-model.number="pricing.domainMarkupPercent" type="number" min="0" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Backup (cents/GB)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.storagePerGb') }}</label>
               <input v-model.number="pricing.backupStorageCentsPerGb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
           </div>
@@ -534,7 +536,7 @@ onMounted(() => { fetchAll() })
             <button type="submit" :disabled="savingPricing" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
               <Loader2 v-if="savingPricing" class="w-4 h-4 animate-spin" />
               <Save v-else class="w-4 h-4" />
-              {{ savingPricing ? 'Saving...' : 'Save Usage Pricing' }}
+              {{ savingPricing ? t('common.saving') : t('super.billing.saveUsagePricing') }}
             </button>
           </div>
         </form>
@@ -546,11 +548,11 @@ onMounted(() => { fetchAll() })
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <MapPin class="w-5 h-5 text-blue-500" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Location Pricing</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.locationPricing') }}</h2>
             </div>
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input type="checkbox" v-model="pricing.locationPricingEnabled" @change="savePricingConfig" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-              Enable
+              {{ t('super.billing.enable') }}
             </label>
           </div>
         </div>
@@ -565,23 +567,23 @@ onMounted(() => { fetchAll() })
           </div>
           <div class="flex items-end gap-3">
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Key</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.key') }}</label>
               <input v-model="newLocation.locationKey" placeholder="us-east" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Label</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.label') }}</label>
               <input v-model="newLocation.label" placeholder="US East" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Multiplier (%)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.multiplier') }}</label>
               <input v-model.number="newLocation.multiplier" type="number" min="1" class="w-24 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <button @click="addLocation" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium">
-              <Plus class="w-4 h-4" /> Add
+              <Plus class="w-4 h-4" /> {{ t('common.add') }}
             </button>
           </div>
         </div>
-        <div v-else class="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Enable location pricing to configure per-region cost multipliers.</div>
+        <div v-else class="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('super.billing.locationPricingDesc') }}</div>
       </div>
 
       <!-- Section 5: Global Resource Limits -->
@@ -589,38 +591,38 @@ onMounted(() => { fetchAll() })
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div class="flex items-center gap-2">
             <Shield class="w-5 h-5 text-purple-500" />
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Global Resource Limits</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.resourceLimits') }}</h2>
           </div>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Default limits inherited by all accounts. Override per account as needed.</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.resourceLimitsDesc') }}</p>
         </div>
         <form @submit.prevent="saveResourceLimits" class="p-6 space-y-5">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max CPU/container (mc)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxCpu') }}</label>
               <input v-model.number="resourceLimitsForm.maxCpuPerContainer" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Memory/container (MB)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxMemory') }}</label>
               <input v-model.number="resourceLimitsForm.maxMemoryPerContainer" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Replicas</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxContainers') }}</label>
               <input v-model.number="resourceLimitsForm.maxReplicas" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Containers</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxContainers') }}</label>
               <input v-model.number="resourceLimitsForm.maxContainers" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Storage (GB)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxStorage') }}</label>
               <input v-model.number="resourceLimitsForm.maxStorageGb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Bandwidth (GB)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxBandwidth') }}</label>
               <input v-model.number="resourceLimitsForm.maxBandwidthGb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max NFS Storage (GB)</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxStorage') }}</label>
               <input v-model.number="resourceLimitsForm.maxNfsStorageGb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
           </div>
@@ -628,7 +630,7 @@ onMounted(() => { fetchAll() })
             <button type="submit" :disabled="savingLimits" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
               <Loader2 v-if="savingLimits" class="w-4 h-4 animate-spin" />
               <Save v-else class="w-4 h-4" />
-              {{ savingLimits ? 'Saving...' : 'Save Resource Limits' }}
+              {{ savingLimits ? t('common.saving') : t('super.billing.saveResourceLimits') }}
             </button>
           </div>
         </form>
@@ -639,18 +641,18 @@ onMounted(() => { fetchAll() })
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div class="flex items-center gap-2">
             <Users class="w-5 h-5 text-green-500" />
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Subscriptions</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.subscriptions') }}</h2>
           </div>
         </div>
         <div class="overflow-x-auto">
           <table v-if="subs.length > 0" class="w-full">
             <thead>
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                <th class="px-6 py-3">Account</th>
-                <th class="px-6 py-3">Plan</th>
-                <th class="px-6 py-3">Model</th>
-                <th class="px-6 py-3">Cycle</th>
-                <th class="px-6 py-3">Status</th>
+                <th class="px-6 py-3">{{ t('super.billing.account') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.plan') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.model') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.cycle') }}</th>
+                <th class="px-6 py-3">{{ t('common.status') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -670,7 +672,7 @@ onMounted(() => { fetchAll() })
               </tr>
             </tbody>
           </table>
-          <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No active subscriptions yet.</div>
+          <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('super.billing.noSubscriptions') }}</div>
         </div>
       </div>
 
@@ -679,17 +681,17 @@ onMounted(() => { fetchAll() })
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div class="flex items-center gap-2">
             <DollarSign class="w-5 h-5 text-yellow-500" />
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Account Billing Overrides</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.overrides') }}</h2>
           </div>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Custom discounts and pricing for specific accounts.</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.overridesDesc') }}</p>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                <th class="px-6 py-3">Account</th>
-                <th class="px-6 py-3">Discount</th>
-                <th class="px-6 py-3">Notes</th>
+                <th class="px-6 py-3">{{ t('super.billing.account') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.discount') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.notes') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">

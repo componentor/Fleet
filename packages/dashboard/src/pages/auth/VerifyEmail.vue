@@ -25,7 +25,7 @@ async function verifyEmail() {
     await api.post('/auth/verify-email', { token })
     success.value = true
   } catch (e: any) {
-    error.value = e?.body?.message ?? e?.message ?? 'Verification failed. The link may have expired.'
+    error.value = e?.body?.error ?? e?.body?.message ?? 'Verification failed. The link may have expired.'
   } finally {
     loading.value = false
   }

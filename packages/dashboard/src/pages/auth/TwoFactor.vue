@@ -58,7 +58,7 @@ async function handleSubmit() {
       await router.push('/panel')
     }
   } catch (e: any) {
-    error.value = e?.body?.message ?? e?.message ?? 'Invalid code. Please try again.'
+    error.value = e?.body?.error ?? e?.body?.message ?? 'Invalid code. Please try again.'
   } finally {
     loading.value = false
   }

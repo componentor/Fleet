@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Settings, Save, Loader2, RefreshCw, Check, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+
+const { t } = useI18n()
 
 const api = useApi()
 
@@ -12,11 +15,11 @@ const error = ref('')
 const success = ref('')
 
 const sections = [
-  { id: 'general', label: 'General' },
-  { id: 'stripe', label: 'Stripe Configuration' },
-  { id: 'email', label: 'Email Configuration' },
-  { id: 'registrar', label: 'Domain Registrar' },
-  { id: 'pricing', label: 'Domain Pricing' },
+  { id: 'general', label: () => t('settings.general') },
+  { id: 'stripe', label: () => t('super.settings.stripeConfig') },
+  { id: 'email', label: () => t('super.settings.emailConfig') },
+  { id: 'registrar', label: () => t('super.settings.domainRegistrar') },
+  { id: 'pricing', label: () => t('super.settings.domainPricing') },
 ]
 
 // General settings
@@ -252,7 +255,7 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <Settings class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Platform Settings</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.settings.title') }}</h1>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -274,7 +277,7 @@ onMounted(() => {
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
             ]"
           >
-            {{ section.label }}
+            {{ section.label() }}
           </button>
         </nav>
       </div>
@@ -291,27 +294,27 @@ onMounted(() => {
         <!-- General -->
         <div v-if="activeSection === 'general'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">General Settings</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure basic platform settings.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.generalSettings') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.generalSettingsDesc') }}</p>
           </div>
           <form @submit.prevent="saveGeneral" class="p-6 space-y-5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Platform Name</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformName') }}</label>
               <input v-model="platformName" type="text" placeholder="Fleet" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Platform URL</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformDomain') }}</label>
               <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Support Email</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.email') }}</label>
               <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
             <div class="pt-2 flex justify-end">
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
                 <Save v-else class="w-4 h-4" />
-                {{ saving ? 'Saving...' : 'Save Changes' }}
+                {{ saving ? $t('common.saving') : $t('common.save') }}
               </button>
             </div>
           </form>
@@ -320,27 +323,27 @@ onMounted(() => {
         <!-- Stripe Configuration -->
         <div v-if="activeSection === 'stripe'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Stripe Configuration</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Connect Stripe for payment processing.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.stripeConfig') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.stripeConfigDesc') }}</p>
           </div>
           <form @submit.prevent="saveStripe" class="p-6 space-y-5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Publishable Key</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripePublishableKey') }}</label>
               <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Secret Key</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeSecretKey') }}</label>
               <input v-model="stripeSecretKey" type="password" placeholder="sk_live_..." required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Webhook Secret (optional)</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeWebhookSecret') }} ({{ $t('common.optional') }})</label>
               <input v-model="stripeWebhookSecret" type="password" placeholder="whsec_..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div class="pt-2 flex justify-end">
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
                 <Save v-else class="w-4 h-4" />
-                {{ saving ? 'Saving...' : 'Save Changes' }}
+                {{ saving ? $t('common.saving') : $t('common.save') }}
               </button>
             </div>
           </form>
@@ -349,8 +352,8 @@ onMounted(() => {
         <!-- Email Configuration -->
         <div v-if="activeSection === 'email'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Email Configuration</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure email provider for transactional emails.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.emailConfig') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.emailConfigDesc') }}</p>
           </div>
           <form @submit.prevent="saveEmail" class="p-6 space-y-5">
             <div>
@@ -364,24 +367,24 @@ onMounted(() => {
             <template v-if="emailProvider === 'smtp'">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">SMTP Host</label>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpHost') }}</label>
                   <input v-model="smtpHost" type="text" placeholder="smtp.example.com" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">SMTP Port</label>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPort') }}</label>
                   <input v-model.number="smtpPort" type="number" placeholder="587" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 </div>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">SMTP Username</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpUser') }}</label>
                 <input v-model="smtpUser" type="text" placeholder="your-username" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">SMTP Password</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPass') }}</label>
                 <input v-model="smtpPass" type="password" placeholder="Enter new password to update" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">From Address</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
                 <input v-model="smtpFrom" type="email" placeholder="noreply@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
               </div>
             </template>
@@ -392,7 +395,7 @@ onMounted(() => {
                 <input v-model="resendApiKey" type="password" placeholder="re_..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">From Address</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
                 <input v-model="resendFrom" type="email" placeholder="noreply@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
               </div>
             </template>
@@ -401,7 +404,7 @@ onMounted(() => {
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
                 <Save v-else class="w-4 h-4" />
-                {{ saving ? 'Saving...' : 'Save Changes' }}
+                {{ saving ? $t('common.saving') : $t('common.save') }}
               </button>
             </div>
           </form>
@@ -410,8 +413,8 @@ onMounted(() => {
         <!-- Domain Registrar -->
         <div v-if="activeSection === 'registrar'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Domain Registrar</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure a domain registrar for purchasing domains.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.domainRegistrar') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.domainRegistrarDesc') }}</p>
           </div>
           <form @submit.prevent="saveRegistrar" class="p-6 space-y-5">
             <div v-if="registrarConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
@@ -444,7 +447,7 @@ onMounted(() => {
               >
                 <Loader2 v-if="testingConnection" class="w-4 h-4 animate-spin" />
                 <RefreshCw v-else class="w-4 h-4" />
-                Test Connection
+                {{ $t('super.settings.testConnection') }}
               </button>
               <div v-if="testResult" class="flex items-center gap-1.5 text-sm">
                 <Check v-if="testResult.success" class="w-4 h-4 text-green-600" />
@@ -459,7 +462,7 @@ onMounted(() => {
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
                 <Save v-else class="w-4 h-4" />
-                {{ saving ? 'Saving...' : 'Save Changes' }}
+                {{ saving ? $t('common.saving') : $t('common.save') }}
               </button>
             </div>
           </form>
@@ -469,8 +472,8 @@ onMounted(() => {
         <div v-if="activeSection === 'pricing'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <div>
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Domain Pricing</h2>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure prices for each TLD sold to customers.</p>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.domainPricing') }}</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.domainPricingDesc') }}</p>
             </div>
             <button
               @click="syncPrices"
@@ -479,7 +482,7 @@ onMounted(() => {
             >
               <Loader2 v-if="syncing" class="w-3.5 h-3.5 animate-spin" />
               <RefreshCw v-else class="w-3.5 h-3.5" />
-              Sync from Provider
+              {{ $t('super.settings.syncFromProvider') }}
             </button>
           </div>
 
@@ -488,19 +491,19 @@ onMounted(() => {
           </div>
 
           <div v-else-if="pricingEntries.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-            No TLD pricing configured. Click "Sync from Provider" to fetch prices.
+            {{ $t('super.settings.noTldPricing') }}
           </div>
 
           <div v-else class="overflow-x-auto">
             <table class="w-full">
               <thead>
                 <tr class="border-b border-gray-200 dark:border-gray-700">
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">TLD</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Provider Price</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.tld') }}</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.registerPrice') }}</th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Markup</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Sell Price</th>
-                  <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Enabled</th>
-                  <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Actions</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.renewPrice') }}</th>
+                  <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('common.enabled') }}</th>
+                  <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -542,7 +545,7 @@ onMounted(() => {
                       @click="updatePricingEntry(entry)"
                       class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
                     >
-                      Save
+                      {{ $t('common.save') }}
                     </button>
                   </td>
                 </tr>

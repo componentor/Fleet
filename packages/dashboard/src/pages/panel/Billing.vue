@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { CreditCard, Box, HardDrive, Loader2, ExternalLink, Calendar, Tag, Gauge, Cpu, MemoryStick, Wifi, AlertTriangle } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { CreditCard, Box, HardDrive, Loader2, ExternalLink, Calendar, Gauge, Cpu, MemoryStick, Wifi, AlertTriangle, Trash2, Star, Plus } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
+const { t } = useI18n()
 const api = useApi()
 const { canOwner: isOwner } = useRole()
 
@@ -14,6 +16,8 @@ const usage = ref<any>(null)
 const plans = ref<any[]>([])
 const invoices = ref<any[]>([])
 const limits = ref<any>(null)
+const paymentMethods = ref<any[]>([])
+const defaultPaymentMethodId = ref<string | null>(null)
 
 // Checkout state
 const selectedModel = ref<string>('fixed')
@@ -62,6 +66,16 @@ function getCycleDiscount(cycle: string): string | null {
   return null
 }
 
+function cardBrandLabel(brand: string): string {
+  switch (brand) {
+    case 'visa': return 'Visa'
+    case 'mastercard': return 'MC'
+    case 'amex': return 'Amex'
+    case 'discover': return 'Disc'
+    default: return brand.charAt(0).toUpperCase() + brand.slice(1)
+  }
+}
+
 const hasSubscription = computed(() => subscription.value && subscription.value.status !== 'cancelled')
 const isTrialing = computed(() => subscription.value?.status === 'trialing')
 const isCancelled = computed(() => subscription.value?.cancelledAt !== null && subscription.value?.cancelledAt !== undefined)
@@ -69,13 +83,14 @@ const isCancelled = computed(() => subscription.value?.cancelledAt !== null && s
 async function fetchAll() {
   loading.value = true
   try {
-    const [configData, subsData, usageData, plansData, invoiceData, limitsData] = await Promise.all([
+    const [configData, subsData, usageData, plansData, invoiceData, limitsData, pmData] = await Promise.all([
       api.get<any>('/billing/config'),
       api.get<any>('/billing/subscription'),
       api.get<any>('/billing/usage'),
       api.get<any[]>('/billing/plans'),
       api.get<any[]>('/billing/invoices'),
       api.get<any>('/billing/resource-limits'),
+      api.get<any>('/billing/payment-methods'),
     ])
     config.value = configData
     subscription.value = subsData
@@ -83,6 +98,8 @@ async function fetchAll() {
     plans.value = plansData
     invoices.value = invoiceData
     limits.value = limitsData
+    paymentMethods.value = pmData?.methods ?? []
+    defaultPaymentMethodId.value = pmData?.defaultId ?? null
     selectedModel.value = configData.billingModel ?? 'fixed'
     if (plansData.length > 0) selectedPlan.value = plansData[0].id
   } catch {
@@ -114,7 +131,7 @@ async function checkout() {
 }
 
 async function cancelSubscription() {
-  if (!confirm('Cancel your subscription? It will remain active until the end of your billing period.')) return
+  if (!confirm(t('billing.cancelConfirm'))) return
   try {
     await api.del('/billing/subscription')
     await fetchAll()
@@ -134,6 +151,30 @@ async function openPortal() {
   }
 }
 
+async function addPaymentMethod() {
+  await openPortal()
+}
+
+async function setDefaultPaymentMethod(pmId: string) {
+  try {
+    await api.patch(`/billing/payment-methods/${pmId}/default`, {})
+    defaultPaymentMethodId.value = pmId
+  } catch {
+    alert(t('billing.setDefaultFailed'))
+  }
+}
+
+async function removePaymentMethod(pmId: string) {
+  if (!confirm(t('billing.removeMethodConfirm'))) return
+  try {
+    await api.del(`/billing/payment-methods/${pmId}`)
+    paymentMethods.value = paymentMethods.value.filter(m => m.id !== pmId)
+    if (defaultPaymentMethodId.value === pmId) defaultPaymentMethodId.value = null
+  } catch {
+    alert(t('billing.removeMethodFailed'))
+  }
+}
+
 onMounted(() => { fetchAll() })
 </script>
 
@@ -141,7 +182,7 @@ onMounted(() => { fetchAll() })
   <div>
     <div class="flex items-center gap-3 mb-8">
       <CreditCard class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Billing</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('billing.title') }}</h1>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -153,8 +194,8 @@ onMounted(() => { fetchAll() })
       <div v-if="isTrialing" class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center gap-3">
         <Calendar class="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
         <p class="text-sm text-blue-700 dark:text-blue-300">
-          You are currently on a free trial.
-          <span v-if="subscription?.trialEndsAt"> Trial ends {{ new Date(subscription.trialEndsAt).toLocaleDateString() }}.</span>
+          {{ $t('billing.trialActive') }}
+          <span v-if="subscription?.trialEndsAt"> {{ $t('billing.trialEnds') }} {{ new Date(subscription.trialEndsAt).toLocaleDateString() }}.</span>
         </p>
       </div>
 
@@ -162,15 +203,15 @@ onMounted(() => { fetchAll() })
       <div v-if="isCancelled" class="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-center gap-3">
         <AlertTriangle class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0" />
         <p class="text-sm text-yellow-700 dark:text-yellow-300">
-          Your subscription has been cancelled and will end
-          <span v-if="subscription?.currentPeriodEnd"> on {{ new Date(subscription.currentPeriodEnd).toLocaleDateString() }}</span>.
+          {{ $t('billing.cancelledBanner') }}
+          <span v-if="subscription?.currentPeriodEnd"> {{ new Date(subscription.currentPeriodEnd).toLocaleDateString() }}</span>.
         </p>
       </div>
 
       <!-- Section 1: Current Subscription -->
       <div v-if="hasSubscription" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Current Subscription</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('billing.currentSubscription') }}</h2>
           <span :class="[
             'px-2.5 py-0.5 text-xs font-medium rounded-full',
             subscription.status === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
@@ -181,84 +222,145 @@ onMounted(() => { fetchAll() })
         <div class="p-6">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">
             <div>
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Plan</p>
-              <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ subscription.plan?.name ?? 'Usage-Based' }}</p>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{{ $t('billing.plan') }}</p>
+              <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ subscription.plan?.name ?? $t('billing.usageBased') }}</p>
             </div>
             <div>
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Model</p>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{{ $t('billing.model') }}</p>
               <p class="text-sm font-semibold text-gray-900 dark:text-white capitalize">{{ subscription.billingModel }}</p>
             </div>
             <div>
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Cycle</p>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{{ $t('billing.cycle') }}</p>
               <p class="text-sm font-semibold text-gray-900 dark:text-white capitalize">{{ subscription.billingCycle?.replace('_', ' ') }}</p>
             </div>
             <div v-if="subscription.currentPeriodEnd">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Renews</p>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{{ $t('billing.renews') }}</p>
               <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ new Date(subscription.currentPeriodEnd).toLocaleDateString() }}</p>
             </div>
           </div>
           <div v-if="isOwner" class="flex gap-3 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
             <button @click="openPortal" class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-              <ExternalLink class="w-4 h-4" /> Manage Billing
+              <ExternalLink class="w-4 h-4" /> {{ $t('billing.manageBilling') }}
             </button>
             <button v-if="!isCancelled" @click="cancelSubscription" class="px-3 py-2 rounded-lg border border-red-300 dark:border-red-800 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-              Cancel Subscription
+              {{ $t('billing.cancelSubscription') }}
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Section 2: Usage Dashboard -->
+      <!-- Section 2: Payment Methods -->
+      <div v-if="isOwner" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('billing.paymentMethods') }}</h2>
+          <button @click="addPaymentMethod" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors">
+            <Plus class="w-3.5 h-3.5" />
+            {{ $t('billing.addMethod') }}
+          </button>
+        </div>
+        <div class="p-6">
+          <div v-if="paymentMethods.length === 0" class="text-center py-6">
+            <CreditCard class="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('billing.noPaymentMethods') }}</p>
+          </div>
+          <div v-else class="space-y-3">
+            <div
+              v-for="pm in paymentMethods"
+              :key="pm.id"
+              :class="[
+                'flex items-center justify-between p-4 rounded-lg border transition-colors',
+                pm.id === defaultPaymentMethodId
+                  ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/10'
+                  : 'border-gray-200 dark:border-gray-600'
+              ]"
+            >
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-7 rounded bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300">
+                  {{ cardBrandLabel(pm.brand) }}
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">
+                    •••• {{ pm.last4 }}
+                    <span v-if="pm.id === defaultPaymentMethodId" class="ml-2 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded font-medium">
+                      {{ $t('billing.default') }}
+                    </span>
+                  </p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('billing.expires') }} {{ pm.expMonth }}/{{ pm.expYear }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="pm.id !== defaultPaymentMethodId"
+                  @click="setDefaultPaymentMethod(pm.id)"
+                  class="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                  :title="$t('billing.setAsDefault')"
+                >
+                  <Star class="w-4 h-4" />
+                </button>
+                <button
+                  @click="removePaymentMethod(pm.id)"
+                  class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  :title="$t('billing.removeMethod')"
+                >
+                  <Trash2 class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3: Usage Dashboard -->
       <div v-if="usage" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Resource Usage</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Current billing period usage and estimated costs.</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('billing.resourceUsage') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('billing.usageDesc') }}</p>
         </div>
         <div class="p-6">
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div class="flex items-center gap-2 mb-2">
                 <Box class="w-4 h-4 text-blue-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Containers</span>
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.containers') }}</span>
               </div>
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.runningContainers }} <span class="text-sm font-normal text-gray-400">/ {{ usage.totalContainers }}</span></p>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div class="flex items-center gap-2 mb-2">
                 <Cpu class="w-4 h-4 text-orange-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">CPU Hours</span>
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.cpuHours') }}</span>
               </div>
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.cpuHours?.toFixed(1) ?? 0 }}</p>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div class="flex items-center gap-2 mb-2">
                 <MemoryStick class="w-4 h-4 text-purple-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Memory GB-hrs</span>
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.memoryGbHrs') }}</span>
               </div>
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.memoryGbHours?.toFixed(1) ?? 0 }}</p>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div class="flex items-center gap-2 mb-2">
                 <HardDrive class="w-4 h-4 text-green-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Storage (GB)</span>
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.storageGb') }}</span>
               </div>
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.storageGb ?? 0 }}</p>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div class="flex items-center gap-2 mb-2">
                 <Wifi class="w-4 h-4 text-teal-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Bandwidth (GB)</span>
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.bandwidthGb') }}</span>
               </div>
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.bandwidthGb ?? 0 }}</p>
             </div>
           </div>
 
-          <!-- Cost estimate for usage/hybrid users -->
+          <!-- Cost estimate -->
           <div v-if="usage.estimatedCostCents > 0" class="p-4 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <Gauge class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">Estimated Usage Cost</span>
+                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">{{ $t('billing.estimatedUsageCost') }}</span>
               </div>
               <span class="text-lg font-bold text-primary-700 dark:text-primary-300">{{ formatCents(usage.estimatedCostCents) }}</span>
             </div>
@@ -273,15 +375,15 @@ onMounted(() => { fetchAll() })
         </div>
       </div>
 
-      <!-- Section 3: Plan Selection (for new subscriptions) -->
+      <!-- Section 4: Plan Selection (for new subscriptions) -->
       <div v-if="!hasSubscription && plans.length > 0 && isOwner" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a Plan</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('billing.choosePlan') }}</h2>
         </div>
         <div class="p-6">
-          <!-- Billing model selector (if user choice allowed) -->
+          <!-- Billing model selector -->
           <div v-if="config?.allowUserChoice" class="mb-6">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Billing Model</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ $t('billing.billingModel') }}</label>
             <div class="grid grid-cols-3 gap-3">
               <button v-for="m in [{ id: 'fixed', label: 'Fixed' }, { id: 'usage', label: 'Usage-Based' }, { id: 'hybrid', label: 'Hybrid' }]"
                 :key="m.id" @click="selectedModel = m.id"
@@ -290,7 +392,7 @@ onMounted(() => { fetchAll() })
             </div>
           </div>
 
-          <!-- Plan cards (for fixed/hybrid) -->
+          <!-- Plan cards -->
           <div v-if="selectedModel !== 'usage'" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <button v-for="plan in plans" :key="plan.id" @click="selectedPlan = plan.id"
               :class="[
@@ -314,7 +416,7 @@ onMounted(() => { fetchAll() })
 
           <!-- Cycle selector -->
           <div class="mb-6">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Billing Cycle</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ $t('billing.billingCycle') }}</label>
             <div class="flex flex-wrap gap-2">
               <button v-for="c in allowedCycleOptions" :key="c.id" @click="selectedCycle = c.id"
                 :class="[
@@ -335,23 +437,23 @@ onMounted(() => { fetchAll() })
             class="w-full py-3 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
           >
             <Loader2 v-if="checkingOut" class="w-4 h-4 animate-spin" />
-            {{ checkingOut ? 'Redirecting to Stripe...' : 'Subscribe Now' }}
+            {{ checkingOut ? $t('billing.redirectingToStripe') : $t('billing.subscribeNow') }}
           </button>
         </div>
       </div>
 
-      <!-- Section 4: Invoice History -->
+      <!-- Section 5: Invoice History -->
       <div v-if="invoices.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Invoice History</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('billing.invoiceHistory') }}</h2>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                <th class="px-6 py-3">Date</th>
-                <th class="px-6 py-3">Amount</th>
-                <th class="px-6 py-3">Status</th>
+                <th class="px-6 py-3">{{ $t('common.date') }}</th>
+                <th class="px-6 py-3">{{ $t('billing.amount') }}</th>
+                <th class="px-6 py-3">{{ $t('common.status') }}</th>
                 <th class="px-6 py-3">PDF</th>
               </tr>
             </thead>
@@ -367,7 +469,7 @@ onMounted(() => { fetchAll() })
                 </td>
                 <td class="px-6 py-4">
                   <a v-if="inv.pdfUrl" :href="inv.pdfUrl" target="_blank" class="text-primary-600 dark:text-primary-400 text-xs hover:underline flex items-center gap-1">
-                    <ExternalLink class="w-3 h-3" /> Download
+                    <ExternalLink class="w-3 h-3" /> {{ $t('common.download') }}
                   </a>
                 </td>
               </tr>

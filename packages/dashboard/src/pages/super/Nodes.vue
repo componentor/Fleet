@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Server, Plus, RefreshCw, Loader2, Cpu, MemoryStick } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
+const { t } = useI18n()
 const api = useApi()
 
 const nodes = ref<any[]>([])
@@ -127,7 +129,7 @@ onMounted(() => {
     <div class="flex items-center justify-between mb-8">
       <div class="flex items-center gap-3">
         <Server class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Swarm Nodes</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.nodes.swarmNodes') }}</h1>
       </div>
       <div class="flex items-center gap-3">
         <button
@@ -136,14 +138,14 @@ onMounted(() => {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
         >
           <RefreshCw :class="['w-4 h-4', loading && 'animate-spin']" />
-          Refresh
+          {{ t('super.nodes.refresh') }}
         </button>
         <button
           @click="showAdd = true"
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
           <Plus class="w-4 h-4" />
-          Add Node
+          {{ t('super.nodes.addNode') }}
         </button>
       </div>
     </div>
@@ -153,35 +155,35 @@ onMounted(() => {
     </div>
 
     <div v-if="joinToken" class="mb-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-      <p class="text-sm font-medium text-green-700 dark:text-green-300 mb-2">Node registered. Run this on the new node to join the swarm:</p>
+      <p class="text-sm font-medium text-green-700 dark:text-green-300 mb-2">{{ t('super.nodes.nodeRegistered') }}</p>
       <code class="block bg-gray-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto">docker swarm join --token {{ joinToken }} &lt;manager-ip&gt;:2377</code>
       <button @click="joinToken = ''" class="mt-2 text-xs text-green-600 dark:text-green-400 hover:underline">Dismiss</button>
     </div>
 
     <!-- Add node form -->
     <div v-if="showAdd" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-      <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Register New Node</h3>
+      <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ t('super.nodes.registerNewNode') }}</h3>
       <form @submit.prevent="addNode" class="flex items-end gap-3 flex-wrap">
         <div class="flex-1 min-w-48">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Hostname</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.nodes.hostname') }}</label>
           <input v-model="addHostname" type="text" placeholder="node-01" required class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
         </div>
         <div class="flex-1 min-w-48">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">IP Address</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.nodes.ipAddress') }}</label>
           <input v-model="addIp" type="text" placeholder="10.0.0.1" required class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
         </div>
         <div class="w-36">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Role</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.nodes.role') }}</label>
           <select v-model="addRole" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
             <option value="worker">Worker</option>
             <option value="manager">Manager</option>
           </select>
         </div>
         <button type="submit" :disabled="adding" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-          {{ adding ? 'Adding...' : 'Add' }}
+          {{ adding ? t('super.nodes.adding') : t('common.add') }}
         </button>
         <button type="button" @click="showAdd = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
-          Cancel
+          {{ t('common.cancel') }}
         </button>
       </form>
     </div>
@@ -195,19 +197,19 @@ onMounted(() => {
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hostname</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">IP</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Role</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Resources</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Docker</th>
-              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.hostname') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.ip') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.role') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.status') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.resources') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.docker') }}</th>
+              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="nodes.length === 0">
               <td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                No nodes registered yet. Add your first node to get started.
+                {{ t('super.nodes.noNodesDesc') }}
               </td>
             </tr>
             <tr
@@ -252,7 +254,7 @@ onMounted(() => {
               <td class="px-6 py-4 text-sm">
                 <div v-if="nodeMetrics[node.id]" class="space-y-1.5 min-w-[120px]">
                   <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">CPU</span>
+                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">{{ t('super.nodes.cpu') }}</span>
                     <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all"
@@ -263,7 +265,7 @@ onMounted(() => {
                     <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id]?.cpuPercent ?? 0) }}%</span>
                   </div>
                   <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">MEM</span>
+                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">{{ t('super.nodes.memory') }}</span>
                     <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all"
@@ -287,20 +289,20 @@ onMounted(() => {
                     @click="drainNode(node.id)"
                     class="text-xs font-medium text-yellow-600 dark:text-yellow-400 hover:underline"
                   >
-                    Drain
+                    {{ t('super.nodes.drain') }}
                   </button>
                   <button
                     v-if="node.status === 'draining'"
                     @click="activateNode(node.id)"
                     class="text-xs font-medium text-green-600 dark:text-green-400 hover:underline"
                   >
-                    Activate
+                    {{ t('super.nodes.activate') }}
                   </button>
                   <button
                     @click="removeNode(node.id)"
                     class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
                   >
-                    Remove
+                    {{ t('super.nodes.remove') }}
                   </button>
                 </div>
               </td>

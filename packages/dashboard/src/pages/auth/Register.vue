@@ -17,7 +17,7 @@ async function handleSubmit() {
   try {
     await register(name.value, email.value, password.value)
   } catch (e: any) {
-    error.value = e?.body?.message ?? e?.message ?? 'Registration failed. Please try again.'
+    error.value = e?.body?.error ?? e?.body?.message ?? 'Registration failed. Please try again.'
   }
 }
 

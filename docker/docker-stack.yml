@@ -8,10 +8,6 @@ services:
   # ─── PostgreSQL ───────────────────────────────────────────────────────
   postgres:
     image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: fleet
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-      POSTGRES_DB: fleet
     env_file:
       - /opt/fleet/config/env
     volumes:
@@ -49,12 +45,14 @@ services:
       --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
+    environment:
+      REDISCLI_AUTH: ${VALKEY_PASSWORD}
     volumes:
       - valkey_data:/data
     networks:
       - fleet_internal
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -80,6 +78,8 @@ services:
     image: ghcr.io/componentor/fleet-api:${FLEET_VERSION:-latest}
     env_file:
       - /opt/fleet/config/env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - fleet_internal
       - fleet_public
@@ -269,6 +269,7 @@ services:
         mode: ingress
     volumes:
       - registry_data:/var/lib/registry
+      - /opt/fleet/registry-auth:/auth:ro
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
       REGISTRY_AUTH: htpasswd
@@ -313,9 +314,9 @@ volumes:
   fleet_certs:
     driver: local
     driver_opts:
-      type: nfs
-      o: "addr=${NFS_SERVER:-127.0.0.1},nolock,soft,rw"
-      device: ":${NFS_CERTS_PATH:-/opt/fleet/certs}"
+      type: none
+      o: bind
+      device: /opt/fleet/certs
 
 # ─── Configs ──────────────────────────────────────────────────────────
 configs:

@@ -15,10 +15,11 @@ let shuttingDown = false
 async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
+  // Close the HTTP server first so the port is released immediately
+  try { server?.close() } catch {}
   logger.info('Shutting down gracefully...')
   updateService.stopPeriodicCheck()
   schedulerService.shutdown()
-  try { server?.close() } catch {}
   await Promise.allSettled([
     shutdownWorkers(),
     closeValkey(),
@@ -59,6 +60,17 @@ if (!process.env['JWT_SECRET']) {
   } catch {
     // DB may not be initialized yet (first run)
   }
+}
+
+// Auto-generate a temporary JWT secret for dev mode if still not set
+if (!process.env['JWT_SECRET']) {
+  if (process.env['NODE_ENV'] === 'production') {
+    logger.error('JWT_SECRET is not set — configure it via env or run the setup wizard')
+    process.exit(1)
+  }
+  const { randomBytes } = await import('node:crypto')
+  process.env['JWT_SECRET'] = randomBytes(32).toString('hex')
+  logger.warn('JWT_SECRET not configured — using auto-generated secret (dev mode, tokens will not survive restarts)')
 }
 
 // Sync built-in marketplace templates from disk into DB

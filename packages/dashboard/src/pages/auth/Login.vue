@@ -16,7 +16,7 @@ async function handleSubmit() {
   try {
     await login(email.value, password.value)
   } catch (e: any) {
-    error.value = e?.body?.message ?? e?.message ?? 'Login failed. Please try again.'
+    error.value = e?.body?.error ?? e?.body?.message ?? 'Login failed. Please try again.'
   }
 }
 

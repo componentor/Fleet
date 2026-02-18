@@ -53,6 +53,16 @@ class SchedulerService {
       },
     );
 
+    // Account deletion — daily at 4 AM UTC (processes expired grace periods)
+    await getMaintenanceQueue().add(
+      'account-deletion',
+      { type: 'account-deletion' },
+      {
+        repeat: { pattern: '0 4 * * *' },
+        jobId: 'system:account-deletion',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -63,7 +73,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 4 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 5 system jobs (BullMQ)`,
     );
   }
 

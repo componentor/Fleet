@@ -27,6 +27,7 @@ export const services = mysqlTable('services', {
   githubRepo: varchar('github_repo', { length: 255 }),
   githubBranch: varchar('github_branch', { length: 255 }),
   autoDeploy: boolean('auto_deploy').default(false),
+  githubWebhookId: int('github_webhook_id'),
   domain: varchar('domain', { length: 255 }),
   sslEnabled: boolean('ssl_enabled').default(true),
   status: varchar('status', { length: 255 }).default('stopped'),
@@ -40,6 +41,9 @@ export const services = mysqlTable('services', {
   memoryLimit: int('memory_limit'),
   cpuReservation: int('cpu_reservation'),
   memoryReservation: int('memory_reservation'),
+  sourceType: varchar('source_type', { length: 20 }),
+  sourcePath: varchar('source_path', { length: 500 }),
+  stackId: varchar('stack_id', { length: 36 }),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -47,6 +51,7 @@ export const services = mysqlTable('services', {
 }, (table) => [
   index('idx_services_account_id').on(table.accountId),
   index('idx_services_status').on(table.status),
+  index('idx_services_stack_id').on(table.stackId),
 ]);
 
 export const deployments = mysqlTable('deployments', {

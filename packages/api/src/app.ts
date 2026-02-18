@@ -35,6 +35,8 @@ import notificationRoutes from './routes/notifications.js';
 import apiKeyRoutes from './routes/api-keys.js';
 import domainPricingRoutes from './routes/domain-pricing.js';
 import errorRoutes from './routes/errors.js';
+import uploadRoutes from './routes/upload.js';
+import fileRoutes from './routes/files.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -58,8 +60,14 @@ app.use('*', cors({
   maxAge: 86400,
 }));
 
-// Request body size limit (2 MB default)
-app.use('*', bodyLimit({ maxSize: 2 * 1024 * 1024 }));
+// Request body size limit — larger for upload/files endpoints
+app.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith('/api/v1/upload') || path.match(/\/api\/v1\/files\/[^/]+\/upload/)) {
+    return bodyLimit({ maxSize: 500 * 1024 * 1024 })(c, next);
+  }
+  return bodyLimit({ maxSize: 2 * 1024 * 1024 })(c, next);
+});
 
 // Global rate limiter: 120 requests per minute per IP
 app.use('*', rateLimiter({ windowMs: 60_000, max: 120, keyPrefix: 'global' }));
@@ -152,6 +160,8 @@ api.route('/notifications', notificationRoutes);
 api.route('/api-keys', apiKeyRoutes);
 api.route('/domain-pricing', domainPricingRoutes);
 api.route('/errors', errorRoutes);
+api.route('/upload', uploadRoutes);
+api.route('/files', fileRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(

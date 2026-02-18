@@ -139,15 +139,17 @@ async function completeSetup() {
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('setup.ensureDocker') }}</p>
           </div>
           <div class="p-6 space-y-4">
-            <p class="text-sm text-gray-600 dark:text-gray-400">{{ $t('setup.runCommand') }}</p>
+            <p class="text-sm text-gray-600 dark:text-gray-400">{{ $t('setup.runJoinScript') }}</p>
+            <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
+              <code>curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | sudo bash</code>
+            </div>
+            <div class="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+              <p class="text-sm text-blue-700 dark:text-blue-300">{{ $t('setup.joinScriptNote') }}</p>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('setup.manualDockerNote') }}</p>
             <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
               <code>curl -fsSL https://get.docker.com | sh</code>
             </div>
-            <p class="text-sm text-gray-600 dark:text-gray-400">{{ $t('setup.enableDocker') }}</p>
-            <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
-              <code>sudo systemctl enable docker && sudo systemctl start docker</code>
-            </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-4">{{ $t('setup.dockerRunning') }}</p>
           </div>
         </div>
 

@@ -3,7 +3,9 @@ import { ref, onMounted } from 'vue'
 import { Shield, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const api = useApi()
 const authStore = useAuthStore()
 
@@ -56,7 +58,7 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <Shield class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">All Users</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.users.title') }}</h1>
     </div>
 
     <div v-if="error" class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -72,17 +74,17 @@ onMounted(() => {
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Email</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Super Admin</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Created</th>
-              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.users.name') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.users.email') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.users.superAdmin') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('common.created') }}</th>
+              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('common.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="users.length === 0">
               <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                No users found.
+                {{ $t('super.users.noUsersFound') }}
               </td>
             </tr>
             <tr
@@ -95,7 +97,7 @@ onMounted(() => {
                   <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
                     <span class="text-xs font-semibold text-primary-700 dark:text-primary-300">{{ user.name?.charAt(0)?.toUpperCase() || '?' }}</span>
                   </div>
-                  <span class="text-sm font-medium text-gray-900 dark:text-white">{{ user.name || 'Unknown' }}</span>
+                  <span class="text-sm font-medium text-gray-900 dark:text-white">{{ user.name || $t('super.users.unknown') }}</span>
                 </div>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ user.email }}</td>
@@ -108,7 +110,7 @@ onMounted(() => {
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                   ]"
                 >
-                  {{ user.isSuper ? 'Yes' : 'No' }}
+                  {{ user.isSuper ? $t('common.yes') : $t('common.no') }}
                 </span>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(user.createdAt) }}</td>
@@ -116,7 +118,7 @@ onMounted(() => {
                 <span
                   v-if="user.id === authStore.user?.id"
                   class="text-xs font-medium text-gray-400 dark:text-gray-500"
-                >You</span>
+                >{{ $t('super.users.you') }}</span>
                 <button
                   v-else
                   @click="toggleSuper(user.id, user.isSuper)"
@@ -125,7 +127,7 @@ onMounted(() => {
                     user.isSuper ? 'text-red-600 dark:text-red-400' : 'text-primary-600 dark:text-primary-400'
                   ]"
                 >
-                  {{ user.isSuper ? 'Revoke Super' : 'Grant Super' }}
+                  {{ user.isSuper ? $t('super.users.revokeSuper') : $t('super.users.grantSuper') }}
                 </button>
               </td>
             </tr>
@@ -135,10 +137,10 @@ onMounted(() => {
 
       <!-- Pagination -->
       <div v-if="totalPages > 1" class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-        <p class="text-xs text-gray-500 dark:text-gray-400">Page {{ page }} of {{ totalPages }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.users.pageOf', { page, total: totalPages }) }}</p>
         <div class="flex gap-2">
-          <button @click="page--; fetchUsers()" :disabled="page <= 1" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Previous</button>
-          <button @click="page++; fetchUsers()" :disabled="page >= totalPages" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Next</button>
+          <button @click="page--; fetchUsers()" :disabled="page <= 1" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{{ $t('super.users.previous') }}</button>
+          <button @click="page++; fetchUsers()" :disabled="page >= totalPages" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{{ $t('super.users.next') }}</button>
         </div>
       </div>
     </div>

@@ -24,6 +24,7 @@ export const accounts = mysqlTable('accounts', {
   status: varchar('status', { length: 255 }).default('active'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  scheduledDeletionAt: timestamp('scheduled_deletion_at'),
   deletedAt: timestamp('deleted_at'),
 });
 

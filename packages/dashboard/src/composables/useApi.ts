@@ -166,8 +166,84 @@ export function useApi() {
       return withToastError(request<T>('PUT', path, body))
     },
 
-    del<T = void>(path: string): Promise<T> {
-      return withToastError(request<T>('DELETE', path))
+    del<T = void>(path: string, body?: unknown): Promise<T> {
+      return withToastError(request<T>('DELETE', path, body))
+    },
+
+    async upload<T>(path: string, formData: FormData): Promise<T> {
+      const headers: Record<string, string> = {}
+
+      let token: string | null = null
+      try {
+        const { useAuthStore } = await import('@/stores/auth')
+        const authStore = useAuthStore()
+        token = authStore.token
+      } catch {}
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+
+      const accountId = localStorage.getItem('fleet_account_id')
+      if (accountId) {
+        headers['X-Account-Id'] = accountId
+      }
+
+      const response = await fetch(`${BASE_URL}${path}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: formData,
+      })
+
+      if (!response.ok) {
+        let errorBody: unknown
+        const text = await response.text()
+        try {
+          errorBody = JSON.parse(text)
+        } catch {
+          errorBody = text
+        }
+        const err = new ApiError(response.status, response.statusText, errorBody)
+        const body = err.body as Record<string, string> | undefined
+        toast.error(body?.error || body?.message || err.statusText)
+        throw err
+      }
+
+      if (response.status === 204) return undefined as T
+      return response.json() as Promise<T>
+    },
+
+    async downloadBlob(path: string): Promise<Blob> {
+      const headers: Record<string, string> = {}
+
+      let token: string | null = null
+      try {
+        const { useAuthStore } = await import('@/stores/auth')
+        const authStore = useAuthStore()
+        token = authStore.token
+      } catch {}
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+
+      const accountId = localStorage.getItem('fleet_account_id')
+      if (accountId) {
+        headers['X-Account-Id'] = accountId
+      }
+
+      const response = await fetch(`${BASE_URL}${path}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers,
+      })
+
+      if (!response.ok) {
+        throw new ApiError(response.status, response.statusText, 'Download failed')
+      }
+
+      return response.blob()
     },
   }
 }

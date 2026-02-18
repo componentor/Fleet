@@ -173,10 +173,10 @@ function changeLocale(newLocale: string) {
         <div class="relative">
           <button
             @click="accountMenuOpen = !accountMenuOpen"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors"
+            class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors max-w-[160px] sm:max-w-[240px]"
           >
-            <span>{{ currentAccount?.name ?? $t('nav.selectAccount') }}</span>
-            <ChevronDown class="w-4 h-4" />
+            <span class="truncate">{{ currentAccount?.name ?? $t('nav.selectAccount') }}</span>
+            <ChevronDown class="w-4 h-4 shrink-0" />
           </button>
 
           <!-- Account dropdown -->

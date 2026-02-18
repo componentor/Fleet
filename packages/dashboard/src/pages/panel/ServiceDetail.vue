@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, Square, Power, RotateCw, Trash2, Loader2, ArrowLeft, Radio } from 'lucide-vue-next'
+import { Box, Play, Square, Power, RotateCw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook } from 'lucide-vue-next'
+import FileExplorer from '@/components/FileExplorer.vue'
 import { useApi, ApiError } from '@/composables/useApi'
 import { useLogStream } from '@/composables/useLogStream'
+import { useTerminal } from '@/composables/useTerminal'
+import '@xterm/xterm/css/xterm.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,12 +15,25 @@ const serviceId = route.params.id as string
 const logStream = useLogStream()
 
 const activeTab = ref('overview')
-const tabs = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'logs', label: 'Logs' },
-  { id: 'deployments', label: 'Deployments' },
-  { id: 'settings', label: 'Settings' },
-]
+const tabs = computed(() => {
+  const base = [
+    { id: 'overview', label: 'Overview' },
+  ]
+  if (service.value?.sourceType === 'upload') {
+    base.push({ id: 'files', label: 'Files' })
+  }
+  base.push(
+    { id: 'logs', label: 'Logs' },
+    { id: 'terminal', label: 'Terminal' },
+    { id: 'deployments', label: 'Deployments' },
+    { id: 'settings', label: 'Settings' },
+  )
+  return base
+})
+
+const { createTerminal, connect: terminalConnect, disconnect: terminalDisconnect, connectionState: terminalState } = useTerminal()
+const terminalContainer = ref<HTMLElement | null>(null)
+const terminalCreated = ref(false)
 
 const service = ref<any>(null)
 const loading = ref(true)
@@ -32,6 +48,12 @@ const logsContainer = ref<HTMLElement | null>(null)
 
 const envVars = ref<{ key: string; value: string }[]>([])
 const settingsLoading = ref(false)
+
+// Auto-deploy settings
+const autoDeployEnabled = ref(false)
+const autoDeployBranch = ref('')
+const autoDeployLoading = ref(false)
+const autoDeployError = ref('')
 
 const displayedLogs = computed(() => liveMode.value ? logStream.logs.value : logs.value)
 
@@ -170,6 +192,22 @@ async function saveSettings() {
   }
 }
 
+async function saveAutoDeploy() {
+  autoDeployLoading.value = true
+  autoDeployError.value = ''
+  try {
+    await api.patch(`/services/${serviceId}`, {
+      autoDeploy: autoDeployEnabled.value,
+      githubBranch: autoDeployBranch.value || undefined,
+    })
+    await fetchService()
+  } catch (err: any) {
+    autoDeployError.value = err?.body?.error || err?.message || 'Failed to update auto-deploy settings'
+  } finally {
+    autoDeployLoading.value = false
+  }
+}
+
 function addEnvVar() {
   envVars.value.push({ key: '', value: '' })
 }
@@ -191,12 +229,29 @@ function onTabChange(tabId: string) {
     logStream.stop()
   }
 
+  // Disconnect terminal when leaving terminal tab
+  if (activeTab.value === 'terminal' && tabId !== 'terminal') {
+    terminalDisconnect()
+  }
+
   activeTab.value = tabId
   if (tabId === 'logs') fetchLogs()
   if (tabId === 'deployments') fetchDeployments()
   if (tabId === 'settings' && service.value) {
     const env = service.value.env ?? {}
     envVars.value = Object.entries(env).map(([key, value]) => ({ key, value: String(value) }))
+    autoDeployEnabled.value = service.value.autoDeploy ?? false
+    autoDeployBranch.value = service.value.githubBranch ?? ''
+    autoDeployError.value = ''
+  }
+  if (tabId === 'terminal' && service.value?.status === 'running') {
+    nextTick(() => {
+      if (!terminalCreated.value && terminalContainer.value) {
+        createTerminal(terminalContainer.value)
+        terminalCreated.value = true
+      }
+      terminalConnect(serviceId)
+    })
   }
 }
 
@@ -376,6 +431,11 @@ onMounted(() => {
           </div>
         </div>
 
+        <!-- Files -->
+        <div v-if="activeTab === 'files' && service.sourceType === 'upload'">
+          <FileExplorer :serviceId="serviceId" />
+        </div>
+
         <!-- Logs -->
         <div v-if="activeTab === 'logs'">
           <div class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
@@ -417,6 +477,47 @@ onMounted(() => {
               </div>
               <template v-else>{{ displayedLogs || 'No logs available.' }}</template>
             </div>
+          </div>
+        </div>
+
+        <!-- Terminal -->
+        <div v-if="activeTab === 'terminal'">
+          <div v-if="service.status !== 'running'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
+            <SquareTerminal class="w-10 h-10 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
+            <p class="text-gray-500 dark:text-gray-400 text-sm">Service must be running to open a terminal session.</p>
+            <button
+              v-if="service.status === 'stopped'"
+              @click="startService"
+              :disabled="!!actionLoading"
+              class="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Power class="w-4 h-4" />
+              Start Service
+            </button>
+          </div>
+          <div v-else class="bg-[#1a1b26] rounded-xl border border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+                <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                <span class="ml-2 text-xs text-gray-400">Terminal - {{ service.name }}</span>
+              </div>
+              <span
+                :class="[
+                  'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium',
+                  terminalState === 'connected'
+                    ? 'bg-green-900/40 text-green-400'
+                    : terminalState === 'connecting' || terminalState === 'reconnecting'
+                      ? 'bg-yellow-900/40 text-yellow-400'
+                      : 'bg-gray-700 text-gray-400'
+                ]"
+              >
+                <span :class="['w-1.5 h-1.5 rounded-full', terminalState === 'connected' ? 'bg-green-400' : terminalState === 'connecting' || terminalState === 'reconnecting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-500']"></span>
+                {{ terminalState === 'connected' ? 'Connected' : terminalState === 'connecting' ? 'Connecting...' : terminalState === 'reconnecting' ? 'Reconnecting...' : 'Disconnected' }}
+              </span>
+            </div>
+            <div ref="terminalContainer" class="h-[500px]"></div>
           </div>
         </div>
 
@@ -495,6 +596,73 @@ onMounted(() => {
             </div>
           </div>
 
+          <!-- GitHub Auto-Deploy -->
+          <div v-if="service.sourceType === 'github'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+              <Github class="w-5 h-5 text-gray-900 dark:text-white" />
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('service.githubSettings') }}</h3>
+            </div>
+            <div class="p-6 space-y-5">
+              <!-- Repository (read-only) -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ $t('service.githubRepo') }}</label>
+                <p class="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white text-sm font-mono">{{ service.githubRepo }}</p>
+              </div>
+
+              <!-- Branch -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ $t('service.githubBranch') }}</label>
+                <input
+                  v-model="autoDeployBranch"
+                  type="text"
+                  :placeholder="service.githubBranch || 'main'"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ $t('service.githubBranchHint') }}</p>
+              </div>
+
+              <!-- Auto-deploy toggle -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.autoDeploy') }}</label>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('service.autoDeployDesc') }}</p>
+                </div>
+                <button
+                  @click="autoDeployEnabled = !autoDeployEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800',
+                    autoDeployEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      autoDeployEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+
+              <!-- Webhook status -->
+              <div class="flex items-center gap-2 text-sm">
+                <Webhook class="w-4 h-4 text-gray-400" />
+                <span class="text-gray-500 dark:text-gray-400">{{ $t('service.webhookStatus') }}:</span>
+                <span v-if="service.githubWebhookId" class="text-green-600 dark:text-green-400 font-medium">{{ $t('service.webhookRegistered') }}</span>
+                <span v-else class="text-gray-500 dark:text-gray-400">{{ $t('service.webhookNotRegistered') }}</span>
+              </div>
+
+              <!-- Error -->
+              <div v-if="autoDeployError" class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                {{ autoDeployError }}
+              </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+              <button @click="saveAutoDeploy" :disabled="autoDeployLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ autoDeployLoading ? $t('service.saving') : $t('service.saveGithubSettings') }}
+              </button>
+            </div>
+          </div>
+
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Service Configuration</h3>
@@ -512,10 +680,6 @@ onMounted(() => {
                 <div>
                   <dt class="text-gray-500 dark:text-gray-400">Rollback on Failure</dt>
                   <dd class="text-gray-900 dark:text-white mt-0.5">{{ service.rollbackOnFailure ? 'Yes' : 'No' }}</dd>
-                </div>
-                <div>
-                  <dt class="text-gray-500 dark:text-gray-400">Auto Deploy</dt>
-                  <dd class="text-gray-900 dark:text-white mt-0.5">{{ service.autoDeploy ? 'Enabled' : 'Disabled' }}</dd>
                 </div>
               </dl>
             </div>

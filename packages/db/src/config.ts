@@ -1,4 +1,9 @@
+import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
+
 export type Dialect = 'sqlite' | 'pg' | 'mysql';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function getDialect(): Dialect {
   const dialect = process.env['DB_DIALECT'] ?? 'sqlite';
@@ -15,7 +20,10 @@ export function getConnectionString(): string {
   const dialect = getDialect();
 
   if (dialect === 'sqlite') {
-    return process.env['DATABASE_PATH'] ?? './fleet.db';
+    if (process.env['DATABASE_PATH']) return process.env['DATABASE_PATH'];
+    // Resolve to monorepo root so the path is stable regardless of CWD
+    // __dirname = packages/db/src -> 3 levels up = monorepo root
+    return resolve(__dirname, '..', '..', '..', 'fleet.db');
   }
 
   const url = process.env['DATABASE_URL'];

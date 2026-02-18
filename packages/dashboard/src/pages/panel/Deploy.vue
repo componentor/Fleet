@@ -15,6 +15,8 @@ import {
   GitBranch,
   ArrowLeft,
   Check,
+  FolderUp,
+  Archive,
 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
@@ -44,7 +46,7 @@ const store = useServicesStore()
 const authStore = useAuthStore()
 const api = useApi()
 
-const deployMethod = ref<'github' | 'docker' | null>(null)
+const deployMethod = ref<'github' | 'docker' | 'upload' | null>(null)
 
 // Docker form state
 const serviceName = ref('')
@@ -77,6 +79,59 @@ const autoDeploy = ref(true)
 // Shared env vars and ports for both deploy methods
 const envVars = ref<{ key: string; value: string }[]>([])
 const ports = ref<{ container: number | null; published: number | null }[]>([])
+
+// Upload form state
+const uploadFile = ref<File | null>(null)
+const uploadServiceName = ref('')
+const uploadBuildFile = ref('')
+const uploadDragOver = ref(false)
+const uploadLoading = ref(false)
+
+function onUploadFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  uploadFile.value = input.files?.[0] || null
+}
+
+function onUploadDrop(e: DragEvent) {
+  uploadDragOver.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (file) {
+    const ext = file.name.toLowerCase()
+    if (ext.endsWith('.zip') || ext.endsWith('.tar') || ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
+      uploadFile.value = file
+    }
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+async function deployUpload() {
+  if (!uploadServiceName.value || !uploadFile.value) return
+  uploadLoading.value = true
+  error.value = ''
+  try {
+    const formData = new FormData()
+    formData.append('file', uploadFile.value)
+    formData.append('name', uploadServiceName.value)
+    if (uploadBuildFile.value) formData.append('buildFile', uploadBuildFile.value)
+    if (buildEnvVarsPayload()) formData.append('env', JSON.stringify(buildEnvVarsPayload()))
+    if (buildPortsPayload()) formData.append('ports', JSON.stringify(buildPortsPayload()))
+    if (domain.value) formData.append('domain', domain.value)
+    formData.append('replicas', String(replicas.value))
+
+    await api.upload('/upload/deploy', formData)
+    router.push('/panel/services')
+  } catch (err: any) {
+    error.value = err?.body?.error || err?.message || t('deploy.deploymentFailed')
+  } finally {
+    uploadLoading.value = false
+  }
+}
+
 
 const filteredRepos = computed(() => {
   if (!repoSearch.value.trim()) return repos.value
@@ -291,7 +346,7 @@ onMounted(() => {
     </div>
 
     <!-- Deploy method selection -->
-    <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-4xl">
+    <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl">
       <button
         @click="deployMethod = 'docker'"
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all group"
@@ -317,6 +372,19 @@ onMounted(() => {
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ $t('deploy.fromGithub') }}</h3>
         <p class="text-sm text-gray-500 dark:text-gray-400">
           {{ $t('deploy.fromGithubDesc') }}
+        </p>
+      </button>
+
+      <button
+        @click="deployMethod = 'upload'"
+        class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all group"
+      >
+        <div class="w-12 h-12 rounded-lg bg-purple-600 flex items-center justify-center mb-4">
+          <FolderUp class="w-6 h-6 text-white" />
+        </div>
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ $t('deploy.fromUpload') }}</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+          {{ $t('deploy.fromUploadDesc') }}
         </p>
       </button>
 
@@ -859,6 +927,149 @@ onMounted(() => {
                 {{ loading ? $t('deploy.deploying') : $t('deploy.deploy') }}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload deploy form -->
+    <div v-if="deployMethod === 'upload'" class="max-w-2xl">
+      <button
+        @click="deployMethod = null; error = ''; uploadFile = null; uploadServiceName = ''"
+        class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors"
+      >
+        &larr; {{ $t('deploy.backToOptions') }}
+      </button>
+      <div
+        class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm"
+      >
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('deploy.fromUpload') }}</h2>
+        </div>
+        <div class="p-6 space-y-5">
+          <!-- Drop zone -->
+          <div>
+            <label
+              :class="[
+                'flex items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors',
+                uploadDragOver
+                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                  : 'border-gray-300 dark:border-gray-600 hover:border-primary-400 dark:hover:border-primary-500 bg-gray-50 dark:bg-gray-900/50',
+              ]"
+              @dragover.prevent="uploadDragOver = true"
+              @dragleave="uploadDragOver = false"
+              @drop.prevent="onUploadDrop"
+            >
+              <div class="text-center">
+                <Archive v-if="!uploadFile" class="w-10 h-10 text-gray-400 mx-auto mb-3" />
+                <FolderUp v-else class="w-10 h-10 text-primary-500 mx-auto mb-3" />
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  {{ uploadFile ? $t('deploy.fileSelected', { name: uploadFile.name, size: formatFileSize(uploadFile.size) }) : $t('deploy.dragDrop') }}
+                </p>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ $t('deploy.supportedFormats') }}</p>
+              </div>
+              <input
+                type="file"
+                accept=".zip,.tar,.tar.gz,.tgz"
+                class="hidden"
+                @change="onUploadFileSelect"
+              />
+            </label>
+          </div>
+
+          <!-- Service Name -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.serviceName') }}</label>
+            <input
+              v-model="uploadServiceName"
+              type="text"
+              placeholder="my-app"
+              required
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            />
+          </div>
+
+          <!-- Build File (optional) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.buildFile') }}</label>
+            <input
+              v-model="uploadBuildFile"
+              type="text"
+              placeholder="Dockerfile"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+            />
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ $t('deploy.buildFileHint') }}</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-5">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.replicas') }}</label>
+              <input
+                v-model.number="replicas"
+                type="number"
+                min="1"
+                max="100"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.domainOptional') }}</label>
+              <input
+                v-model="domain"
+                type="text"
+                placeholder="app.example.com"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
+          </div>
+
+          <!-- Environment Variables -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('deploy.envVars') }}</label>
+              <button type="button" @click="addEnvVar" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
+              </button>
+            </div>
+            <div v-for="(env, i) in envVars" :key="i" class="flex items-center gap-2 mb-2">
+              <input v-model="env.key" type="text" :placeholder="$t('deploy.keyPlaceholder')" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="env.value" type="text" :placeholder="$t('deploy.valuePlaceholder')" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <button type="button" @click="removeEnvVar(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
+            </div>
+            <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noEnvVars') }}</p>
+          </div>
+
+          <!-- Port Mappings -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('deploy.portMappings') }}</label>
+              <button type="button" @click="addPort" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
+              </button>
+            </div>
+            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
+              <div class="flex-1">
+                <input v-model.number="port.container" type="number" :placeholder="$t('deploy.containerPort')" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
+              <div class="flex-1">
+                <input v-model.number="port.published" type="number" :placeholder="String(port.container || $t('deploy.hostPort'))" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <button type="button" @click="removePort(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
+            </div>
+            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noPorts') }}</p>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button
+              @click="deployUpload"
+              :disabled="uploadLoading || !uploadServiceName || !uploadFile"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Loader2 v-if="uploadLoading" class="w-4 h-4 animate-spin" />
+              <Rocket v-else class="w-4 h-4" />
+              {{ uploadLoading ? $t('deploy.uploading') : $t('deploy.deploy') }}
+            </button>
           </div>
         </div>
       </div>

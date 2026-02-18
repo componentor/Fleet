@@ -1,26 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TheNavbar from '@/components/TheNavbar.vue'
+import type { NavLink } from '@/components/TheNavbar.vue'
+import TheFooter from '@/components/TheFooter.vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const dashboardUrl = import.meta.env.VITE_DASHBOARD_URL || 'http://localhost:5173'
 
-const isScrolled = ref(false)
-const mobileMenuOpen = ref(false)
-
-function handleScroll() {
-  isScrolled.value = window.scrollY > 20
-}
-
-function changeLocale(newLocale: string) {
-  locale.value = newLocale
-  localStorage.setItem('fleet_locale', newLocale)
-}
-
 onMounted(() => {
-  window.addEventListener('scroll', handleScroll)
-
   // Intersection Observer for fade-in animations
   const observer = new IntersectionObserver(
     (entries) => {
@@ -36,48 +25,55 @@ onMounted(() => {
   document.querySelectorAll('.fade-in').forEach((el) => observer.observe(el))
 
   onUnmounted(() => {
-    window.removeEventListener('scroll', handleScroll)
     observer.disconnect()
   })
 })
 
 const features = computed(() => [
   {
+    id: 'docker-swarm',
     icon: '&#x2699;&#xFE0F;',
     title: t('features.dockerSwarm.title'),
     description: t('features.dockerSwarm.description'),
   },
   {
+    id: 'multi-tenant',
     icon: '&#x1F3E2;',
     title: t('features.multiTenant.title'),
     description: t('features.multiTenant.description'),
   },
   {
+    id: 'billing',
     icon: '&#x1F4B3;',
     title: t('features.billing.title'),
     description: t('features.billing.description'),
   },
   {
+    id: 'domains',
     icon: '&#x1F310;',
     title: t('features.domains.title'),
     description: t('features.domains.description'),
   },
   {
+    id: 'ssh',
     icon: '&#x1F5A5;&#xFE0F;',
     title: t('features.ssh.title'),
     description: t('features.ssh.description'),
   },
   {
+    id: 'backups',
     icon: '&#x1F4BE;',
     title: t('features.backups.title'),
     description: t('features.backups.description'),
   },
   {
+    id: 'marketplace',
     icon: '&#x1F6D2;',
     title: t('features.marketplace.title'),
     description: t('features.marketplace.description'),
   },
   {
+    id: 'monitoring',
     icon: '&#x1F4CA;',
     title: t('features.monitoring.title'),
     description: t('features.monitoring.description'),
@@ -132,116 +128,17 @@ const plans = computed(() => [
   },
 ])
 
-const navLinks = computed(() => [
+const navLinks = computed<NavLink[]>(() => [
   { label: t('nav.features'), href: '#features' },
   { label: t('nav.pricing'), href: '#pricing' },
+  { label: 'Docs', href: '/docs', routerLink: true },
   { label: t('nav.github'), href: 'https://github.com/fleet', external: true },
 ])
 </script>
 
 <template>
   <div class="min-h-screen bg-surface-950 text-surface-200">
-    <!-- Navbar -->
-    <nav
-      :class="[
-        'fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b',
-        isScrolled
-          ? 'bg-surface-950/80 backdrop-blur-xl border-surface-800/50'
-          : 'bg-transparent border-transparent',
-      ]"
-    >
-      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div class="flex h-16 items-center justify-between">
-          <!-- Logo -->
-          <a href="/" class="flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700">
-              <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <span class="text-xl font-bold text-white">Fleet</span>
-          </a>
-
-          <!-- Desktop nav links -->
-          <div class="hidden items-center gap-8 md:flex">
-            <a
-              v-for="link in navLinks"
-              :key="link.label"
-              :href="link.href"
-              :target="link.external ? '_blank' : undefined"
-              :rel="link.external ? 'noopener noreferrer' : undefined"
-              class="text-sm font-medium text-surface-400 transition-colors hover:text-white"
-            >
-              {{ link.label }}
-            </a>
-            <select
-              :value="locale"
-              @change="changeLocale(($event.target as HTMLSelectElement).value)"
-              class="bg-transparent text-sm font-medium text-surface-400 transition-colors hover:text-white cursor-pointer outline-none"
-            >
-              <option value="en" class="bg-surface-900 text-surface-200">EN</option>
-              <option value="nb" class="bg-surface-900 text-surface-200">NO</option>
-              <option value="de" class="bg-surface-900 text-surface-200">DE</option>
-              <option value="zh" class="bg-surface-900 text-surface-200">中文</option>
-            </select>
-            <a
-              :href="dashboardUrl + '/register'"
-              class="rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
-            >
-              {{ $t('nav.getStarted') }}
-            </a>
-          </div>
-
-          <!-- Mobile menu button -->
-          <button
-            class="inline-flex items-center justify-center rounded-lg p-2 text-surface-400 hover:text-white md:hidden"
-            @click="mobileMenuOpen = !mobileMenuOpen"
-          >
-            <svg v-if="!mobileMenuOpen" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-            <svg v-else class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <!-- Mobile menu -->
-        <div
-          v-if="mobileMenuOpen"
-          class="border-t border-surface-800/50 pb-4 pt-2 md:hidden"
-        >
-          <a
-            v-for="link in navLinks"
-            :key="link.label"
-            :href="link.href"
-            :target="link.external ? '_blank' : undefined"
-            :rel="link.external ? 'noopener noreferrer' : undefined"
-            class="block rounded-lg px-3 py-2 text-sm font-medium text-surface-400 transition-colors hover:bg-surface-800 hover:text-white"
-            @click="mobileMenuOpen = false"
-          >
-            {{ link.label }}
-          </a>
-          <select
-            :value="locale"
-            @change="changeLocale(($event.target as HTMLSelectElement).value)"
-            class="block w-full rounded-lg px-3 py-2 text-sm font-medium text-surface-400 bg-transparent transition-colors hover:bg-surface-800 hover:text-white cursor-pointer outline-none"
-          >
-            <option value="en" class="bg-surface-900 text-surface-200">English</option>
-            <option value="nb" class="bg-surface-900 text-surface-200">Norsk</option>
-            <option value="de" class="bg-surface-900 text-surface-200">Deutsch</option>
-            <option value="zh" class="bg-surface-900 text-surface-200">中文</option>
-          </select>
-          <a
-            :href="dashboardUrl + '/register'"
-            class="mt-2 block rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-2 text-center text-sm font-semibold text-white"
-            @click="mobileMenuOpen = false"
-          >
-            {{ $t('nav.getStarted') }}
-          </a>
-        </div>
-      </div>
-    </nav>
+    <TheNavbar :nav-links="navLinks" :dashboard-url="dashboardUrl" />
 
     <!-- Hero Section -->
     <section class="relative overflow-hidden pt-32 pb-20 sm:pt-40 sm:pb-32">
@@ -309,15 +206,11 @@ const navLinks = computed(() => [
               <div class="h-3 w-3 rounded-full bg-green-500/80"></div>
               <span class="ml-2 text-xs text-surface-500">{{ $t('terminal.title') }}</span>
             </div>
-            <div class="p-6 font-mono text-sm leading-relaxed">
-              <p><span class="text-green-400">$</span> <span class="text-surface-300">{{ $t('terminal.command') }}</span></p>
-              <p class="mt-2 text-surface-500">{{ $t('terminal.deploying') }}</p>
-              <p class="text-surface-500">{{ $t('terminal.building') }}</p>
-              <p class="text-surface-500">{{ $t('terminal.pushing') }}</p>
-              <p class="text-surface-500">{{ $t('terminal.updating') }}</p>
-              <p class="mt-2 text-green-400">&#x2713; {{ $t('terminal.success') }}</p>
-              <p class="text-surface-500">&#x2192; {{ $t('terminal.url') }}</p>
-            </div>
+            <pre class="p-6 font-mono text-sm leading-normal text-left"><span class="text-green-400">$</span> <span class="text-surface-300">{{ $t('terminal.command') }}</span>
+<span class="text-green-400">&#x2713; {{ $t('terminal.success') }}</span>
+<span class="text-white font-bold">  {{ $t('terminal.labelName') }}     </span><span class="text-surface-400">{{ $t('terminal.valueName') }}</span>
+<span class="text-white font-bold">  {{ $t('terminal.labelReplicas') }} </span><span class="text-surface-400">{{ $t('terminal.valueReplicas') }}</span>
+<span class="text-white font-bold">  {{ $t('terminal.labelUrl') }}      </span><span class="text-cyan-400">{{ $t('terminal.valueUrl') }}</span></pre>
           </div>
         </div>
       </div>
@@ -339,7 +232,7 @@ const navLinks = computed(() => [
         <div class="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <div
             v-for="(feature, index) in features"
-            :key="feature.title"
+            :key="feature.id"
             class="fade-in group relative overflow-hidden rounded-xl border border-surface-800 bg-surface-900/50 p-6 transition-all duration-300 hover:border-primary-500/30 hover:bg-surface-850"
             :style="{ transitionDelay: `${index * 50}ms` }"
           >
@@ -479,54 +372,7 @@ const navLinks = computed(() => [
       </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="border-t border-surface-800/50 py-12">
-      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div class="flex flex-col items-center justify-between gap-8 md:flex-row">
-          <!-- Branding -->
-          <div class="flex flex-col items-center gap-2 md:items-start">
-            <div class="flex items-center gap-2">
-              <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700">
-                <svg class="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-              <span class="text-lg font-bold text-white">Fleet</span>
-            </div>
-            <p class="text-sm text-surface-500">{{ $t('footer.builtWith') }}</p>
-          </div>
-
-          <!-- Links -->
-          <div class="flex items-center gap-8">
-            <a
-              href="https://github.com/fleet"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-sm text-surface-400 transition-colors hover:text-white"
-            >
-              {{ $t('footer.github') }}
-            </a>
-            <a
-              href="#"
-              class="text-sm text-surface-400 transition-colors hover:text-white"
-            >
-              {{ $t('footer.docs') }}
-            </a>
-            <a
-              href="#"
-              class="text-sm text-surface-400 transition-colors hover:text-white"
-            >
-              {{ $t('footer.discord') }}
-            </a>
-          </div>
-
-          <!-- Copyright -->
-          <p class="text-sm text-surface-500">
-            &copy; {{ new Date().getFullYear() }} {{ $t('footer.rights') }}
-          </p>
-        </div>
-      </div>
-    </footer>
+    <TheFooter />
   </div>
 </template>
 

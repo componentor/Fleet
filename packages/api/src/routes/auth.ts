@@ -6,7 +6,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
-import { db, users, userAccounts, accounts, oauthProviders, insertReturning, eq, and, isNull } from '@fleet/db';
+import { db, users, userAccounts, accounts, oauthProviders, insertReturning, safeTransaction, eq, and, isNull } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../services/logger.js';
@@ -74,18 +74,18 @@ function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
-function setRefreshTokenCookie(c: any, refreshToken: string) {
+export function setRefreshTokenCookie(c: any, refreshToken: string) {
   setCookie(c, 'fleet_refresh', refreshToken, {
     httpOnly: true,
     secure: process.env['NODE_ENV'] === 'production',
     sameSite: 'Lax',
-    path: '/api/v1/auth',
+    path: '/',
     maxAge: 7 * 24 * 60 * 60, // 7 days
   });
 }
 
 function clearRefreshTokenCookie(c: any) {
-  deleteCookie(c, 'fleet_refresh', { path: '/api/v1/auth' });
+  deleteCookie(c, 'fleet_refresh', { path: '/' });
 }
 
 function userResponse(user: any) {
@@ -137,7 +137,7 @@ auth.post('/register', authRateLimit, async (c) => {
   // Create user, account, and link them in a single transaction
   let user: any;
   let account: any;
-  await db.transaction(async (tx) => {
+  await safeTransaction(async (tx) => {
     [user] = await tx.insert(users).values({
       email,
       passwordHash,
@@ -512,7 +512,7 @@ auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
   const passwordHash = await hash(password);
 
   // Use transaction to prevent TOCTOU race on reset token
-  const result = await db.transaction(async (tx) => {
+  const result = await safeTransaction(async (tx) => {
     const user = await tx.query.users.findFirst({
       where: and(eq(users.passwordResetToken, hashed), isNull(users.deletedAt)),
     });
@@ -934,7 +934,7 @@ auth.get('/github/callback', async (c) => {
 
       if (!user) {
         // Create new user, account, and link in a single transaction (OAuth = email already verified)
-        await db.transaction(async (tx) => {
+        await safeTransaction(async (tx) => {
           const [newUser] = await tx.insert(users).values({
             email,
             name: githubUser.name ?? githubUser.login,
@@ -1154,7 +1154,7 @@ auth.get('/google/callback', async (c) => {
 
       if (!user) {
         // Create new user, account, and link in a single transaction
-        await db.transaction(async (tx) => {
+        await safeTransaction(async (tx) => {
           const [newUser] = await tx.insert(users).values({
             email: googleUser.email,
             name: googleUser.name,

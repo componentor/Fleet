@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { verify } from 'argon2';
-import { db, accounts, userAccounts, users, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and, isNull } from '@fleet/db';
+import { db, accounts, userAccounts, users, services, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and, isNull, isNotNull, safeTransaction } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { generateTokens } from './auth.js';
+import { generateTokens, setRefreshTokenCookie } from './auth.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
+import { dockerService } from '../services/docker.service.js';
+import { logger } from '../services/logger.js';
 
 const accountRoutes = new Hono<{
   Variables: {
@@ -113,7 +115,7 @@ accountRoutes.post('/', async (c) => {
 
   // Create account and link user as owner in a single transaction
   let account: any;
-  await db.transaction(async (tx) => {
+  await safeTransaction(async (tx) => {
     [account] = await tx.insert(accounts).values({
       name,
       slug,
@@ -196,7 +198,7 @@ accountRoutes.patch('/:id', tenantMiddleware, async (c) => {
   return c.json(updated);
 });
 
-// DELETE /:id — delete account and all descendants
+// DELETE /:id — schedule account for deletion (30-day grace period)
 accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
   const account = c.get('account');
   if (!account) {
@@ -236,25 +238,104 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
     }
   }
 
+  // Schedule deletion for 30 days from now
+  const scheduledDate = new Date();
+  scheduledDate.setDate(scheduledDate.getDate() + 30);
+
   const descendants = await db.query.accounts.findMany({
     where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
   });
 
   const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
 
-  // Soft-delete all accounts; hard-delete user-account links (they're just join records)
-  await db.transaction(async (tx) => {
-    for (const accountId of allAccountIds) {
-      await tx.delete(userAccounts).where(eq(userAccounts.accountId, accountId));
+  // Mark all accounts as scheduled for deletion and stop their services
+  await safeTransaction(async (tx) => {
+    for (const accId of allAccountIds) {
+      await tx.update(accounts).set({
+        scheduledDeletionAt: scheduledDate,
+        status: 'pending_deletion',
+        updatedAt: new Date(),
+      }).where(eq(accounts.id, accId));
     }
-
-    for (const desc of descendants.reverse()) {
-      await tx.update(accounts).set({ deletedAt: new Date() }).where(eq(accounts.id, desc.id));
-    }
-    await tx.update(accounts).set({ deletedAt: new Date() }).where(eq(accounts.id, account.id));
   });
 
-  return c.json({ message: 'Account and all sub-accounts deleted' });
+  // Stop all running services for these accounts (outside transaction for Docker calls)
+  for (const accId of allAccountIds) {
+    const accountServices = await db.query.services.findMany({
+      where: and(eq(services.accountId, accId), isNull(services.deletedAt)),
+    });
+
+    for (const svc of accountServices) {
+      if (svc.dockerServiceId && svc.status !== 'stopped') {
+        try {
+          await dockerService.scaleService(svc.dockerServiceId, 0);
+        } catch (err) {
+          logger.error({ err, serviceId: svc.id }, 'Failed to stop service during deletion scheduling');
+        }
+      }
+      await db.update(services).set({
+        status: 'stopped',
+        stoppedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(services.id, svc.id));
+    }
+  }
+
+  await invalidateCache(`GET:/accounts/${account.id}:*`);
+
+  return c.json({
+    message: 'Account scheduled for deletion',
+    scheduledDeletionAt: scheduledDate.toISOString(),
+  });
+});
+
+// POST /:id/revoke-deletion — cancel scheduled deletion
+accountRoutes.post('/:id/revoke-deletion', tenantMiddleware, async (c) => {
+  const account = c.get('account');
+  if (!account) {
+    return c.json({ error: 'Account not found' }, 404);
+  }
+
+  const user = c.get('user');
+
+  if (!user.isSuper) {
+    const membership = await db.query.userAccounts.findFirst({
+      where: (ua, { and, eq: e }) =>
+        and(e(ua.userId, user.userId), e(ua.accountId, account.id)),
+    });
+
+    if (!membership || membership.role !== 'owner') {
+      return c.json({ error: 'Only account owners can revoke deletion' }, 403);
+    }
+  }
+
+  const fullAccount = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, account.id), isNull(accounts.deletedAt)),
+  });
+
+  if (!fullAccount?.scheduledDeletionAt) {
+    return c.json({ error: 'Account is not scheduled for deletion' }, 400);
+  }
+
+  const descendants = await db.query.accounts.findMany({
+    where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
+  });
+
+  const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
+
+  await safeTransaction(async (tx) => {
+    for (const accId of allAccountIds) {
+      await tx.update(accounts).set({
+        scheduledDeletionAt: null,
+        status: 'active',
+        updatedAt: new Date(),
+      }).where(eq(accounts.id, accId));
+    }
+  });
+
+  await invalidateCache(`GET:/accounts/${account.id}:*`);
+
+  return c.json({ message: 'Account deletion revoked' });
 });
 
 // GET /:id/tree — full descendant tree
@@ -386,6 +467,8 @@ accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
     isSuper: fullUser.isSuper ?? false,
     impersonatingAccountId: account.id,
   });
+
+  setRefreshTokenCookie(c, tokens.refreshToken);
 
   return c.json({
     token: tokens.accessToken,

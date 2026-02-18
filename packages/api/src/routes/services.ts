@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, services, deployments, insertReturning, updateReturning, eq, and, isNull } from '@fleet/db';
+import { db, services, deployments, oauthProviders, insertReturning, updateReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
+import { githubService } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { logger } from '../services/logger.js';
+import { decrypt } from '../services/crypto.service.js';
 
 const serviceRoutes = new Hono<{
   Variables: {
@@ -91,10 +93,13 @@ const createServiceSchema = z.object({
   githubRepo: z.string().nullable().optional(),
   githubBranch: z.string().nullable().optional(),
   autoDeploy: z.boolean().default(false),
+  sourceType: z.enum(['docker', 'github', 'upload', 'marketplace']).nullable().optional(),
+  sourcePath: z.string().nullable().optional(),
 });
 
 serviceRoutes.post('/', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
+  const user = c.get('user');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
@@ -143,50 +148,58 @@ serviceRoutes.post('/', requireMember, requireScope('write'), async (c) => {
     constraints.push(`node.id == ${data.nodeConstraint}`);
   }
 
-  // Insert into DB within a transaction
-  let svc: any;
-  await db.transaction(async (tx) => {
-    [svc] = await tx.insert(services).values({
-      accountId,
-      name: data.name,
-      image: data.image,
-      replicas: data.replicas,
-      env: data.env,
-      ports: data.ports,
-      volumes: data.volumes,
-      domain: data.domain ?? null,
-      sslEnabled: data.sslEnabled,
-      nodeConstraint: data.nodeConstraint ?? null,
-      placementConstraints: data.placementConstraints,
-      updateParallelism: data.updateParallelism,
-      updateDelay: data.updateDelay,
-      rollbackOnFailure: data.rollbackOnFailure,
-      healthCheck: data.healthCheck ?? null,
-      githubRepo: data.githubRepo ?? null,
-      githubBranch: data.githubBranch ?? null,
-      autoDeploy: data.autoDeploy,
-      status: 'deploying',
-    }).returning();
+  // Insert into DB
+  const [svc] = await insertReturning(services, {
+    accountId,
+    name: data.name,
+    image: data.image,
+    replicas: data.replicas,
+    env: data.env,
+    ports: data.ports,
+    volumes: data.volumes,
+    domain: data.domain ?? null,
+    sslEnabled: data.sslEnabled,
+    nodeConstraint: data.nodeConstraint ?? null,
+    placementConstraints: data.placementConstraints,
+    updateParallelism: data.updateParallelism,
+    updateDelay: data.updateDelay,
+    rollbackOnFailure: data.rollbackOnFailure,
+    healthCheck: data.healthCheck ?? null,
+    githubRepo: data.githubRepo ?? null,
+    githubBranch: data.githubBranch ?? null,
+    autoDeploy: data.autoDeploy,
+    sourceType: data.sourceType ?? (data.githubRepo ? 'github' : 'docker'),
+    sourcePath: data.sourcePath ?? null,
+    status: 'deploying',
   });
 
   if (!svc) {
     return c.json({ error: 'Failed to create service record' }, 500);
   }
 
-  // Ensure account has an overlay network for isolation
-  const networkName = `fleet-account-${accountId}`;
-  let networkId: string | undefined;
-  try {
-    networkId = await dockerService.ensureNetwork(networkName);
-  } catch (err) {
-    logger.error({ err, accountId, networkName }, 'Failed to create account network — aborting deployment');
-    // Clean up the orphaned DB record since we cannot proceed without network isolation
-    await db.delete(services).where(eq(services.id, svc.id));
-    return c.json({ error: 'Failed to create network isolation. Deployment aborted.' }, 500);
+  // Register GitHub webhook if autoDeploy is enabled
+  if (data.autoDeploy && data.githubRepo) {
+    try {
+      const webhookId = await manageWebhook({
+        userId: user.userId,
+        githubRepo: data.githubRepo,
+        enable: true,
+        existingWebhookId: null,
+      });
+      if (webhookId) {
+        await db.update(services).set({ githubWebhookId: webhookId }).where(eq(services.id, svc.id));
+        svc.githubWebhookId = webhookId;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to register GitHub webhook during service creation — auto-deploy may not work');
+    }
   }
 
-  // Deploy to Docker Swarm (external service — outside transaction)
+  // Try to deploy to Docker Swarm (non-fatal — service record is always kept)
   try {
+    const networkName = `fleet-account-${accountId}`;
+    const networkId = await dockerService.ensureNetwork(networkName);
+
     const swarmServiceName = `fleet-${accountId.slice(0, 8)}-${data.name}`;
 
     const result = await dockerService.createService({
@@ -217,7 +230,6 @@ serviceRoutes.post('/', requireMember, requireScope('write'), async (c) => {
       networkId,
     });
 
-    // Update DB with Docker service ID
     await db
       .update(services)
       .set({
@@ -229,13 +241,13 @@ serviceRoutes.post('/', requireMember, requireScope('write'), async (c) => {
 
     return c.json({ ...svc, dockerServiceId: result.id, status: 'running' }, 201);
   } catch (err) {
-    // Rollback: delete the orphaned DB record since Docker creation failed
-    await db.delete(services).where(eq(services.id, svc.id));
+    logger.warn({ err }, 'Docker not available — service created but not started');
+    await db
+      .update(services)
+      .set({ status: 'stopped', updatedAt: new Date() })
+      .where(eq(services.id, svc.id));
 
-    logger.error({ err }, 'Docker service creation failed');
-    return c.json({
-      error: 'Failed to deploy service to Docker Swarm',
-    }, 500);
+    return c.json({ ...svc, status: 'stopped' }, 201);
   }
 });
 
@@ -302,10 +314,65 @@ const updateServiceSchema = z.object({
     timeout: z.number().int(),
     retries: z.number().int(),
   }).nullable().optional(),
+  autoDeploy: z.boolean().optional(),
+  githubBranch: z.string().min(1).optional(),
 });
+
+/**
+ * Helper: register or remove GitHub webhook when autoDeploy changes.
+ * Returns the webhook ID on registration, null on removal.
+ */
+async function manageWebhook(opts: {
+  userId: string;
+  githubRepo: string;
+  enable: boolean;
+  existingWebhookId: number | null;
+}): Promise<number | null> {
+  const oauth = await db.query.oauthProviders.findFirst({
+    where: and(
+      eq(oauthProviders.userId, opts.userId),
+      eq(oauthProviders.provider, 'github'),
+    ),
+  });
+
+  if (!oauth?.accessToken) {
+    throw new Error('GitHub account not connected');
+  }
+
+  const token = decrypt(oauth.accessToken);
+  const parts = opts.githubRepo.split('/');
+  const owner = parts[0]!;
+  const repo = parts[1]!;
+
+  if (opts.enable) {
+    // Build webhook URL from platform domain
+    const platformDomain = process.env['PLATFORM_DOMAIN'] || process.env['CORS_ORIGIN']?.replace(/^https?:\/\//, '');
+    const apiBase = platformDomain
+      ? `https://${platformDomain}/api/v1`
+      : `http://localhost:${process.env['PORT'] ?? '3000'}/api/v1`;
+    const webhookUrl = `${apiBase}/deployments/github/webhook`;
+    const webhookSecret = process.env['GITHUB_WEBHOOK_SECRET'];
+
+    if (!webhookSecret) {
+      throw new Error('GITHUB_WEBHOOK_SECRET not configured');
+    }
+
+    const webhook = await githubService.createWebhook(token, owner, repo, webhookUrl, webhookSecret);
+    return webhook.id;
+  } else {
+    // Remove existing webhook
+    if (opts.existingWebhookId) {
+      await githubService.deleteWebhook(token, owner, repo, opts.existingWebhookId).catch((err) => {
+        logger.warn({ err, hookId: opts.existingWebhookId }, 'Failed to delete GitHub webhook (may already be removed)');
+      });
+    }
+    return null;
+  }
+}
 
 serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
+  const user = c.get('user');
   const serviceId = c.req.param('id');
 
   if (!accountId) {
@@ -329,40 +396,62 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
 
   const data = parsed.data;
 
+  // Handle auto-deploy webhook management
+  const autoDeployChanged = data.autoDeploy !== undefined && data.autoDeploy !== (svc.autoDeploy ?? false);
+  let githubWebhookId = svc.githubWebhookId ?? null;
+
+  if (autoDeployChanged && svc.githubRepo) {
+    try {
+      githubWebhookId = await manageWebhook({
+        userId: user.userId,
+        githubRepo: svc.githubRepo,
+        enable: data.autoDeploy!,
+        existingWebhookId: githubWebhookId,
+      });
+    } catch (err) {
+      logger.error({ err }, 'GitHub webhook management failed');
+      return c.json({ error: `Failed to ${data.autoDeploy ? 'register' : 'remove'} GitHub webhook: ${(err as Error).message}` }, 400);
+    }
+  }
+
+  // Build DB update payload (exclude autoDeploy/githubBranch from Docker update)
+  const { autoDeploy: _ad, githubBranch: _gb, ...dockerFields } = data;
+
   // Update DB
   const [updated] = await updateReturning(services, {
     ...data,
+    githubWebhookId,
     updatedAt: new Date(),
   }, eq(services.id, serviceId));
 
-  // Update Docker Swarm service if it exists
-  if (svc.dockerServiceId) {
+  // Update Docker Swarm service if it exists (only for Docker-relevant fields)
+  if (svc.dockerServiceId && Object.keys(dockerFields).length > 0) {
     try {
       const traefikLabels = buildTraefikLabels(
-        data.name ?? svc.name,
-        data.domain !== undefined ? data.domain : (svc.domain ?? null),
-        data.sslEnabled ?? svc.sslEnabled ?? true,
+        dockerFields.name ?? svc.name,
+        dockerFields.domain !== undefined ? dockerFields.domain : (svc.domain ?? null),
+        dockerFields.sslEnabled ?? svc.sslEnabled ?? true,
       );
 
       await dockerService.updateService(svc.dockerServiceId, {
-        image: data.image,
-        replicas: data.replicas,
-        env: data.env,
+        image: dockerFields.image,
+        replicas: dockerFields.replicas,
+        env: dockerFields.env,
         labels: {
           ...traefikLabels,
           'fleet.account-id': accountId,
           'fleet.service-id': serviceId,
         },
-        constraints: data.placementConstraints ?? (svc.placementConstraints as string[]) ?? [],
-        ports: data.ports?.map((p) => ({
+        constraints: dockerFields.placementConstraints ?? (svc.placementConstraints as string[]) ?? [],
+        ports: dockerFields.ports?.map((p) => ({
           target: p.target,
           published: p.published ?? 0,
           protocol: p.protocol,
         })),
-        healthCheck: data.healthCheck ?? undefined,
-        updateParallelism: data.updateParallelism,
-        updateDelay: data.updateDelay,
-        rollbackOnFailure: data.rollbackOnFailure,
+        healthCheck: dockerFields.healthCheck ?? undefined,
+        updateParallelism: dockerFields.updateParallelism,
+        updateDelay: dockerFields.updateDelay,
+        rollbackOnFailure: dockerFields.rollbackOnFailure,
       });
     } catch (err) {
       logger.error({ err }, 'Docker service update failed');
@@ -382,6 +471,7 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
 // DELETE /:id — destroy service
 serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
+  const user = c.get('user');
   const serviceId = c.req.param('id');
 
   if (!accountId) {
@@ -402,6 +492,30 @@ serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => 
       await dockerService.removeService(svc.dockerServiceId);
     } catch (err) {
       logger.error({ err }, 'Docker service removal failed');
+    }
+  }
+
+  // Clean up GitHub webhook
+  if (svc.githubRepo && svc.githubWebhookId) {
+    try {
+      await manageWebhook({
+        userId: user.userId,
+        githubRepo: svc.githubRepo,
+        enable: false,
+        existingWebhookId: svc.githubWebhookId,
+      });
+    } catch (err) {
+      logger.warn({ err }, 'Failed to clean up GitHub webhook on service delete');
+    }
+  }
+
+  // Clean up uploaded source files
+  if (svc.sourceType === 'upload' && svc.sourcePath) {
+    try {
+      const { uploadService } = await import('../services/upload.service.js');
+      await uploadService.deleteServiceFiles(accountId, serviceId);
+    } catch (err) {
+      logger.error({ err }, 'Failed to clean up upload source files');
     }
   }
 

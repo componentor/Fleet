@@ -50,18 +50,44 @@ webhookRoutes.post('/github/webhook', async (c) => {
   }
 
   const event = c.req.header('X-GitHub-Event');
-  if (event !== 'push') {
+  const payload = JSON.parse(rawBody) as Record<string, unknown>;
+
+  let branch: string;
+  let repoFullName: string;
+  let commitSha: string;
+  let triggerMessage: string;
+
+  if (event === 'push') {
+    const ref = payload['ref'] as string; // "refs/heads/main"
+    branch = ref.replace('refs/heads/', '');
+    const repoData = payload['repository'] as Record<string, unknown>;
+    repoFullName = repoData['full_name'] as string;
+    const headCommit = payload['head_commit'] as Record<string, unknown> | null;
+    commitSha = (headCommit?.['id'] as string) ?? 'unknown';
+    const commitMessage = (headCommit?.['message'] as string) ?? '';
+    triggerMessage = `Auto-deploy triggered by push to ${branch}\nCommit: ${commitSha}\n${commitMessage}\n`;
+  } else if (event === 'pull_request') {
+    const action = payload['action'] as string;
+    const pr = payload['pull_request'] as Record<string, unknown>;
+    const merged = pr['merged'] as boolean;
+
+    // Only trigger on merged PRs
+    if (action !== 'closed' || !merged) {
+      return c.json({ message: `Ignored pull_request action: ${action}, merged: ${merged}` });
+    }
+
+    const base = pr['base'] as Record<string, unknown>;
+    branch = base['ref'] as string;
+    const repoData = payload['repository'] as Record<string, unknown>;
+    repoFullName = repoData['full_name'] as string;
+    const mergeCommit = pr['merge_commit_sha'] as string;
+    commitSha = mergeCommit ?? 'unknown';
+    const prTitle = pr['title'] as string;
+    const prNumber = pr['number'] as number;
+    triggerMessage = `Auto-deploy triggered by PR #${prNumber} merged into ${branch}\n${prTitle}\nCommit: ${commitSha}\n`;
+  } else {
     return c.json({ message: `Ignored event: ${event}` });
   }
-
-  const payload = JSON.parse(rawBody) as Record<string, unknown>;
-  const ref = payload['ref'] as string; // "refs/heads/main"
-  const branch = ref.replace('refs/heads/', '');
-  const repoData = payload['repository'] as Record<string, unknown>;
-  const repoFullName = repoData['full_name'] as string;
-  const headCommit = payload['head_commit'] as Record<string, unknown> | null;
-  const commitSha = (headCommit?.['id'] as string) ?? 'unknown';
-  const commitMessage = (headCommit?.['message'] as string) ?? '';
 
   // Find services that match this repo + branch + auto-deploy
   const matchingServices = await db.query.services.findMany({
@@ -80,22 +106,19 @@ webhookRoutes.post('/github/webhook', async (c) => {
   const results: Array<{ serviceId: string; deploymentId: string; status: string }> = [];
 
   for (const svc of matchingServices) {
-    // Create deployment record within a transaction for atomicity
-    await db.transaction(async (tx) => {
-      const [deployment] = await tx.insert(deployments).values({
-        serviceId: svc.id,
-        commitSha,
-        status: 'building',
-        log: `Auto-deploy triggered by push to ${branch}\nCommit: ${commitSha}\n${commitMessage}\n`,
-      }).returning();
+    const [deployment] = await insertReturning(deployments, {
+      serviceId: svc.id,
+      commitSha,
+      status: 'building',
+      log: triggerMessage,
+    });
 
-      if (!deployment) return;
+    if (!deployment) continue;
 
-      results.push({
-        serviceId: svc.id,
-        deploymentId: deployment.id,
-        status: 'building',
-      });
+    results.push({
+      serviceId: svc.id,
+      deploymentId: deployment.id,
+      status: 'building',
     });
   }
 

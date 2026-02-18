@@ -125,7 +125,7 @@ export const errorLog = _schema.errorLog as typeof PgSchema.errorLog;
 export const webhookEvents = _schema.webhookEvents as typeof PgSchema.webhookEvents;
 
 // --- Helper exports ---
-export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql } from './helpers';
+export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql, safeTransaction } from './helpers';
 export { getDialect } from './config';
 
 // --- Re-export drizzle-orm operators so consumers use the same instance ---

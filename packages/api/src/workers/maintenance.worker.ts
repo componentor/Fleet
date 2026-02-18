@@ -1,8 +1,9 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backupSchedules, eq, and, lt } from '@fleet/db';
+import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, eq, and, lt, like, isNull, isNotNull, safeTransaction } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
+import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
 
 interface HealthCheckData {
@@ -26,12 +27,17 @@ interface StripeUsageReportData {
   type: 'stripe-usage-report';
 }
 
+interface AccountDeletionData {
+  type: 'account-deletion';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
   | BackupScheduleData
   | UsageCollectionData
-  | StripeUsageReportData;
+  | StripeUsageReportData
+  | AccountDeletionData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -105,6 +111,90 @@ async function executeBackupSchedule(scheduleId: string): Promise<void> {
   }
 }
 
+async function executeScheduledDeletions(): Promise<void> {
+  // Find all accounts whose scheduled deletion date has passed
+  const now = new Date();
+  const pendingAccounts = await db.query.accounts.findMany({
+    where: and(
+      isNotNull(accounts.scheduledDeletionAt),
+      lt(accounts.scheduledDeletionAt, now),
+      isNull(accounts.deletedAt),
+    ),
+  });
+
+  if (pendingAccounts.length === 0) return;
+
+  logger.info(`Processing ${pendingAccounts.length} scheduled account deletion(s)`);
+
+  for (const account of pendingAccounts) {
+    try {
+      // Find all services for this account and remove from Docker Swarm
+      const accountServices = await db.query.services.findMany({
+        where: and(eq(services.accountId, account.id), isNull(services.deletedAt)),
+      });
+
+      for (const svc of accountServices) {
+        if (svc.dockerServiceId) {
+          try {
+            await dockerService.removeService(svc.dockerServiceId);
+          } catch (err) {
+            logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during account deletion');
+          }
+        }
+        // Soft-delete the service
+        await db.update(services).set({
+          deletedAt: new Date(),
+          status: 'deleted',
+          updatedAt: new Date(),
+        }).where(eq(services.id, svc.id));
+      }
+
+      // Also handle descendants
+      const descendants = await db.query.accounts.findMany({
+        where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
+      });
+
+      for (const desc of descendants) {
+        const descServices = await db.query.services.findMany({
+          where: and(eq(services.accountId, desc.id), isNull(services.deletedAt)),
+        });
+        for (const svc of descServices) {
+          if (svc.dockerServiceId) {
+            try {
+              await dockerService.removeService(svc.dockerServiceId);
+            } catch (err) {
+              logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during descendant deletion');
+            }
+          }
+          await db.update(services).set({
+            deletedAt: new Date(),
+            status: 'deleted',
+            updatedAt: new Date(),
+          }).where(eq(services.id, svc.id));
+        }
+      }
+
+      // Soft-delete the accounts and remove user-account links
+      await safeTransaction(async (tx) => {
+        const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
+
+        for (const accId of allAccountIds) {
+          await tx.delete(userAccounts).where(eq(userAccounts.accountId, accId));
+          await tx.update(accounts).set({
+            deletedAt: new Date(),
+            status: 'deleted',
+            updatedAt: new Date(),
+          }).where(eq(accounts.id, accId));
+        }
+      });
+
+      logger.info(`Account ${account.id} (${account.name}) permanently deleted after grace period`);
+    } catch (err) {
+      logger.error({ err, accountId: account.id }, 'Failed to execute scheduled account deletion');
+    }
+  }
+}
+
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
   switch (job.name) {
     case 'health-check':
@@ -121,6 +211,9 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'stripe-usage-report':
       await usageService.reportUsageToStripe();
+      break;
+    case 'account-deletion':
+      await executeScheduledDeletions();
       break;
   }
 }

@@ -328,8 +328,12 @@ async function goToDashboard() {
                       {{ dockerState.available ? $t('setup.dockerInstalled') : $t('setup.dockerNotAvailable') }}
                     </p>
                     <p v-if="!dockerState.available" class="text-xs text-red-600 dark:text-red-400 mt-1">
-                      {{ $t('setup.installDocker') }} <code class="bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded">curl -fsSL https://get.docker.com | sh</code>
+                      {{ $t('setup.installDockerHint') }}
                     </p>
+                    <div v-if="!dockerState.available" class="mt-2">
+                      <p class="text-xs text-red-600 dark:text-red-400 mb-1">{{ $t('setup.installDockerAutoHint') }}</p>
+                      <code class="text-xs bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-700 dark:text-red-300">curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | sudo bash</code>
+                    </div>
                   </div>
                 </div>
 

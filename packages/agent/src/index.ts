@@ -8,8 +8,11 @@ const NODE_ID = process.env.NODE_ID || 'unknown'
 const NODE_AUTH_TOKEN = process.env.NODE_AUTH_TOKEN
 
 if (!NODE_AUTH_TOKEN) {
-  logger.error('NODE_AUTH_TOKEN is required — set it to match the API server')
-  process.exit(1)
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('NODE_AUTH_TOKEN is required — set it to match the API server')
+    process.exit(1)
+  }
+  logger.warn('NODE_AUTH_TOKEN not set — heartbeat auth disabled (dev mode)')
 }
 
 // Register shutdown handlers early — before any async work

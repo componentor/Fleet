@@ -1,43 +1,56 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte } from '@fleet/db';
+import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
+import os from 'node:os';
 
 const nodeRoutes = new Hono();
 
-// ── Heartbeat from agent (requires NODE_AUTH_TOKEN) ──
+// ── Heartbeat from agent (requires NODE_AUTH_TOKEN in production) ──
 nodeRoutes.post('/:id/heartbeat', async (c) => {
   const expectedToken = process.env['NODE_AUTH_TOKEN'];
 
-  if (!expectedToken) {
+  if (expectedToken) {
+    const authHeader = c.req.header('Authorization');
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!bearerToken || bearerToken !== expectedToken) {
+      return c.json({ error: 'Invalid or missing Authorization header' }, 401);
+    }
+  } else if (process.env.NODE_ENV === 'production') {
     logger.error('NODE_AUTH_TOKEN is not configured — rejecting heartbeat');
     return c.json({ error: 'Server misconfiguration: NODE_AUTH_TOKEN is not set' }, 500);
   }
 
-  const authHeader = c.req.header('Authorization');
-  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-  if (!bearerToken || bearerToken !== expectedToken) {
-    return c.json({ error: 'Invalid or missing Authorization header' }, 401);
-  }
-
   const nodeId = c.req.param('id');
+  const body = await c.req.json();
 
-  const node = await db.query.nodes.findFirst({
+  let node = await db.query.nodes.findFirst({
     where: eq(nodes.id, nodeId),
   });
+
+  // In dev mode, auto-register the node on first heartbeat
+  if (!node && process.env.NODE_ENV !== 'production') {
+    const [created] = await insertReturning(nodes, {
+      hostname: body.hostname ?? os.hostname(),
+      ipAddress: '127.0.0.1',
+      role: 'manager',
+      status: 'active',
+    });
+    node = created;
+    logger.info(`Auto-registered dev node: ${node.id} (${node.hostname})`);
+  }
+
   if (!node) {
     return c.json({ error: 'Node not found' }, 404);
   }
 
-  const body = await c.req.json();
-
   await db.update(nodes).set({ lastHeartbeat: new Date() }).where(eq(nodes.id, nodeId));
 
   await db.insert(nodeMetrics).values({
-    nodeId,
+    nodeId: node.id,
     hostname: body.hostname ?? node.hostname,
     cpuCount: body.cpuCount ?? 0,
     memTotal: body.memTotal ?? 0,

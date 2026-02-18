@@ -167,6 +167,225 @@ export class BuildService {
     }
   }
 
+  async buildFromDirectory(opts: {
+    serviceId: string;
+    sourceDir: string;
+    dockerfile?: string;
+    imageTag: string;
+    buildArgs?: Record<string, string>;
+  }): Promise<BuildInfo> {
+    const buildId = randomUUID();
+    const workDir = join(BUILD_DIR, buildId);
+    const dockerfile = opts.dockerfile ?? 'Dockerfile';
+    if (dockerfile.includes('..') || dockerfile.startsWith('/') || dockerfile.includes('\\')) {
+      throw new Error('Invalid dockerfile path: must be relative without directory traversal');
+    }
+    const fullImageTag = `${REGISTRY}/${opts.imageTag}`;
+
+    const info: BuildInfo = {
+      id: buildId,
+      serviceId: opts.serviceId,
+      status: 'pending',
+      imageTag: fullImageTag,
+      log: '',
+      startedAt: new Date(),
+      finishedAt: null,
+    };
+
+    this.activeBuilds.set(buildId, { aborted: false, info });
+
+    // Copy source to temp build dir, then build + push
+    this.runDirectoryBuildPipeline(buildId, workDir, opts.sourceDir, dockerfile, fullImageTag, opts.buildArgs ?? {}, info)
+      .catch((err) => {
+        if (info.status !== 'cancelled') {
+          info.status = 'failed';
+          info.log += `\n[error] ${String(err)}`;
+        }
+        info.finishedAt = new Date();
+        this.events.emit(`build:${buildId}`, info);
+      });
+
+    return info;
+  }
+
+  private async runDirectoryBuildPipeline(
+    buildId: string,
+    workDir: string,
+    sourceDir: string,
+    dockerfile: string,
+    imageTag: string,
+    buildArgs: Record<string, string>,
+    info: BuildInfo,
+  ): Promise<void> {
+    try {
+      // 1. Copy source to temp build dir
+      info.status = 'cloning';
+      info.log += '[copy] Copying source files to build directory...\n';
+      this.events.emit(`build:${buildId}`, info);
+
+      await mkdir(workDir, { recursive: true });
+      await this.exec('cp', ['-a', `${sourceDir}/.`, workDir], workDir);
+
+      // 2. Build
+      info.status = 'building';
+      info.log += `\n[build] Building image ${imageTag} from ${dockerfile}...\n`;
+      this.events.emit(`build:${buildId}`, info);
+
+      const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
+      for (const [key, val] of Object.entries(buildArgs)) {
+        buildCmdArgs.push('--build-arg', `${key}=${val}`);
+      }
+      buildCmdArgs.push(workDir);
+
+      const buildLog = await this.exec('docker', buildCmdArgs, workDir, 600_000);
+      info.log += scrubSecrets(buildLog);
+
+      // 3. Push
+      info.status = 'pushing';
+      info.log += `\n[push] Pushing ${imageTag}...\n`;
+      this.events.emit(`build:${buildId}`, info);
+
+      const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000);
+      info.log += scrubSecrets(pushLog);
+
+      // Done
+      info.status = 'succeeded';
+      info.log += '\n[done] Build and push completed successfully.\n';
+      info.finishedAt = new Date();
+      this.events.emit(`build:${buildId}`, info);
+    } catch (err) {
+      if (info.status !== 'cancelled') {
+        info.status = 'failed';
+        info.log += `\n[error] ${String(err)}\n`;
+      }
+      info.finishedAt = new Date();
+      this.events.emit(`build:${buildId}`, info);
+      throw err;
+    } finally {
+      this.activeBuilds.delete(buildId);
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async buildFromCompose(opts: {
+    serviceId: string;
+    sourceDir: string;
+    composeFile?: string;
+    imageTag: string;
+  }): Promise<BuildInfo> {
+    const buildId = randomUUID();
+    const workDir = join(BUILD_DIR, buildId);
+    const composeFile = opts.composeFile ?? 'docker-compose.yml';
+    if (composeFile.includes('..') || composeFile.startsWith('/') || composeFile.includes('\\')) {
+      throw new Error('Invalid compose file path: must be relative without directory traversal');
+    }
+    const fullImageTag = `${REGISTRY}/${opts.imageTag}`;
+
+    const info: BuildInfo = {
+      id: buildId,
+      serviceId: opts.serviceId,
+      status: 'pending',
+      imageTag: fullImageTag,
+      log: '',
+      startedAt: new Date(),
+      finishedAt: null,
+    };
+
+    this.activeBuilds.set(buildId, { aborted: false, info });
+
+    this.runComposeBuildPipeline(buildId, workDir, opts.sourceDir, composeFile, fullImageTag, info)
+      .catch((err) => {
+        if (info.status !== 'cancelled') {
+          info.status = 'failed';
+          info.log += `\n[error] ${String(err)}`;
+        }
+        info.finishedAt = new Date();
+        this.events.emit(`build:${buildId}`, info);
+      });
+
+    return info;
+  }
+
+  private async runComposeBuildPipeline(
+    buildId: string,
+    workDir: string,
+    sourceDir: string,
+    composeFile: string,
+    imageTag: string,
+    info: BuildInfo,
+  ): Promise<void> {
+    try {
+      // 1. Copy source to temp build dir
+      info.status = 'cloning';
+      info.log += '[copy] Copying source files to build directory...\n';
+      this.events.emit(`build:${buildId}`, info);
+
+      await mkdir(workDir, { recursive: true });
+      await this.exec('cp', ['-a', `${sourceDir}/.`, workDir], workDir);
+
+      // 2. Build using docker compose
+      info.status = 'building';
+      info.log += `\n[build] Building with compose file ${composeFile}...\n`;
+      this.events.emit(`build:${buildId}`, info);
+
+      const projectName = `fleet-${buildId.slice(0, 8)}`;
+
+      const buildLog = await this.exec(
+        'docker',
+        ['compose', '-f', join(workDir, composeFile), '-p', projectName, 'build'],
+        workDir,
+        600_000,
+      );
+      info.log += scrubSecrets(buildLog);
+
+      // 3. Get the built service name
+      const servicesOutput = await this.exec(
+        'docker',
+        ['compose', '-f', join(workDir, composeFile), '-p', projectName, 'config', '--services'],
+        workDir,
+      );
+      const firstService = servicesOutput.trim().split('\n')[0]?.trim();
+      if (!firstService) {
+        throw new Error('No services found in compose file');
+      }
+
+      // The compose-built image is named <project>-<service>
+      const composeBuildImage = `${projectName}-${firstService}`;
+      info.log += `\n[tag] Tagging ${composeBuildImage} as ${imageTag}...\n`;
+      this.events.emit(`build:${buildId}`, info);
+
+      await this.exec('docker', ['tag', composeBuildImage, imageTag], workDir);
+
+      // 4. Push
+      info.status = 'pushing';
+      info.log += `\n[push] Pushing ${imageTag}...\n`;
+      this.events.emit(`build:${buildId}`, info);
+
+      const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000);
+      info.log += scrubSecrets(pushLog);
+
+      // Cleanup local compose image
+      await this.exec('docker', ['rmi', composeBuildImage], workDir).catch(() => {});
+
+      // Done
+      info.status = 'succeeded';
+      info.log += '\n[done] Compose build and push completed successfully.\n';
+      info.finishedAt = new Date();
+      this.events.emit(`build:${buildId}`, info);
+    } catch (err) {
+      if (info.status !== 'cancelled') {
+        info.status = 'failed';
+        info.log += `\n[error] ${String(err)}\n`;
+      }
+      info.finishedAt = new Date();
+      this.events.emit(`build:${buildId}`, info);
+      throw err;
+    } finally {
+      this.activeBuilds.delete(buildId);
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
   cancelBuild(buildId: string): boolean {
     const build = this.activeBuilds.get(buildId);
     if (!build) return false;

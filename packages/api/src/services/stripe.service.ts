@@ -238,6 +238,60 @@ export class StripeService {
   }
 
   /**
+   * List payment methods for a customer.
+   */
+  async listPaymentMethods(
+    customerId: string,
+  ): Promise<Stripe.ApiList<Stripe.PaymentMethod>> {
+    return getStripe().paymentMethods.list({ customer: customerId, type: 'card' });
+  }
+
+  /**
+   * Get the default payment method for a customer.
+   */
+  async getDefaultPaymentMethod(
+    customerId: string,
+  ): Promise<string | null> {
+    const customer = await getStripe().customers.retrieve(customerId) as Stripe.Customer;
+    if (customer.deleted) return null;
+    const defaultPm = customer.invoice_settings?.default_payment_method;
+    return typeof defaultPm === 'string' ? defaultPm : defaultPm?.id ?? null;
+  }
+
+  /**
+   * Set the default payment method for a customer.
+   */
+  async setDefaultPaymentMethod(
+    customerId: string,
+    paymentMethodId: string,
+  ): Promise<void> {
+    await getStripe().customers.update(customerId, {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    });
+  }
+
+  /**
+   * Create a setup intent so the customer can add a payment method.
+   */
+  async createSetupIntent(
+    customerId: string,
+  ): Promise<Stripe.SetupIntent> {
+    return getStripe().setupIntents.create({
+      customer: customerId,
+      payment_method_types: ['card'],
+    });
+  }
+
+  /**
+   * Detach a payment method from a customer.
+   */
+  async detachPaymentMethod(
+    paymentMethodId: string,
+  ): Promise<Stripe.PaymentMethod> {
+    return getStripe().paymentMethods.detach(paymentMethodId);
+  }
+
+  /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */
   constructWebhookEvent(

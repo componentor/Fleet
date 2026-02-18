@@ -11,6 +11,10 @@ export interface DeploymentJobData {
   serviceId: string;
   accountId: string;
   commitSha: string | null;
+  sourceType?: 'github' | 'upload';
+  sourcePath?: string;
+  buildMethod?: 'dockerfile' | 'compose' | 'none';
+  buildFile?: string;
 }
 
 async function getGitHubTokenForService(accountId: string): Promise<string | null> {
@@ -42,7 +46,7 @@ async function publishProgress(deploymentId: string, status: string, log: string
 }
 
 async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
-  const { deploymentId, serviceId, accountId, commitSha } = job.data;
+  const { deploymentId, serviceId, accountId, commitSha, sourceType, sourcePath, buildMethod, buildFile } = job.data;
 
   const svc = await db.query.services.findFirst({
     where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
@@ -55,36 +59,70 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     return;
   }
 
-  if (!svc.githubRepo || !svc.githubBranch) {
-    await db.update(deployments)
-      .set({ status: 'failed', log: 'Service has no GitHub repository configured' })
-      .where(eq(deployments.id, deploymentId));
-    return;
-  }
-
-  const [owner, repo] = svc.githubRepo.split('/');
-  if (!owner || !repo) {
-    await db.update(deployments)
-      .set({ status: 'failed', log: `Invalid GitHub repo format: ${svc.githubRepo}` })
-      .where(eq(deployments.id, deploymentId));
-    return;
-  }
-
-  const githubToken = await getGitHubTokenForService(accountId);
-  const cloneUrl = githubToken
-    ? githubService.getAuthenticatedCloneUrl(githubToken, owner, repo)
-    : `https://github.com/${svc.githubRepo}.git`;
-
-  const imageTag = `${accountId.slice(0, 8)}-${svc.name}:${commitSha?.slice(0, 7) ?? 'latest'}`;
+  const imageTag = `${accountId.slice(0, 8)}-${svc.name}:${commitSha?.slice(0, 7) ?? Date.now()}`;
 
   try {
-    // Start the build
-    const buildInfo = await buildService.buildImage({
-      serviceId: svc.id,
-      cloneUrl,
-      branch: svc.githubBranch,
-      imageTag,
-    });
+    let buildInfo;
+
+    if (sourceType === 'upload' && sourcePath) {
+      if (buildMethod === 'none') {
+        // No build file — upload complete, service stays stopped until user adds one
+        await db.update(deployments)
+          .set({ status: 'succeeded', log: 'Upload complete. No Dockerfile or compose file detected — add one via the Files tab and rebuild.' })
+          .where(eq(deployments.id, deploymentId));
+
+        await db.update(services)
+          .set({ status: 'stopped', updatedAt: new Date() })
+          .where(eq(services.id, svc.id));
+
+        await publishProgress(deploymentId, 'succeeded', 'No build file found');
+        return;
+      }
+
+      if (buildMethod === 'compose') {
+        buildInfo = await buildService.buildFromCompose({
+          serviceId: svc.id,
+          sourceDir: sourcePath,
+          composeFile: buildFile,
+          imageTag,
+        });
+      } else {
+        buildInfo = await buildService.buildFromDirectory({
+          serviceId: svc.id,
+          sourceDir: sourcePath,
+          dockerfile: buildFile,
+          imageTag,
+        });
+      }
+    } else {
+      // GitHub build flow
+      if (!svc.githubRepo || !svc.githubBranch) {
+        await db.update(deployments)
+          .set({ status: 'failed', log: 'Service has no GitHub repository configured' })
+          .where(eq(deployments.id, deploymentId));
+        return;
+      }
+
+      const [owner, repo] = svc.githubRepo.split('/');
+      if (!owner || !repo) {
+        await db.update(deployments)
+          .set({ status: 'failed', log: `Invalid GitHub repo format: ${svc.githubRepo}` })
+          .where(eq(deployments.id, deploymentId));
+        return;
+      }
+
+      const githubToken = await getGitHubTokenForService(accountId);
+      const cloneUrl = githubToken
+        ? githubService.getAuthenticatedCloneUrl(githubToken, owner, repo)
+        : `https://github.com/${svc.githubRepo}.git`;
+
+      buildInfo = await buildService.buildImage({
+        serviceId: svc.id,
+        cloneUrl,
+        branch: svc.githubBranch,
+        imageTag,
+      });
+    }
 
     // Wait for build to complete
     await new Promise<void>((resolve, reject) => {

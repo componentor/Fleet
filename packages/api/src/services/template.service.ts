@@ -235,8 +235,13 @@ export class TemplateService {
     slug: string,
     accountId: string,
     config: Record<string, string>,
+    options?: {
+      composeOverride?: string;
+      resourceOverrides?: Record<string, { replicas?: number; cpuLimit?: number; memoryLimit?: number }>;
+    },
   ): Promise<{
     services: Array<{ id: string; name: string; dockerServiceId: string | null }>;
+    stackId: string;
   }> {
     const template = await db.query.appTemplates.findFirst({
       where: eq(appTemplates.slug, slug),
@@ -246,7 +251,9 @@ export class TemplateService {
       throw new Error(`Template "${slug}" not found`);
     }
 
-    const parsed = this.parseTemplate(template.composeTemplate);
+    const composeYaml = options?.composeOverride ?? template.composeTemplate;
+    const parsed = this.parseTemplate(composeYaml);
+    const stackId = randomBytes(16).toString('hex');
 
     // Build the variable values: use provided config, fall back to defaults, generate passwords
     const resolvedVars: Record<string, string> = {};
@@ -308,18 +315,27 @@ export class TemplateService {
         readonly: v.readonly ?? false,
       }));
 
+      // Apply per-service resource overrides if provided
+      const overrides = options?.resourceOverrides?.[svcDef.name];
+      const replicas = overrides?.replicas ?? 1;
+      const cpuLimit = overrides?.cpuLimit ?? null;
+      const memoryLimit = overrides?.memoryLimit ?? null;
+
       // Insert service record into DB
       const [svc] = await insertReturning(services, {
         accountId,
         name: svcDef.name,
         image: svcDef.image,
-        replicas: 1,
+        replicas,
         env: resolvedEnv,
         ports: svcDef.ports ?? [],
         volumes: resolvedVolumes,
         domain: resolvedDomain || null,
         sslEnabled: true,
         status: 'deploying',
+        stackId,
+        cpuLimit,
+        memoryLimit,
       });
 
       if (!svc) {
@@ -334,7 +350,7 @@ export class TemplateService {
         const result = await dockerService.createService({
           name: swarmName,
           image: svcDef.image,
-          replicas: 1,
+          replicas,
           env: resolvedEnv,
           ports: (svcDef.ports ?? []).map((p) => ({
             target: p.target,
@@ -378,7 +394,7 @@ export class TemplateService {
       });
     }
 
-    return { services: createdServices };
+    return { services: createdServices, stackId };
   }
 
   /**

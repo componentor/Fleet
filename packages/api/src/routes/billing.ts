@@ -21,6 +21,7 @@ import {
   and,
   isNull,
   webhookEvents,
+  safeTransaction,
 } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -377,6 +378,105 @@ authed.post('/portal', requireOwner, async (c) => {
   return c.json({ url: session.url });
 });
 
+// GET /payment-methods — list payment methods for the account
+authed.get('/payment-methods', async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+
+  if (!account?.stripeCustomerId) {
+    return c.json({ methods: [], defaultId: null });
+  }
+
+  try {
+    const [methods, defaultId] = await Promise.all([
+      stripeService.listPaymentMethods(account.stripeCustomerId),
+      stripeService.getDefaultPaymentMethod(account.stripeCustomerId),
+    ]);
+
+    return c.json({
+      methods: methods.data.map((pm) => ({
+        id: pm.id,
+        brand: pm.card?.brand ?? 'unknown',
+        last4: pm.card?.last4 ?? '****',
+        expMonth: pm.card?.exp_month,
+        expYear: pm.card?.exp_year,
+      })),
+      defaultId,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to fetch payment methods');
+    return c.json({ error: 'Failed to fetch payment methods' }, 500);
+  }
+});
+
+// POST /payment-methods/setup — create a setup intent for adding a new payment method
+authed.post('/payment-methods/setup', requireOwner, async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+
+  if (!account?.stripeCustomerId) {
+    return c.json({ error: 'No Stripe customer found' }, 400);
+  }
+
+  try {
+    const intent = await stripeService.createSetupIntent(account.stripeCustomerId);
+    return c.json({ clientSecret: intent.client_secret });
+  } catch (err) {
+    logger.error({ err }, 'Failed to create setup intent');
+    return c.json({ error: 'Failed to create setup intent' }, 500);
+  }
+});
+
+// PATCH /payment-methods/:id/default — set a payment method as default
+authed.patch('/payment-methods/:id/default', requireOwner, async (c) => {
+  const accountId = c.get('accountId');
+  const paymentMethodId = c.req.param('id');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+
+  if (!account?.stripeCustomerId) {
+    return c.json({ error: 'No Stripe customer found' }, 400);
+  }
+
+  try {
+    await stripeService.setDefaultPaymentMethod(account.stripeCustomerId, paymentMethodId);
+    return c.json({ message: 'Default payment method updated' });
+  } catch (err) {
+    logger.error({ err }, 'Failed to set default payment method');
+    return c.json({ error: 'Failed to update default payment method' }, 500);
+  }
+});
+
+// DELETE /payment-methods/:id — remove a payment method
+authed.delete('/payment-methods/:id', requireOwner, async (c) => {
+  const paymentMethodId = c.req.param('id');
+
+  try {
+    await stripeService.detachPaymentMethod(paymentMethodId);
+    return c.json({ message: 'Payment method removed' });
+  } catch (err) {
+    logger.error({ err }, 'Failed to detach payment method');
+    return c.json({ error: 'Failed to remove payment method' }, 500);
+  }
+});
+
 // GET /config — billing configuration (public for end users)
 authed.get('/config', async (c) => {
   const config = await db.query.billingConfig.findFirst();
@@ -725,7 +825,7 @@ billing.post('/webhook', async (c) => {
           const planId = session.metadata?.planId ?? null;
 
           // Wrap subscription creation + account update in a transaction
-          await db.transaction(async (tx) => {
+          await safeTransaction(async (tx) => {
             // Check for existing active subscription
             const existingSub = await tx.query.subscriptions.findFirst({
               where: and(

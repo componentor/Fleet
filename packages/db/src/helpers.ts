@@ -11,6 +11,34 @@ export function _setDb(db: any) {
 }
 
 /**
+ * Dialect-safe async transaction.
+ * - PG + MySQL: uses Drizzle's native db.transaction()
+ * - SQLite: uses raw BEGIN/COMMIT SQL because better-sqlite3
+ *   rejects async transaction callbacks
+ *
+ * The callback receives a `tx` object (for PG/MySQL it's a real
+ * transaction context; for SQLite it's the db instance itself,
+ * which is safe because SQLite is single-connection/single-threaded).
+ */
+export async function safeTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T> {
+  const dialect = getDialect();
+
+  if (dialect === 'sqlite') {
+    _db.run(sql`BEGIN`);
+    try {
+      const result = await fn(_db);
+      _db.run(sql`COMMIT`);
+      return result;
+    } catch (err) {
+      _db.run(sql`ROLLBACK`);
+      throw err;
+    }
+  }
+
+  return _db.transaction(fn);
+}
+
+/**
  * Insert a row and return the inserted record.
  * - PG + SQLite: uses native RETURNING clause
  * - MySQL: generates UUID app-side, inserts, then SELECTs back

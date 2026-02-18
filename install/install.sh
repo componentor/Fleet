@@ -45,6 +45,61 @@ detect_os() {
   log "Detected OS: $OS $OS_VERSION"
 }
 
+# ─── Install system dependencies ─────────────────────────────────────
+install_dependencies() {
+  log "Checking system dependencies..."
+
+  # Check what's already installed
+  local MISSING=""
+  for cmd in curl openssl git tar gzip unzip jq htpasswd; do
+    if command -v "$cmd" &>/dev/null; then
+      log "  ✓ $cmd already installed"
+    else
+      MISSING="$MISSING $cmd"
+    fi
+  done
+
+  if [ -z "$MISSING" ]; then
+    log "All required system dependencies are already installed"
+    return
+  fi
+
+  log "Installing missing dependencies:$MISSING"
+  case $OS in
+    ubuntu|debian)
+      apt-get update -qq
+      # apt-get install -y skips already-installed packages
+      apt-get install -y -qq \
+        ca-certificates curl wget gnupg lsb-release \
+        openssl git tar gzip unzip xz-utils \
+        jq htop net-tools iptables \
+        apache2-utils \
+        logrotate cron
+      ;;
+    centos|rocky|rhel|almalinux)
+      yum install -y -q epel-release 2>/dev/null || true
+      yum install -y -q \
+        ca-certificates curl wget gnupg2 \
+        openssl git tar gzip unzip xz \
+        jq htop net-tools iptables \
+        httpd-tools \
+        logrotate cronie
+      ;;
+    fedora)
+      dnf install -y -q \
+        ca-certificates curl wget gnupg2 \
+        openssl git tar gzip unzip xz \
+        jq htop net-tools iptables \
+        httpd-tools \
+        logrotate cronie
+      ;;
+    *)
+      warn "Unknown OS '$OS' — skipping dependency install. Ensure curl, openssl, git, tar, unzip, and jq are available."
+      ;;
+  esac
+  log "System dependencies installed"
+}
+
 # ─── Install Docker ──────────────────────────────────────────────────
 install_docker() {
   if command -v docker &>/dev/null; then
@@ -69,8 +124,13 @@ install_docker() {
       yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
       yum install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
       ;;
+    fedora)
+      dnf install -y -q dnf-plugins-core
+      dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+      dnf install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      ;;
     *)
-      err "Unsupported OS: $OS"
+      err "Unsupported OS for Docker install: $OS. Supported: ubuntu, debian, centos, rocky, rhel, almalinux, fedora."
       ;;
   esac
 
@@ -86,7 +146,6 @@ configure_docker() {
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'DAEMONJSON'
 {
-  "userns-remap": "default",
   "no-new-privileges": true,
   "log-driver": "json-file",
   "log-opts": {
@@ -108,18 +167,30 @@ DAEMONJSON
 
 # ─── Install NFS ─────────────────────────────────────────────────────
 install_nfs() {
+  if systemctl is-active --quiet nfs-kernel-server 2>/dev/null || systemctl is-active --quiet nfs-server 2>/dev/null; then
+    log "NFS server is already running"
+    return
+  fi
+
   log "Installing NFS server..."
   case $OS in
     ubuntu|debian)
       apt-get install -y -qq nfs-kernel-server
+      systemctl enable nfs-kernel-server
+      systemctl start nfs-kernel-server
       ;;
     centos|rocky|rhel|almalinux)
       yum install -y -q nfs-utils
       systemctl enable nfs-server
       systemctl start nfs-server
       ;;
+    fedora)
+      dnf install -y -q nfs-utils
+      systemctl enable nfs-server
+      systemctl start nfs-server
+      ;;
   esac
-  log "NFS server installed"
+  log "NFS server installed and started"
 }
 
 # ─── Initialize Swarm ────────────────────────────────────────────────
@@ -142,9 +213,10 @@ setup_dirs() {
   mkdir -p "$FLEET_DIR"/{data,certs,backups,nfs-exports,config}
   mkdir -p "$FLEET_DIR"/nfs-exports/volumes
 
-  # Setup NFS export
+  # Setup NFS export — restrict to the local subnet
   if ! grep -q "$FLEET_DIR/nfs-exports" /etc/exports 2>/dev/null; then
-    echo "$FLEET_DIR/nfs-exports *(rw,sync,no_subtree_check,root_squash)" >> /etc/exports
+    LOCAL_SUBNET=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}' | sed 's/\.[0-9]*$/.0\/24/')
+    echo "$FLEET_DIR/nfs-exports ${LOCAL_SUBNET}(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
     exportfs -ra 2>/dev/null || true
   fi
   log "Directories created"
@@ -153,30 +225,43 @@ setup_dirs() {
 # ─── Collect configuration ───────────────────────────────────────────
 collect_config() {
   echo ""
-  read -rp "$(echo -e ${BLUE}Enter admin email: ${NC})" ADMIN_EMAIL
-  read -rsp "$(echo -e ${BLUE}Enter admin password: ${NC})" ADMIN_PASSWORD
+  # Read from /dev/tty so this works when piped from curl
+  read -rp "$(echo -e ${BLUE}Enter admin email: ${NC})" ADMIN_EMAIL </dev/tty
+  read -rsp "$(echo -e ${BLUE}Enter admin password: ${NC})" ADMIN_PASSWORD </dev/tty
   echo ""
-  read -rp "$(echo -e ${BLUE}Enter platform domain \(e.g., panel.example.com\): ${NC})" PLATFORM_DOMAIN
-  read -rp "$(echo -e ${BLUE}Enter Stripe secret key \(or press Enter to skip\): ${NC})" STRIPE_KEY
+  read -rp "$(echo -e ${BLUE}Enter platform domain \(e.g., panel.example.com\): ${NC})" PLATFORM_DOMAIN </dev/tty
+  read -rp "$(echo -e ${BLUE}Enter Stripe secret key \(or press Enter to skip\): ${NC})" STRIPE_KEY </dev/tty
   echo ""
 
   # Generate secrets
   JWT_SECRET=$(openssl rand -hex 32)
+  ENCRYPTION_KEY=$(openssl rand -hex 32)
   DB_PASSWORD=$(openssl rand -hex 16)
   VALKEY_PASSWORD=$(openssl rand -hex 16)
+  REGISTRY_PASSWORD=$(openssl rand -hex 16)
 
   # Save config
   cat > "$FLEET_DIR/config/env" <<EOF
 DATABASE_URL=postgresql://fleet:${DB_PASSWORD}@postgres:5432/fleet
+DB_DIALECT=pg
 VALKEY_URL=redis://:${VALKEY_PASSWORD}@valkey:6379
 JWT_SECRET=${JWT_SECRET}
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
 ADMIN_EMAIL=${ADMIN_EMAIL}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 PLATFORM_DOMAIN=${PLATFORM_DOMAIN}
+APP_URL=https://${PLATFORM_DOMAIN}
+CORS_ORIGIN=https://${PLATFORM_DOMAIN}
 STRIPE_SECRET_KEY=${STRIPE_KEY}
 NODE_ENV=production
 PORT=3000
+API_URL=http://api:3000
 EOF
+
+  # Create registry htpasswd file (apache2-utils/httpd-tools installed in install_dependencies)
+  log "Creating registry auth..."
+  mkdir -p "$FLEET_DIR/registry-auth"
+  htpasswd -Bbn fleet "$REGISTRY_PASSWORD" > "$FLEET_DIR/registry-auth/htpasswd"
 
   log "Configuration saved to $FLEET_DIR/config/env"
 }
@@ -635,6 +720,42 @@ SECCOMP
   log "Seccomp profile created at $FLEET_DIR/config/seccomp-default.json"
 }
 
+# ─── Configure Firewall ──────────────────────────────────────────────
+configure_firewall() {
+  log "Configuring firewall..."
+
+  if command -v ufw &>/dev/null; then
+    ufw --force enable 2>/dev/null || true
+    ufw allow 22/tcp     # SSH
+    ufw allow 80/tcp     # HTTP
+    ufw allow 443/tcp    # HTTPS
+    ufw allow 2377/tcp   # Docker Swarm management
+    ufw allow 7946/tcp   # Docker Swarm node communication
+    ufw allow 7946/udp   # Docker Swarm node communication
+    ufw allow 4789/udp   # Docker overlay network (VXLAN)
+    ufw allow 2222/tcp   # SSH gateway
+    ufw allow 2049/tcp   # NFS
+    ufw reload 2>/dev/null || true
+    log "UFW firewall configured"
+  elif command -v firewall-cmd &>/dev/null; then
+    systemctl enable firewalld 2>/dev/null || true
+    systemctl start firewalld 2>/dev/null || true
+    firewall-cmd --permanent --add-port=22/tcp
+    firewall-cmd --permanent --add-port=80/tcp
+    firewall-cmd --permanent --add-port=443/tcp
+    firewall-cmd --permanent --add-port=2377/tcp
+    firewall-cmd --permanent --add-port=7946/tcp
+    firewall-cmd --permanent --add-port=7946/udp
+    firewall-cmd --permanent --add-port=4789/udp
+    firewall-cmd --permanent --add-port=2222/tcp
+    firewall-cmd --permanent --add-port=2049/tcp
+    firewall-cmd --reload
+    log "Firewalld configured"
+  else
+    warn "No firewall detected (ufw/firewalld). Consider configuring one manually."
+  fi
+}
+
 # ─── Deploy stack ────────────────────────────────────────────────────
 deploy_stack() {
   log "Deploying Fleet stack..."
@@ -734,6 +855,7 @@ EOF
 # ─── Main ────────────────────────────────────────────────────────────
 main() {
   detect_os
+  install_dependencies
   install_docker
   configure_docker
   install_nfs
@@ -742,6 +864,7 @@ main() {
   collect_config
   create_networks
   create_seccomp_profile
+  configure_firewall
   deploy_stack
 
   echo ""
@@ -751,13 +874,16 @@ main() {
   echo ""
   echo "  Platform:    https://${PLATFORM_DOMAIN}"
   echo "  Admin email: ${ADMIN_EMAIL}"
-  echo "  Traefik:     http://$(hostname -I | awk '{print $1}'):8080"
   echo ""
   echo "  To add more nodes, run on each new server:"
   echo "  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | bash"
   echo ""
   echo "  Join token:"
   docker swarm join-token worker -q 2>/dev/null || echo "  (run 'docker swarm join-token worker' to get the token)"
+  echo ""
+  echo "  Useful commands:"
+  echo "    docker stack services fleet     — list all services"
+  echo "    docker service logs fleet_api   — view API logs"
   echo ""
 }
 
