@@ -34,7 +34,7 @@ import { logger } from '../services/logger.js';
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
 function validateRedirectUrl(url: string): boolean {
   const appUrl = process.env['APP_URL'];
-  if (!appUrl) return true; // Dev mode — allow any URL
+  if (!appUrl) return process.env['NODE_ENV'] !== 'production'; // Reject in production if APP_URL not set
   if (url.startsWith('/')) return true; // Relative path
   try {
     const parsed = new URL(url);

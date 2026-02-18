@@ -116,7 +116,50 @@ ALTER TABLE "account_billing_overrides" ADD CONSTRAINT "account_billing_override
 -- Session invalidation support
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "security_changed_at" timestamp;
 
--- Webhook idempotency unique constraint
+-- Create missing tables: webhook_events
+CREATE TABLE IF NOT EXISTS "webhook_events" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "stripe_event_id" varchar NOT NULL UNIQUE,
+  "event_type" varchar NOT NULL,
+  "processed_at" timestamp DEFAULT now(),
+  "payload" jsonb,
+  "created_at" timestamp DEFAULT now()
+);
+
+-- Create missing tables: error_log
+CREATE TABLE IF NOT EXISTS "error_log" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "level" varchar NOT NULL,
+  "message" text NOT NULL,
+  "stack" text,
+  "method" varchar,
+  "path" varchar,
+  "status_code" integer,
+  "user_id" uuid,
+  "ip" varchar,
+  "user_agent" text,
+  "metadata" jsonb,
+  "resolved" boolean DEFAULT false,
+  "created_at" timestamp DEFAULT now()
+);
+
+-- Create missing tables: domain_tld_pricing
+CREATE TABLE IF NOT EXISTS "domain_tld_pricing" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tld" varchar(63) NOT NULL UNIQUE,
+  "provider_registration_price" integer NOT NULL,
+  "provider_renewal_price" integer NOT NULL,
+  "markup_type" varchar(20) NOT NULL DEFAULT 'percentage',
+  "markup_value" integer NOT NULL DEFAULT 20,
+  "sell_registration_price" integer NOT NULL,
+  "sell_renewal_price" integer NOT NULL,
+  "enabled" boolean DEFAULT true,
+  "currency" varchar(3) NOT NULL DEFAULT 'USD',
+  "created_at" timestamp DEFAULT now(),
+  "updated_at" timestamp DEFAULT now()
+);
+
+-- Webhook idempotency unique constraint (table now exists)
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_webhook_events_stripe_event_id" ON "webhook_events" ("stripe_event_id");
 
 -- Create indexes for soft delete queries (WHERE deleted_at IS NULL is common)
@@ -124,3 +167,10 @@ CREATE INDEX IF NOT EXISTS "accounts_deleted_at_idx" ON "accounts" ("deleted_at"
 CREATE INDEX IF NOT EXISTS "users_deleted_at_idx" ON "users" ("deleted_at") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "services_deleted_at_idx" ON "services" ("deleted_at") WHERE "deleted_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "services_account_id_idx" ON "services" ("account_id") WHERE "deleted_at" IS NULL;
+
+-- Performance indexes (defined in schemas but missing from migrations)
+CREATE INDEX IF NOT EXISTS "idx_services_status" ON "services" ("status");
+CREATE INDEX IF NOT EXISTS "idx_deployments_service_id" ON "deployments" ("service_id");
+CREATE INDEX IF NOT EXISTS "idx_notifications_account_id" ON "notifications" ("account_id");
+CREATE INDEX IF NOT EXISTS "idx_audit_log_account_id" ON "audit_log" ("account_id");
+CREATE INDEX IF NOT EXISTS "idx_audit_log_created_at" ON "audit_log" ("created_at");

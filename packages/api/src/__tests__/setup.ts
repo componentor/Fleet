@@ -159,7 +159,23 @@ sqlite.exec(`
     expires_at INTEGER,
     auto_renew INTEGER DEFAULT 1,
     registrar_domain_id TEXT,
+    stripe_payment_id TEXT,
     created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE domain_tld_pricing (
+    id TEXT PRIMARY KEY,
+    tld TEXT NOT NULL UNIQUE,
+    provider_registration_price INTEGER NOT NULL,
+    provider_renewal_price INTEGER NOT NULL,
+    markup_type TEXT NOT NULL DEFAULT 'percentage',
+    markup_value INTEGER NOT NULL DEFAULT 20,
+    sell_registration_price INTEGER NOT NULL,
+    sell_renewal_price INTEGER NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE nodes (
@@ -203,7 +219,7 @@ sqlite.exec(`
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     plan_id TEXT REFERENCES billing_plans(id),
     billing_model TEXT DEFAULT 'fixed',
-    stripe_subscription_id TEXT,
+    stripe_subscription_id TEXT UNIQUE,
     stripe_customer_id TEXT,
     billing_cycle TEXT DEFAULT 'monthly',
     status TEXT DEFAULT 'active',
@@ -884,6 +900,7 @@ vi.mock('@fleet/db', () => ({
   dnsRecords: sqliteSchema.dnsRecords,
   domainRegistrars: sqliteSchema.domainRegistrars,
   domainRegistrations: sqliteSchema.domainRegistrations,
+  domainTldPricing: sqliteSchema.domainTldPricing,
   dnsZonesRelations: sqliteSchema.dnsZonesRelations,
   dnsRecordsRelations: sqliteSchema.dnsRecordsRelations,
   domainRegistrarsRelations: sqliteSchema.domainRegistrarsRelations,
@@ -977,6 +994,7 @@ const allTableNames = [
   'usage_records',
   'subscriptions',
   'billing_plans',
+  'domain_tld_pricing',
   'domain_registrations',
   'domain_registrars',
   'dns_records',

@@ -509,25 +509,36 @@ auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
   }
 
   const hashed = hashToken(token);
-  const user = await db.query.users.findFirst({
-    where: and(eq(users.passwordResetToken, hashed), isNull(users.deletedAt)),
+  const passwordHash = await hash(password);
+
+  // Use transaction to prevent TOCTOU race on reset token
+  const result = await db.transaction(async (tx) => {
+    const user = await tx.query.users.findFirst({
+      where: and(eq(users.passwordResetToken, hashed), isNull(users.deletedAt)),
+    });
+
+    if (!user) {
+      return { error: 'Invalid or expired reset token' } as const;
+    }
+
+    if (user.passwordResetExpires && new Date(user.passwordResetExpires) < new Date()) {
+      return { error: 'Reset token has expired' } as const;
+    }
+
+    await tx.update(users).set({
+      passwordHash,
+      passwordResetToken: null,
+      passwordResetExpires: null,
+      securityChangedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(users.id, user.id));
+
+    return { ok: true } as const;
   });
 
-  if (!user) {
-    return c.json({ error: 'Invalid or expired reset token' }, 400);
+  if ('error' in result) {
+    return c.json({ error: result.error }, 400);
   }
-
-  if (user.passwordResetExpires && new Date(user.passwordResetExpires) < new Date()) {
-    return c.json({ error: 'Reset token has expired' }, 400);
-  }
-
-  const passwordHash = await hash(password);
-  await db.update(users).set({
-    passwordHash,
-    passwordResetToken: null,
-    passwordResetExpires: null,
-    updatedAt: new Date(),
-  }).where(eq(users.id, user.id));
 
   return c.json({ message: 'Password has been reset successfully' });
 });
@@ -960,6 +971,11 @@ auth.get('/github/callback', async (c) => {
           });
         });
       } else {
+        // Verify the existing user's email is verified — block linking to unverified accounts
+        if (!user!.emailVerified) {
+          // Mark email as verified since OAuth provider confirmed same email
+          await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
+        }
         // Link OAuth provider to existing user
         await db.insert(oauthProviders).values({
           userId: user!.id,
@@ -1055,7 +1071,8 @@ auth.get('/google/callback', async (c) => {
         }
       }
     } catch {
-      // Valkey unavailable — allow flow (graceful degradation)
+      // Valkey unavailable — fail-secure, reject OAuth flow
+      return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
     }
   }
 
@@ -1174,6 +1191,11 @@ auth.get('/google/callback', async (c) => {
           });
         });
       } else {
+        // Verify the existing user's email is verified — block linking to unverified accounts
+        if (!user!.emailVerified) {
+          // Mark email as verified since OAuth provider confirmed same email
+          await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user!.id));
+        }
         // Link OAuth provider to existing user
         await db.insert(oauthProviders).values({
           userId: user!.id,
