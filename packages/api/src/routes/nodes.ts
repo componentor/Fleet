@@ -88,7 +88,7 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
     return c.json({ error: 'Node not found' }, 404);
   }
 
-  await db.update(nodes).set({ lastHeartbeat: new Date() }).where(eq(nodes.id, nodeId));
+  await db.update(nodes).set({ lastHeartbeat: new Date() }).where(eq(nodes.id, node.id));
 
   await db.insert(nodeMetrics).values({
     nodeId: node.id,
