@@ -733,7 +733,7 @@ configure_firewall() {
     ufw allow 7946/tcp   # Docker Swarm node communication
     ufw allow 7946/udp   # Docker Swarm node communication
     ufw allow 4789/udp   # Docker overlay network (VXLAN)
-    ufw allow 2222/tcp   # SSH gateway
+    ufw allow 2222/tcp   # SFTP file access
     ufw allow 2049/tcp   # NFS
     ufw reload 2>/dev/null || true
     log "UFW firewall configured"

@@ -480,6 +480,52 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, requireOwner, async (c) 
   return c.json({ message: 'Successfully disconnected from parent account' });
 });
 
+// POST /:id/release/:childId — parent releases a child account
+accountRoutes.post('/:id/release/:childId', tenantMiddleware, requireOwner, async (c) => {
+  const account = c.get('account');
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+
+  const childId = c.req.param('childId');
+  const child = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, childId), isNull(accounts.deletedAt)),
+  });
+
+  if (!child) return c.json({ error: 'Child account not found' }, 404);
+  if (child.parentId !== account.id) return c.json({ error: 'This account is not a child of your account' }, 403);
+
+  const newSlug = child.slug ?? '';
+  const oldPath = child.path ?? '';
+
+  await safeTransaction(async (tx) => {
+    await tx
+      .update(accounts)
+      .set({
+        parentId: null,
+        path: newSlug,
+        depth: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(accounts.id, child.id));
+
+    const descendants = await tx.query.accounts.findMany({
+      where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
+      limit: 1000,
+    });
+
+    for (const desc of descendants) {
+      const descPath = desc.path ?? '';
+      const newDescPath = descPath.replace(oldPath, newSlug);
+      const newDepth = newDescPath.split('.').length - 1;
+      await tx
+        .update(accounts)
+        .set({ path: newDescPath, depth: newDepth, updatedAt: new Date() })
+        .where(eq(accounts.id, desc.id));
+    }
+  });
+
+  return c.json({ message: 'Child account released successfully' });
+});
+
 // POST /:id/impersonate — super user enters account's panel
 accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
   const user = c.get('user');

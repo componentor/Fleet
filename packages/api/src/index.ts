@@ -11,12 +11,14 @@ import { logger } from './services/logger.js'
 
 // Register shutdown handlers early — before any async work
 let server: ReturnType<typeof serve> | undefined
+let sftpServer: import('ssh2').Server | undefined
 let shuttingDown = false
 async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
-  // Close the HTTP server first so the port is released immediately
+  // Close servers first so ports are released immediately
   try { server?.close() } catch {}
+  try { sftpServer?.close() } catch {}
   logger.info('Shutting down gracefully...')
   updateService.stopPeriodicCheck()
   schedulerService.shutdown()
@@ -110,5 +112,15 @@ server = serve({
 injectWebSocket(server)
 
 logger.info({ port }, `Fleet API running on port ${port}`)
+
+// Start embedded SFTP server for file access to upload-based services
+if (process.env['SFTP_ENABLED'] !== 'false') {
+  try {
+    const { startSftpServer } = await import('./services/sftp.service.js')
+    startSftpServer()
+  } catch (err) {
+    logger.warn({ err }, 'SFTP server failed to start (non-critical)')
+  }
+}
 
 updateService.startPeriodicCheck()

@@ -71,7 +71,7 @@ app.use('*', cors({
 // Request body size limit — larger for upload/files endpoints
 app.use('*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  if (path.startsWith('/api/v1/upload') || path.match(/\/api\/v1\/files\/[^/]+\/upload/)) {
+  if (path.startsWith('/api/v1/upload') || path.match(/\/api\/v1\/files\/[^/]+\/upload/) || path.match(/\/api\/v1\/database\/[^/]+\/import/)) {
     return bodyLimit({ maxSize: 500 * 1024 * 1024 })(c, next);
   }
   return bodyLimit({ maxSize: 2 * 1024 * 1024 })(c, next);

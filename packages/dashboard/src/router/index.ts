@@ -161,6 +161,11 @@ const panelRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/panel/Deploy.vue'),
       },
       {
+        path: 'deploy/gh',
+        name: 'deploy-github-oneclick',
+        component: () => import('@/pages/panel/DeployGitHub.vue'),
+      },
+      {
         path: 'marketplace',
         name: 'panel-marketplace',
         component: () => import('@/pages/panel/Marketplace.vue'),

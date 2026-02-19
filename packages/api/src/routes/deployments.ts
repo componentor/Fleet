@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { db, services, deployments, oauthProviders, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -11,6 +12,32 @@ import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.
 import type { DeploymentJobData } from '../workers/deployment.worker.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
+
+// ── fleet.json manifest schema ───────────────────────────────────────────────
+const fleetManifestSchema = z.object({
+  name: z.string().max(100).optional(),
+  description: z.string().max(500).optional(),
+  icon: z.string().url().optional(),
+  website: z.string().url().optional(),
+  env: z.record(z.union([
+    z.string(),
+    z.object({
+      description: z.string().max(200).optional(),
+      value: z.string().optional(),
+      required: z.boolean().optional(),
+      generate: z.boolean().optional(),
+    }),
+  ])).optional(),
+  ports: z.array(z.object({
+    target: z.number().int().min(1).max(65535),
+    published: z.number().int().min(1).max(65535).optional(),
+    protocol: z.enum(['tcp', 'udp']).optional(),
+  })).optional(),
+  buildFile: z.string().max(200).optional(),
+  branch: z.string().max(200).optional(),
+}).strict();
+
+export type FleetManifest = z.infer<typeof fleetManifestSchema>;
 
 // Inline fallback for local dev when Valkey/BullMQ is not available.
 // Imports the worker's processor and runs it in-process.
@@ -390,6 +417,97 @@ authenticatedRoutes.get('/:id/logs', async (c) => {
   const log = liveBuild?.log ?? deployment.log ?? '';
 
   return c.json({ log, status: liveBuild?.status ?? deployment.status });
+});
+
+// --- GitHub Manifest (for one-click deploy) ---
+
+// GET /github/manifest — fetch fleet.json from a public (or private) GitHub repo
+authenticatedRoutes.get('/github/manifest', async (c) => {
+  const user = c.get('user');
+  const repo = c.req.query('repo');
+  const branch = c.req.query('branch');
+
+  if (!repo || !/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo)) {
+    return c.json({ error: 'Invalid repo format. Expected owner/repo' }, 400);
+  }
+
+  // Try to get user's GitHub token for private repos
+  let githubToken: string | null = null;
+  try {
+    const oauth = await db.query.oauthProviders.findFirst({
+      where: and(
+        eq(oauthProviders.userId, user.userId),
+        eq(oauthProviders.provider, 'github'),
+      ),
+    });
+    if (oauth?.accessToken) {
+      githubToken = decrypt(oauth.accessToken);
+    }
+  } catch {
+    // No GitHub token — will try public access
+  }
+
+  // Resolve branch: URL param → default branch via GitHub API
+  let targetBranch = branch;
+  if (!targetBranch) {
+    try {
+      const headers: Record<string, string> = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'Fleet-Deploy',
+      };
+      if (githubToken) headers['Authorization'] = `Bearer ${githubToken}`;
+
+      const repoRes = await fetch(`https://api.github.com/repos/${repo}`, { headers });
+      if (repoRes.ok) {
+        const repoData = await repoRes.json() as { default_branch?: string };
+        targetBranch = repoData.default_branch ?? 'main';
+      } else {
+        targetBranch = 'main';
+      }
+    } catch {
+      targetBranch = 'main';
+    }
+  }
+
+  // Fetch fleet.json from the repo
+  try {
+    const rawUrl = `https://raw.githubusercontent.com/${repo}/${targetBranch}/fleet.json`;
+    const headers: Record<string, string> = { 'User-Agent': 'Fleet-Deploy' };
+    if (githubToken) headers['Authorization'] = `Bearer ${githubToken}`;
+
+    const res = await fetch(rawUrl, { headers, signal: AbortSignal.timeout(10_000) });
+
+    if (!res.ok) {
+      // No fleet.json — that's fine, return null manifest with repo info
+      return c.json({ manifest: null, branch: targetBranch, repo });
+    }
+
+    const text = await res.text();
+    // Guard against absurdly large manifests
+    if (text.length > 50_000) {
+      return c.json({ error: 'fleet.json too large (max 50 KB)' }, 400);
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return c.json({ error: 'fleet.json contains invalid JSON' }, 400);
+    }
+
+    const result = fleetManifestSchema.safeParse(parsed);
+    if (!result.success) {
+      return c.json({
+        error: 'fleet.json validation failed',
+        details: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+      }, 400);
+    }
+
+    return c.json({ manifest: result.data, branch: targetBranch, repo });
+  } catch (err) {
+    logger.error({ err, repo }, 'Failed to fetch fleet.json');
+    return c.json({ manifest: null, branch: targetBranch, repo });
+  }
 });
 
 // --- GitHub Repo Management (authenticated) ---

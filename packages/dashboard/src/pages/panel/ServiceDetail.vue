@@ -832,7 +832,9 @@ onMounted(() => {
                 {{ terminalState === 'connected' ? 'Connected' : terminalState === 'connecting' ? 'Connecting...' : terminalState === 'reconnecting' ? 'Reconnecting...' : 'Disconnected' }}
               </span>
             </div>
-            <div ref="terminalContainer" class="h-[500px] pt-2 px-2 pb-5"></div>
+            <div class="h-[500px] pt-2 px-2 pb-4 bg-[#1a1b26]">
+              <div ref="terminalContainer" class="h-full"></div>
+            </div>
           </div>
         </div>
 

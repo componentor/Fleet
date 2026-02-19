@@ -230,12 +230,12 @@ onMounted(() => {
           <div class="border-t border-gray-200 dark:border-gray-700"></div>
 
           <div v-if="!scheduledDeletionAt">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-6">
               <div>
                 <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ $t('settings.deleteAccount') }}</h3>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('settings.deleteAccountDesc') }}</p>
               </div>
-              <button @click="showDeleteConfirm = true" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors">
+              <button @click="showDeleteConfirm = true" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors whitespace-nowrap">
                 {{ $t('settings.deleteAccount') }}
               </button>
             </div>

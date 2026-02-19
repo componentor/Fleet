@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Network, Plus, Loader2 } from 'lucide-vue-next'
+import { Network, Plus, Loader2, Unlink } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 import { useRouter } from 'vue-router'
@@ -12,6 +12,7 @@ const router = useRouter()
 const tree = ref<any>(null)
 const loading = ref(true)
 const error = ref('')
+const releasingId = ref<string | null>(null)
 
 // Create sub-account
 const showCreate = ref(false)
@@ -54,6 +55,23 @@ async function createSubAccount() {
 function switchToAccount(accountId: string) {
   accountStore.switchAccount(accountId)
   router.push('/panel')
+}
+
+async function releaseChild(childId: string, childName: string) {
+  if (!confirm(`Release "${childName}" from your account? It will become an independent account.`)) return
+  const accountId = accountStore.currentAccount?.id
+  if (!accountId) return
+  releasingId.value = childId
+  error.value = ''
+  try {
+    await api.post(`/accounts/${accountId}/release/${childId}`, {})
+    await fetchTree()
+    await accountStore.fetchAccounts()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to release sub-account'
+  } finally {
+    releasingId.value = null
+  }
 }
 
 onMounted(() => {
@@ -142,12 +160,23 @@ onMounted(() => {
                   </span>
                 </p>
               </div>
-              <button
-                @click="switchToAccount(child.account.id)"
-                class="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-              >
-                Switch to
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="switchToAccount(child.account.id)"
+                  class="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                >
+                  Switch to
+                </button>
+                <button
+                  @click="releaseChild(child.account.id, child.account.name)"
+                  :disabled="releasingId === child.account.id"
+                  class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+                >
+                  <Loader2 v-if="releasingId === child.account.id" class="w-3 h-3 animate-spin" />
+                  <Unlink v-else class="w-3 h-3" />
+                  Release
+                </button>
+              </div>
             </div>
 
             <!-- Nested children -->
@@ -161,12 +190,23 @@ onMounted(() => {
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ grandchild.account.name }}</p>
                   <p class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ grandchild.account.slug }}</p>
                 </div>
-                <button
-                  @click="switchToAccount(grandchild.account.id)"
-                  class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                >
-                  Switch to
-                </button>
+                <div class="flex items-center gap-2">
+                  <button
+                    @click="switchToAccount(grandchild.account.id)"
+                    class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    Switch to
+                  </button>
+                  <button
+                    @click="releaseChild(grandchild.account.id, grandchild.account.name)"
+                    :disabled="releasingId === grandchild.account.id"
+                    class="flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                  >
+                    <Loader2 v-if="releasingId === grandchild.account.id" class="w-3 h-3 animate-spin" />
+                    <Unlink v-else class="w-3 h-3" />
+                    Release
+                  </button>
+                </div>
               </div>
             </div>
           </div>

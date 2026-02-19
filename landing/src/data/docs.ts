@@ -60,6 +60,23 @@ export const sidebarSections: DocSection[] = [
     ],
   },
   {
+    id: 'networking',
+    titleKey: 'docs.sidebar.networking',
+    children: [
+      { id: 'networking-ports', titleKey: 'docs.sidebar.networkingPorts' },
+      { id: 'networking-firewall', titleKey: 'docs.sidebar.networkingFirewall' },
+      { id: 'networking-sftp', titleKey: 'docs.sidebar.networkingSftp' },
+    ],
+  },
+  {
+    id: 'integrations',
+    titleKey: 'docs.sidebar.integrations',
+    children: [
+      { id: 'deploy-button', titleKey: 'docs.sidebar.deployButton' },
+      { id: 'fleet-json', titleKey: 'docs.sidebar.fleetJson' },
+    ],
+  },
+  {
     id: 'configuration',
     titleKey: 'docs.sidebar.configuration',
   },

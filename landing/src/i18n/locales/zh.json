@@ -167,6 +167,9 @@
       "sshKeys": "SSH 密钥",
       "marketplace": "应用市场",
       "infrastructure": "基础设施",
+      "integrations": "集成",
+      "deployButton": "部署按钮",
+      "fleetJson": "fleet.json 参考",
       "configuration": "配置"
     },
     "cmd": {

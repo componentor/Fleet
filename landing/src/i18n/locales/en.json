@@ -173,6 +173,13 @@
       "storageNodeSetup": "Node Setup",
       "storageSpecs": "Hardware Specs",
       "storageMigration": "Migration",
+      "networking": "Networking",
+      "networkingPorts": "Required Ports",
+      "networkingFirewall": "Firewall Setup",
+      "networkingSftp": "SFTP Access",
+      "integrations": "Integrations",
+      "deployButton": "Deploy Button",
+      "fleetJson": "fleet.json Reference",
       "configuration": "Configuration"
     },
     "cmd": {

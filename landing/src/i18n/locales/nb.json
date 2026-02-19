@@ -167,6 +167,9 @@
       "sshKeys": "SSH-nøkler",
       "marketplace": "Markedsplass",
       "infrastructure": "Infrastruktur",
+      "integrations": "Integrasjoner",
+      "deployButton": "Distribueringsknapp",
+      "fleetJson": "fleet.json-referanse",
       "configuration": "Konfigurasjon"
     },
     "cmd": {

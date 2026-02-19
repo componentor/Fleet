@@ -1,4 +1,6 @@
 import Dockerode from 'dockerode';
+import { Readable, PassThrough } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
 
 const docker = new Dockerode({ socketPath: '/var/run/docker.sock' });
@@ -594,6 +596,99 @@ export class DockerService {
 
       stream.on('error', (err: Error) => {
         clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  // Streaming command execution — returns a readable stream of stdout (for large outputs like pg_dump)
+  async execCommandStream(
+    containerId: string,
+    cmd: string[],
+    timeoutMs: number = 300_000,
+  ): Promise<{ stream: Readable; exec: Dockerode.Exec }> {
+    const container = docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdin: false,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+    const rawStream = await exec.start({ hijack: true, stdin: false, Tty: false });
+
+    // Demux Docker stream and return only stdout via a PassThrough
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    docker.modem.demuxStream(rawStream, stdout, stderr);
+
+    const timer = setTimeout(() => {
+      rawStream.destroy();
+      stdout.destroy(new Error('Command timed out'));
+    }, timeoutMs);
+
+    rawStream.on('end', () => clearTimeout(timer));
+    rawStream.on('error', () => clearTimeout(timer));
+    stdout.on('close', () => clearTimeout(timer));
+
+    return { stream: stdout, exec };
+  }
+
+  // Execute command with stdin input (for database restore)
+  async execCommandWithInput(
+    containerId: string,
+    cmd: string[],
+    input: Readable,
+    timeoutMs: number = 600_000,
+  ): Promise<{ exitCode: number; stderr: string }> {
+    const container = docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+    const rawStream = await exec.start({ hijack: true, stdin: true, Tty: false });
+
+    return new Promise((resolve, reject) => {
+      const errChunks: Buffer[] = [];
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      docker.modem.demuxStream(rawStream, stdout, stderr);
+
+      stderr.on('data', (chunk: Buffer) => {
+        const total = errChunks.reduce((sum, c) => sum + c.length, 0);
+        if (total < 64 * 1024) errChunks.push(chunk);
+      });
+
+      const timer = setTimeout(() => {
+        rawStream.destroy();
+        reject(new Error('Command timed out'));
+      }, timeoutMs);
+
+      // Pipe input to the container's stdin
+      input.pipe(rawStream, { end: true });
+
+      // When rawStream ends, inspect exit code
+      rawStream.on('end', async () => {
+        clearTimeout(timer);
+        try {
+          const info = await exec.inspect();
+          resolve({ exitCode: info.ExitCode ?? 0, stderr: Buffer.concat(errChunks).toString('utf8') });
+        } catch {
+          resolve({ exitCode: 0, stderr: Buffer.concat(errChunks).toString('utf8') });
+        }
+      });
+
+      rawStream.on('error', (err: Error) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+
+      input.on('error', (err: Error) => {
+        clearTimeout(timer);
+        rawStream.destroy();
         reject(err);
       });
     });

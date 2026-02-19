@@ -643,6 +643,575 @@ onUnmounted(() => {
             </div>
           </section>
 
+          <!-- Networking -->
+          <section id="networking" data-section="networking" class="mb-16">
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white sm:text-4xl">Networking &amp; Ports</h1>
+            <p class="mt-4 text-lg text-surface-500 dark:text-surface-400">
+              Fleet uses several network ports for communication between nodes, serving traffic, and providing file access. This guide covers which ports to open, firewall configuration, and SFTP access setup.
+            </p>
+
+            <!-- Required Ports -->
+            <div id="networking-ports" data-section="networking-ports" class="mt-12">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Required Ports</h2>
+              <p class="mt-4 text-surface-600 dark:text-surface-300">
+                The following ports must be accessible for Fleet to operate correctly. Ports are categorized by their purpose.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Public-facing Ports</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">These ports must be open to the internet (or to your users' networks):</p>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Port</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Protocol</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Service</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">22</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">SSH</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Server management access</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">80</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">HTTP</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Web traffic (redirects to HTTPS)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">443</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">HTTPS</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Secure web traffic, dashboard, and API</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">2222</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">SFTP</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Secure file transfer for upload-based services</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Swarm Cluster Ports (Internal)</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">These ports are used for node-to-node communication within the Docker Swarm cluster. They should only be open between your nodes, not to the public internet:</p>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Port</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Protocol</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Service</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">2377</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">Swarm Management</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Docker Swarm cluster management and Raft consensus</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">7946</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP + UDP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">Node Discovery</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Container network discovery and gossip protocol</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">4789</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">UDP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">Overlay Network</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">VXLAN overlay network for cross-node container communication</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">2049</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">NFS</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Network File System for shared volume storage</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Optional Storage Ports (Internal)</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">Only needed if you use distributed storage providers:</p>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Port</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Protocol</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Service</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">24007-24008</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">GlusterFS</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">GlusterFS daemon and management</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">49152-49251</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">GlusterFS Bricks</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">GlusterFS brick ports (one per brick)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">6789</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">Ceph Monitor</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Ceph monitor daemon</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">6800-7300</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">Ceph OSD</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Ceph OSD daemons</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">9000</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">MinIO API</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">MinIO S3-compatible API</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">9001</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">TCP</td>
+                      <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">MinIO Console</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">MinIO web console</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Firewall Setup -->
+            <div id="networking-firewall" data-section="networking-firewall" class="mt-12">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Firewall Setup</h2>
+              <p class="mt-4 text-surface-600 dark:text-surface-300">
+                The Fleet install script automatically configures firewall rules for the required ports. If you need to set them up manually, use the commands below.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">UFW (Ubuntu/Debian)</h3>
+              <div class="mt-3">
+                <CodeBlock :code="`# Public ports\nsudo ufw allow 22/tcp    # SSH\nsudo ufw allow 80/tcp    # HTTP\nsudo ufw allow 443/tcp   # HTTPS\nsudo ufw allow 2222/tcp  # SFTP\n\n# Swarm ports (restrict to your node IPs in production)\nsudo ufw allow 2377/tcp  # Swarm management\nsudo ufw allow 7946/tcp  # Node discovery\nsudo ufw allow 7946/udp  # Node discovery\nsudo ufw allow 4789/udp  # Overlay network\nsudo ufw allow 2049/tcp  # NFS\n\nsudo ufw reload`" />
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">firewalld (RHEL/CentOS/Fedora)</h3>
+              <div class="mt-3">
+                <CodeBlock :code="`sudo firewall-cmd --permanent --add-port=22/tcp\nsudo firewall-cmd --permanent --add-port=80/tcp\nsudo firewall-cmd --permanent --add-port=443/tcp\nsudo firewall-cmd --permanent --add-port=2222/tcp\nsudo firewall-cmd --permanent --add-port=2377/tcp\nsudo firewall-cmd --permanent --add-port=7946/tcp\nsudo firewall-cmd --permanent --add-port=7946/udp\nsudo firewall-cmd --permanent --add-port=4789/udp\nsudo firewall-cmd --permanent --add-port=2049/tcp\nsudo firewall-cmd --reload`" />
+              </div>
+
+              <p class="mt-6 text-sm text-surface-500 dark:text-surface-400 rounded-lg border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 px-4 py-3">
+                <strong>Security tip:</strong> For production deployments, restrict Swarm ports (2377, 7946, 4789) and NFS (2049) to only your cluster node IPs rather than opening them to all traffic. Use <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">ufw allow from &lt;NODE_IP&gt; to any port 2377</code> to restrict per-IP.
+              </p>
+            </div>
+
+            <!-- SFTP Access -->
+            <div id="networking-sftp" data-section="networking-sftp" class="mt-12">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">SFTP Access</h2>
+              <p class="mt-4 text-surface-600 dark:text-surface-300">
+                Fleet includes a built-in SFTP server that provides secure file access to services using custom upload (file-based deployment). Users can connect via any SFTP client to manage their uploaded files directly.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">How It Works</h3>
+              <ul class="mt-3 space-y-2 text-sm text-surface-600 dark:text-surface-300">
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>SFTP server runs embedded in the Fleet API process on port <strong>2222</strong> (configurable)</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Authentication uses <strong>API keys</strong> — the same keys used for the REST API and CLI</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Each connection is <strong>chrooted</strong> to the specific service's upload directory — no cross-account or cross-service access</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Built-in rate limiting on failed auth attempts and per-account connection limits protect against abuse</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Supports up to <strong>10,000 concurrent connections</strong> by default (configurable via <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">SFTP_MAX_CONNECTIONS</code>)</span>
+                </li>
+              </ul>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Connecting</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">
+                Use any SFTP client (FileZilla, WinSCP, Cyberduck, or the command line). The username format is <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">accountId/serviceId</code> and the password is your API key.
+              </p>
+              <div class="mt-3">
+                <CodeBlock :code="`# Command-line SFTP\nsftp -P 2222 ACCOUNT_ID/SERVICE_ID@your-server.com\n\n# When prompted for password, enter your API key`" />
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Security</h3>
+              <ul class="mt-3 space-y-2 text-sm text-surface-600 dark:text-surface-300">
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span><strong>Per-account isolation:</strong> Each SFTP session is restricted to its service's upload directory. Path traversal is blocked.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span><strong>Brute-force protection:</strong> After 10 failed login attempts from an IP within 60 seconds, further attempts are blocked for that IP.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span><strong>Connection limits:</strong> Global limit of 10,000 connections and 100 per account (both configurable) prevent resource exhaustion.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span><strong>SSH encryption:</strong> All traffic is encrypted via SSH (ed25519 host key, auto-generated on first startup).</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span><strong>API key auth:</strong> Passwords are verified against argon2-hashed API keys in the database. Expired keys are rejected.</span>
+                </li>
+              </ul>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Disabling SFTP</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">
+                If you don't need SFTP access, disable it by setting the environment variable:
+              </p>
+              <div class="mt-3">
+                <CodeBlock code="SFTP_ENABLED=false" />
+              </div>
+            </div>
+          </section>
+
+          <!-- Integrations -->
+          <section id="integrations" data-section="integrations" class="mb-16">
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white sm:text-4xl">Integrations</h1>
+            <p class="mt-4 text-lg text-surface-500 dark:text-surface-400">
+              Add a "Deploy on Fleet" button to any GitHub repository. Users click the button, land on a pre-filled deploy form, and launch the service in a few clicks.
+            </p>
+
+            <!-- Deploy Button -->
+            <div id="deploy-button" data-section="deploy-button" class="mt-12">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Deploy Button</h2>
+              <p class="mt-4 text-surface-600 dark:text-surface-300">
+                The deploy button is a badge that links to your Fleet instance's one-click deploy page. It works like Heroku, Vercel, or Railway deploy buttons.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Quick Start</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">Add this to your repository's README:</p>
+              <div class="mt-3">
+                <CodeBlock :code="`[![Deploy on Fleet](https://your-landing-site.com/deploy-button.svg)](https://your-dashboard.com/deploy/gh?repo=owner/repo)`" />
+              </div>
+              <p class="mt-3 text-sm text-surface-500 dark:text-surface-400">
+                Replace <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">your-landing-site.com</code> with your Fleet landing page URL and <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">your-dashboard.com</code> with your Fleet dashboard URL.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">URL Parameters</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">
+                The deploy URL supports the following query parameters:
+              </p>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Parameter</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Required</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">repo</td>
+                      <td class="px-4 py-3 text-red-500">Yes</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">GitHub repo in <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">owner/repo</code> format</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">branch</td>
+                      <td class="px-4 py-3 text-surface-500">No</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Branch to deploy. Falls back to fleet.json default, then the repo's default branch</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">name</td>
+                      <td class="px-4 py-3 text-surface-500">No</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Pre-fill the service name</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">env[KEY]</td>
+                      <td class="px-4 py-3 text-surface-500">No</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Pre-fill environment variables. Use multiple <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">env[KEY]=value</code> params for multiple variables</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">How It Works</h3>
+              <ol class="mt-3 space-y-2 text-sm text-surface-600 dark:text-surface-300 list-decimal pl-5">
+                <li>User clicks the deploy button in your README</li>
+                <li>Fleet fetches <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">fleet.json</code> from your repo (if it exists) and pre-fills the deploy form</li>
+                <li>User reviews the configuration, fills in any required env vars, and clicks Deploy</li>
+                <li>Fleet creates the service, clones the repo, builds and deploys it</li>
+              </ol>
+              <p class="mt-4 text-sm text-surface-500 dark:text-surface-400 rounded-lg border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/50 px-4 py-3">
+                If the user is not logged in, they'll be redirected to the login page first, then returned to the deploy form after authentication.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Examples</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">Basic deploy button:</p>
+              <div class="mt-3">
+                <CodeBlock code="https://your-dashboard.com/deploy/gh?repo=myorg/my-app" />
+              </div>
+              <p class="mt-4 text-sm text-surface-500 dark:text-surface-400">With branch and pre-filled env vars:</p>
+              <div class="mt-3">
+                <CodeBlock code="https://your-dashboard.com/deploy/gh?repo=myorg/my-app&branch=stable&env[NODE_ENV]=production&env[PORT]=3000" />
+              </div>
+            </div>
+
+            <!-- fleet.json Reference -->
+            <div id="fleet-json" data-section="fleet-json" class="mt-12">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">fleet.json Reference</h2>
+              <p class="mt-4 text-surface-600 dark:text-surface-300">
+                The <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">fleet.json</code> file is an optional manifest placed in the root of your repository. When present, it enriches the deploy experience with metadata, environment variable descriptions, port configuration, and build settings.
+              </p>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Full Example</h3>
+              <div class="mt-3">
+                <CodeBlock :code='`{
+  \"name\": \"My App\",
+  \"description\": \"A brief description of the app\",
+  \"icon\": \"https://example.com/icon.png\",
+  \"website\": \"https://example.com\",
+  \"env\": {
+    \"DATABASE_URL\": {
+      \"description\": \"PostgreSQL connection string\",
+      \"required\": true
+    },
+    \"SECRET_KEY\": {
+      \"description\": \"Secret key for session encryption\",
+      \"generate\": true
+    },
+    \"LOG_LEVEL\": {
+      \"description\": \"Logging verbosity\",
+      \"value\": \"info\",
+      \"required\": false
+    }
+  },
+  \"ports\": [
+    { \"target\": 3000 }
+  ],
+  \"buildFile\": \"Dockerfile\",
+  \"branch\": \"main\"
+}`' />
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Top-Level Fields</h3>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Field</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Type</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">name</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Display name for the app (max 100 chars)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">description</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Short description shown on the deploy page (max 500 chars)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">icon</td>
+                      <td class="px-4 py-3 text-surface-500">url</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">URL to an app icon displayed on the deploy page</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">website</td>
+                      <td class="px-4 py-3 text-surface-500">url</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Link to the project's website</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">env</td>
+                      <td class="px-4 py-3 text-surface-500">object</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Environment variable definitions (see below)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">ports</td>
+                      <td class="px-4 py-3 text-surface-500">array</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Port mappings for the service</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">buildFile</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Path to the Dockerfile or docker-compose.yml (max 200 chars)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">branch</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Default branch to deploy if not specified in the URL</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Environment Variables</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">
+                Each key in the <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">env</code> object maps to an environment variable. The value can be a plain string (used as the default value) or an object with the following properties:
+              </p>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Property</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Type</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">description</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Human-readable help text shown next to the input</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">value</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Default value (pre-filled, user can change)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">required</td>
+                      <td class="px-4 py-3 text-surface-500">boolean</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Whether the variable must be filled (default: true)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">generate</td>
+                      <td class="px-4 py-3 text-surface-500">boolean</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Auto-generate a random 32-byte hex string. Useful for secrets, tokens, and encryption keys</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Port Mappings</h3>
+              <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">
+                Each entry in the <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">ports</code> array defines a port mapping:
+              </p>
+              <div class="mt-4 overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800">
+                <table class="w-full text-sm">
+                  <thead class="bg-surface-50 dark:bg-surface-900/80">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Property</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Type</th>
+                      <th class="px-4 py-3 text-left font-semibold text-surface-600 dark:text-surface-300">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-surface-200 dark:divide-surface-800">
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">target</td>
+                      <td class="px-4 py-3 text-surface-500">number</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Container port (required, 1-65535)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">published</td>
+                      <td class="px-4 py-3 text-surface-500">number</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Host port (optional, auto-assigned if omitted)</td>
+                    </tr>
+                    <tr>
+                      <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">protocol</td>
+                      <td class="px-4 py-3 text-surface-500">string</td>
+                      <td class="px-4 py-3 text-surface-500 dark:text-surface-400"><code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">tcp</code> or <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">udp</code> (default: tcp)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Real-World Examples</h3>
+
+              <h4 class="mt-6 text-base font-semibold text-gray-900 dark:text-white">Node.js App</h4>
+              <div class="mt-3">
+                <CodeBlock :code='`{
+  \"name\": \"Express API\",
+  \"description\": \"REST API built with Express.js\",
+  \"env\": {
+    \"NODE_ENV\": {
+      \"value\": \"production\",
+      \"required\": false
+    },
+    \"PORT\": {
+      \"value\": \"3000\"
+    },
+    \"SESSION_SECRET\": {
+      \"description\": \"Secret for signing session cookies\",
+      \"generate\": true
+    },
+    \"DATABASE_URL\": {
+      \"description\": \"PostgreSQL connection string\",
+      \"required\": true
+    }
+  },
+  \"ports\": [{ \"target\": 3000 }],
+  \"buildFile\": \"Dockerfile\"
+}`' />
+              </div>
+
+              <h4 class="mt-6 text-base font-semibold text-gray-900 dark:text-white">Python / Django</h4>
+              <div class="mt-3">
+                <CodeBlock :code='`{
+  \"name\": \"Django App\",
+  \"description\": \"Django web application\",
+  \"env\": {
+    \"DJANGO_SECRET_KEY\": {
+      \"description\": \"Django secret key\",
+      \"generate\": true
+    },
+    \"DJANGO_ALLOWED_HOSTS\": {
+      \"value\": \"*\"
+    },
+    \"DATABASE_URL\": {
+      \"description\": \"Database connection string\",
+      \"required\": true
+    }
+  },
+  \"ports\": [{ \"target\": 8000 }],
+  \"branch\": \"main\"
+}`' />
+              </div>
+
+              <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">Best Practices</h3>
+              <ul class="mt-3 space-y-2 text-sm text-surface-600 dark:text-surface-300">
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Use <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">generate: true</code> for secrets — never commit default secret values</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Add <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">description</code> to every env var — it helps users understand what each variable does</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Set <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">required: false</code> for optional env vars — all env vars are required by default</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  <span>Always include a <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">Dockerfile</code> in your repo so Fleet can build and run it</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  <span>Never put actual secret values in <code class="rounded bg-surface-100 dark:bg-surface-800/50 px-1.5 py-0.5 text-xs">fleet.json</code> — it's committed to your repo and publicly visible</span>
+                </li>
+              </ul>
+            </div>
+          </section>
+
           <!-- Configuration -->
           <section id="configuration" data-section="configuration" class="mb-16">
             <h1 class="text-3xl font-bold text-gray-900 dark:text-white sm:text-4xl">{{ $t('docs.configuration') }}</h1>
@@ -709,6 +1278,31 @@ onUnmounted(() => {
                     <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">PLATFORM_DOMAIN</td>
                     <td class="px-4 py-3 text-surface-500 dark:text-surface-400">{{ $t('docs.configPlatformDomain') }}</td>
                     <td class="px-4 py-3 text-surface-500">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">SFTP_ENABLED</td>
+                    <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Enable or disable the built-in SFTP server</td>
+                    <td class="px-4 py-3 text-surface-500">true</td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">SFTP_PORT</td>
+                    <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Port for the SFTP server to listen on</td>
+                    <td class="px-4 py-3 text-surface-500">2222</td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">SFTP_HOST_KEY_PATH</td>
+                    <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Path to the SSH host key file (auto-generated if missing)</td>
+                    <td class="px-4 py-3 text-surface-500">./data/sftp_host_ed25519_key</td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">SFTP_MAX_CONNECTIONS</td>
+                    <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Maximum total concurrent SFTP connections</td>
+                    <td class="px-4 py-3 text-surface-500">10000</td>
+                  </tr>
+                  <tr>
+                    <td class="px-4 py-3 font-mono text-primary-600 dark:text-primary-400">SFTP_MAX_PER_ACCOUNT</td>
+                    <td class="px-4 py-3 text-surface-500 dark:text-surface-400">Maximum concurrent SFTP connections per account</td>
+                    <td class="px-4 py-3 text-surface-500">100</td>
                   </tr>
                 </tbody>
               </table>

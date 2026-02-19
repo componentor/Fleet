@@ -1,12 +1,27 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { Readable } from 'node:stream';
+import { createHmac, randomBytes } from 'node:crypto';
 import { db, services, eq, and, isNull } from '@fleet/db';
-import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
 import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
+
+// Short-lived download tokens (in-memory, 60s TTL)
+const downloadTokens = new Map<string, { accountId: string; serviceId: string; db?: string; expiresAt: number }>();
+const DOWNLOAD_TOKEN_TTL = 60_000; // 60 seconds
+
+// Periodically clean up expired tokens
+const tokenCleanup = setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of downloadTokens) {
+    if (now > val.expiresAt) downloadTokens.delete(key);
+  }
+}, 30_000);
+tokenCleanup.unref();
 
 const dbExecRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 60, keyPrefix: 'db-exec' });
 
@@ -94,6 +109,52 @@ function enforceLimit(sql: string, limit: number): string {
   if (/^\s*SELECT\b/i.test(trimmed)) return `${trimmed} LIMIT ${limit}`;
   return trimmed;
 }
+
+// ---- Identifier quoting & value escaping ----
+
+function quoteIdentifier(engine: DatabaseEngine, name: string): string {
+  if (engine === 'postgres') return `"${name}"`;
+  return `\`${name}\``;
+}
+
+function escapeValue(engine: DatabaseEngine, value: string | null): string {
+  if (value === null) return 'NULL';
+  if (engine === 'postgres') {
+    const tag = '$fleet$';
+    if (value.includes(tag)) return `'${value.replace(/'/g, "''")}'`;
+    return `${tag}${value}${tag}`;
+  }
+  // mysql / mariadb
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\0/g, '\\0')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\x1a/g, '\\Z');
+  return `'${escaped}'`;
+}
+
+async function getPrimaryKeyColumns(
+  engine: DatabaseEngine,
+  info: DatabaseInfo,
+  containerId: string,
+  tableName: string,
+): Promise<string[]> {
+  let sql: string;
+  if (engine === 'postgres') {
+    sql = `SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '${tableName}'::regclass AND i.indisprimary ORDER BY array_position(i.indkey, a.attnum)`;
+  } else {
+    sql = `SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION`;
+  }
+  const cmd = buildCommand(info, sql);
+  const result = await dockerService.execCommand(containerId, cmd);
+  return result.stdout.trim().split('\n').filter(s => s.trim()).map(s => s.trim());
+}
+
+const VALID_TABLE_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const VALID_COLUMN_TYPE = /^[a-zA-Z][a-zA-Z0-9_ (),.]+$/;
+const SAFE_DEFAULT = /^(\d+(\.\d+)?|'[^']*'|NULL|CURRENT_TIMESTAMP|NOW\(\)|TRUE|FALSE|uuid_generate_v4\(\)|gen_random_uuid\(\))$/i;
 
 // ---- Helper to find running container ----
 
@@ -237,13 +298,23 @@ databaseRoutes.get('/:serviceId/tables/:name/columns', dbExecRateLimit, requireM
   try {
     const cmd = buildCommand(info, sql);
     const result = await dockerService.execCommand(container.containerId, cmd);
+
+    // Fetch primary key columns
+    let pkSet = new Set<string>();
+    try {
+      const pkCols = await getPrimaryKeyColumns(container.engine, info, container.containerId, tableName);
+      pkSet = new Set(pkCols);
+    } catch { /* PK detection is best-effort */ }
+
     const columns = result.stdout.trim().split('\n').filter(s => s.trim()).map(line => {
       const parts = line.split('\t');
+      const name = parts[0]?.trim() ?? '';
       return {
-        name: parts[0]?.trim() ?? '',
+        name,
         type: parts[1]?.trim() ?? '',
         nullable: (parts[2]?.trim() ?? 'YES') === 'YES',
         defaultValue: parts[3]?.trim() === '\\N' || parts[3]?.trim() === 'NULL' ? null : (parts[3]?.trim() ?? null),
+        isPrimaryKey: pkSet.has(name),
       };
     }).filter(col => col.name);
 
@@ -281,7 +352,8 @@ databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMemb
 
   try {
     // Get total count
-    const countCmd = buildCommand(info, `SELECT COUNT(*) FROM "${tableName}"`);
+    const qi = (n: string) => quoteIdentifier(container.engine, n);
+    const countCmd = buildCommand(info, `SELECT COUNT(*) FROM ${qi(tableName)}`);
     const countResult = await dockerService.execCommand(container.containerId, countCmd);
     const totalRows = parseInt(countResult.stdout.trim(), 10) || 0;
 
@@ -296,8 +368,8 @@ databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMemb
     const columns = colResult.stdout.trim().split('\n').filter(s => s.trim()).map(s => s.trim());
 
     // Get data
-    const orderClause = orderBy ? ` ORDER BY "${orderBy}" ${orderDir}` : '';
-    const dataSql = `SELECT * FROM "${tableName}"${orderClause} LIMIT ${pageSize} OFFSET ${offset}`;
+    const orderClause = orderBy ? ` ORDER BY ${qi(orderBy)} ${orderDir}` : '';
+    const dataSql = `SELECT * FROM ${qi(tableName)}${orderClause} LIMIT ${pageSize} OFFSET ${offset}`;
     const dataCmd = buildCommand(info, dataSql);
     const dataResult = await dockerService.execCommand(container.containerId, dataCmd);
     const rows = dataResult.stdout.trim().split('\n').filter(s => s.length > 0).map(line => line.split('\t'));
@@ -359,6 +431,374 @@ databaseRoutes.post('/:serviceId/query', dbExecRateLimit, requireMember, async (
     const message = err instanceof Error ? err.message : 'Query execution failed';
     logger.error({ err }, 'Database query failed');
     return c.json({ error: message }, 500);
+  }
+});
+
+// ---- CRUD: Row operations ----
+
+const insertRowSchema = z.object({
+  values: z.record(z.string(), z.union([z.string(), z.null()])),
+});
+
+const updateRowSchema = z.object({
+  primaryKey: z.record(z.string(), z.string()),
+  updates: z.record(z.string(), z.union([z.string(), z.null()])),
+});
+
+const deleteRowSchema = z.object({
+  primaryKey: z.record(z.string(), z.string()),
+});
+
+const createTableSchema = z.object({
+  name: z.string().regex(VALID_TABLE_NAME),
+  columns: z.array(z.object({
+    name: z.string().regex(VALID_TABLE_NAME),
+    type: z.string().min(1).max(100),
+    nullable: z.boolean().default(true),
+    defaultValue: z.string().optional(),
+    primaryKey: z.boolean().default(false),
+  })).min(1).max(100),
+});
+
+// POST /:serviceId/tables/:name/rows — insert a row
+databaseRoutes.post('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const tableName = c.req.param('name');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+  if (!VALID_TABLE_NAME.test(tableName)) return c.json({ error: 'Invalid table name' }, 400);
+
+  const body = await c.req.json();
+  const parsed = insertRowSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
+
+  const { values } = parsed.data;
+  const columnNames = Object.keys(values);
+  if (columnNames.length === 0) return c.json({ error: 'No values provided' }, 400);
+  for (const col of columnNames) {
+    if (!VALID_TABLE_NAME.test(col)) return c.json({ error: `Invalid column name: ${col}` }, 400);
+  }
+
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+  const qi = (n: string) => quoteIdentifier(container.engine, n);
+
+  const quotedCols = columnNames.map(qi).join(', ');
+  const escapedVals = columnNames.map(n => escapeValue(container.engine, values[n] ?? null)).join(', ');
+  const sql = `INSERT INTO ${qi(tableName)} (${quotedCols}) VALUES (${escapedVals})`;
+
+  try {
+    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Insert failed' }, 500);
+    return c.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Database insert failed');
+    return c.json({ error: err instanceof Error ? err.message : 'Insert failed' }, 500);
+  }
+});
+
+// PUT /:serviceId/tables/:name/rows — update a row
+databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const tableName = c.req.param('name');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+  if (!VALID_TABLE_NAME.test(tableName)) return c.json({ error: 'Invalid table name' }, 400);
+
+  const body = await c.req.json();
+  const parsed = updateRowSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
+
+  const { primaryKey, updates } = parsed.data;
+  if (Object.keys(updates).length === 0) return c.json({ error: 'No updates provided' }, 400);
+  if (Object.keys(primaryKey).length === 0) return c.json({ error: 'No primary key provided' }, 400);
+  for (const col of [...Object.keys(primaryKey), ...Object.keys(updates)]) {
+    if (!VALID_TABLE_NAME.test(col)) return c.json({ error: `Invalid column name: ${col}` }, 400);
+  }
+
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+  const qi = (n: string) => quoteIdentifier(container.engine, n);
+
+  const setClauses = Object.entries(updates)
+    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val)}`)
+    .join(', ');
+  const whereClauses = Object.entries(primaryKey)
+    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val)}`)
+    .join(' AND ');
+  const sql = `UPDATE ${qi(tableName)} SET ${setClauses} WHERE ${whereClauses}`;
+
+  try {
+    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Update failed' }, 500);
+    return c.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Database update failed');
+    return c.json({ error: err instanceof Error ? err.message : 'Update failed' }, 500);
+  }
+});
+
+// DELETE /:serviceId/tables/:name/rows — delete a row
+databaseRoutes.delete('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const tableName = c.req.param('name');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+  if (!VALID_TABLE_NAME.test(tableName)) return c.json({ error: 'Invalid table name' }, 400);
+
+  const body = await c.req.json();
+  const parsed = deleteRowSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
+
+  const { primaryKey } = parsed.data;
+  if (Object.keys(primaryKey).length === 0) return c.json({ error: 'No primary key provided' }, 400);
+  for (const col of Object.keys(primaryKey)) {
+    if (!VALID_TABLE_NAME.test(col)) return c.json({ error: `Invalid column name: ${col}` }, 400);
+  }
+
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+  const qi = (n: string) => quoteIdentifier(container.engine, n);
+
+  const whereClauses = Object.entries(primaryKey)
+    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val)}`)
+    .join(' AND ');
+  const sql = `DELETE FROM ${qi(tableName)} WHERE ${whereClauses}`;
+
+  try {
+    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Delete failed' }, 500);
+    return c.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Database row delete failed');
+    return c.json({ error: err instanceof Error ? err.message : 'Delete failed' }, 500);
+  }
+});
+
+// ---- CRUD: Table operations ----
+
+// POST /:serviceId/tables — create a table
+databaseRoutes.post('/:serviceId/tables', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const body = await c.req.json();
+  const parsed = createTableSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
+
+  const { name, columns } = parsed.data;
+  for (const col of columns) {
+    if (!VALID_COLUMN_TYPE.test(col.type)) return c.json({ error: `Invalid column type: ${col.type}` }, 400);
+    if (col.defaultValue && !SAFE_DEFAULT.test(col.defaultValue)) return c.json({ error: `Unsafe default value: ${col.defaultValue}` }, 400);
+  }
+  if (!columns.some(col => col.primaryKey)) return c.json({ error: 'At least one primary key column is required' }, 400);
+
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+  const qi = (n: string) => quoteIdentifier(container.engine, n);
+
+  const pkColumns = columns.filter(col => col.primaryKey).map(col => qi(col.name));
+  const columnDefs = columns.map(col => {
+    let def = `${qi(col.name)} ${col.type}`;
+    if (!col.nullable) def += ' NOT NULL';
+    if (col.defaultValue) def += ` DEFAULT ${col.defaultValue}`;
+    return def;
+  });
+  columnDefs.push(`PRIMARY KEY (${pkColumns.join(', ')})`);
+  const sql = `CREATE TABLE ${qi(name)} (${columnDefs.join(', ')})`;
+
+  try {
+    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Create table failed' }, 500);
+    return c.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Database create table failed');
+    return c.json({ error: err instanceof Error ? err.message : 'Create table failed' }, 500);
+  }
+});
+
+// DELETE /:serviceId/tables/:name — drop a table
+databaseRoutes.delete('/:serviceId/tables/:name', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const tableName = c.req.param('name');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+  if (!VALID_TABLE_NAME.test(tableName)) return c.json({ error: 'Invalid table name' }, 400);
+
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+  const sql = `DROP TABLE ${quoteIdentifier(container.engine, tableName)}`;
+
+  try {
+    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Drop table failed' }, 500);
+    return c.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Database drop table failed');
+    return c.json({ error: err instanceof Error ? err.message : 'Drop table failed' }, 500);
+  }
+});
+
+// GET /:serviceId/credentials — connection info & credentials
+databaseRoutes.get('/:serviceId/credentials', requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  const engine = detectEngine(svc.image);
+  if (!engine) return c.json({ error: 'Not a database service' }, 400);
+
+  const env = (svc.env as Record<string, string>) ?? {};
+  const info = extractCredentials(engine, env);
+  const ports = (svc.ports as Array<{ target: number; published: number }>) ?? [];
+
+  const defaultPort = engine === 'postgres' ? 5432 : 3306;
+  const publishedPort = ports.find(p => p.target === defaultPort)?.published ?? defaultPort;
+
+  return c.json({
+    engine,
+    host: svc.name,
+    port: publishedPort,
+    user: info.user,
+    password: info.password,
+    database: info.database,
+  });
+});
+
+// POST /:serviceId/export — create a short-lived download token so the browser
+// can stream the dump directly (no blob buffering).
+databaseRoutes.post('/:serviceId/export', dbExecRateLimit, requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  // Verify container is reachable before issuing a token
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+
+  const token = randomBytes(32).toString('hex');
+  downloadTokens.set(token, {
+    accountId,
+    serviceId,
+    db: dbName || undefined,
+    expiresAt: Date.now() + DOWNLOAD_TOKEN_TTL,
+  });
+
+  return c.json({ token, expiresIn: DOWNLOAD_TOKEN_TTL / 1000 });
+});
+
+// GET /:serviceId/export — stream a full database dump.
+// Accepts either normal auth (Authorization header) or a one-time download token (?token=...).
+databaseRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
+  const serviceId = c.req.param('serviceId');
+  const tokenParam = c.req.query('token');
+
+  let accountId: string | undefined;
+  let dbName: string | undefined;
+
+  if (tokenParam) {
+    // Token-based download (from browser window.open)
+    const entry = downloadTokens.get(tokenParam);
+    if (!entry || Date.now() > entry.expiresAt || entry.serviceId !== serviceId) {
+      return c.json({ error: 'Invalid or expired download token' }, 403);
+    }
+    downloadTokens.delete(tokenParam); // one-time use
+    accountId = entry.accountId;
+    dbName = entry.db;
+  } else {
+    // Normal authenticated request (fallback for API clients)
+    accountId = c.get('accountId');
+    dbName = c.req.query('db');
+    if (!accountId) return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const container = await getDbContainer(accountId!, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+
+  let cmd: string[];
+  let filename: string;
+  if (container.engine === 'postgres') {
+    cmd = ['pg_dump', '-U', info.user, '-d', info.database, '--no-owner', '--no-acl'];
+    filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
+  } else {
+    cmd = ['mysqldump', '-u', info.user, `-p${info.password}`, '--single-transaction', '--routines', '--triggers', info.database];
+    filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
+  }
+
+  try {
+    const { stream } = await dockerService.execCommandStream(container.containerId, cmd);
+    c.header('Content-Type', 'application/sql');
+    c.header('Content-Disposition', `attachment; filename="${filename}"`);
+    return c.body(stream as any);
+  } catch (err) {
+    logger.error({ err }, 'Database export failed');
+    return c.json({ error: 'Export failed' }, 500);
+  }
+});
+
+// POST /:serviceId/import — restore a database from SQL dump
+databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  const dbName = c.req.query('db');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const container = await getDbContainer(accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+
+  const info = dbName ? { ...container.info, database: dbName } : container.info;
+
+  // Parse uploaded file
+  const body = await c.req.parseBody({ all: true });
+  const file = body['file'] as File | undefined;
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: 'SQL file is required' }, 400);
+  }
+
+  const maxSize = 500 * 1024 * 1024; // 500MB
+  if (file.size > maxSize) {
+    return c.json({ error: 'File too large (max 500MB)' }, 400);
+  }
+
+  let cmd: string[];
+  if (container.engine === 'postgres') {
+    cmd = ['psql', '-U', info.user, '-d', info.database, '-v', 'ON_ERROR_STOP=1'];
+  } else {
+    cmd = ['mysql', '-u', info.user, `-p${info.password}`, info.database];
+  }
+
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const inputStream = Readable.from(buffer);
+
+    const result = await dockerService.execCommandWithInput(container.containerId, cmd, inputStream);
+    if (result.exitCode !== 0) {
+      const errMsg = result.stderr?.slice(0, 500) || 'Import failed';
+      return c.json({ error: errMsg }, 500);
+    }
+    return c.json({ success: true, message: 'Database import completed successfully' });
+  } catch (err) {
+    logger.error({ err }, 'Database import failed');
+    return c.json({ error: err instanceof Error ? err.message : 'Import failed' }, 500);
   }
 });
 

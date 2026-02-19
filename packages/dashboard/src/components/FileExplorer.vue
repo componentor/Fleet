@@ -19,8 +19,11 @@ import {
   RefreshCw,
   Archive,
   File as FileIcon,
+  Terminal,
+  Copy,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useAccountStore } from '@/stores/account'
 import { useI18n } from 'vue-i18n'
 
 interface FileEntry {
@@ -61,6 +64,25 @@ const uploadProgress = ref('')
 const showRebuild = ref(false)
 const rebuildFile = ref<File | null>(null)
 const rebuilding = ref(false)
+
+// SFTP connection info
+const accountStore = useAccountStore()
+const showSftpInfo = ref(false)
+const sftpCopied = ref('')
+
+const sftpHost = computed(() => window.location.hostname)
+const sftpPort = '2222'
+const sftpUsername = computed(() => {
+  const accountId = accountStore.currentAccount?.id
+  return accountId ? `${accountId}/${props.serviceId}` : ''
+})
+const sftpCommand = computed(() => `sftp -P ${sftpPort} ${sftpUsername.value}@${sftpHost.value}`)
+
+function copySftp(text: string, label: string) {
+  navigator.clipboard.writeText(text)
+  sftpCopied.value = label
+  setTimeout(() => { sftpCopied.value = '' }, 2000)
+}
 
 const breadcrumbs = computed(() => {
   if (currentPath.value === '/') return [{ name: 'root', path: '/' }]
@@ -522,6 +544,18 @@ onMounted(() => fetchEntries())
             {{ uploading ? '...' : t('fileExplorer.uploadFiles') }}
             <input type="file" class="hidden" @change="handleFileUpload" :disabled="uploading" multiple />
           </label>
+          <button
+            @click="showSftpInfo = !showSftpInfo"
+            :class="[
+              'inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors',
+              showSftpInfo
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
+            ]"
+          >
+            <Terminal class="w-3.5 h-3.5" />
+            SFTP
+          </button>
           <div class="relative group">
             <button
               class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -546,6 +580,55 @@ onMounted(() => fetchEntries())
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- SFTP Connection Info -->
+    <div v-if="showSftpInfo" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-4 p-4">
+      <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">SFTP Connection</h4>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Connect via any SFTP client (FileZilla, WinSCP, Cyberduck, or command line). Use your API key as the password.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Host</label>
+          <div class="flex items-center gap-2">
+            <code class="flex-1 px-2.5 py-1.5 rounded-md bg-gray-100 dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 font-mono truncate">{{ sftpHost }}</code>
+            <button @click="copySftp(sftpHost, 'host')" class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0">
+              <Copy class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Port</label>
+          <div class="flex items-center gap-2">
+            <code class="flex-1 px-2.5 py-1.5 rounded-md bg-gray-100 dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 font-mono">{{ sftpPort }}</code>
+            <button @click="copySftp(sftpPort, 'port')" class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0">
+              <Copy class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Username</label>
+          <div class="flex items-center gap-2">
+            <code class="flex-1 px-2.5 py-1.5 rounded-md bg-gray-100 dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 font-mono truncate">{{ sftpUsername }}</code>
+            <button @click="copySftp(sftpUsername, 'username')" class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0">
+              <Copy class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Password</label>
+          <code class="block px-2.5 py-1.5 rounded-md bg-gray-100 dark:bg-gray-900 text-sm text-gray-500 dark:text-gray-400 font-mono italic">Your API key</code>
+        </div>
+      </div>
+      <div class="mt-3">
+        <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Command</label>
+        <div class="flex items-center gap-2">
+          <code class="flex-1 px-2.5 py-1.5 rounded-md bg-gray-100 dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 font-mono truncate">{{ sftpCommand }}</code>
+          <button @click="copySftp(sftpCommand, 'command')" class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0">
+            <Copy class="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+      <p v-if="sftpCopied" class="text-xs text-green-600 dark:text-green-400 mt-2">Copied {{ sftpCopied }} to clipboard</p>
     </div>
 
     <!-- Drag-and-drop overlay -->

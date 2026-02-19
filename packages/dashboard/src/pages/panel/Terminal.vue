@@ -150,10 +150,11 @@ onMounted(async () => {
           </span>
         </div>
       </div>
-      <div ref="terminalContainer" class="h-[500px] pt-2 px-2 pb-5">
+      <div class="h-[500px] pt-2 px-2 pb-4 bg-[#1a1b26]">
         <div v-if="!selectedService && !terminalCreated" class="h-full flex items-center justify-center">
           <p class="text-gray-500 text-sm">Select a service to open a terminal session.</p>
         </div>
+        <div v-else ref="terminalContainer" class="h-full"></div>
       </div>
     </div>
   </div>
