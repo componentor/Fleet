@@ -423,12 +423,9 @@ async function exportDatabase() {
     // browser streams the file natively (progress bar, no memory buffering).
     const { token } = await api.post<{ token: string }>(`/database/${props.serviceId}/export${dbParams.value}`, {})
     const downloadUrl = `/api/v1/dl/database/${props.serviceId}/export?token=${encodeURIComponent(token)}`
-    const a = document.createElement('a')
-    a.href = downloadUrl
-    a.download = `${selectedDb.value || 'database'}-${new Date().toISOString().slice(0, 10)}.sql`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    // Use window.open — the Content-Disposition: attachment header triggers a
+    // download without navigating the SPA away.
+    window.open(downloadUrl, '_blank')
   } catch { /* error shown by useApi */ } finally {
     exportLoading.value = false
   }

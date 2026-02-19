@@ -223,6 +223,11 @@ const panelRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/panel/Users.vue'),
       },
       {
+        path: 'activity',
+        name: 'panel-activity',
+        component: () => import('@/pages/panel/Activity.vue'),
+      },
+      {
         path: 'billing',
         name: 'panel-billing',
         component: () => import('@/pages/panel/Billing.vue'),

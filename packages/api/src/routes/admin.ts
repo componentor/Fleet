@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
-import { db, accounts, users, services, nodes, deployments, auditLog, updateReturning, countSql, eq, and, isNull } from '@fleet/db';
+import { db, accounts, users, services, nodes, deployments, auditLog, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 const adminRoutes = new Hono<{
   Variables: { user: AuthUser };
@@ -156,6 +157,15 @@ adminRoutes.patch('/users/:id/super', async (c) => {
 
   logger.info({ targetUserId, newIsSuper: !targetUser.isSuper, changedBy: authUser.userId }, 'Super user status toggled');
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.USER_SUPER_TOGGLED,
+    description: `Set super admin to ${!targetUser.isSuper} for ${targetUser.email}`,
+    resourceType: 'user',
+    resourceId: targetUserId,
+    resourceName: targetUser.email,
+  });
+
   return c.json({
     id: updated!.id,
     email: updated!.email,
@@ -164,21 +174,52 @@ adminRoutes.patch('/users/:id/super', async (c) => {
   });
 });
 
-// GET /audit-log — platform-wide audit log
+// GET /audit-log — platform-wide audit log with filtering
 adminRoutes.get('/audit-log', async (c) => {
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
   const offset = (page - 1) * limit;
 
-  const logs = await db.query.auditLog.findMany({
-    orderBy: (a, { desc: d }) => d(a.createdAt),
-    limit,
-    offset,
-  });
+  const resourceType = c.req.query('resourceType');
+  const eventType = c.req.query('eventType');
+  const userId = c.req.query('userId');
+  const accountId = c.req.query('accountId');
+  const dateFrom = c.req.query('dateFrom');
+  const dateTo = c.req.query('dateTo');
+  const search = c.req.query('search');
+
+  const conditions: any[] = [];
+  if (resourceType) conditions.push(eq(auditLog.resourceType, resourceType));
+  if (eventType) conditions.push(like(auditLog.eventType, `${eventType}%`));
+  if (userId) conditions.push(eq(auditLog.userId, userId));
+  if (accountId) conditions.push(eq(auditLog.accountId, accountId));
+  if (dateFrom) conditions.push(gte(auditLog.createdAt, new Date(dateFrom)));
+  if (dateTo) conditions.push(lte(auditLog.createdAt, new Date(dateTo)));
+  if (search) {
+    conditions.push(
+      or(
+        like(auditLog.description, `%${search}%`),
+        like(auditLog.actorEmail, `%${search}%`),
+        like(auditLog.resourceName, `%${search}%`),
+        like(auditLog.action, `%${search}%`),
+      )
+    );
+  }
+
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const logs = await db
+    .select()
+    .from(auditLog)
+    .where(whereClause)
+    .orderBy(desc(auditLog.createdAt))
+    .limit(limit)
+    .offset(offset);
 
   const [total] = await db
     .select({ count: countSql() })
-    .from(auditLog);
+    .from(auditLog)
+    .where(whereClause);
 
   return c.json({
     data: logs,

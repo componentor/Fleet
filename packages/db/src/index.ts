@@ -89,6 +89,7 @@ export const sshAccessRulesRelations = _schema.sshAccessRulesRelations;
 
 // audit-log.ts
 export const auditLog = _schema.auditLog as typeof PgSchema.auditLog;
+export const auditLogRelations = _schema.auditLogRelations;
 
 // backups.ts
 export const backups = _schema.backups as typeof PgSchema.backups;

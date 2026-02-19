@@ -8,6 +8,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 const apiKeyRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'api-key' });
 
@@ -83,6 +84,15 @@ apiKeyRoutes.post('/', apiKeyRateLimit, requireAdmin, async (c) => {
     expiresAt,
   });
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.API_KEY_CREATED,
+    description: `Created API key '${name}'`,
+    resourceType: 'api_key',
+    resourceId: created.id,
+    resourceName: name,
+  });
+
   return c.json({
     id: created.id,
     name: created.name,
@@ -103,6 +113,16 @@ apiKeyRoutes.delete('/:id', requireAdmin, async (c) => {
   if (!deleted) return c.json({ error: 'API key not found' }, 404);
 
   logger.info({ keyId, accountId, revokedBy: c.get('user').userId }, 'API key revoked');
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.API_KEY_REVOKED,
+    description: `Revoked API key '${deleted.name}'`,
+    resourceType: 'api_key',
+    resourceId: keyId,
+    resourceName: deleted.name,
+  });
+
   return c.json({ message: 'API key revoked' });
 });
 

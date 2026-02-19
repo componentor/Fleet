@@ -7,6 +7,7 @@ import { schedulerService } from '../services/scheduler.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 const backupRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'backup' });
 
@@ -65,6 +66,14 @@ backupRoutes.post('/', backupRateLimit, requireMember, async (c) => {
       parsed.data.serviceId,
       parsed.data.storageBackend,
     );
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.BACKUP_CREATED,
+      description: `Created backup for '${parsed.data.serviceId ?? 'account'}'`,
+      resourceType: 'backup',
+      resourceId: backup.id,
+    });
 
     return c.json({
       id: backup.id,
@@ -259,6 +268,14 @@ backupRoutes.delete('/:id', requireMember, async (c) => {
     return c.json({ error: 'Failed to delete backup' }, 500);
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.BACKUP_DELETED,
+    description: `Deleted backup`,
+    resourceType: 'backup',
+    resourceId: backupId,
+  });
+
   return c.json({ message: 'Backup deleted' });
 });
 
@@ -279,6 +296,15 @@ backupRoutes.post('/:id/restore', requireMember, async (c) => {
 
   try {
     const result = await backupService.restoreBackup(backupId, accountId);
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.BACKUP_RESTORED,
+      description: `Restored backup`,
+      resourceType: 'backup',
+      resourceId: backupId,
+    });
+
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : '';

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import {
   ScrollText,
   Search,
@@ -10,10 +10,12 @@ import {
   X,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useAccount } from '@/composables/useAccount'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const api = useApi()
+const { currentAccount } = useAccount()
 
 const logs = ref<any[]>([])
 const loading = ref(true)
@@ -26,7 +28,6 @@ const showFilters = ref(false)
 const filters = reactive({
   search: '',
   resourceType: '',
-  eventType: '',
   dateRange: '',
   dateFrom: '',
   dateTo: '',
@@ -35,25 +36,25 @@ const filters = reactive({
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 const resourceTypes = [
-  { value: '', label: 'All types' },
-  { value: 'service', label: 'Services' },
-  { value: 'deployment', label: 'Deployments' },
-  { value: 'dns', label: 'DNS / Domains' },
-  { value: 'backup', label: 'Backups' },
-  { value: 'user', label: 'Users' },
-  { value: 'account', label: 'Accounts' },
-  { value: 'ssh', label: 'SSH Keys' },
-  { value: 'api_key', label: 'API Keys' },
-  { value: 'settings', label: 'Settings' },
-  { value: 'stack', label: 'Stacks' },
+  { value: '', labelKey: 'activity.allTypes' },
+  { value: 'service', labelKey: 'activity.services' },
+  { value: 'deployment', labelKey: 'activity.deployments' },
+  { value: 'dns', labelKey: 'activity.dns' },
+  { value: 'backup', labelKey: 'activity.backups' },
+  { value: 'user', labelKey: 'activity.users' },
+  { value: 'account', labelKey: 'activity.accounts' },
+  { value: 'ssh', labelKey: 'activity.sshKeys' },
+  { value: 'api_key', labelKey: 'activity.apiKeys' },
+  { value: 'settings', labelKey: 'activity.settings' },
+  { value: 'stack', labelKey: 'activity.stacks' },
 ]
 
 const dateRanges = [
-  { value: '', label: 'All time' },
-  { value: 'today', label: 'Today' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: '30d', label: 'Last 30 days' },
-  { value: 'custom', label: 'Custom range' },
+  { value: '', labelKey: 'activity.allTime' },
+  { value: 'today', labelKey: 'activity.today' },
+  { value: '7d', labelKey: 'activity.last7Days' },
+  { value: '30d', labelKey: 'activity.last30Days' },
+  { value: 'custom', labelKey: 'activity.customRange' },
 ]
 
 function applyDateRange(range: string) {
@@ -81,7 +82,6 @@ function applyDateRange(range: string) {
 function clearFilters() {
   filters.search = ''
   filters.resourceType = ''
-  filters.eventType = ''
   filters.dateRange = ''
   filters.dateFrom = ''
   filters.dateTo = ''
@@ -90,19 +90,19 @@ function clearFilters() {
 }
 
 const hasActiveFilters = () =>
-  filters.resourceType || filters.eventType || filters.dateFrom || filters.dateTo || filters.search
+  filters.resourceType || filters.dateFrom || filters.dateTo || filters.search
 
 async function fetchLogs() {
+  if (!currentAccount.value?.id) return
   loading.value = true
   try {
     const params = new URLSearchParams({ page: page.value.toString(), limit: '50' })
     if (filters.resourceType) params.set('resourceType', filters.resourceType)
-    if (filters.eventType) params.set('eventType', filters.eventType)
     if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
     if (filters.dateTo) params.set('dateTo', filters.dateTo)
     if (filters.search) params.set('search', filters.search)
 
-    const data = await api.get<any>(`/admin/audit-log?${params}`)
+    const data = await api.get<any>(`/accounts/${currentAccount.value.id}/activity?${params}`)
     logs.value = data.data ?? []
     totalPages.value = data.pagination?.totalPages ?? 1
     total.value = data.pagination?.total ?? 0
@@ -157,22 +157,29 @@ function getBadgeClasses(eventType: string | null) {
 }
 
 function formatEventType(eventType: string | null) {
-  if (!eventType) return 'HTTP request'
+  if (!eventType) return t('activity.httpRequest')
   return eventType.replace(/[._]/g, ' ')
 }
 
 function getSourceLabel(source: string | null) {
-  if (source === 'webhook') return 'Webhook'
-  if (source === 'api-key') return 'API Key'
-  if (source === 'system') return 'System'
-  return 'User'
+  if (source === 'webhook') return t('activity.sourceWebhook')
+  if (source === 'api-key') return t('activity.sourceApiKey')
+  if (source === 'system') return t('activity.sourceSystem')
+  return t('activity.sourceUser')
 }
+
+import { watch } from 'vue'
 
 watch(() => filters.dateRange, (range) => {
   if (range !== 'custom') {
     applyDateRange(range)
     onFilterChange()
   }
+})
+
+watch(() => currentAccount.value?.id, () => {
+  page.value = 1
+  fetchLogs()
 })
 
 onMounted(() => {
@@ -186,8 +193,8 @@ onMounted(() => {
       <div class="flex items-center gap-3">
         <ScrollText class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.auditLog.title') }}</h1>
-          <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} events</p>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('activity.title') }}</h1>
+          <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} {{ $t('activity.events') }}</p>
         </div>
       </div>
       <button
@@ -200,23 +207,23 @@ onMounted(() => {
         ]"
       >
         <Filter class="w-4 h-4" />
-        Filters
+        {{ $t('activity.filters') }}
         <span v-if="hasActiveFilters()" class="w-2 h-2 rounded-full bg-primary-500" />
       </button>
     </div>
 
     <!-- Filters panel -->
     <div v-if="showFilters" class="mb-6 p-4 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <!-- Search -->
-        <div class="sm:col-span-2">
-          <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Search</label>
+        <div class="sm:col-span-2 lg:col-span-1">
+          <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ $t('activity.search') }}</label>
           <div class="relative">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               v-model="filters.search"
               type="text"
-              :placeholder="t('super.auditLog.search')"
+              :placeholder="t('activity.search')"
               class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               @input="onSearchInput"
             />
@@ -225,31 +232,31 @@ onMounted(() => {
 
         <!-- Resource type -->
         <div>
-          <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Resource Type</label>
+          <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ $t('activity.resourceType') }}</label>
           <select
             v-model="filters.resourceType"
             @change="onFilterChange"
             class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            <option v-for="rt in resourceTypes" :key="rt.value" :value="rt.value">{{ rt.label }}</option>
+            <option v-for="rt in resourceTypes" :key="rt.value" :value="rt.value">{{ $t(rt.labelKey) }}</option>
           </select>
         </div>
 
         <!-- Date range -->
         <div>
-          <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Date Range</label>
+          <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ $t('activity.dateRange') }}</label>
           <select
             v-model="filters.dateRange"
             class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            <option v-for="dr in dateRanges" :key="dr.value" :value="dr.value">{{ dr.label }}</option>
+            <option v-for="dr in dateRanges" :key="dr.value" :value="dr.value">{{ $t(dr.labelKey) }}</option>
           </select>
         </div>
 
         <!-- Custom date inputs -->
         <template v-if="filters.dateRange === 'custom'">
           <div>
-            <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">From</label>
+            <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ $t('activity.from') }}</label>
             <input
               v-model="filters.dateFrom"
               type="date"
@@ -258,7 +265,7 @@ onMounted(() => {
             />
           </div>
           <div>
-            <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">To</label>
+            <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ $t('activity.to') }}</label>
             <input
               v-model="filters.dateTo"
               type="date"
@@ -275,7 +282,7 @@ onMounted(() => {
           class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
           <X class="w-3 h-3" />
-          Clear filters
+          {{ $t('activity.clearFilters') }}
         </button>
       </div>
     </div>
@@ -291,18 +298,17 @@ onMounted(() => {
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.auditLog.time') }}</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actor</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Event</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.auditLog.resource') }}</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.auditLog.account') }}</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.auditLog.ip') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('activity.time') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('activity.actor') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('activity.event') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('activity.resource') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('activity.ip') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="logs.length === 0">
-              <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                {{ hasActiveFilters() ? 'No events match your filters.' : $t('super.auditLog.noEntries') }}
+              <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+                {{ hasActiveFilters() ? $t('activity.noEventsFiltered') : $t('activity.noEvents') }}
               </td>
             </tr>
             <template v-for="log in logs" :key="log.id">
@@ -331,32 +337,31 @@ onMounted(() => {
                   <span v-else>--</span>
                   <span v-if="log.resourceId" class="font-mono text-xs ml-1 text-gray-400">{{ log.resourceId.slice(0, 8) }}</span>
                 </td>
-                <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-400 font-mono text-xs">{{ log.accountId?.slice(0, 8) || '--' }}</td>
                 <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-400 font-mono text-xs">{{ log.ipAddress || '--' }}</td>
               </tr>
               <!-- Expanded details -->
               <tr v-if="expandedRow === log.id">
-                <td colspan="6" class="px-5 py-4 bg-gray-50 dark:bg-gray-900/50">
+                <td colspan="5" class="px-5 py-4 bg-gray-50 dark:bg-gray-900/50">
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                     <div>
-                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Raw Action</p>
+                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{{ $t('activity.rawAction') }}</p>
                       <code class="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded font-mono text-gray-700 dark:text-gray-300">{{ log.action }}</code>
                     </div>
                     <div>
-                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Source</p>
+                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{{ $t('activity.source') }}</p>
                       <span class="text-gray-700 dark:text-gray-300">{{ getSourceLabel(log.source) }}</span>
                     </div>
                     <div>
-                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">User ID</p>
+                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{{ $t('activity.userId') }}</p>
                       <code class="text-xs font-mono text-gray-500">{{ log.userId || '--' }}</code>
                     </div>
                     <div>
-                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Account ID</p>
+                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{{ $t('activity.accountId') }}</p>
                       <code class="text-xs font-mono text-gray-500">{{ log.accountId || '--' }}</code>
                     </div>
                   </div>
                   <div v-if="log.details && Object.keys(log.details).length > 0" class="mt-3">
-                    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Details</p>
+                    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{{ $t('activity.details') }}</p>
                     <pre class="text-xs bg-gray-100 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto font-mono text-gray-700 dark:text-gray-300">{{ JSON.stringify(log.details, null, 2) }}</pre>
                   </div>
                 </td>
@@ -368,10 +373,10 @@ onMounted(() => {
 
       <!-- Pagination -->
       <div v-if="totalPages > 1" class="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-        <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.auditLog.pageOf', { page, total: totalPages }) }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('activity.pageOf', { page, total: totalPages }) }}</p>
         <div class="flex gap-2">
-          <button @click="page--; fetchLogs()" :disabled="page <= 1" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{{ $t('super.auditLog.previous') }}</button>
-          <button @click="page++; fetchLogs()" :disabled="page >= totalPages" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{{ $t('super.auditLog.next') }}</button>
+          <button @click="page--; fetchLogs()" :disabled="page <= 1" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{{ $t('activity.previous') }}</button>
+          <button @click="page++; fetchLogs()" :disabled="page >= totalPages" class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">{{ $t('activity.next') }}</button>
         </div>
       </div>
     </div>

@@ -43,6 +43,13 @@
       "when": 1771900000000,
       "tag": "0005_add_storage_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772000000000,
+      "tag": "0006_add_event_log_columns",
+      "breakpoints": true
     }
   ]
 }

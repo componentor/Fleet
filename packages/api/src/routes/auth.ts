@@ -15,6 +15,7 @@ import { emailService } from '../services/email.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 const auth = new Hono();
 
@@ -212,6 +213,16 @@ auth.post('/register', authRateLimit, async (c) => {
 
   setRefreshTokenCookie(c, tokens.refreshToken);
 
+  eventService.log({
+    userId: user.id,
+    actorEmail: user.email,
+    eventType: EventTypes.USER_REGISTERED,
+    description: `User registered`,
+    resourceType: 'user',
+    resourceId: user.id,
+    resourceName: user.email,
+  });
+
   return c.json({
     tokens,
     user: userResponse(user),
@@ -272,6 +283,17 @@ auth.post('/login', authRateLimit, async (c) => {
   });
 
   setRefreshTokenCookie(c, tokens.refreshToken);
+
+  eventService.log({
+    userId: user.id,
+    actorEmail: user.email,
+    ipAddress: c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? undefined,
+    eventType: EventTypes.USER_LOGIN,
+    description: `User logged in`,
+    resourceType: 'user',
+    resourceId: user.id,
+    resourceName: user.email,
+  });
 
   return c.json({
     tokens,
@@ -415,6 +437,14 @@ auth.post('/logout', authMiddleware, async (c) => {
   }
 
   clearRefreshTokenCookie(c);
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.USER_LOGOUT,
+    description: `User logged out`,
+    resourceType: 'user',
+  });
+
   return c.json({ message: 'Logged out successfully' });
 });
 

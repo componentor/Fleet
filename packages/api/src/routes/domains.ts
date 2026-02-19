@@ -7,6 +7,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dnsManager } from '../services/dns-provider-manager.js';
 import { requireMember } from '../middleware/rbac.js';
 import { randomUUID } from 'crypto';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 const dnsRoutes = new Hono<{
   Variables: {
@@ -117,6 +118,15 @@ dnsRoutes.post('/zones', requireMember, async (c) => {
     return c.json({ error: 'Failed to create zone record' }, 500);
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DNS_ZONE_CREATED,
+    description: `Added DNS zone '${domain}'`,
+    resourceType: 'dns_zone',
+    resourceId: zone.id,
+    resourceName: domain,
+  });
+
   return c.json(
     {
       ...zone,
@@ -177,6 +187,15 @@ dnsRoutes.delete('/zones/:id', requireMember, async (c) => {
   await safeTransaction(async (tx) => {
     await tx.delete(dnsRecords).where(eq(dnsRecords.zoneId, zoneId));
     await tx.delete(dnsZones).where(eq(dnsZones.id, zoneId));
+  });
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DNS_ZONE_DELETED,
+    description: `Deleted DNS zone '${zone.domain}'`,
+    resourceType: 'dns_zone',
+    resourceId: zoneId,
+    resourceName: zone.domain,
   });
 
   return c.json({ message: 'Zone deleted' });
@@ -359,6 +378,15 @@ dnsRoutes.post('/zones/:id/records', requireMember, async (c) => {
     return c.json({ error: 'Failed to create record' }, 500);
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DNS_RECORD_CREATED,
+    description: `Added ${type} record to '${zone.domain}'`,
+    resourceType: 'dns_record',
+    resourceId: record.id,
+    resourceName: zone.domain,
+  });
+
   return c.json(
     {
       ...record,
@@ -433,6 +461,15 @@ dnsRoutes.patch('/records/:id', requireMember, async (c) => {
     updatedAt: new Date(),
   }, eq(dnsRecords.id, recordId));
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DNS_RECORD_UPDATED,
+    description: `Updated ${finalType} record in '${record.zone.domain}'`,
+    resourceType: 'dns_record',
+    resourceId: recordId,
+    resourceName: record.zone.domain,
+  });
+
   return c.json({
     ...updated,
     warnings: result.warnings.length > 0 ? result.warnings : undefined,
@@ -466,6 +503,15 @@ dnsRoutes.delete('/records/:id', requireMember, async (c) => {
 
   // Delete from DB
   await db.delete(dnsRecords).where(eq(dnsRecords.id, recordId));
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DNS_RECORD_DELETED,
+    description: `Deleted record from '${record.zone.domain}'`,
+    resourceType: 'dns_record',
+    resourceId: recordId,
+    resourceName: record.zone.domain,
+  });
 
   return c.json({ message: 'Record deleted' });
 });

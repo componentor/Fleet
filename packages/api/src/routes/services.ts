@@ -11,6 +11,7 @@ import { cache, invalidateCache } from '../middleware/cache.js';
 import { buildService } from '../services/build.service.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 // Images that need writable filesystem and default user (not UID 1000)
 const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
@@ -330,6 +331,13 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
 
     const response: Record<string, unknown> = { ...svc, dockerServiceId: result.id, status: 'running' };
     if (webhookWarning) response.warning = webhookWarning;
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.SERVICE_CREATED,
+      description: `Created service '${data.name}'`,
+      resourceId: svc.id,
+      resourceName: data.name,
+    });
     return c.json(response, 201);
   } catch (err) {
     logger.warn({ err }, 'Docker not available — service created but not started');
@@ -583,6 +591,13 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
 
   await invalidateCache(`GET:/services:${accountId}`);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_UPDATED,
+    description: `Updated service '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
   return c.json(updated);
 });
 
@@ -673,6 +688,13 @@ serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => 
 
   await invalidateCache(`GET:/services:${accountId}`);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_DELETED,
+    description: `Deleted service '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
   return c.json({ message: 'Service destroyed' });
 });
 
@@ -706,6 +728,13 @@ serviceRoutes.post('/:id/restart', requireMember, requireScope('write'), async (
       ...(needsWritable ? {} : { user: '1000' }),
     });
 
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.SERVICE_RESTARTED,
+      description: `Restarted service '${svc.name}'`,
+      resourceId: serviceId,
+      resourceName: svc.name,
+    });
     return c.json({ message: 'Service restart initiated' });
   } catch (err) {
     logger.error({ err }, 'Service restart failed');
@@ -844,6 +873,13 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
       .where(eq(services.id, serviceId));
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_REDEPLOYED,
+    description: `Redeployed service '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
   return c.json({ message: 'Redeployment initiated', deploymentId: deployment?.id });
 });
 
@@ -888,6 +924,13 @@ serviceRoutes.post('/:id/stop', requireMember, requireScope('write'), async (c) 
 
   await invalidateCache(`GET:/services:${accountId}`);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_STOPPED,
+    description: `Stopped service '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
   return c.json({ message: 'Service stopped' });
 });
 
@@ -939,6 +982,13 @@ serviceRoutes.post('/:id/cancel-deploy', requireMember, requireScope('write'), a
 
   await invalidateCache(`GET:/services:${accountId}`);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DEPLOYMENT_CANCELLED,
+    description: `Cancelled deployment for '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
   return c.json({ message: 'Deployment cancelled' });
 });
 
@@ -1019,6 +1069,13 @@ serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c)
 
       await invalidateCache(`GET:/services:${accountId}`);
 
+      eventService.log({
+        ...eventContext(c),
+        eventType: EventTypes.SERVICE_STARTED,
+        description: `Started service '${svc.name}'`,
+        resourceId: serviceId,
+        resourceName: svc.name,
+      });
       return c.json({ message: 'Service deployed and started' });
     } catch (err) {
       logger.error({ err }, 'Docker deployment on start failed');
@@ -1040,6 +1097,13 @@ serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c)
 
   await invalidateCache(`GET:/services:${accountId}`);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_STARTED,
+    description: `Started service '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
   return c.json({ message: 'Service started' });
 });
 
@@ -1263,6 +1327,12 @@ serviceRoutes.delete('/stack/:stackId', requireMember, requireScope('write'), as
 
   await invalidateCache(`GET:/services:${accountId}`);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.STACK_DELETED,
+    description: `Deleted stack (${stackServices.length} services)`,
+    details: { serviceCount: stackServices.length },
+  });
   return c.json({ message: 'Stack deleted', results });
 });
 
@@ -1304,6 +1374,12 @@ serviceRoutes.post('/stack/:stackId/restart', requireMember, requireScope('write
     }
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.STACK_RESTARTED,
+    description: `Restarted stack (${stackServices.length} services)`,
+    details: { serviceCount: stackServices.length },
+  });
   return c.json({ message: 'Stack restart initiated', results });
 });
 

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { verify } from 'argon2';
-import { db, accounts, userAccounts, users, services, auditLog, insertReturning, updateReturning, deleteReturning, eq, like, and, isNull, isNotNull, safeTransaction } from '@fleet/db';
+import { db, accounts, userAccounts, users, services, auditLog, insertReturning, updateReturning, deleteReturning, countSql, eq, like, and, or, isNull, isNotNull, desc, gte, lte, safeTransaction } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin, requireOwner } from '../middleware/rbac.js';
@@ -12,6 +12,7 @@ import { logger } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 async function queueEmail(data: EmailJobData): Promise<void> {
   if (isQueueAvailable()) {
@@ -159,6 +160,15 @@ accountRoutes.post('/', async (c) => {
     return c.json({ error: 'Failed to create account' }, 500);
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.ACCOUNT_CREATED,
+    description: `Created account '${name}'`,
+    resourceType: 'account',
+    resourceId: account.id,
+    resourceName: name,
+  });
+
   return c.json(account, 201);
 });
 
@@ -216,6 +226,15 @@ accountRoutes.patch('/:id', tenantMiddleware, requireAdmin, async (c) => {
   await invalidateCache(`GET:/accounts/${account.id}:*`);
 
   if (updated) {
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.ACCOUNT_UPDATED,
+      description: `Updated account '${updated.name}'`,
+      resourceType: 'account',
+      resourceId: account.id,
+      resourceName: updated.name,
+    });
+
     const { stripeCustomerId, ...rest } = updated;
     return c.json(rest);
   }
@@ -316,6 +335,14 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
   }
 
   await invalidateCache(`GET:/accounts/${account.id}:*`);
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.ACCOUNT_DELETION_SCHEDULED,
+    description: `Scheduled account for deletion`,
+    resourceType: 'account',
+    resourceId: account.id,
+  });
 
   return c.json({
     message: 'Account scheduled for deletion',
@@ -556,6 +583,15 @@ accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
 
   setRefreshTokenCookie(c, tokens.refreshToken);
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.ACCOUNT_IMPERSONATED,
+    description: `Impersonated account '${account.name}'`,
+    resourceType: 'account',
+    resourceId: account.id,
+    resourceName: account.name,
+  });
+
   return c.json({
     token: tokens.accessToken,
     refreshToken: tokens.refreshToken,
@@ -676,6 +712,14 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     accountId: account.id,
   }).catch((err) => logger.error({ err }, 'Failed to queue invite email'));
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.USER_INVITED,
+    description: `Invited ${email} as ${role}`,
+    resourceType: 'user',
+    resourceName: email,
+  });
+
   return c.json({
     id: targetUser.id,
     email: targetUser.email,
@@ -727,6 +771,14 @@ accountRoutes.patch('/:id/members/:userId', tenantMiddleware, async (c) => {
   if (!updated) {
     return c.json({ error: 'Member not found in this account' }, 404);
   }
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.USER_ROLE_CHANGED,
+    description: `Changed role to ${parsed.data.role}`,
+    resourceType: 'user',
+    resourceId: targetUserId,
+  });
 
   return c.json({ message: 'Role updated', role: parsed.data.role });
 });
@@ -806,6 +858,14 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
     return c.json({ error: 'Member not found in this account' }, 404);
   }
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.USER_REMOVED,
+    description: `Removed member from account`,
+    resourceType: 'user',
+    resourceId: targetUserId,
+  });
+
   return c.json({ message: 'Member removed successfully' });
 });
 
@@ -833,7 +893,7 @@ accountRoutes.get('/:id/my-role', tenantMiddleware, async (c) => {
   return c.json({ role: membership.role ?? 'member' });
 });
 
-// GET /:id/activity — account-scoped audit log
+// GET /:id/activity — account-scoped audit log with filtering
 accountRoutes.get('/:id/activity', tenantMiddleware, async (c) => {
   const accountId = c.get('accountId');
   const paramId = c.req.param('id');
@@ -846,14 +906,51 @@ accountRoutes.get('/:id/activity', tenantMiddleware, async (c) => {
   const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20), 100);
   const offset = (page - 1) * limit;
 
-  const logs = await db.query.auditLog.findMany({
-    where: eq(auditLog.accountId, accountId),
-    orderBy: (a, { desc: d }) => d(a.createdAt),
-    limit,
-    offset,
-  });
+  const resourceType = c.req.query('resourceType');
+  const eventType = c.req.query('eventType');
+  const dateFrom = c.req.query('dateFrom');
+  const dateTo = c.req.query('dateTo');
+  const search = c.req.query('search');
 
-  return c.json({ data: logs });
+  const conditions: any[] = [eq(auditLog.accountId, accountId)];
+  if (resourceType) conditions.push(eq(auditLog.resourceType, resourceType));
+  if (eventType) conditions.push(like(auditLog.eventType, `${eventType}%`));
+  if (dateFrom) conditions.push(gte(auditLog.createdAt, new Date(dateFrom)));
+  if (dateTo) conditions.push(lte(auditLog.createdAt, new Date(dateTo)));
+  if (search) {
+    conditions.push(
+      or(
+        like(auditLog.description, `%${search}%`),
+        like(auditLog.actorEmail, `%${search}%`),
+        like(auditLog.resourceName, `%${search}%`),
+      )
+    );
+  }
+
+  const whereClause = and(...conditions);
+
+  const logs = await db
+    .select()
+    .from(auditLog)
+    .where(whereClause)
+    .orderBy(desc(auditLog.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  const [total] = await db
+    .select({ count: countSql() })
+    .from(auditLog)
+    .where(whereClause);
+
+  return c.json({
+    data: logs,
+    pagination: {
+      page,
+      limit,
+      total: total?.count ?? 0,
+      totalPages: Math.ceil((total?.count ?? 0) / limit),
+    },
+  });
 });
 
 export default accountRoutes;

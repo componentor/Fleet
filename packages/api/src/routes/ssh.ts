@@ -6,6 +6,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { sshService } from '../services/ssh.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 const sshRoutes = new Hono<{
   Variables: {
@@ -75,6 +76,16 @@ sshRoutes.post('/keys', requireMember, async (c) => {
   });
 
   logger.info({ userId: user.userId, keyId: key.id, fingerprint }, 'SSH key added');
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SSH_KEY_ADDED,
+    description: `Added SSH key '${name}'`,
+    resourceType: 'ssh_key',
+    resourceId: key.id,
+    resourceName: name,
+  });
+
   return c.json(key, 201);
 });
 
@@ -109,6 +120,15 @@ sshRoutes.delete('/keys/:id', requireMember, async (c) => {
 
   await db.delete(sshKeys).where(eq(sshKeys.id, keyId));
   logger.info({ userId: user.userId, keyId }, 'SSH key removed');
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SSH_KEY_REMOVED,
+    description: `Removed SSH key`,
+    resourceType: 'ssh_key',
+    resourceId: keyId,
+  });
+
   return c.json({ message: 'SSH key removed' });
 });
 

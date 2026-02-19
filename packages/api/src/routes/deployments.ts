@@ -12,6 +12,7 @@ import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.
 import type { DeploymentJobData } from '../workers/deployment.worker.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 // ── fleet.json manifest schema ───────────────────────────────────────────────
 const fleetManifestSchema = z.object({
@@ -179,6 +180,16 @@ webhookRoutes.post('/github/webhook', async (c) => {
         accountId: svc.accountId,
         commitSha,
       });
+
+      eventService.log({
+        eventType: EventTypes.DEPLOYMENT_TRIGGERED,
+        description: `Auto-deploy triggered by push to ${branch}`,
+        resourceType: 'deployment',
+        resourceId: svc.id,
+        resourceName: svc.name,
+        accountId: svc.accountId,
+        source: 'webhook',
+      });
     }
   }
 
@@ -312,6 +323,15 @@ authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, a
     commitSha: null,
   });
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DEPLOYMENT_TRIGGERED,
+    description: `Triggered deployment for '${svc.name}'`,
+    resourceType: 'deployment',
+    resourceId: deployment.id,
+    resourceName: svc.name,
+  });
+
   return c.json({ message: 'Deployment triggered', deploymentId: deployment.id }, 202);
 });
 
@@ -386,6 +406,15 @@ authenticatedRoutes.post('/:id/rollback', requireMember, async (c) => {
       return c.json({ error: 'Rollback failed' }, 500);
     }
   }
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.DEPLOYMENT_ROLLED_BACK,
+    description: `Rolled back deployment for '${svc.name}'`,
+    resourceType: 'deployment',
+    resourceId: rollbackDeploy.id,
+    resourceName: svc.name,
+  });
 
   return c.json({ message: 'Rollback succeeded', deploymentId: rollbackDeploy.id });
 });

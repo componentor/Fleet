@@ -627,8 +627,16 @@ export class DockerService {
       stdout.destroy(new Error('Command timed out'));
     }, timeoutMs);
 
-    rawStream.on('end', () => clearTimeout(timer));
-    rawStream.on('error', () => clearTimeout(timer));
+    rawStream.on('end', () => {
+      clearTimeout(timer);
+      stdout.end();
+      stderr.end();
+    });
+    rawStream.on('error', (err) => {
+      clearTimeout(timer);
+      stdout.destroy(err);
+      stderr.destroy(err);
+    });
     stdout.on('close', () => clearTimeout(timer));
 
     return { stream: stdout, exec };

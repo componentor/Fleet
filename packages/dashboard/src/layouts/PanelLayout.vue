@@ -19,6 +19,7 @@ import {
   Archive,
   Key,
   KeyRound,
+  ScrollText,
   Users,
   UserPlus,
   CreditCard,
@@ -78,6 +79,7 @@ const navItems = [
   { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
   { nameKey: 'nav.subAccounts', path: '/panel/sub-accounts', icon: UserPlus },
   { nameKey: 'nav.users', path: '/panel/users', icon: Users },
+  { nameKey: 'nav.activity', path: '/panel/activity', icon: ScrollText },
   { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
   { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
 ]
