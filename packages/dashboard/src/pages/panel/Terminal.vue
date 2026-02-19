@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { SquareTerminal, Loader2 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
+import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
+import '@xterm/xterm/css/xterm.css'
+
+const STORAGE_KEY = 'fleet_terminal_service'
 
 const servicesStore = useServicesStore()
-const { createTerminal, connect, disconnect } = useTerminal()
+const api = useApi()
+const { createTerminal, connect, disconnect, connectionState } = useTerminal()
 
 const selectedService = ref('')
-const connected = ref(false)
 const terminalContainer = ref<HTMLElement | null>(null)
 const terminalCreated = ref(false)
 const loading = ref(true)
+const terminalContainers = ref<{ containerId: string; nodeId: string; taskId: string }[]>([])
+const selectedContainerId = ref('')
+
+const connected = computed(() => connectionState.value === 'connected')
 
 async function loadServices() {
   loading.value = true
@@ -22,24 +30,57 @@ async function loadServices() {
   }
 }
 
-watch(selectedService, async (serviceId) => {
-  disconnect()
-  connected.value = false
+async function fetchContainers(serviceId: string) {
+  try {
+    const info = await api.get<{ containers: { containerId: string; nodeId: string; taskId: string }[] }>(`/terminal/info/${serviceId}`)
+    terminalContainers.value = info.containers ?? []
+    if (terminalContainers.value.length > 0) {
+      selectedContainerId.value = terminalContainers.value[0]!.containerId
+    } else {
+      selectedContainerId.value = ''
+    }
+  } catch {
+    terminalContainers.value = []
+    selectedContainerId.value = ''
+  }
+}
 
-  if (!serviceId) return
-
+function connectToService(serviceId: string) {
   if (!terminalCreated.value && terminalContainer.value) {
     createTerminal(terminalContainer.value)
     terminalCreated.value = true
   }
 
+  connect(serviceId, selectedContainerId.value || undefined)
+  sessionStorage.setItem(STORAGE_KEY, serviceId)
+}
+
+function switchContainer(containerId: string) {
+  selectedContainerId.value = containerId
+  if (selectedService.value) {
+    disconnect()
+    connect(selectedService.value, containerId)
+  }
+}
+
+watch(selectedService, async (serviceId) => {
+  disconnect()
+
+  if (!serviceId) return
+
+  await fetchContainers(serviceId)
   await nextTick()
-  connect(serviceId)
-  connected.value = true
+  connectToService(serviceId)
 })
 
-onMounted(() => {
-  loadServices()
+onMounted(async () => {
+  await loadServices()
+
+  // Restore previous session's service selection and auto-reconnect
+  const lastService = sessionStorage.getItem(STORAGE_KEY)
+  if (lastService && servicesStore.services.some((s) => s.id === lastService)) {
+    selectedService.value = lastService
+  }
 })
 </script>
 
@@ -78,6 +119,16 @@ onMounted(() => {
           <span class="ml-2 text-xs text-gray-400">
             {{ selectedService ? `Terminal - ${servicesStore.services.find(s => s.id === selectedService)?.name || selectedService}` : 'Terminal' }}
           </span>
+          <select
+            v-if="terminalContainers.length > 1"
+            :value="selectedContainerId"
+            @change="switchContainer(($event.target as HTMLSelectElement).value)"
+            class="ml-2 px-2 py-0.5 rounded border border-gray-600 bg-gray-800 text-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
+          >
+            <option v-for="(ctr, idx) in terminalContainers" :key="ctr.containerId" :value="ctr.containerId">
+              Replica {{ idx + 1 }} ({{ ctr.containerId.slice(0, 12) }})
+            </option>
+          </select>
         </div>
         <div class="flex items-center gap-2">
           <span
@@ -93,7 +144,7 @@ onMounted(() => {
           </span>
         </div>
       </div>
-      <div ref="terminalContainer" class="h-[500px]">
+      <div ref="terminalContainer" class="h-[500px] pt-2 px-2 pb-5">
         <div v-if="!selectedService && !terminalCreated" class="h-full flex items-center justify-center">
           <p class="text-gray-500 text-sm">Select a service to open a terminal session.</p>
         </div>
@@ -101,3 +152,4 @@ onMounted(() => {
     </div>
   </div>
 </template>
+

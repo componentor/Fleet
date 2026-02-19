@@ -132,7 +132,7 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
       const networkName = `fleet-account-${accountId}`;
       const networkId = await dockerService.ensureNetwork(networkName);
 
-      const swarmServiceName = `fleet-${accountId.slice(0, 8)}-${name}`;
+      const swarmServiceName = `fleet-${accountId}-${name}`;
       const result = await dockerService.createService({
         name: swarmServiceName,
         image: 'alpine:latest', // Placeholder until build completes

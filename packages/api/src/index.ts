@@ -73,6 +73,14 @@ if (!process.env['JWT_SECRET']) {
   logger.warn('JWT_SECRET not configured — using auto-generated secret (dev mode, tokens will not survive restarts)')
 }
 
+// Initialize storage manager (loads provider config from DB, defaults to local)
+try {
+  const { storageManager } = await import('./services/storage/storage-manager.js')
+  await storageManager.initialize()
+} catch (err) {
+  logger.error({ err }, 'Storage manager initialization failed')
+}
+
 // Sync built-in marketplace templates from disk into DB
 try { await templateService.syncBuiltinTemplates() } catch {}
 
@@ -84,6 +92,14 @@ try { await initWorkers() } catch (err) {
 // Initialize background job scheduler (registers repeatable BullMQ jobs)
 try { await schedulerService.initialize() } catch (err) {
   logger.error({ err }, 'Scheduler initialization failed')
+}
+
+// Configure Docker Swarm task history limit (auto-clean old failed task records)
+try {
+  const { dockerService } = await import('./services/docker.service.js')
+  await dockerService.configureTaskHistoryLimit(3)
+} catch {
+  // Swarm may not be initialized yet
 }
 
 server = serve({

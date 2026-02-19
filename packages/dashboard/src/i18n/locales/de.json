@@ -166,7 +166,36 @@
     "backToAdmin": "Zurück zum Admin",
     "switchToPanel": "Zum Panel wechseln",
     "selectAccount": "Konto auswählen",
-    "status": "Status"
+    "status": "Status",
+    "updates": "Updates",
+    "emailTemplates": "E-Mail-Vorlagen",
+    "stacks": "Stacks"
+  },
+  "stacks": {
+    "title": "Stacks",
+    "deployStack": "Stack bereitstellen",
+    "searchPlaceholder": "Stacks suchen...",
+    "noStacks": "Noch keine Stacks",
+    "noStacksDesc": "Stellen Sie eine Vorlage aus dem Marktplatz bereit, um Ihren ersten Stack zu erstellen.",
+    "noResults": "Keine passenden Stacks",
+    "noResultsDesc": "Keine Stacks stimmen mit \"{query}\" überein.",
+    "service": "Dienst",
+    "services": "Dienste",
+    "running": "läuft",
+    "startAll": "Starten",
+    "stopAll": "Stoppen",
+    "restartAll": "Neustarten",
+    "deleteStack": "Löschen",
+    "confirmDelete": "Löschen bestätigen",
+    "cancel": "Abbrechen",
+    "startSuccess": "Stack erfolgreich gestartet",
+    "startFailed": "Einige Dienste konnten nicht gestartet werden",
+    "stopSuccess": "Stack erfolgreich gestoppt",
+    "stopFailed": "Einige Dienste konnten nicht gestoppt werden",
+    "restartSuccess": "Stack-Neustart eingeleitet",
+    "restartFailed": "Einige Dienste konnten nicht neu gestartet werden",
+    "deleteSuccess": "Stack erfolgreich gelöscht",
+    "deleteFailed": "Stack konnte nicht gelöscht werden"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -225,7 +254,11 @@
     "replica": "Replikat",
     "replicas": "Replikate",
     "servicesInStack": "Dienste",
-    "notBilled": "Nicht abgerechnet"
+    "notBilled": "Nicht abgerechnet",
+    "searchPlaceholder": "Dienste suchen...",
+    "startAll": "Alle starten",
+    "stopAll": "Alle stoppen",
+    "cancelDeploy": "Deploy abbrechen"
   },
   "domains": {
     "title": "Domains",

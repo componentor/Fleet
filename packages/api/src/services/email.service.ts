@@ -148,22 +148,20 @@ const DEFAULT_TEMPLATES: Record<
 <p><a href="{{inviteUrl}}">Accept Invitation</a></p>`,
     variables: ['userName', 'accountName', 'platformName', 'inviteUrl'],
   },
-  'deployment-success': {
+  'deploy-success': {
     subject: 'Deployment succeeded: {{serviceName}}',
     bodyHtml: `<h1>Deployment Successful</h1>
 <p>Your service <strong>{{serviceName}}</strong> has been deployed successfully.</p>
-<p>Deployment ID: {{deploymentId}}</p>
-<p>Time: {{timestamp}}</p>`,
-    variables: ['serviceName', 'deploymentId', 'timestamp'],
+<p>Image: {{imageTag}}</p>`,
+    variables: ['serviceName', 'imageTag'],
   },
-  'deployment-failed': {
+  'deploy-failed': {
     subject: 'Deployment failed: {{serviceName}}',
     bodyHtml: `<h1>Deployment Failed</h1>
-<p>Your service <strong>{{serviceName}}</strong> failed to deploy.</p>
-<p>Deployment ID: {{deploymentId}}</p>
+<p>The deployment of <strong>{{serviceName}}</strong> has failed.</p>
 <p>Error: {{errorMessage}}</p>
-<p>Please check the logs for more details.</p>`,
-    variables: ['serviceName', 'deploymentId', 'errorMessage'],
+<p>Please check the deployment logs for more details.</p>`,
+    variables: ['serviceName', 'errorMessage'],
   },
   'domain-expiry': {
     subject: 'Domain expiring soon: {{domain}}',
@@ -172,6 +170,22 @@ const DEFAULT_TEMPLATES: Record<
 <p>Please renew it before expiration to avoid losing it.</p>
 <p><a href="{{renewUrl}}">Renew Now</a></p>`,
     variables: ['domain', 'expiryDate', 'renewUrl'],
+  },
+  'payment-failed': {
+    subject: 'Payment failed for your subscription',
+    bodyHtml: `<h1>Payment Failed</h1>
+<p>We were unable to process the payment for your <strong>{{planName}}</strong> subscription.</p>
+<p>Please update your payment method to avoid service interruption.</p>
+<p><a href="{{billingUrl}}">Update Payment</a></p>`,
+    variables: ['planName', 'billingUrl'],
+  },
+  'service-down': {
+    subject: 'Service alert: {{serviceName}} is down',
+    bodyHtml: `<h1>Service Down</h1>
+<p>Your service <strong>{{serviceName}}</strong> has no running containers.</p>
+<p>Last status: {{lastStatus}}</p>
+<p><a href="{{dashboardUrl}}">View Dashboard</a></p>`,
+    variables: ['serviceName', 'lastStatus', 'dashboardUrl'],
   },
 };
 

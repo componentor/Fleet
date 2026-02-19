@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
 import { db, domainRegistrars, domainRegistrations, insertReturning, updateReturning, eq } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
 import { logger } from './logger.js';
@@ -78,6 +79,28 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
     ai: { registration: 79.99, renewal: 79.99 },
   };
 
+  private async isDomainRegistered(domain: string): Promise<boolean> {
+    // Check local DB first
+    const existing = await db.query.domainRegistrations.findFirst({
+      where: eq(domainRegistrations.domain, domain),
+    });
+    if (existing) return true;
+
+    // Check DNS for NS or A records to determine if the domain is registered
+    try {
+      await dns.resolveNs(domain);
+      return true; // Has NS records → registered
+    } catch {
+      // NXDOMAIN or SERVFAIL — try A record as fallback
+      try {
+        await dns.resolve4(domain);
+        return true; // Has A records → registered
+      } catch {
+        return false; // No DNS records → likely available
+      }
+    }
+  }
+
   async searchDomains(
     query: string,
     tlds: string[],
@@ -93,20 +116,15 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
     const effectiveTlds =
       tlds.length > 0 ? tlds : Object.keys(this.tldPrices);
 
-    const results: DomainSearchResult[] = [];
-
-    for (const tld of effectiveTlds) {
+    // Check all domains in parallel for faster results
+    const checks = effectiveTlds.map(async (tld) => {
       const domain = `${cleaned}.${tld}`;
       const prices = this.tldPrices[tld];
+      const registered = await this.isDomainRegistered(domain);
 
-      // Check if already registered in our system
-      const existing = await db.query.domainRegistrations.findFirst({
-        where: eq(domainRegistrations.domain, domain),
-      });
-
-      results.push({
+      return {
         domain,
-        available: !existing,
+        available: !registered,
         premium: false,
         price: prices
           ? {
@@ -115,23 +133,20 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
               currency: 'USD',
             }
           : null,
-      });
-    }
+      } satisfies DomainSearchResult;
+    });
 
-    return results;
+    return Promise.all(checks);
   }
 
   async checkAvailability(domain: string): Promise<DomainSearchResult> {
     const tld = domain.split('.').slice(1).join('.');
     const prices = this.tldPrices[tld];
-
-    const existing = await db.query.domainRegistrations.findFirst({
-      where: eq(domainRegistrations.domain, domain),
-    });
+    const registered = await this.isDomainRegistered(domain);
 
     return {
       domain,
-      available: !existing,
+      available: !registered,
       premium: false,
       price: prices
         ? {

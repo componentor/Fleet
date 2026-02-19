@@ -9,6 +9,25 @@ summary {
   cursor: pointer;
 }
 
+/* xterm.js scrollbar — match the terminal dark theme */
+.xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+.xterm-viewport::-webkit-scrollbar-track {
+  background: #1a1b26;
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: #33467c;
+  border-radius: 4px;
+}
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: #445588;
+}
+.xterm-viewport {
+  scrollbar-color: #33467c #1a1b26;
+  scrollbar-width: thin;
+}
+
 @theme {
   --color-primary-50: #eef2ff;
   --color-primary-100: #e0e7ff;

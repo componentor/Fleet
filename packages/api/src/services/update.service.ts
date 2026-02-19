@@ -43,7 +43,7 @@ const FLEET_SERVICES = ['fleet_api', 'fleet_dashboard', 'fleet_ssh-gateway', 'fl
 export class UpdateService {
   private state: UpdateState = {
     status: 'idle',
-    currentVersion: process.env['FLEET_VERSION'] ?? 'unknown',
+    currentVersion: process.env['FLEET_VERSION'] ?? '0.1.0',
     targetVersion: null,
     log: '',
     startedAt: null,

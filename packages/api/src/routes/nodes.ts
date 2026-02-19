@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
 import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
@@ -8,6 +9,22 @@ import { rateLimiter } from '../middleware/rate-limit.js';
 import os from 'node:os';
 
 const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 6, keyPrefix: 'heartbeat' });
+
+const heartbeatSchema = z.object({
+  hostname: z.string().max(255).optional(),
+  cpuCount: z.number().int().min(0).max(1024).optional(),
+  memTotal: z.number().min(0).optional(),
+  memUsed: z.number().min(0).optional(),
+  memFree: z.number().min(0).optional(),
+  containerCount: z.number().int().min(0).max(100000).optional(),
+});
+
+function safeTokenCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 const nodeRoutes = new Hono();
 
@@ -19,7 +36,7 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
     const authHeader = c.req.header('Authorization');
     const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
-    if (!bearerToken || bearerToken !== expectedToken) {
+    if (!bearerToken || !safeTokenCompare(bearerToken, expectedToken)) {
       return c.json({ error: 'Invalid or missing Authorization header' }, 401);
     }
   } else if (process.env.NODE_ENV === 'production') {
@@ -28,7 +45,18 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
   }
 
   const nodeId = c.req.param('id');
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
+
+  if (!body) {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const parsed = heartbeatSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed' }, 400);
+  }
+
+  const hb = parsed.data;
 
   let node = await db.query.nodes.findFirst({
     where: eq(nodes.id, nodeId),
@@ -37,7 +65,7 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
   // In dev mode, auto-register the node on first heartbeat
   if (!node && process.env.NODE_ENV !== 'production') {
     const [created] = await insertReturning(nodes, {
-      hostname: body.hostname ?? os.hostname(),
+      hostname: hb.hostname ?? os.hostname(),
       ipAddress: '127.0.0.1',
       role: 'manager',
       status: 'active',
@@ -56,12 +84,12 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
 
   await db.insert(nodeMetrics).values({
     nodeId: node.id,
-    hostname: body.hostname ?? node.hostname,
-    cpuCount: body.cpuCount ?? 0,
-    memTotal: body.memTotal ?? 0,
-    memUsed: body.memUsed ?? 0,
-    memFree: body.memFree ?? 0,
-    containerCount: body.containerCount ?? 0,
+    hostname: hb.hostname ?? node.hostname,
+    cpuCount: hb.cpuCount ?? 0,
+    memTotal: hb.memTotal ?? 0,
+    memUsed: hb.memUsed ?? 0,
+    memFree: hb.memFree ?? 0,
+    containerCount: hb.containerCount ?? 0,
   });
 
   return c.json({ ok: true });
@@ -118,7 +146,8 @@ const registerNodeSchema = z.object({
 });
 
 adminNodeRoutes.post('/', async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
   const parsed = registerNodeSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -181,7 +210,8 @@ const updateNodeSchema = z.object({
 
 adminNodeRoutes.patch('/:id', async (c) => {
   const nodeId = c.req.param('id');
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
   const parsed = updateNodeSchema.safeParse(body);
 
   if (!parsed.success) {

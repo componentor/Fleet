@@ -1,22 +1,53 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useAuth } from '@/composables/useAuth'
-import { LogIn, Github, Mail } from 'lucide-vue-next'
+import { LogIn, Github, Mail, Clock } from 'lucide-vue-next'
 
 const { login, loading } = useAuth()
 
 const email = ref('')
 const password = ref('')
 const error = ref('')
+const rateLimitCountdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+function startCountdown(seconds: number) {
+  stopCountdown()
+  rateLimitCountdown.value = seconds
+  countdownTimer = setInterval(() => {
+    rateLimitCountdown.value--
+    if (rateLimitCountdown.value <= 0) {
+      stopCountdown()
+      error.value = ''
+    }
+  }, 1000)
+}
+
+function stopCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+  rateLimitCountdown.value = 0
+}
+
+onUnmounted(() => stopCountdown())
 
 async function handleSubmit() {
+  if (rateLimitCountdown.value > 0) return
   error.value = ''
   try {
     await login(email.value, password.value)
   } catch (e: any) {
-    error.value = e?.body?.error ?? e?.body?.message ?? 'Login failed. Please try again.'
+    const retryAfter = e?.body?.retryAfter
+    if (e?.status === 429 && retryAfter) {
+      error.value = 'Too many login attempts.'
+      startCountdown(retryAfter)
+    } else {
+      error.value = e?.body?.error ?? e?.body?.message ?? 'Login failed. Please try again.'
+    }
   }
 }
 
@@ -42,7 +73,13 @@ function loginWithGoogle() {
         v-if="error"
         class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-3"
       >
-        <p class="text-sm text-red-700 dark:text-red-300">{{ error }}</p>
+        <div class="flex items-center gap-2">
+          <Clock v-if="rateLimitCountdown > 0" class="w-4 h-4 text-red-500 shrink-0" />
+          <p class="text-sm text-red-700 dark:text-red-300">
+            {{ error }}
+            <span v-if="rateLimitCountdown > 0" class="font-medium"> Try again in {{ rateLimitCountdown }}s</span>
+          </p>
+        </div>
       </div>
 
       <!-- OAuth buttons -->
@@ -108,11 +145,12 @@ function loginWithGoogle() {
 
         <button
           type="submit"
-          :disabled="loading"
+          :disabled="loading || rateLimitCountdown > 0"
           class="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
           <LogIn class="w-4 h-4" />
           <span v-if="loading">{{ $t('auth.signingIn') }}</span>
+          <span v-else-if="rateLimitCountdown > 0">{{ $t('auth.signInButton') }} ({{ rateLimitCountdown }}s)</span>
           <span v-else>{{ $t('auth.signInButton') }}</span>
         </button>
       </form>

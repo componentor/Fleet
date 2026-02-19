@@ -97,5 +97,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="terminalRef" class="w-full h-full min-h-[400px] rounded-lg overflow-hidden bg-[#1a1b26]"></div>
+  <div ref="terminalRef" class="w-full h-full min-h-[400px] rounded-lg overflow-hidden bg-[#1a1b26] pt-2 px-2 pb-5"></div>
 </template>

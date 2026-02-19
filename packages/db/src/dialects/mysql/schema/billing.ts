@@ -116,6 +116,7 @@ export const resourceLimits = mysqlTable('resource_limits', {
   maxStorageGb: int('max_storage_gb'),
   maxBandwidthGb: int('max_bandwidth_gb'),
   maxNfsStorageGb: int('max_nfs_storage_gb'),
+  maxContainerDiskMb: int('max_container_disk_mb'),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),

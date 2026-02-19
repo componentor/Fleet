@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { db, storageVolumes, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { nfsService } from '../services/nfs.service.js';
+import { storageManager } from '../services/storage/storage-manager.js';
 import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 
@@ -17,7 +18,7 @@ const storage = new Hono<{
 storage.use('*', authMiddleware);
 storage.use('*', tenantMiddleware);
 
-// GET /volumes — list NFS volumes for the current account
+// GET /volumes — list volumes for the current account
 storage.get('/volumes', async (c) => {
   const accountId = c.get('accountId');
   if (!accountId) {
@@ -25,12 +26,7 @@ storage.get('/volumes', async (c) => {
   }
 
   try {
-    const allVolumes = await nfsService.listVolumes();
-
-    // Filter volumes belonging to this account by naming convention (prefix)
-    const accountPrefix = `vol-${accountId.slice(0, 8)}-`;
-    const volumes = allVolumes.filter((v) => v.name.startsWith(accountPrefix));
-
+    const volumes = await storageManager.listAccountVolumes(accountId);
     return c.json(volumes);
   } catch (err) {
     logger.error({ err }, 'Failed to list volumes');
@@ -38,7 +34,26 @@ storage.get('/volumes', async (c) => {
   }
 });
 
-// POST /volumes — create a new NFS volume
+// GET /volumes/quota — get storage quota and usage for the current account
+storage.get('/volumes/quota', async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  try {
+    const [usage, limit] = await Promise.all([
+      storageManager.getAccountStorageUsage(accountId),
+      storageManager.getAccountStorageLimit(accountId),
+    ]);
+    return c.json({ usedGb: usage, limitGb: limit, provider: storageManager.config?.provider ?? 'local' });
+  } catch (err) {
+    logger.error({ err }, 'Failed to get storage quota');
+    return c.json({ error: 'Failed to get storage quota' }, 500);
+  }
+});
+
+// POST /volumes — create a new volume
 const createVolumeSchema = z.object({
   name: z
     .string()
@@ -66,13 +81,16 @@ storage.post('/volumes', requireMember, async (c) => {
 
   const { name, sizeGb, nodeId } = parsed.data;
 
-  // Prefix volume name with account ID fragment for isolation
-  const volumeName = `vol-${accountId.slice(0, 8)}-${name}`;
+  // Use full accountId in volume name for collision-free isolation
+  const volumeName = `vol-${accountId}-${name}`;
 
   try {
-    const volume = await nfsService.createVolume(volumeName, sizeGb, nodeId);
+    const volume = await storageManager.createVolume(accountId, volumeName, name, sizeGb, nodeId);
     return c.json(volume, 201);
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.message?.includes('quota exceeded')) {
+      return c.json({ error: err.message }, 403);
+    }
     logger.error({ err }, 'Failed to create volume');
     return c.json({ error: 'Failed to create volume' }, 500);
   }
@@ -87,15 +105,34 @@ storage.get('/volumes/:id', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // The :id here is the user-provided name; reconstruct the full NFS volume name
-  const volumeName = `vol-${accountId.slice(0, 8)}-${volumeId}`;
+  // Look up volume in DB by displayName + accountId (authoritative ownership check)
+  const dbVolume = await db.query.storageVolumes.findFirst({
+    where: and(
+      eq(storageVolumes.displayName, volumeId),
+      eq(storageVolumes.accountId, accountId),
+      isNull(storageVolumes.deletedAt),
+    ),
+  });
+
+  if (!dbVolume) {
+    return c.json({ error: 'Volume not found' }, 404);
+  }
 
   try {
-    const volume = await nfsService.getVolumeInfo(volumeName);
+    const volume = await storageManager.volumes.getVolumeInfo(dbVolume.name);
     return c.json(volume);
   } catch (err) {
     logger.error({ err }, 'Failed to get volume info');
-    return c.json({ error: 'Volume not found' }, 404);
+    // Return DB data as fallback if provider query fails
+    return c.json({
+      name: dbVolume.name,
+      path: dbVolume.mountPath ?? '',
+      sizeGb: dbVolume.sizeGb,
+      usedGb: dbVolume.usedGb ?? 0,
+      availableGb: dbVolume.sizeGb - (dbVolume.usedGb ?? 0),
+      replicaCount: dbVolume.replicaCount ?? 1,
+      status: dbVolume.status,
+    });
   }
 });
 
@@ -108,17 +145,21 @@ storage.delete('/volumes/:id', requireMember, async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const volumeName = `vol-${accountId.slice(0, 8)}-${volumeId}`;
+  // Look up volume in DB by displayName + accountId (authoritative ownership check)
+  const dbVolume = await db.query.storageVolumes.findFirst({
+    where: and(
+      eq(storageVolumes.displayName, volumeId),
+      eq(storageVolumes.accountId, accountId),
+      isNull(storageVolumes.deletedAt),
+    ),
+  });
 
-  try {
-    // Verify volume exists before deleting
-    await nfsService.getVolumeInfo(volumeName);
-  } catch {
+  if (!dbVolume) {
     return c.json({ error: 'Volume not found' }, 404);
   }
 
   try {
-    await nfsService.deleteVolume(volumeName);
+    await storageManager.deleteVolume(accountId, dbVolume.name);
     return c.json({ message: 'Volume deleted' });
   } catch (err) {
     logger.error({ err }, 'Failed to delete volume');

@@ -42,6 +42,7 @@ variables:
     label: Domain
     type: string
     required: false
+    default: localhost
 
 services:
   - name: directus

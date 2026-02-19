@@ -20,6 +20,8 @@ export function useTerminal() {
   let resizeObserver: ResizeObserver | null = null
   let dataDisposable: { dispose(): void } | null = null
   let resizeDisposable: { dispose(): void } | null = null
+  let everConnected = false
+  let currentContainerId: string | null = null
 
   const MAX_RECONNECT_ATTEMPTS = 5
   const BASE_DELAY_MS = 1000
@@ -44,6 +46,12 @@ export function useTerminal() {
     terminal.open(container)
     fitAddon.fit()
 
+    // xterm canvas needs a deferred fit after the DOM layout settles (e.g., after tab switch remount)
+    requestAnimationFrame(() => {
+      fitAddon?.fit()
+      terminal?.refresh(0, terminal.rows - 1)
+    })
+
     resizeObserver = new ResizeObserver(() => {
       fitAddon?.fit()
     })
@@ -65,12 +73,21 @@ export function useTerminal() {
     return { terminal, fitAddon }
   }
 
-  function connect(serviceId: string) {
+  function refit() {
+    if (fitAddon && terminal) {
+      fitAddon.fit()
+      terminal.refresh(0, terminal.rows - 1)
+    }
+  }
+
+  function connect(serviceId: string, containerId?: string) {
     if (!terminal) return
 
     intentionalClose = false
     currentServiceId = serviceId
+    currentContainerId = containerId ?? null
     reconnectAttempts = 0
+    everConnected = false
     doConnect(serviceId)
   }
 
@@ -85,12 +102,18 @@ export function useTerminal() {
     const token = authStore.token
     const accountId = localStorage.getItem('fleet_account_id')
 
-    ws = new WebSocket(`${wsUrl}?token=${token}&accountId=${accountId}`)
+    let url = `${wsUrl}?token=${token}&accountId=${accountId}`
+    if (currentContainerId) {
+      url += `&containerId=${encodeURIComponent(currentContainerId)}`
+    }
+
+    ws = new WebSocket(url)
 
     ws.onopen = () => {
       connectionState.value = 'connected'
       const wasReconnecting = reconnectAttempts > 0
       reconnectAttempts = 0
+      everConnected = true
 
       if (!wasReconnecting) {
         terminal?.writeln('Connected to terminal...')
@@ -99,6 +122,10 @@ export function useTerminal() {
       }
 
       if (terminal && fitAddon) {
+        // Refit and refresh the canvas to ensure it renders after remount
+        fitAddon.fit()
+        terminal.refresh(0, terminal.rows - 1)
+
         ws?.send(
           JSON.stringify({
             type: 'resize',
@@ -121,6 +148,12 @@ export function useTerminal() {
       connectionState.value = 'disconnected'
 
       if (intentionalClose) return
+
+      // If we never connected at all, don't retry — the server is likely unreachable
+      if (!everConnected) {
+        terminal?.writeln('\r\nFailed to connect to terminal. The service may not be running or the terminal server is unavailable.')
+        return
+      }
 
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         const delay = BASE_DELAY_MS * Math.pow(2, reconnectAttempts)
@@ -173,5 +206,6 @@ export function useTerminal() {
     connect,
     disconnect,
     dispose,
+    refit,
   }
 }

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, services, deployments, oauthProviders, insertReturning, updateReturning, eq, and, not, isNull } from '@fleet/db';
+import { db, services, deployments, oauthProviders, resourceLimits, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
@@ -8,8 +8,30 @@ import { githubService } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
+import { buildService } from '../services/build.service.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
+
+// Images that need writable filesystem and default user (not UID 1000)
+const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
+
+/**
+ * Get the container disk size limit for an account (in MB).
+ * Returns the account-specific override, or the global default, or undefined (no limit).
+ */
+async function getContainerDiskLimit(accountId: string): Promise<number | undefined> {
+  // Account-specific override
+  const accountLimit = await db.query.resourceLimits.findFirst({
+    where: eq(resourceLimits.accountId, accountId),
+  });
+  if (accountLimit?.maxContainerDiskMb) return accountLimit.maxContainerDiskMb;
+
+  // Global default (accountId is null)
+  const globalLimit = await db.query.resourceLimits.findFirst({
+    where: isNull(resourceLimits.accountId),
+  });
+  return globalLimit?.maxContainerDiskMb ?? undefined;
+}
 
 const serviceRoutes = new Hono<{
   Variables: {
@@ -46,7 +68,7 @@ function buildTraefikLabels(
   return labels;
 }
 
-// GET / — list services for the current account
+// GET / — list services for the current account (with live Docker status sync)
 serviceRoutes.get('/', cache(30), async (c) => {
   const accountId = c.get('accountId');
 
@@ -58,6 +80,60 @@ serviceRoutes.get('/', cache(30), async (c) => {
     where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
     orderBy: (s, { desc }) => desc(s.createdAt),
   });
+
+  // Live Docker status sync — reconcile DB status with actual Swarm state
+  const active = result.filter((s) => (s.status === 'running' || s.status === 'deploying') && s.dockerServiceId);
+  if (active.length > 0) {
+    try {
+      const dockerIds = active.map((s) => s.dockerServiceId!);
+      const [dockerSvcs, dockerTasks] = await Promise.all([
+        dockerService.listServices({ label: [`fleet.account-id=${accountId}`] }),
+        dockerService.listTasks({ label: [`fleet.account-id=${accountId}`] }),
+      ]);
+      const dockerSvcSet = new Set(dockerSvcs.map((s: any) => s.ID));
+
+      // Aggregate tasks by service ID
+      const tasksByService = new Map<string, { running: number; failed: number; total: number }>();
+      for (const t of dockerTasks) {
+        const sid = t.ServiceID;
+        if (!sid) continue;
+        let e = tasksByService.get(sid);
+        if (!e) { e = { running: 0, failed: 0, total: 0 }; tasksByService.set(sid, e); }
+        e.total++;
+        const state = t.Status?.State;
+        if (state === 'running') e.running++;
+        else if (state === 'failed' || state === 'rejected') e.failed++;
+      }
+
+      const now = new Date();
+      for (const svc of active) {
+        let newStatus: string | null = null;
+        const updateFields: Record<string, any> = { updatedAt: now };
+
+        if (!dockerSvcSet.has(svc.dockerServiceId!)) {
+          newStatus = 'stopped';
+          updateFields['dockerServiceId'] = null;
+        } else {
+          const tasks = tasksByService.get(svc.dockerServiceId!) ?? { running: 0, failed: 0, total: 0 };
+          if (svc.status === 'running' && tasks.running === 0 && tasks.failed > 0) {
+            newStatus = 'failed';
+          } else if (svc.status === 'deploying' && tasks.running > 0) {
+            newStatus = 'running';
+          }
+        }
+
+        if (newStatus) {
+          updateFields['status'] = newStatus;
+          await db.update(services).set(updateFields).where(eq(services.id, svc.id));
+          // Update in-memory result so the response reflects the corrected status
+          (svc as any).status = newStatus;
+          if (updateFields['dockerServiceId'] === null) (svc as any).dockerServiceId = null;
+        }
+      }
+    } catch {
+      // Docker unavailable — return DB state as-is
+    }
+  }
 
   return c.json(result);
 });
@@ -207,7 +283,10 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
 
-    const swarmServiceName = `fleet-${accountId.slice(0, 8)}-${data.name}`;
+    const swarmServiceName = `fleet-${accountId}-${data.name}`;
+
+    const needsWritable = IMAGE_NEEDS_WRITABLE.test(data.image);
+    const storageLimitMb = await getContainerDiskLimit(accountId);
 
     const result = await dockerService.createService({
       name: swarmServiceName,
@@ -235,6 +314,9 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
       updateDelay: data.updateDelay,
       rollbackOnFailure: data.rollbackOnFailure,
       networkId,
+      readOnly: !needsWritable,
+      user: needsWritable ? undefined : '1000',
+      storageLimitMb,
     });
 
     await db
@@ -279,22 +361,46 @@ serviceRoutes.get('/:id', async (c) => {
     return c.json({ error: 'Service not found' }, 404);
   }
 
-  // Optionally fetch live Docker status
+  // Fetch live Docker status and sync DB if state drifted
   let dockerStatus = null;
+  let correctedStatus: string | null = null;
   if (svc.dockerServiceId) {
     try {
       const info = await dockerService.inspectService(svc.dockerServiceId);
       const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+      const runningTasks = tasks.filter((t) => t.status === 'running').length;
+      const failedTasks = tasks.filter((t) => t.status === 'failed' || t.status === 'rejected').length;
       dockerStatus = {
         createdAt: info.CreatedAt,
         updatedAt: info.UpdatedAt,
-        runningTasks: tasks.filter((t) => t.status === 'running').length,
+        runningTasks,
         desiredTasks: svc.replicas ?? 1,
         tasks,
       };
+
+      // Auto-correct status drift
+      if (svc.status === 'running' && runningTasks === 0 && failedTasks > 0) {
+        correctedStatus = 'failed';
+      } else if (svc.status === 'deploying' && runningTasks > 0) {
+        correctedStatus = 'running';
+      }
     } catch {
-      // Docker service may not exist anymore
+      // Docker service doesn't exist anymore — correct the DB
+      if (svc.status === 'running' || svc.status === 'deploying') {
+        correctedStatus = 'stopped';
+        await db.update(services).set({ status: 'stopped', dockerServiceId: null, updatedAt: new Date() }).where(eq(services.id, svc.id));
+        return c.json({ ...svc, status: 'stopped', dockerServiceId: null, dockerStatus: null });
+      }
     }
+  } else if (svc.status === 'running') {
+    // No Docker service ID but DB says running
+    correctedStatus = 'stopped';
+  }
+
+  if (correctedStatus) {
+    const updateFields: Record<string, any> = { status: correctedStatus, updatedAt: new Date() };
+    await db.update(services).set(updateFields).where(eq(services.id, svc.id));
+    return c.json({ ...svc, status: correctedStatus, dockerStatus });
   }
 
   return c.json({ ...svc, dockerStatus });
@@ -304,7 +410,7 @@ serviceRoutes.get('/:id', async (c) => {
 const updateServiceSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   image: z.string().min(1).optional(),
-  replicas: z.number().int().min(1).max(100).optional(),
+  replicas: z.number().int().min(0).max(100).optional(),
   env: z.record(z.string()).optional(),
   ports: z.array(z.object({
     target: z.number().int().min(1).max(65535),
@@ -324,6 +430,9 @@ const updateServiceSchema = z.object({
     timeout: z.number().int().min(1),
     retries: z.number().int().min(1).max(20),
   }).nullable().optional(),
+  restartCondition: z.enum(['none', 'on-failure', 'any']).optional(),
+  restartMaxAttempts: z.number().int().min(0).max(100).optional(),
+  restartDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
   autoDeploy: z.boolean().optional(),
   githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
 });
@@ -455,6 +564,9 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
         updateParallelism: dockerFields.updateParallelism,
         updateDelay: dockerFields.updateDelay,
         rollbackOnFailure: dockerFields.rollbackOnFailure,
+        restartCondition: dockerFields.restartCondition,
+        restartMaxAttempts: dockerFields.restartMaxAttempts,
+        restartDelay: dockerFields.restartDelay,
       });
     } catch (err) {
       logger.error({ err }, 'Docker service update failed — DB not updated');
@@ -467,7 +579,7 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
     ...data,
     githubWebhookId,
     updatedAt: new Date(),
-  }, eq(services.id, serviceId));
+  }, and(eq(services.id, serviceId), eq(services.accountId, accountId))!);
 
   await invalidateCache(`GET:/services:${accountId}`);
 
@@ -499,6 +611,8 @@ serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => 
     } catch (err) {
       logger.error({ err }, 'Docker service removal failed');
     }
+    // Wait for containers to fully stop before volume cleanup
+    await dockerService.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
   }
 
   // Clean up GitHub webhook
@@ -522,6 +636,35 @@ serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => 
       await uploadService.deleteServiceFiles(accountId, serviceId);
     } catch (err) {
       logger.error({ err }, 'Failed to clean up upload source files');
+    }
+  }
+
+  // Clean up Docker volumes (only if no other active services reference them)
+  const vols = svc.volumes as Array<{ source: string; target: string }> | null;
+  if (vols && vols.length > 0) {
+    // Check for sibling services that share the same volumes (e.g., stack members)
+    const siblings = svc.stackId
+      ? await db.query.services.findMany({
+          where: and(
+            eq(services.stackId, svc.stackId),
+            not(eq(services.id, svc.id)),
+            isNull(services.deletedAt),
+          ),
+        })
+      : [];
+
+    const siblingVols = new Set<string>();
+    for (const s of siblings) {
+      const sv = s.volumes as Array<{ source: string }> | null;
+      if (sv) for (const v of sv) { if (v.source) siblingVols.add(v.source); }
+    }
+
+    for (const v of vols) {
+      if (v.source && !siblingVols.has(v.source)) {
+        await dockerService.removeVolume(v.source).catch((err) => {
+          logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
+        });
+      }
     }
   }
 
@@ -555,9 +698,12 @@ serviceRoutes.post('/:id/restart', requireMember, requireScope('write'), async (
   }
 
   try {
-    // Force update triggers a rolling restart
+    // Force update triggers a rolling restart — also fix ReadOnly/User if needed
+    const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc.image);
     await dockerService.updateService(svc.dockerServiceId, {
       image: svc.image,
+      readOnly: !needsWritable,
+      ...(needsWritable ? {} : { user: '1000' }),
     });
 
     return c.json({ message: 'Service restart initiated' });
@@ -584,8 +730,13 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
     return c.json({ error: 'Service not found' }, 404);
   }
 
-  // Prevent duplicate deployments — reject if already deploying
-  if (svc.status === 'deploying') {
+  // Atomic status transition — prevents concurrent redeploy race condition
+  const [locked] = await updateReturning(services, {
+    status: 'deploying',
+    updatedAt: new Date(),
+  }, and(eq(services.id, serviceId), not(eq(services.status, 'deploying')))!);
+
+  if (!locked) {
     return c.json({ error: 'Service is already deploying. Wait for the current deployment to finish.' }, 409);
   }
 
@@ -596,41 +747,101 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
     imageTag: svc.image,
   });
 
-  // Update service status
-  await db
-    .update(services)
-    .set({ status: 'deploying', updatedAt: new Date() })
-    .where(eq(services.id, serviceId));
-
-  // If it has a Docker service, force re-pull the image
-  if (svc.dockerServiceId) {
-    try {
-      await dockerService.updateService(svc.dockerServiceId, {
-        image: svc.image,
-      });
-
-      await db
-        .update(deployments)
-        .set({ status: 'succeeded' })
-        .where(eq(deployments.id, deployment!.id));
-
-      await db
-        .update(services)
-        .set({ status: 'running', updatedAt: new Date() })
-        .where(eq(services.id, serviceId));
-    } catch (err) {
-      logger.error({ err }, 'Redeployment failed');
-
-      await db
-        .update(deployments)
-        .set({ status: 'failed', log: String(err) })
-        .where(eq(deployments.id, deployment!.id));
-
-      await db
-        .update(services)
-        .set({ status: 'failed', updatedAt: new Date() })
-        .where(eq(services.id, serviceId));
+  // Helper to create a fresh Docker Swarm service
+  async function createDockerService() {
+    const networkName = `fleet-account-${accountId}`;
+    const networkId = await dockerService.ensureNetwork(networkName);
+    const swarmServiceName = `fleet-${accountId}-${svc!.name}`;
+    const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true);
+    const constraints = [...((svc!.placementConstraints as string[]) ?? [])];
+    if (svc!.nodeConstraint) {
+      constraints.push(`node.id == ${svc!.nodeConstraint}`);
     }
+
+    const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc!.image);
+    const storageLimitMb = await getContainerDiskLimit(accountId!);
+
+    const result = await dockerService.createService({
+      name: swarmServiceName,
+      image: svc!.image,
+      replicas: svc!.replicas ?? 1,
+      env: (svc!.env as Record<string, string>) ?? {},
+      ports: ((svc!.ports as any[]) ?? []).map((p: any) => ({
+        target: p.target,
+        published: p.published ?? 0,
+        protocol: p.protocol ?? 'tcp',
+      })),
+      volumes: ((svc!.volumes as any[]) ?? []).map((v: any) => ({
+        source: v.source,
+        target: v.target,
+        readonly: v.readonly ?? false,
+      })),
+      labels: {
+        ...traefikLabels,
+        'fleet.account-id': accountId!,
+        'fleet.service-id': serviceId,
+      },
+      constraints,
+      healthCheck: (svc!.healthCheck as any) ?? undefined,
+      updateParallelism: svc!.updateParallelism ?? 1,
+      updateDelay: svc!.updateDelay ?? '10s',
+      rollbackOnFailure: svc!.rollbackOnFailure ?? true,
+      networkId,
+      readOnly: !needsWritable,
+      user: needsWritable ? undefined : '1000',
+      storageLimitMb,
+    });
+
+    return result.id;
+  }
+
+  try {
+    let dockerSvcId = svc.dockerServiceId;
+
+    if (dockerSvcId) {
+      // Check if the Docker service still exists in Swarm
+      try {
+        await dockerService.inspectService(dockerSvcId);
+        // Exists — force re-pull the image and fix container spec if needed
+        const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc.image);
+        await dockerService.updateService(dockerSvcId, {
+          image: svc.image,
+          readOnly: !needsWritable,
+          ...(needsWritable ? {} : { user: '1000' }),
+        });
+      } catch {
+        // Docker service is gone — create a new one
+        logger.warn({ serviceId, dockerSvcId }, 'Docker service not found during redeploy — recreating');
+        dockerSvcId = await createDockerService();
+        await db.update(services).set({ dockerServiceId: dockerSvcId }).where(eq(services.id, serviceId));
+      }
+    } else {
+      // No Docker service exists — create one
+      dockerSvcId = await createDockerService();
+      await db.update(services).set({ dockerServiceId: dockerSvcId }).where(eq(services.id, serviceId));
+    }
+
+    await db
+      .update(deployments)
+      .set({ status: 'succeeded' })
+      .where(eq(deployments.id, deployment!.id));
+
+    await db
+      .update(services)
+      .set({ status: 'running', updatedAt: new Date() })
+      .where(eq(services.id, serviceId));
+  } catch (err) {
+    logger.error({ err }, 'Redeployment failed');
+
+    await db
+      .update(deployments)
+      .set({ status: 'failed', log: String(err) })
+      .where(eq(deployments.id, deployment!.id));
+
+    await db
+      .update(services)
+      .set({ status: 'failed', updatedAt: new Date() })
+      .where(eq(services.id, serviceId));
   }
 
   return c.json({ message: 'Redeployment initiated', deploymentId: deployment?.id });
@@ -680,6 +891,57 @@ serviceRoutes.post('/:id/stop', requireMember, requireScope('write'), async (c) 
   return c.json({ message: 'Service stopped' });
 });
 
+// POST /:id/cancel-deploy — cancel an in-progress deployment
+serviceRoutes.post('/:id/cancel-deploy', requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+
+  if (!svc) {
+    return c.json({ error: 'Service not found' }, 404);
+  }
+
+  if (svc.status !== 'deploying') {
+    return c.json({ error: 'Service is not currently deploying' }, 400);
+  }
+
+  // Find the active deployment and cancel its build
+  const activeDeployment = await db.query.deployments.findFirst({
+    where: and(eq(deployments.serviceId, serviceId), eq(deployments.status, 'building')),
+    orderBy: desc(deployments.createdAt),
+  });
+
+  if (activeDeployment) {
+    buildService.cancelBuild(activeDeployment.id);
+    await db
+      .update(deployments)
+      .set({ status: 'failed', log: (activeDeployment.log ?? '') + 'Deployment cancelled by user.\n' })
+      .where(eq(deployments.id, activeDeployment.id));
+  }
+
+  // Also mark any 'deploying' status deployments as failed
+  await db
+    .update(deployments)
+    .set({ status: 'failed', log: 'Deployment cancelled by user.\n' })
+    .where(and(eq(deployments.serviceId, serviceId), eq(deployments.status, 'deploying')));
+
+  await db
+    .update(services)
+    .set({ status: svc.dockerServiceId ? 'running' : 'stopped', updatedAt: new Date() })
+    .where(eq(services.id, serviceId));
+
+  await invalidateCache(`GET:/services:${accountId}`);
+
+  return c.json({ message: 'Deployment cancelled' });
+});
+
 // POST /:id/start — start a stopped service (restore replicas)
 serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
@@ -701,13 +963,74 @@ serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c)
     return c.json({ error: 'Service is not stopped' }, 400);
   }
 
-  if (svc.dockerServiceId) {
+  if (!svc.dockerServiceId) {
+    // No Docker service exists — deploy it now
     try {
-      await dockerService.scaleService(svc.dockerServiceId, svc.replicas ?? 1);
+      const networkName = `fleet-account-${accountId}`;
+      const networkId = await dockerService.ensureNetwork(networkName);
+
+      const swarmServiceName = `fleet-${accountId}-${svc.name}`;
+
+      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true);
+
+      const constraints = [...((svc.placementConstraints as string[]) ?? [])];
+      if (svc.nodeConstraint) {
+        constraints.push(`node.id == ${svc.nodeConstraint}`);
+      }
+
+      const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc.image);
+      const storageLimitMb = await getContainerDiskLimit(accountId);
+
+      const result = await dockerService.createService({
+        name: swarmServiceName,
+        image: svc.image,
+        replicas: svc.replicas ?? 1,
+        env: (svc.env as Record<string, string>) ?? {},
+        ports: ((svc.ports as any[]) ?? []).map((p: any) => ({
+          target: p.target,
+          published: p.published ?? 0,
+          protocol: p.protocol ?? 'tcp',
+        })),
+        volumes: ((svc.volumes as any[]) ?? []).map((v: any) => ({
+          source: v.source,
+          target: v.target,
+          readonly: v.readonly ?? false,
+        })),
+        labels: {
+          ...traefikLabels,
+          'fleet.account-id': accountId,
+          'fleet.service-id': serviceId,
+        },
+        constraints,
+        healthCheck: (svc.healthCheck as any) ?? undefined,
+        updateParallelism: svc.updateParallelism ?? 1,
+        updateDelay: svc.updateDelay ?? '10s',
+        rollbackOnFailure: svc.rollbackOnFailure ?? true,
+        networkId,
+        readOnly: !needsWritable,
+        user: needsWritable ? undefined : '1000',
+        storageLimitMb,
+      });
+
+      await db
+        .update(services)
+        .set({ dockerServiceId: result.id, status: 'running', stoppedAt: null, updatedAt: new Date() })
+        .where(eq(services.id, serviceId));
+
+      await invalidateCache(`GET:/services:${accountId}`);
+
+      return c.json({ message: 'Service deployed and started' });
     } catch (err) {
-      logger.error({ err }, 'Docker scale-up failed');
-      return c.json({ error: 'Failed to start service in Docker' }, 500);
+      logger.error({ err }, 'Docker deployment on start failed');
+      return c.json({ error: 'Failed to deploy service to Docker' }, 500);
     }
+  }
+
+  try {
+    await dockerService.scaleService(svc.dockerServiceId, svc.replicas ?? 1);
+  } catch (err) {
+    logger.error({ err }, 'Docker scale-up failed');
+    return c.json({ error: 'Failed to start service in Docker' }, 500);
   }
 
   await db
@@ -718,6 +1041,60 @@ serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c)
   await invalidateCache(`GET:/services:${accountId}`);
 
   return c.json({ message: 'Service started' });
+});
+
+// POST /:id/sync — manually sync service status with Docker
+serviceRoutes.post('/:id/sync', requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+    columns: { id: true, status: true, dockerServiceId: true, replicas: true },
+  });
+
+  if (!svc) {
+    return c.json({ error: 'Service not found' }, 404);
+  }
+
+  let newStatus = svc.status;
+  const updateFields: Record<string, any> = { updatedAt: new Date() };
+
+  if (!svc.dockerServiceId) {
+    if (svc.status === 'running' || svc.status === 'deploying') {
+      newStatus = 'stopped';
+    }
+  } else {
+    try {
+      await dockerService.inspectService(svc.dockerServiceId);
+      const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+      const running = tasks.filter((t) => t.status === 'running').length;
+      const failed = tasks.filter((t) => t.status === 'failed' || t.status === 'rejected').length;
+
+      if (running > 0) {
+        newStatus = 'running';
+      } else if (failed > 0 && tasks.length > 0) {
+        newStatus = 'failed';
+      } else if (svc.status === 'running') {
+        // Service exists but no running/failed tasks — might be pending
+        newStatus = 'deploying';
+      }
+    } catch {
+      // Docker service gone
+      newStatus = 'stopped';
+      updateFields['dockerServiceId'] = null;
+    }
+  }
+
+  updateFields['status'] = newStatus;
+  await db.update(services).set(updateFields).where(eq(services.id, svc.id));
+  await invalidateCache(`GET:/services:${accountId}`);
+
+  return c.json({ status: newStatus, synced: true });
 });
 
 // GET /:id/logs — stream service logs
@@ -740,19 +1117,45 @@ serviceRoutes.get('/:id/logs', async (c) => {
   const tail = Math.min(parseInt(c.req.query('tail') ?? '100', 10), 5000);
 
   try {
-    const logStream = await dockerService.getServiceLogs(svc.dockerServiceId, {
+    const result = await dockerService.getServiceLogs(svc.dockerServiceId, {
       tail,
       follow: false,
     });
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of logStream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    // Dockerode returns a Buffer when follow=false
+    let raw: Buffer;
+    if (Buffer.isBuffer(result)) {
+      raw = result;
+    } else {
+      // Fallback: consume stream if somehow a stream is returned
+      const chunks: Buffer[] = [];
+      for await (const chunk of result) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
+      raw = Buffer.concat(chunks);
     }
 
-    const logs = Buffer.concat(chunks).toString('utf-8');
+    // Docker multiplexed log format: each frame has an 8-byte header
+    // [stream_type(1), 0, 0, 0, size(4 big-endian)] followed by payload
+    // Demultiplex to extract plain text
+    const lines: string[] = [];
+    let offset = 0;
+    while (offset + 8 <= raw.length) {
+      const size = raw.readUInt32BE(offset + 4);
+      if (offset + 8 + size > raw.length) break;
+      const payload = raw.subarray(offset + 8, offset + 8 + size).toString('utf-8');
+      lines.push(payload);
+      offset += 8 + size;
+    }
+
+    // If demultiplexing produced no results, the output might be raw text (TTY mode)
+    const logs = lines.length > 0 ? lines.join('') : raw.toString('utf-8');
     return c.json({ logs });
-  } catch (err) {
+  } catch (err: any) {
+    // Docker service may have been removed — return empty logs with context
+    if (err?.statusCode === 404 || err?.reason === 'no such service') {
+      return c.json({ logs: '', warning: 'Docker service not found — it may have been removed or is not yet deployed.' });
+    }
     logger.error({ err }, 'Log fetch failed');
     return c.json({ error: 'Failed to fetch logs' }, 500);
   }
@@ -782,6 +1185,171 @@ serviceRoutes.get('/:id/deployments', async (c) => {
   });
 
   return c.json(deploys);
+});
+
+// DELETE /stack/:stackId — destroy all services in a stack
+serviceRoutes.delete('/stack/:stackId', requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const user = c.get('user');
+  const stackId = c.req.param('stackId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const stackServices = await db.query.services.findMany({
+    where: and(
+      eq(services.accountId, accountId),
+      eq(services.stackId, stackId),
+      isNull(services.deletedAt),
+    ),
+  });
+
+  if (stackServices.length === 0) {
+    return c.json({ error: 'Stack not found' }, 404);
+  }
+
+  const results: { id: string; name: string; success: boolean }[] = [];
+
+  // Collect all Docker volume names and service IDs for cleanup
+  const volumeNames = new Set<string>();
+  const removedDockerServiceIds: string[] = [];
+
+  for (const svc of stackServices) {
+    try {
+      if (svc.dockerServiceId) {
+        await dockerService.removeService(svc.dockerServiceId).catch((err) => {
+          logger.warn({ err, serviceId: svc.id }, 'Docker removal failed during stack delete');
+        });
+        removedDockerServiceIds.push(svc.dockerServiceId);
+      }
+
+      if (svc.githubRepo && svc.githubWebhookId) {
+        await manageWebhook({
+          userId: user.userId,
+          githubRepo: svc.githubRepo,
+          enable: false,
+          existingWebhookId: svc.githubWebhookId,
+        }).catch(() => {});
+      }
+
+      // Track volumes for cleanup
+      const vols = svc.volumes as Array<{ source: string; target: string }> | null;
+      if (vols) {
+        for (const v of vols) {
+          if (v.source) volumeNames.add(v.source);
+        }
+      }
+
+      await db.update(services).set({ deletedAt: new Date(), status: 'deleted' }).where(eq(services.id, svc.id));
+      results.push({ id: svc.id, name: svc.name, success: true });
+    } catch (err) {
+      logger.error({ err, serviceId: svc.id }, 'Failed to delete stack service');
+      results.push({ id: svc.id, name: svc.name, success: false });
+    }
+  }
+
+  // Wait for containers to fully stop before removing volumes
+  await Promise.all(
+    removedDockerServiceIds.map((id) => dockerService.waitForServiceTasksGone(id).catch(() => {})),
+  );
+
+  // Clean up Docker volumes after containers are gone (removeVolume retries on 409)
+  for (const volName of volumeNames) {
+    await dockerService.removeVolume(volName).catch((err) => {
+      logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
+    });
+  }
+
+  await invalidateCache(`GET:/services:${accountId}`);
+
+  return c.json({ message: 'Stack deleted', results });
+});
+
+// POST /stack/:stackId/restart — restart all services in a stack
+serviceRoutes.post('/stack/:stackId/restart', requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const stackId = c.req.param('stackId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const stackServices = await db.query.services.findMany({
+    where: and(
+      eq(services.accountId, accountId),
+      eq(services.stackId, stackId),
+      isNull(services.deletedAt),
+    ),
+  });
+
+  if (stackServices.length === 0) {
+    return c.json({ error: 'Stack not found' }, 404);
+  }
+
+  const results: { id: string; name: string; success: boolean }[] = [];
+
+  for (const svc of stackServices) {
+    if (!svc.dockerServiceId) {
+      results.push({ id: svc.id, name: svc.name, success: false });
+      continue;
+    }
+
+    try {
+      await dockerService.updateService(svc.dockerServiceId, { image: svc.image });
+      results.push({ id: svc.id, name: svc.name, success: true });
+    } catch (err) {
+      logger.error({ err, serviceId: svc.id }, 'Failed to restart stack service');
+      results.push({ id: svc.id, name: svc.name, success: false });
+    }
+  }
+
+  return c.json({ message: 'Stack restart initiated', results });
+});
+
+// GET /stack/:stackId/status — deployment progress for a template stack
+serviceRoutes.get('/stack/:stackId/status', async (c) => {
+  const accountId = c.get('accountId');
+  const stackId = c.req.param('stackId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const stackServices = await db.query.services.findMany({
+    where: and(
+      eq(services.accountId, accountId),
+      eq(services.stackId, stackId),
+    ),
+  });
+
+  if (stackServices.length === 0) {
+    return c.json({ error: 'Stack not found' }, 404);
+  }
+
+  const statuses = stackServices.map((s) => s.status);
+  let overall: 'deploying' | 'running' | 'failed' | 'partial' = 'running';
+  if (statuses.some((s) => s === 'deploying')) {
+    overall = 'deploying';
+  } else if (statuses.every((s) => s === 'running')) {
+    overall = 'running';
+  } else if (statuses.every((s) => s === 'failed')) {
+    overall = 'failed';
+  } else if (statuses.some((s) => s === 'failed')) {
+    overall = 'partial';
+  }
+
+  return c.json({
+    stackId,
+    overall,
+    services: stackServices.map((s) => ({
+      id: s.id,
+      name: s.name,
+      image: s.image,
+      status: s.status,
+      dockerServiceId: s.dockerServiceId,
+    })),
+  });
 });
 
 export default serviceRoutes;

@@ -124,6 +124,16 @@ export const errorLog = _schema.errorLog as typeof PgSchema.errorLog;
 // webhook_events (from billing.ts)
 export const webhookEvents = _schema.webhookEvents as typeof PgSchema.webhookEvents;
 
+// storage.ts
+export const storageClusters = _schema.storageClusters as typeof PgSchema.storageClusters;
+export const storageNodes = _schema.storageNodes as typeof PgSchema.storageNodes;
+export const storageVolumes = _schema.storageVolumes as typeof PgSchema.storageVolumes;
+export const storageMigrations = _schema.storageMigrations as typeof PgSchema.storageMigrations;
+export const storageClustersRelations = _schema.storageClustersRelations;
+export const storageNodesRelations = _schema.storageNodesRelations;
+export const storageVolumesRelations = _schema.storageVolumesRelations;
+export const storageMigrationsRelations = _schema.storageMigrationsRelations;
+
 // --- Helper exports ---
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql, safeTransaction } from './helpers';
 export { getDialect } from './config';

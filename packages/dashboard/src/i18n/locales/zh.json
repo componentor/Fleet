@@ -166,7 +166,36 @@
     "backToAdmin": "返回管理",
     "switchToPanel": "切换到面板",
     "selectAccount": "选择账户",
-    "status": "状态"
+    "status": "状态",
+    "updates": "更新",
+    "emailTemplates": "邮件模板",
+    "stacks": "应用栈"
+  },
+  "stacks": {
+    "title": "应用栈",
+    "deployStack": "部署应用栈",
+    "searchPlaceholder": "搜索应用栈...",
+    "noStacks": "暂无应用栈",
+    "noStacksDesc": "从应用市场部署模板以创建您的第一个应用栈。",
+    "noResults": "没有匹配的应用栈",
+    "noResultsDesc": "没有匹配 \"{query}\" 的应用栈。",
+    "service": "服务",
+    "services": "服务",
+    "running": "运行中",
+    "startAll": "启动",
+    "stopAll": "停止",
+    "restartAll": "重启",
+    "deleteStack": "删除",
+    "confirmDelete": "确认删除",
+    "cancel": "取消",
+    "startSuccess": "应用栈已启动",
+    "startFailed": "部分服务启动失败",
+    "stopSuccess": "应用栈已停止",
+    "stopFailed": "部分服务停止失败",
+    "restartSuccess": "应用栈重启已开始",
+    "restartFailed": "部分服务重启失败",
+    "deleteSuccess": "应用栈已删除",
+    "deleteFailed": "应用栈删除失败"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -225,7 +254,11 @@
     "replica": "副本",
     "replicas": "副本",
     "servicesInStack": "个服务",
-    "notBilled": "未计费"
+    "notBilled": "未计费",
+    "searchPlaceholder": "搜索服务...",
+    "startAll": "全部启动",
+    "stopAll": "全部停止",
+    "cancelDeploy": "取消部署"
   },
   "domains": {
     "title": "域名",

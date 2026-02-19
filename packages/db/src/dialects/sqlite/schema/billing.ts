@@ -112,6 +112,7 @@ export const resourceLimits = sqliteTable('resource_limits', {
   maxStorageGb: integer('max_storage_gb'),
   maxBandwidthGb: integer('max_bandwidth_gb'),
   maxNfsStorageGb: integer('max_nfs_storage_gb'),
+  maxContainerDiskMb: integer('max_container_disk_mb'),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),

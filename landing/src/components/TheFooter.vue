@@ -1,5 +1,5 @@
 <template>
-  <footer class="border-t border-surface-800/50 py-12">
+  <footer class="border-t border-surface-200 dark:border-surface-800/50 py-12">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div class="flex flex-col items-center justify-between gap-8 md:flex-row">
         <!-- Branding -->
@@ -10,7 +10,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
-            <span class="text-lg font-bold text-white">Fleet</span>
+            <span class="text-lg font-bold text-gray-900 dark:text-white">Fleet</span>
           </div>
           <p class="text-sm text-surface-500">{{ $t('footer.builtWith') }}</p>
         </div>
@@ -21,19 +21,19 @@
             href="https://github.com/fleet"
             target="_blank"
             rel="noopener noreferrer"
-            class="text-sm text-surface-400 transition-colors hover:text-white"
+            class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
           >
             {{ $t('footer.github') }}
           </a>
           <router-link
             to="/docs"
-            class="text-sm text-surface-400 transition-colors hover:text-white"
+            class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
           >
             {{ $t('footer.docs') }}
           </router-link>
           <a
             href="#"
-            class="text-sm text-surface-400 transition-colors hover:text-white"
+            class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
           >
             {{ $t('footer.discord') }}
           </a>

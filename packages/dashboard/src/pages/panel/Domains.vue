@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
@@ -85,8 +85,13 @@ async function fetchDomains() {
   }
 }
 
+let searchTimeout: ReturnType<typeof setTimeout> | null = null
+
 async function searchDomains() {
-  if (!searchQuery.value.trim()) return
+  if (!searchQuery.value.trim()) {
+    searchResults.value = []
+    return
+  }
   searching.value = true
   error.value = ''
   try {
@@ -99,6 +104,18 @@ async function searchDomains() {
     searching.value = false
   }
 }
+
+// Debounced search as you type
+watch(searchQuery, (val) => {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  if (!val.trim()) {
+    searchResults.value = []
+    return
+  }
+  searchTimeout = setTimeout(() => {
+    searchDomains()
+  }, 400)
+})
 
 async function buyDomain(domain: string) {
   purchasing.value = true
@@ -361,21 +378,16 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Search for a Domain</h2>
           </div>
           <div class="p-6">
-            <form @submit.prevent="searchDomains" class="flex items-end gap-3 mb-6">
-              <div class="flex-1">
-                <input
-                  v-model="searchQuery"
-                  type="text"
-                  placeholder="Enter a domain name (e.g. mywebsite)"
-                  class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                />
-              </div>
-              <button type="submit" :disabled="searching || !searchQuery.trim()" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="searching" class="w-4 h-4 animate-spin" />
-                <Search v-else class="w-4 h-4" />
-                Search
-              </button>
-            </form>
+            <div class="relative mb-6">
+              <Search class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                v-model="searchQuery"
+                type="text"
+                placeholder="Search for a domain (e.g. mywebsite)"
+                class="w-full pl-10 pr-10 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+              <Loader2 v-if="searching" class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-500 animate-spin" />
+            </div>
 
             <!-- Results -->
             <div v-if="searchResults.length > 0" class="space-y-2">

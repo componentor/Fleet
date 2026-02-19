@@ -23,8 +23,8 @@ async function fetchUnreadCount() {
 async function fetchNotifications() {
   loading.value = true
   try {
-    const data = await api.get<any[]>('/notifications?limit=10')
-    notifications.value = data
+    const res = await api.get<{ data: any[] }>('/notifications?limit=10')
+    notifications.value = res.data
   } catch {}
   loading.value = false
 }

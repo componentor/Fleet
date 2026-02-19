@@ -49,6 +49,17 @@ export const sidebarSections: DocSection[] = [
     ],
   },
   {
+    id: 'storage',
+    titleKey: 'docs.sidebar.storage',
+    children: [
+      { id: 'storage-overview', titleKey: 'docs.sidebar.storageOverview' },
+      { id: 'storage-providers', titleKey: 'docs.sidebar.storageProviders' },
+      { id: 'storage-node-setup', titleKey: 'docs.sidebar.storageNodeSetup' },
+      { id: 'storage-specs', titleKey: 'docs.sidebar.storageSpecs' },
+      { id: 'storage-migration', titleKey: 'docs.sidebar.storageMigration' },
+    ],
+  },
+  {
     id: 'configuration',
     titleKey: 'docs.sidebar.configuration',
   },

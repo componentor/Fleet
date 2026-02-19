@@ -86,7 +86,8 @@ backupRoutes.get('/schedules', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const schedules = await backupService.listSchedules(accountId);
+  const serviceId = c.req.query('serviceId');
+  const schedules = await backupService.listSchedules(accountId, serviceId ?? undefined);
   return c.json(schedules);
 });
 
@@ -252,7 +253,7 @@ backupRoutes.delete('/:id', requireMember, async (c) => {
     return c.json({ error: 'Backup not found' }, 404);
   }
 
-  const deleted = await backupService.deleteBackup(backupId);
+  const deleted = await backupService.deleteBackup(backupId, accountId);
 
   if (!deleted) {
     return c.json({ error: 'Failed to delete backup' }, 500);
@@ -277,7 +278,7 @@ backupRoutes.post('/:id/restore', requireMember, async (c) => {
   }
 
   try {
-    const result = await backupService.restoreBackup(backupId);
+    const result = await backupService.restoreBackup(backupId, accountId);
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : '';

@@ -105,6 +105,26 @@ const superRoutes: RouteRecordRaw[] = [
         name: 'super-errors',
         component: () => import('@/pages/super/Errors.vue'),
       },
+      {
+        path: 'updates',
+        name: 'super-updates',
+        component: () => import('@/pages/super/Updates.vue'),
+      },
+      {
+        path: 'email-templates',
+        name: 'super-email-templates',
+        component: () => import('@/pages/super/EmailTemplates.vue'),
+      },
+      {
+        path: 'services',
+        name: 'super-services',
+        component: () => import('@/pages/super/Services.vue'),
+      },
+      {
+        path: 'storage',
+        name: 'super-storage',
+        component: () => import('@/pages/super/StorageSetup.vue'),
+      },
     ],
   },
 ]
@@ -125,6 +145,11 @@ const panelRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/panel/Services.vue'),
       },
       {
+        path: 'stacks',
+        name: 'panel-stacks',
+        component: () => import('@/pages/panel/Stacks.vue'),
+      },
+      {
         path: 'services/:id',
         name: 'panel-service-detail',
         component: () => import('@/pages/panel/ServiceDetail.vue'),
@@ -139,6 +164,12 @@ const panelRoutes: RouteRecordRaw[] = [
         path: 'marketplace',
         name: 'panel-marketplace',
         component: () => import('@/pages/panel/Marketplace.vue'),
+      },
+      {
+        path: 'marketplace/:slug',
+        name: 'panel-deploy-wizard',
+        component: () => import('@/pages/panel/DeployWizard.vue'),
+        props: true,
       },
       {
         path: 'domains',

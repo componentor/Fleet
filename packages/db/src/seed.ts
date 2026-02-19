@@ -30,6 +30,13 @@ const seeders: SeederFn[] = [
     run: async (db, schema, dialect) => {
       const defaultTemplates = [
         {
+          slug: 'email-verification',
+          subject: 'Verify your email address',
+          bodyHtml: '<h1>Verify Your Email</h1><p>Hi {{userName}},</p><p>Please verify your email address by clicking the link below:</p><p><a href="{{verifyUrl}}">Verify Email</a></p><p>This link expires in 24 hours.</p>',
+          variables: { userName: 'string', verifyUrl: 'string' },
+          enabled: true,
+        },
+        {
           slug: 'welcome',
           subject: 'Welcome to {{platformName}}',
           bodyHtml: '<h1>Welcome, {{userName}}!</h1><p>Your account has been created on {{platformName}}.</p>',
@@ -224,13 +231,31 @@ async function runSqliteSeeders(path: string): Promise<{ executed: number }> {
   }
 }
 
+/** Execute raw SQL in a dialect-appropriate way */
+function execSql(db: any, sql: ReturnType<typeof drizzleSql>, dialect: string): any {
+  if (dialect === 'sqlite') {
+    return db.all(sql);
+  }
+  return db.execute(sql);
+}
+
+/** Execute raw write SQL in a dialect-appropriate way */
+function runSql(db: any, sql: ReturnType<typeof drizzleSql>, dialect: string): any {
+  if (dialect === 'sqlite') {
+    return db.run(sql);
+  }
+  return db.execute(sql);
+}
+
 async function executeSeederLoop(db: any, schema: any, dialect: string): Promise<{ executed: number }> {
   let executed = 0;
 
   for (const seeder of seeders) {
     // Check if already run
-    const existing = await db.execute(
+    const existing = await execSql(
+      db,
       drizzleSql`SELECT id FROM fleet_seeders WHERE version = ${seeder.version} AND description = ${seeder.description}`,
+      dialect,
     );
 
     const rows = dialect === 'mysql' ? (existing as any)[0] : existing;
@@ -240,8 +265,10 @@ async function executeSeederLoop(db: any, schema: any, dialect: string): Promise
 
     await seeder.run(db, schema, dialect);
 
-    await db.execute(
+    await runSql(
+      db,
       drizzleSql`INSERT INTO fleet_seeders (version, description) VALUES (${seeder.version}, ${seeder.description})`,
+      dialect,
     );
 
     executed++;

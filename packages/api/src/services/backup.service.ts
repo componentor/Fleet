@@ -1,10 +1,14 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, readFile as fsReadFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
 import { getBackupQueue, isQueueAvailable } from './queue.service.js';
+import { storageManager } from './storage/storage-manager.js';
+import { STORAGE_BUCKETS } from './storage/storage-provider.js';
 import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -29,8 +33,8 @@ export class BackupService {
     const backupId = randomUUID();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupName = serviceId
-      ? `${accountId.slice(0, 8)}-${serviceId.slice(0, 8)}-${timestamp}`
-      : `${accountId.slice(0, 8)}-full-${timestamp}`;
+      ? `${accountId}-${serviceId}-${timestamp}`
+      : `${accountId}-full-${timestamp}`;
 
     const baseDir = storageBackend === 'nfs' ? NFS_BACKUP_DIR : BACKUP_DIR;
     const backupPath = join(baseDir, accountId, backupName);
@@ -86,8 +90,8 @@ export class BackupService {
     const backupId = randomUUID();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupName = serviceId
-      ? `${accountId.slice(0, 8)}-${serviceId.slice(0, 8)}-${timestamp}`
-      : `${accountId.slice(0, 8)}-full-${timestamp}`;
+      ? `${accountId}-${serviceId}-${timestamp}`
+      : `${accountId}-full-${timestamp}`;
 
     const baseDir = storageBackend === 'nfs' ? NFS_BACKUP_DIR : BACKUP_DIR;
     const backupPath = join(baseDir, accountId, backupName);
@@ -113,6 +117,11 @@ export class BackupService {
     serviceId: string | null,
     backupPath: string,
   ): Promise<void> {
+    // Use a temp directory for archive creation (Docker needs local paths)
+    const tempDir = join(tmpdir(), `fleet-backup-${backupId}`);
+    const useObjectStorage = this.isObjectStorageAvailable();
+    const objectKeyPrefix = `${accountId}/${backupId}`;
+
     try {
       // Mark as in progress
       await db
@@ -120,10 +129,11 @@ export class BackupService {
         .set({ status: 'in_progress' })
         .where(eq(backups.id, backupId));
 
-      // Ensure backup directory exists
-      await mkdir(backupPath, { recursive: true });
+      // Create working directory (temp if using object storage, backupPath for legacy)
+      const workDir = useObjectStorage ? tempDir : backupPath;
+      await mkdir(workDir, { recursive: true });
 
-      const contents: Array<{ type: string; name: string; path: string }> = [];
+      const contents: Array<{ type: string; name: string; path: string; objectKey?: string }> = [];
 
       if (serviceId) {
         // Backup a specific service
@@ -142,7 +152,8 @@ export class BackupService {
         // Backup service volumes
         const serviceVolumes = (service.volumes as Array<{ source: string; target: string }>) ?? [];
         for (const vol of serviceVolumes) {
-          const volumeBackupPath = join(backupPath, `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`);
+          const archiveName = `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`;
+          const localArchivePath = join(workDir, archiveName);
           try {
             await this.exec('docker', [
               'run',
@@ -150,19 +161,26 @@ export class BackupService {
               '-v',
               `${vol.source}:/source:ro`,
               '-v',
-              `${backupPath}:/backup`,
+              `${workDir}:/backup`,
               'alpine',
               'tar',
               'czf',
-              `/backup/volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`,
+              `/backup/${archiveName}`,
               '-C',
               '/source',
               '.',
             ]);
+
+            const objectKey = `${objectKeyPrefix}/${archiveName}`;
+            if (useObjectStorage) {
+              await this.uploadToObjectStorage(localArchivePath, objectKey);
+            }
+
             contents.push({
               type: 'volume',
               name: vol.source,
-              path: volumeBackupPath,
+              path: useObjectStorage ? objectKey : localArchivePath,
+              objectKey: useObjectStorage ? objectKey : undefined,
             });
           } catch (err) {
             logger.error({ err, volume: vol.source }, `Failed to backup volume ${vol.source}`);
@@ -170,7 +188,8 @@ export class BackupService {
         }
 
         // Export service metadata as JSON
-        const metadataPath = join(backupPath, 'service-metadata.json');
+        const metadataName = 'service-metadata.json';
+        const metadataPath = join(workDir, metadataName);
         const metadata = {
           service: {
             id: service.id,
@@ -186,7 +205,16 @@ export class BackupService {
         };
 
         await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-        contents.push({ type: 'metadata', name: 'service-metadata.json', path: metadataPath });
+        const metadataKey = `${objectKeyPrefix}/${metadataName}`;
+        if (useObjectStorage) {
+          await this.uploadToObjectStorage(metadataPath, metadataKey);
+        }
+        contents.push({
+          type: 'metadata',
+          name: metadataName,
+          path: useObjectStorage ? metadataKey : metadataPath,
+          objectKey: useObjectStorage ? metadataKey : undefined,
+        });
       } else {
         // Full account backup — backup all services
         const accountServices = await db.query.services.findMany({
@@ -194,7 +222,7 @@ export class BackupService {
         });
 
         for (const service of accountServices) {
-          const svcDir = join(backupPath, service.id);
+          const svcDir = join(workDir, service.id);
           await mkdir(svcDir, { recursive: true });
 
           const serviceVolumes = (service.volumes as Array<{ source: string; target: string }>) ?? [];
@@ -216,10 +244,17 @@ export class BackupService {
                 '/source',
                 '.',
               ]);
+
+              const objectKey = `${objectKeyPrefix}/${service.id}/${archiveName}`;
+              if (useObjectStorage) {
+                await this.uploadToObjectStorage(join(svcDir, archiveName), objectKey);
+              }
+
               contents.push({
                 type: 'volume',
                 name: `${service.name}/${vol.source}`,
-                path: join(svcDir, archiveName),
+                path: useObjectStorage ? objectKey : join(svcDir, archiveName),
+                objectKey: useObjectStorage ? objectKey : undefined,
               });
             } catch (err) {
               logger.error(
@@ -231,7 +266,8 @@ export class BackupService {
         }
 
         // Export account-wide metadata
-        const metadataPath = join(backupPath, 'account-metadata.json');
+        const metadataName = 'account-metadata.json';
+        const metadataPath = join(workDir, metadataName);
         const metadata = {
           services: accountServices.map((s) => ({
             id: s.id,
@@ -247,11 +283,25 @@ export class BackupService {
         };
 
         await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-        contents.push({ type: 'metadata', name: 'account-metadata.json', path: metadataPath });
+        const metadataKey = `${objectKeyPrefix}/${metadataName}`;
+        if (useObjectStorage) {
+          await this.uploadToObjectStorage(metadataPath, metadataKey);
+        }
+        contents.push({
+          type: 'metadata',
+          name: metadataName,
+          path: useObjectStorage ? metadataKey : metadataPath,
+          objectKey: useObjectStorage ? metadataKey : undefined,
+        });
       }
 
       // Calculate total size
-      const sizeBytes = await this.calculateDirSize(backupPath);
+      const sizeBytes = await this.calculateDirSize(workDir);
+
+      // Clean up temp directory if using object storage (files already uploaded)
+      if (useObjectStorage) {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
 
       // Mark as completed
       await db
@@ -259,6 +309,8 @@ export class BackupService {
         .set({
           status: 'completed',
           sizeBytes: BigInt(sizeBytes),
+          storageBackend: useObjectStorage ? 'object' : (backupPath.startsWith(NFS_BACKUP_DIR) ? 'nfs' : 'local'),
+          storagePath: useObjectStorage ? objectKeyPrefix : backupPath,
           contents,
         })
         .where(eq(backups.id, backupId));
@@ -268,15 +320,20 @@ export class BackupService {
         .update(backups)
         .set({ status: 'failed' })
         .where(eq(backups.id, backupId));
+    } finally {
+      // Always clean up temp dir
+      if (useObjectStorage) {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 
   /**
    * Restore from a backup.
    */
-  async restoreBackup(backupId: string): Promise<{ message: string }> {
+  async restoreBackup(backupId: string, accountId: string): Promise<{ message: string }> {
     const backup = await db.query.backups.findFirst({
-      where: eq(backups.id, backupId),
+      where: and(eq(backups.id, backupId), eq(backups.accountId, accountId)),
     });
 
     if (!backup) {
@@ -291,7 +348,9 @@ export class BackupService {
       throw new Error('Backup has no storage path');
     }
 
-    const backupContents = (backup.contents as Array<{ type: string; name: string; path: string }>) ?? [];
+    const backupContents = (backup.contents as Array<{ type: string; name: string; path: string; objectKey?: string }>) ?? [];
+    const isObjectBacked = backup.storageBackend === 'object';
+    const tempDir = isObjectBacked ? join(tmpdir(), `fleet-restore-${backupId}`) : null;
 
     // Mark backup as restoring
     await db
@@ -300,6 +359,10 @@ export class BackupService {
       .where(eq(backups.id, backupId));
 
     try {
+      if (tempDir) {
+        await mkdir(tempDir, { recursive: true });
+      }
+
       // Restore volume data
       const storagePath = backup.storagePath;
       for (const item of backupContents) {
@@ -315,12 +378,30 @@ export class BackupService {
             continue;
           }
 
-          // Validate item.path is within the backup storage directory
-          const resolvedItemPath = resolve(item.path);
-          const safeDirPrefix = storagePath.endsWith('/') ? storagePath : storagePath + '/';
-          if (resolvedItemPath !== storagePath && !resolvedItemPath.startsWith(safeDirPrefix)) {
-            logger.error({ itemPath: item.path, storagePath }, 'Skipping restore: path outside backup directory');
-            continue;
+          let archivePath: string;
+
+          if (isObjectBacked && item.objectKey) {
+            // Download from object storage to temp directory
+            archivePath = join(tempDir!, `${randomUUID()}.tar.gz`);
+            try {
+              const buffer = await storageManager.objects.getObjectBuffer(
+                STORAGE_BUCKETS.BACKUPS,
+                item.objectKey,
+              );
+              await writeFile(archivePath, buffer);
+            } catch (err) {
+              logger.error({ err, objectKey: item.objectKey }, 'Failed to download backup archive from object storage');
+              continue;
+            }
+          } else {
+            // Legacy filesystem path — validate it's within the backup directory
+            const resolvedItemPath = resolve(item.path);
+            const safeDirPrefix = storagePath.endsWith('/') ? storagePath : storagePath + '/';
+            if (resolvedItemPath !== storagePath && !resolvedItemPath.startsWith(safeDirPrefix)) {
+              logger.error({ itemPath: item.path, storagePath }, 'Skipping restore: path outside backup directory');
+              continue;
+            }
+            archivePath = resolvedItemPath;
           }
 
           try {
@@ -330,7 +411,7 @@ export class BackupService {
               '-v',
               `${volumeName}:/target`,
               '-v',
-              `${resolvedItemPath}:/backup/archive.tar.gz:ro`,
+              `${archivePath}:/backup/archive.tar.gz:ro`,
               'alpine',
               'sh',
               '-c',
@@ -355,23 +436,36 @@ export class BackupService {
         .set({ status: 'failed' })
         .where(eq(backups.id, backupId));
       throw err;
+    } finally {
+      // Clean up temp directory
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 
   /**
    * Delete a backup and its storage files.
    */
-  async deleteBackup(backupId: string): Promise<boolean> {
+  async deleteBackup(backupId: string, accountId: string): Promise<boolean> {
     const backup = await db.query.backups.findFirst({
-      where: eq(backups.id, backupId),
+      where: and(eq(backups.id, backupId), eq(backups.accountId, accountId)),
     });
 
     if (!backup) {
       return false;
     }
 
-    // Remove files from disk
-    if (backup.storagePath) {
+    // Remove files from storage
+    if (backup.storageBackend === 'object' && backup.storagePath) {
+      // Delete from object storage by prefix (storagePath = accountId/backupId)
+      try {
+        await storageManager.objects.deletePrefix(STORAGE_BUCKETS.BACKUPS, backup.storagePath);
+      } catch (err) {
+        logger.error({ err, storagePath: backup.storagePath }, 'Failed to remove backup from object storage');
+      }
+    } else if (backup.storagePath) {
+      // Legacy: remove from filesystem
       try {
         await rm(backup.storagePath, { recursive: true, force: true });
       } catch (err) {
@@ -382,7 +476,7 @@ export class BackupService {
     // Remove DB record
     const result = await deleteReturning(
       backups,
-      eq(backups.id, backupId),
+      and(eq(backups.id, backupId), eq(backups.accountId, accountId))!,
     );
 
     return result.length > 0;
@@ -484,9 +578,13 @@ export class BackupService {
   /**
    * List backup schedules for an account.
    */
-  async listSchedules(accountId: string) {
+  async listSchedules(accountId: string, serviceId?: string) {
+    const conditions = [eq(backupSchedules.accountId, accountId)];
+    if (serviceId) {
+      conditions.push(eq(backupSchedules.serviceId, serviceId));
+    }
     return db.query.backupSchedules.findMany({
-      where: eq(backupSchedules.accountId, accountId),
+      where: and(...conditions),
       orderBy: (s, { desc }) => desc(s.createdAt),
     });
   }
@@ -537,6 +635,34 @@ export class BackupService {
         `Command "${cmd} ${args.join(' ')}" failed with code ${execErr.code}\n${output}`,
       );
     }
+  }
+
+  /**
+   * Check if the storage system's object storage is available and non-local.
+   * When using distributed object storage (MinIO/S3/GCS), backups go there.
+   * When using local object storage, keep the legacy filesystem approach.
+   */
+  private isObjectStorageAvailable(): boolean {
+    try {
+      const config = storageManager.config;
+      return !!config && config.objectProvider !== 'local';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Upload a local file to the object storage backup bucket.
+   */
+  private async uploadToObjectStorage(localPath: string, objectKey: string): Promise<void> {
+    const data = createReadStream(localPath);
+    const fileStat = await stat(localPath);
+    await storageManager.objects.putObject(
+      STORAGE_BUCKETS.BACKUPS,
+      objectKey,
+      data,
+      fileStat.size,
+    );
   }
 
   /**

@@ -1,0 +1,123 @@
+/**
+ * Storage Provider Interfaces
+ *
+ * Two categories of storage:
+ * - Volume storage (POSIX): mounted into Docker containers (GlusterFS, local NFS)
+ * - Object storage (S3-like): uploads, backups, build artifacts (MinIO, local filesystem)
+ */
+
+// ── Volume Storage ──────────────────────────────────────────────────────────
+
+export interface VolumeInfo {
+  name: string;
+  path: string;
+  sizeGb: number;
+  usedGb: number;
+  availableGb: number;
+  replicaCount?: number;
+  status?: string;
+  nodeId?: string;
+}
+
+export interface VolumeResult {
+  name: string;
+  path: string;
+  driver: string;
+  driverOptions: Record<string, string>;
+}
+
+export interface VolumeStorageProvider {
+  readonly name: string;
+
+  /** One-time initialization (connect, verify prerequisites). */
+  initialize(): Promise<void>;
+
+  // Volume lifecycle
+  createVolume(name: string, sizeGb: number, nodeId?: string): Promise<VolumeResult>;
+  deleteVolume(name: string): Promise<void>;
+  resizeVolume(name: string, newSizeGb: number): Promise<void>;
+  listVolumes(): Promise<VolumeInfo[]>;
+  getVolumeInfo(name: string): Promise<VolumeInfo>;
+
+  /** Docker volume driver name (e.g. 'local', 'glusterfs'). */
+  getDockerVolumeDriver(): string;
+
+  /** Driver-specific options for mounting a volume in Docker. */
+  getDockerVolumeOptions(name: string): Record<string, string>;
+
+  /** Provider health status. */
+  getHealth(): Promise<StorageHealth>;
+}
+
+// ── Object Storage ──────────────────────────────────────────────────────────
+
+export interface ObjectInfo {
+  key: string;
+  size: number;
+  lastModified: Date;
+  etag?: string;
+}
+
+export interface ObjectStorageProvider {
+  readonly name: string;
+
+  /** One-time initialization (connect, verify prerequisites). */
+  initialize(): Promise<void>;
+
+  /** Store an object. */
+  putObject(bucket: string, key: string, data: Buffer | NodeJS.ReadableStream, size?: number): Promise<void>;
+
+  /** Retrieve an object as a readable stream. */
+  getObject(bucket: string, key: string): Promise<NodeJS.ReadableStream>;
+
+  /** Retrieve an object as a buffer (convenience). */
+  getObjectBuffer(bucket: string, key: string): Promise<Buffer>;
+
+  /** Delete a single object. */
+  deleteObject(bucket: string, key: string): Promise<void>;
+
+  /** Delete all objects under a prefix. Returns count of deleted objects. */
+  deletePrefix(bucket: string, prefix: string): Promise<number>;
+
+  /** List objects under a prefix. */
+  listObjects(bucket: string, prefix?: string): Promise<ObjectInfo[]>;
+
+  /** Check if an object exists. */
+  objectExists(bucket: string, key: string): Promise<boolean>;
+
+  /** Ensure a bucket exists, creating it if necessary. */
+  ensureBucket(bucket: string): Promise<void>;
+
+  /** Provider health status. */
+  getHealth(): Promise<StorageHealth>;
+}
+
+// ── Health ───────────────────────────────────────────────────────────────────
+
+export type StorageHealthStatus = 'healthy' | 'degraded' | 'error' | 'unavailable';
+
+export interface StorageNodeHealth {
+  hostname: string;
+  ipAddress: string;
+  status: StorageHealthStatus;
+  capacityGb?: number;
+  usedGb?: number;
+  message?: string;
+}
+
+export interface StorageHealth {
+  status: StorageHealthStatus;
+  provider: string;
+  message?: string;
+  nodes?: StorageNodeHealth[];
+  replicationFactor?: number;
+  activeReplicas?: number;
+}
+
+// ── Standard Buckets ────────────────────────────────────────────────────────
+
+export const STORAGE_BUCKETS = {
+  UPLOADS: 'fleet-uploads',
+  BACKUPS: 'fleet-backups',
+  BUILDS: 'fleet-builds',
+} as const;

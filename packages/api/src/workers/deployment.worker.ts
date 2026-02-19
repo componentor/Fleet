@@ -1,11 +1,44 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, services, deployments, oauthProviders, eq, and, isNull } from '@fleet/db';
+import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull } from '@fleet/db';
 import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
 import { logger } from '../services/logger.js';
+import { emailService } from '../services/email.service.js';
+import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
+import type { EmailJobData } from './email.worker.js';
+
+async function queueEmail(data: EmailJobData): Promise<void> {
+  if (isQueueAvailable()) {
+    await getEmailQueue().add('send-email', data);
+  } else {
+    emailService.sendTemplateEmail(data.templateSlug, data.to, data.variables, data.accountId)
+      .catch((err) => logger.error({ err }, `Failed to send ${data.templateSlug} email`));
+  }
+}
+
+async function notifyAccountMembers(accountId: string, templateSlug: string, variables: Record<string, string>): Promise<void> {
+  try {
+    const members = await db.query.userAccounts.findMany({
+      where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+      with: { user: true },
+    });
+    for (const m of members) {
+      if (m.user?.email) {
+        queueEmail({
+          templateSlug,
+          to: m.user.email,
+          variables,
+          accountId,
+        }).catch((err) => logger.error({ err }, `Failed to queue ${templateSlug} email`));
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, 'Failed to notify account members');
+  }
+}
 
 export interface DeploymentJobData {
   deploymentId: string;
@@ -62,7 +95,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     return;
   }
 
-  const imageTag = `${accountId.slice(0, 8)}-${svc.name}:${commitSha?.slice(0, 7) ?? Date.now()}`;
+  const imageTag = `${accountId}-${svc.name}:${commitSha?.slice(0, 7) ?? Date.now()}`;
 
   try {
     let buildInfo;
@@ -164,9 +197,21 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     await publishProgress(deploymentId, 'deploying', '');
 
     if (svc.dockerServiceId) {
+      // Clean up old failed/dead containers before deploying new version
+      try {
+        const pruned = await dockerService.pruneServiceContainers(svc.dockerServiceId);
+        if (pruned > 0) {
+          logger.info({ serviceId: svc.id, pruned }, 'Pruned dead containers before deploy');
+        }
+      } catch (err) {
+        logger.warn({ err, serviceId: svc.id }, 'Failed to prune old containers before deploy');
+      }
+
       await dockerService.updateService(svc.dockerServiceId, {
         image: fullImageTag,
       });
+    } else {
+      logger.warn({ serviceId: svc.id }, 'No dockerServiceId — image built but cannot deploy to Docker');
     }
 
     // Mark as succeeded
@@ -175,10 +220,16 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       .where(eq(deployments.id, deploymentId));
 
     await db.update(services)
-      .set({ image: fullImageTag, status: 'running', updatedAt: new Date() })
+      .set({ image: fullImageTag, status: svc.dockerServiceId ? 'running' : 'stopped', updatedAt: new Date() })
       .where(eq(services.id, svc.id));
 
     await publishProgress(deploymentId, 'succeeded', '');
+
+    // Notify account owners
+    notifyAccountMembers(accountId, 'deploy-success', {
+      serviceName: svc.name,
+      imageTag: fullImageTag,
+    });
   } catch (err) {
     await db.update(deployments)
       .set({ status: 'failed', log: `Build/deploy failed: ${String(err)}` })
@@ -189,6 +240,12 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       .where(eq(services.id, svc.id));
 
     await publishProgress(deploymentId, 'failed', String(err));
+
+    // Notify account owners of failure
+    notifyAccountMembers(accountId, 'deploy-failed', {
+      serviceName: svc.name,
+      errorMessage: String(err),
+    });
 
     throw err;
   }

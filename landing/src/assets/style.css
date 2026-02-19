@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-primary-50: #eef2ff;
   --color-primary-100: #e0e7ff;
@@ -29,9 +31,18 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 8rem;
 }
 
-body {
-  background-color: var(--color-surface-950);
-  color: var(--color-surface-200);
+[data-section] {
+  scroll-margin-top: 8rem;
+}
+
+@media (min-width: 1024px) {
+  html {
+    scroll-padding-top: 5rem;
+  }
+  [data-section] {
+    scroll-margin-top: 5rem;
+  }
 }

@@ -9,6 +9,18 @@ import { generateTokens, setRefreshTokenCookie } from './auth.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
+import { emailService } from '../services/email.service.js';
+import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
+import type { EmailJobData } from '../workers/email.worker.js';
+
+async function queueEmail(data: EmailJobData): Promise<void> {
+  if (isQueueAvailable()) {
+    await getEmailQueue().add('send-email', data);
+  } else {
+    emailService.sendTemplateEmail(data.templateSlug, data.to, data.variables, data.accountId)
+      .catch((err) => logger.error({ err }, `Failed to send ${data.templateSlug} email`));
+  }
+}
 
 const accountRoutes = new Hono<{
   Variables: {
@@ -604,6 +616,20 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     throw err;
   }
 
+  // Send invite notification email
+  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  queueEmail({
+    templateSlug: 'invite',
+    to: targetUser.email,
+    variables: {
+      userName: targetUser.name ?? targetUser.email,
+      accountName: account.name ?? account.slug,
+      platformName: 'Fleet',
+      inviteUrl: `${appUrl}/panel`,
+    },
+    accountId: account.id,
+  }).catch((err) => logger.error({ err }, 'Failed to queue invite email'));
+
   return c.json({
     id: targetUser.id,
     email: targetUser.email,
@@ -681,6 +707,8 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
   }
 
   if (!authUser.isSuper && targetUserId !== authUser.userId) {
+    const ROLE_LEVELS: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
+
     const authMembership = await db.query.userAccounts.findFirst({
       where: (ua, { and, eq: e }) =>
         and(e(ua.userId, authUser.userId), e(ua.accountId, account.id)),
@@ -688,6 +716,35 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
 
     if (!authMembership || (authMembership.role !== 'owner' && authMembership.role !== 'admin')) {
       return c.json({ error: 'Only owners and admins can remove members' }, 403);
+    }
+
+    // Check target role — can only remove members below your own role level
+    const targetMembership = await db.query.userAccounts.findFirst({
+      where: (ua, { and, eq: e }) =>
+        and(e(ua.userId, targetUserId), e(ua.accountId, account.id)),
+    });
+
+    if (targetMembership && (ROLE_LEVELS[targetMembership.role] ?? 0) >= (ROLE_LEVELS[authMembership.role] ?? 0)) {
+      return c.json({ error: 'Cannot remove a member with a role equal to or higher than your own' }, 403);
+    }
+  }
+
+  // Prevent removing the last owner (even for self-removal, already checked above, but also for super admins)
+  if (targetUserId !== authUser.userId) {
+    const targetMembership = await db.query.userAccounts.findFirst({
+      where: (ua, { and, eq: e }) =>
+        and(e(ua.userId, targetUserId), e(ua.accountId, account.id)),
+    });
+
+    if (targetMembership?.role === 'owner') {
+      const owners = await db.query.userAccounts.findMany({
+        where: (ua, { and, eq: e }) =>
+          and(e(ua.accountId, account.id), e(ua.role, 'owner')),
+      });
+
+      if (owners.length <= 1) {
+        return c.json({ error: 'Cannot remove the last owner of an account' }, 400);
+      }
     }
   }
 

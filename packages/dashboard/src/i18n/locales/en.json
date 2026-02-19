@@ -166,7 +166,36 @@
     "backToAdmin": "Back to Admin",
     "switchToPanel": "Switch to Panel",
     "selectAccount": "Select account",
-    "status": "Status"
+    "status": "Status",
+    "updates": "Updates",
+    "emailTemplates": "Email Templates",
+    "stacks": "Stacks"
+  },
+  "stacks": {
+    "title": "Stacks",
+    "deployStack": "Deploy Stack",
+    "searchPlaceholder": "Search stacks...",
+    "noStacks": "No stacks yet",
+    "noStacksDesc": "Deploy a template from the marketplace to create your first stack.",
+    "noResults": "No matching stacks",
+    "noResultsDesc": "No stacks match \"{query}\".",
+    "service": "service",
+    "services": "services",
+    "running": "running",
+    "startAll": "Start",
+    "stopAll": "Stop",
+    "restartAll": "Restart",
+    "deleteStack": "Delete",
+    "confirmDelete": "Confirm delete",
+    "cancel": "Cancel",
+    "startSuccess": "Stack started successfully",
+    "startFailed": "Failed to start some services",
+    "stopSuccess": "Stack stopped successfully",
+    "stopFailed": "Failed to stop some services",
+    "restartSuccess": "Stack restart initiated",
+    "restartFailed": "Failed to restart some services",
+    "deleteSuccess": "Stack deleted successfully",
+    "deleteFailed": "Failed to delete stack"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -225,7 +254,11 @@
     "replica": "replica",
     "replicas": "replicas",
     "servicesInStack": "services",
-    "notBilled": "Not billed"
+    "notBilled": "Not billed",
+    "searchPlaceholder": "Search services...",
+    "startAll": "Start all",
+    "stopAll": "Stop all",
+    "cancelDeploy": "Cancel deploy"
   },
   "domains": {
     "title": "Domains",

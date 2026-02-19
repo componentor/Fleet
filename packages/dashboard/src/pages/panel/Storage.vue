@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { HardDrive, Plus, Loader2 } from 'lucide-vue-next'
+import { ref, computed, onMounted } from 'vue'
+import { HardDrive, Plus, Loader2, Info } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
@@ -14,6 +14,8 @@ const newName = ref('')
 const newSize = ref(1)
 const creating = ref(false)
 const error = ref('')
+const maxStorageGb = ref<number | null>(null)
+const storageCentsPerGbMonth = ref<number>(0)
 
 async function fetchVolumes() {
   loading.value = true
@@ -46,6 +48,32 @@ async function createVolume() {
   }
 }
 
+const usedStorageGb = computed(() =>
+  volumes.value.reduce((sum: number, v: any) => sum + (v.sizeGb ?? 0), 0),
+)
+
+const remainingStorageGb = computed(() =>
+  maxStorageGb.value !== null ? Math.max(0, maxStorageGb.value - usedStorageGb.value) : null,
+)
+
+const estimatedMonthlyCost = computed(() => {
+  if (!storageCentsPerGbMonth.value) return null
+  return ((newSize.value * storageCentsPerGbMonth.value) / 100).toFixed(2)
+})
+
+async function fetchLimitsAndPricing() {
+  try {
+    const [limits, config] = await Promise.all([
+      api.get<any>('/billing/resource-limits'),
+      api.get<any>('/billing/config'),
+    ])
+    maxStorageGb.value = limits.maxNfsStorageGb ?? limits.maxStorageGb ?? null
+    storageCentsPerGbMonth.value = config.pricingConfig?.storageCentsPerGbMonth ?? 0
+  } catch {
+    // Non-critical — just hide the info
+  }
+}
+
 async function deleteVolume(volumeId: string) {
   if (!confirm('Delete this volume? All data will be lost.')) return
   try {
@@ -63,6 +91,7 @@ function formatDate(ts: any) {
 
 onMounted(() => {
   fetchVolumes()
+  fetchLimitsAndPricing()
 })
 </script>
 
@@ -90,35 +119,55 @@ onMounted(() => {
     <!-- Create volume form -->
     <div v-if="showCreate" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Create New Volume</h3>
-      <form @submit.prevent="createVolume" class="flex items-end gap-3 flex-wrap">
-        <div class="flex-1 min-w-48">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
-          <input
-            v-model="newName"
-            type="text"
-            placeholder="my-data"
-            required
-            class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
-          />
-          <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Lowercase letters, numbers, and hyphens only.</p>
+
+      <!-- Storage info bar -->
+      <div v-if="maxStorageGb !== null || estimatedMonthlyCost" class="mb-4 flex flex-wrap items-center gap-4 px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700 text-xs">
+        <div v-if="maxStorageGb !== null" class="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+          <Info class="w-3.5 h-3.5 shrink-0" />
+          <span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ usedStorageGb }} GB</span> of
+            <span class="font-medium text-gray-900 dark:text-white">{{ maxStorageGb }} GB</span> used
+            <template v-if="remainingStorageGb !== null">
+              &middot; <span class="font-medium text-green-600 dark:text-green-400">{{ remainingStorageGb }} GB</span> available
+            </template>
+          </span>
         </div>
-        <div class="w-32">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Size (GB)</label>
-          <input
-            v-model.number="newSize"
-            type="number"
-            min="1"
-            max="1000"
-            required
-            class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-          />
+        <div v-if="estimatedMonthlyCost" class="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 ml-auto">
+          Est. <span class="font-medium text-gray-900 dark:text-white">${{ estimatedMonthlyCost }}/mo</span> for {{ newSize }} GB
         </div>
-        <button type="submit" :disabled="creating" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-          {{ creating ? 'Creating...' : 'Create' }}
-        </button>
-        <button type="button" @click="showCreate = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
-          Cancel
-        </button>
+      </div>
+
+      <form @submit.prevent="createVolume" class="space-y-3">
+        <div class="flex items-end gap-3 flex-wrap">
+          <div class="flex-1 min-w-48">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
+            <input
+              v-model="newName"
+              type="text"
+              placeholder="my-data"
+              required
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+            />
+          </div>
+          <div class="w-32">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Size (GB)</label>
+            <input
+              v-model.number="newSize"
+              type="number"
+              min="1"
+              :max="remainingStorageGb ?? 1000"
+              required
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            />
+          </div>
+          <button type="submit" :disabled="creating" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+            {{ creating ? 'Creating...' : 'Create' }}
+          </button>
+          <button type="button" @click="showCreate = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
+            Cancel
+          </button>
+        </div>
+        <p class="text-xs text-gray-400 dark:text-gray-500">Lowercase letters, numbers, and hyphens only.</p>
       </form>
     </div>
 

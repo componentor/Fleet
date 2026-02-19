@@ -23,9 +23,20 @@ async function enqueueOrRunDeployment(data: DeploymentJobData) {
   } else {
     // Fire-and-forget fallback (single-instance dev mode)
     import('../workers/deployment.worker.js').then(({ processDeploymentInline }) =>
-      processDeploymentInline(data).catch((err) =>
-        logger.error({ err, deploymentId: data.deploymentId }, `Build failed for deployment ${data.deploymentId}`),
-      ),
+      processDeploymentInline(data).catch(async (err) => {
+        logger.error({ err, deploymentId: data.deploymentId }, `Build failed for deployment ${data.deploymentId}`);
+        // Ensure deployment & service are marked as failed
+        try {
+          await db.update(deployments)
+            .set({ status: 'failed', log: `Deployment failed: ${String(err)}` })
+            .where(eq(deployments.id, data.deploymentId));
+          await db.update(services)
+            .set({ status: 'failed', updatedAt: new Date() })
+            .where(eq(services.id, data.serviceId));
+        } catch (dbErr) {
+          logger.error({ err: dbErr }, 'Failed to mark deployment as failed in DB');
+        }
+      }),
     );
   }
 }

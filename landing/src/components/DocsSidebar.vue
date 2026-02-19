@@ -20,10 +20,10 @@ defineEmits<{
       <a
         :href="'#' + section.id"
         :class="[
-          'block rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
+          'block rounded-lg px-3 py-2 text-sm font-semibold transition-colors cursor-pointer',
           activeSection === section.id
-            ? 'bg-primary-500/10 text-primary-400'
-            : 'text-surface-300 hover:bg-surface-800 hover:text-white',
+            ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400'
+            : 'text-surface-600 dark:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-gray-900 dark:hover:text-white',
         ]"
         @click.prevent="$emit('navigate', section.id)"
       >
@@ -35,10 +35,10 @@ defineEmits<{
           :key="child.id"
           :href="'#' + child.id"
           :class="[
-            'block rounded-lg px-3 py-1.5 text-sm transition-colors',
+            'block rounded-lg px-3 py-1.5 text-sm transition-colors cursor-pointer',
             activeSection === child.id
-              ? 'text-primary-400'
-              : 'text-surface-500 hover:text-surface-300',
+              ? 'text-primary-600 dark:text-primary-400'
+              : 'text-surface-500 hover:text-surface-700 dark:hover:text-surface-300',
           ]"
           @click.prevent="$emit('navigate', child.id)"
         >

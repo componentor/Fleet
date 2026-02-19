@@ -167,6 +167,12 @@
       "sshKeys": "SSH Keys",
       "marketplace": "Marketplace",
       "infrastructure": "Infrastructure",
+      "storage": "Storage",
+      "storageOverview": "Overview",
+      "storageProviders": "Providers",
+      "storageNodeSetup": "Node Setup",
+      "storageSpecs": "Hardware Specs",
+      "storageMigration": "Migration",
       "configuration": "Configuration"
     },
     "cmd": {

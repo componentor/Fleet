@@ -166,7 +166,36 @@
     "backToAdmin": "Tilbake til administrasjon",
     "switchToPanel": "Bytt til panel",
     "selectAccount": "Velg konto",
-    "status": "Status"
+    "status": "Status",
+    "updates": "Oppdateringer",
+    "emailTemplates": "E-postmaler",
+    "stacks": "Stabler"
+  },
+  "stacks": {
+    "title": "Stabler",
+    "deployStack": "Distribuer stabel",
+    "searchPlaceholder": "Søk stabler...",
+    "noStacks": "Ingen stabler ennå",
+    "noStacksDesc": "Distribuer en mal fra markedsplassen for å opprette din første stabel.",
+    "noResults": "Ingen samsvarende stabler",
+    "noResultsDesc": "Ingen stabler samsvarer med \"{query}\".",
+    "service": "tjeneste",
+    "services": "tjenester",
+    "running": "kjører",
+    "startAll": "Start",
+    "stopAll": "Stopp",
+    "restartAll": "Omstart",
+    "deleteStack": "Slett",
+    "confirmDelete": "Bekreft sletting",
+    "cancel": "Avbryt",
+    "startSuccess": "Stabel startet",
+    "startFailed": "Kunne ikke starte noen tjenester",
+    "stopSuccess": "Stabel stoppet",
+    "stopFailed": "Kunne ikke stoppe noen tjenester",
+    "restartSuccess": "Omstart av stabel startet",
+    "restartFailed": "Kunne ikke omstarte noen tjenester",
+    "deleteSuccess": "Stabel slettet",
+    "deleteFailed": "Kunne ikke slette stabel"
   },
   "dashboard": {
     "title": "Kontrollpanel",
@@ -225,7 +254,11 @@
     "replica": "replika",
     "replicas": "replikaer",
     "servicesInStack": "tjenester",
-    "notBilled": "Ikke fakturert"
+    "notBilled": "Ikke fakturert",
+    "searchPlaceholder": "Søk etter tjenester...",
+    "startAll": "Start alle",
+    "stopAll": "Stopp alle",
+    "cancelDeploy": "Avbryt deploy"
   },
   "domains": {
     "title": "Domener",

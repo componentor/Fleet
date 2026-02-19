@@ -38,6 +38,8 @@ import domainPricingRoutes from './routes/domain-pricing.js';
 import errorRoutes from './routes/errors.js';
 import uploadRoutes from './routes/upload.js';
 import fileRoutes from './routes/files.js';
+import databaseRoutes from './routes/database.js';
+import storageAdminRoutes from './routes/storage-admin.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -83,6 +85,11 @@ app.use('*', requestLogger);
 
 // Global error handler — logs to DB for super admin error tracking
 app.onError((err, c) => {
+  // Return 400 for malformed JSON bodies instead of 500
+  if (err instanceof SyntaxError && err.message.includes('JSON')) {
+    return c.json({ error: 'Invalid JSON in request body' }, 400);
+  }
+
   const ip =
     c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
     c.req.header('x-real-ip') ??
@@ -185,6 +192,8 @@ api.route('/domain-pricing', domainPricingRoutes);
 api.route('/errors', errorRoutes);
 api.route('/upload', uploadRoutes);
 api.route('/files', fileRoutes);
+api.route('/database', databaseRoutes);
+api.route('/admin/storage', storageAdminRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(
@@ -194,6 +203,7 @@ api.get(
     const token = c.req.query('token');
     const accountId = c.req.query('accountId');
     let logStream: Readable | null = null;
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
     return {
       async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
@@ -252,6 +262,14 @@ api.get(
             logger.error({ err }, 'Log stream error');
             ws.close(1011, 'Log stream error');
           });
+
+          // Send WebSocket-level pings every 25s to prevent proxy timeouts
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* connection already closed */ }
+            }, 25_000);
+          }
         } catch (err) {
           logger.error({ err }, 'WS log auth failed');
           ws.close(4003, 'Auth failed');
@@ -259,6 +277,10 @@ api.get(
       },
 
       onClose() {
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
         if (logStream) {
           logStream.destroy();
           logStream = null;
@@ -275,8 +297,10 @@ api.get(
     const serviceId = c.req.param('serviceId');
     const token = c.req.query('token');
     const accountId = c.req.query('accountId');
+    const requestedContainerId = c.req.query('containerId');
     let dockerStream: import('node:stream').Duplex | null = null;
     let execId: string | null = null;
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
     return {
       async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
@@ -317,17 +341,27 @@ api.get(
           }
 
           const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
-          const running = tasks.find(
+          const runningTasks = tasks.filter(
             (t) => t.status === 'running' && t.containerStatus?.containerId,
           );
 
-          if (!running?.containerStatus) {
+          // Use requested container if specified, otherwise first running task
+          let targetContainer: string | undefined;
+          if (requestedContainerId) {
+            const match = runningTasks.find((t) => t.containerStatus!.containerId === requestedContainerId);
+            targetContainer = match?.containerStatus?.containerId;
+          }
+          if (!targetContainer) {
+            targetContainer = runningTasks[0]?.containerStatus?.containerId;
+          }
+
+          if (!targetContainer) {
             ws.close(4004, 'No running containers');
             return;
           }
 
           const result = await dockerService.execInContainer(
-            running.containerStatus.containerId,
+            targetContainer,
             ['/bin/sh'],
           );
           dockerStream = result.stream as import('node:stream').Duplex;
@@ -345,6 +379,14 @@ api.get(
             logger.error({ err }, 'Docker stream error');
             ws.close(1011, 'Container error');
           });
+
+          // Send WebSocket-level pings every 25s to prevent proxy timeouts
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* connection already closed */ }
+            }, 25_000);
+          }
         } catch (err) {
           logger.error({ err }, 'WS terminal auth failed');
           ws.close(4003, 'Auth failed');
@@ -369,6 +411,10 @@ api.get(
       },
 
       onClose() {
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
         if (dockerStream) {
           dockerStream.destroy();
           dockerStream = null;

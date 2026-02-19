@@ -4,6 +4,8 @@
 
 export type ServiceStatus = 'running' | 'stopped' | 'deploying' | 'failed';
 
+export type RestartCondition = 'none' | 'on-failure' | 'any';
+
 export type DeploymentStatus =
   | 'pending'
   | 'building'
@@ -44,6 +46,9 @@ export interface Service {
   memoryLimit: number | null;
   cpuReservation: number | null;
   memoryReservation: number | null;
+  restartCondition: RestartCondition;
+  restartMaxAttempts: number;
+  restartDelay: string;
   stackId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -89,6 +94,9 @@ export interface UpdateServiceInput {
   updateDelay?: string;
   rollbackOnFailure?: boolean;
   healthCheck?: HealthCheck | null;
+  restartCondition?: RestartCondition;
+  restartMaxAttempts?: number;
+  restartDelay?: string;
 }
 
 export interface Deployment {

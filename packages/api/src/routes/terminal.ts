@@ -1,10 +1,15 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { db, services, sshAccessRules, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
+import { requireMember } from '../middleware/rbac.js';
 import { dockerService } from '../services/docker.service.js';
 import { sshService } from '../services/ssh.service.js';
 import { logger } from '../services/logger.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
+
+const execRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 'terminal-exec' });
 
 const terminalRoutes = new Hono<{
   Variables: {
@@ -14,11 +19,14 @@ const terminalRoutes = new Hono<{
   };
 }>();
 
-terminalRoutes.use('*', authMiddleware);
-terminalRoutes.use('*', tenantMiddleware);
+// NOTE: Do NOT use terminalRoutes.use('*', ...) here.
+// The parent router also defines WebSocket upgrade routes at /terminal/:serviceId
+// and /terminal/logs/:serviceId. Hono propagates sub-router use('*') middleware
+// to the parent, which would intercept WebSocket upgrades (they have no Authorization
+// header — auth is via query params). Apply middleware per-route instead.
 
 // GET /info/:serviceId — get terminal connection info (pre-flight check)
-terminalRoutes.get('/info/:serviceId', async (c) => {
+terminalRoutes.get('/info/:serviceId', authMiddleware, tenantMiddleware, requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
 
@@ -60,7 +68,11 @@ terminalRoutes.get('/info/:serviceId', async (c) => {
 });
 
 // POST /exec/:serviceId — execute a one-shot command in a container
-terminalRoutes.post('/exec/:serviceId', async (c) => {
+const execSchema = z.object({
+  command: z.array(z.string().max(1000)).min(1).max(50),
+});
+
+terminalRoutes.post('/exec/:serviceId', execRateLimit, authMiddleware, tenantMiddleware, requireMember, async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
 
@@ -68,16 +80,17 @@ terminalRoutes.post('/exec/:serviceId', async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = (await c.req.json()) as { command: string[] };
-  const { command } = body;
-
-  if (!command || !Array.isArray(command) || command.length === 0) {
-    return c.json({ error: 'command array is required' }, 400);
+  const body = await c.req.json().catch(() => null);
+  if (!body) {
+    return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  if (command.length > 50 || command.some(arg => typeof arg !== 'string' || arg.length > 1000)) {
-    return c.json({ error: 'Command exceeds allowed size limits' }, 400);
+  const parsed = execSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
   }
+
+  const { command } = parsed.data;
 
   // Check IP allowlist
   const clientIp = c.req.header('X-Forwarded-For')?.split(',')[0]?.trim()

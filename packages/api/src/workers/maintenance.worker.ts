@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, subscriptions, eq, and, lt, like, isNull, isNotNull, safeTransaction } from '@fleet/db';
+import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, subscriptions, eq, and, lt, like, isNull, isNotNull, inArray, safeTransaction } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -39,6 +39,23 @@ interface DatabaseBackupData {
   type: 'database-backup';
 }
 
+interface ServiceStatusSyncData {
+  type: 'service-status-sync';
+}
+
+interface ContainerPruneData {
+  type: 'container-prune';
+}
+
+interface StorageHealthCheckData {
+  type: 'storage-health-check';
+}
+
+interface StorageMigrationData {
+  type: 'storage-migration';
+  migrationId: string;
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -47,7 +64,11 @@ type MaintenanceJobData =
   | StripeUsageReportData
   | AccountDeletionData
   | BillingGraceCheckData
-  | DatabaseBackupData;
+  | DatabaseBackupData
+  | ServiceStatusSyncData
+  | ContainerPruneData
+  | StorageHealthCheckData
+  | StorageMigrationData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -71,6 +92,112 @@ async function checkNodeHealth(): Promise<void> {
 
       logger.info(`Node ${node.hostname} back online`);
     }
+  }
+}
+
+async function syncServiceStatus(): Promise<void> {
+  // 1) Single bulk DB query: all non-deleted services that claim running/deploying
+  //    Only select the columns we need to minimize data transfer
+  const toCheck = await db.query.services.findMany({
+    where: and(isNull(services.deletedAt)),
+    columns: { id: true, name: true, status: true, dockerServiceId: true, replicas: true },
+  });
+
+  const active = toCheck.filter((s) => s.status === 'running' || s.status === 'deploying');
+  if (active.length === 0) return;
+
+  // 2) Two parallel Docker API calls — O(1) regardless of service count
+  //    Docker returns ALL fleet-labelled services and tasks in bulk
+  let dockerSvcSet: Set<string>;
+  let tasksByService: Map<string, { running: number; failed: number; total: number }>;
+  try {
+    const [allDockerSvcs, allTasks] = await Promise.all([
+      dockerService.listServices({ label: ['fleet.service-id'] }),
+      dockerService.listTasks({ label: ['fleet.service-id'] }),
+    ]);
+
+    // O(n) set build for O(1) lookups
+    dockerSvcSet = new Set(allDockerSvcs.map((s: any) => s.ID));
+
+    // Aggregate task states per Docker service ID in single pass
+    tasksByService = new Map();
+    for (const t of allTasks) {
+      const svcId = t.ServiceID;
+      if (!svcId) continue;
+      let entry = tasksByService.get(svcId);
+      if (!entry) {
+        entry = { running: 0, failed: 0, total: 0 };
+        tasksByService.set(svcId, entry);
+      }
+      entry.total++;
+      const state = t.Status?.State;
+      if (state === 'running') entry.running++;
+      else if (state === 'failed' || state === 'rejected') entry.failed++;
+    }
+  } catch (err) {
+    logger.error({ err }, 'Service status sync: failed to query Docker — skipping');
+    return;
+  }
+
+  // 3) Classify services into batch update buckets — single pass O(n)
+  const markStopped: string[] = [];       // status → stopped
+  const markStoppedClear: string[] = [];   // status → stopped + clear dockerServiceId
+  const markFailed: string[] = [];         // status → failed
+  const markRunning: string[] = [];        // status → running (deploying → running)
+
+  for (const svc of active) {
+    if (!svc.dockerServiceId) {
+      markStopped.push(svc.id);
+      continue;
+    }
+
+    if (!dockerSvcSet.has(svc.dockerServiceId)) {
+      markStoppedClear.push(svc.id);
+      continue;
+    }
+
+    const tasks = tasksByService.get(svc.dockerServiceId) ?? { running: 0, failed: 0, total: 0 };
+
+    if (svc.status === 'running' && tasks.running === 0 && tasks.failed > 0 && tasks.total > 0) {
+      markFailed.push(svc.id);
+    } else if (svc.status === 'deploying' && tasks.running > 0) {
+      markRunning.push(svc.id);
+    }
+  }
+
+  // 4) Batch DB updates — at most 4 queries regardless of service count
+  const now = new Date();
+  const updates: Promise<any>[] = [];
+
+  if (markStopped.length > 0) {
+    updates.push(
+      db.update(services).set({ status: 'stopped', updatedAt: now }).where(inArray(services.id, markStopped)),
+    );
+  }
+  if (markStoppedClear.length > 0) {
+    updates.push(
+      db.update(services).set({ status: 'stopped', dockerServiceId: null, updatedAt: now }).where(inArray(services.id, markStoppedClear)),
+    );
+  }
+  if (markFailed.length > 0) {
+    updates.push(
+      db.update(services).set({ status: 'failed', updatedAt: now }).where(inArray(services.id, markFailed)),
+    );
+  }
+  if (markRunning.length > 0) {
+    updates.push(
+      db.update(services).set({ status: 'running', updatedAt: now }).where(inArray(services.id, markRunning)),
+    );
+  }
+
+  await Promise.all(updates);
+
+  const total = markStopped.length + markStoppedClear.length + markFailed.length + markRunning.length;
+  if (total > 0) {
+    logger.info(
+      { stopped: markStopped.length + markStoppedClear.length, failed: markFailed.length, running: markRunning.length },
+      `Service status sync: updated ${total}/${active.length} service(s)`,
+    );
   }
 }
 
@@ -370,6 +497,103 @@ async function executeDatabaseBackup(): Promise<void> {
   }
 }
 
+async function checkStorageHealth(): Promise<void> {
+  try {
+    const { storageManager } = await import('../services/storage/storage-manager.js');
+    const { db, storageClusters, storageNodes, eq } = await import('@fleet/db');
+    const { notificationService } = await import('../services/notification.service.js');
+
+    const health = await storageManager.getHealth();
+
+    // Update cluster status in DB
+    const cluster = await db.query.storageClusters.findFirst();
+    if (cluster) {
+      let clusterStatus = 'healthy';
+      if (health.volumes.status === 'error' || health.objects.status === 'error') {
+        clusterStatus = 'error';
+      } else if (health.volumes.status === 'degraded' || health.objects.status === 'degraded') {
+        clusterStatus = 'degraded';
+      }
+
+      // Only update if status changed
+      if (cluster.status !== clusterStatus) {
+        await db.update(storageClusters).set({
+          status: clusterStatus,
+          updatedAt: new Date(),
+        }).where(eq(storageClusters.id, cluster.id));
+
+        logger.info({ previous: cluster.status, current: clusterStatus }, 'Storage cluster status changed');
+
+        // Send notification if degraded or error
+        if (clusterStatus === 'degraded' || clusterStatus === 'error') {
+          try {
+            // Notify all super admin accounts
+            const { users: usersTable } = await import('@fleet/db');
+            const superUsers = await db.query.users.findMany({
+              where: eq(usersTable.isSuper, true),
+              columns: { id: true },
+            });
+            for (const su of superUsers) {
+              // Get any account for the super user to attach notification to
+              const membership = await db.query.userAccounts.findFirst({
+                where: eq(userAccounts.userId, su.id),
+              });
+              if (membership) {
+                await notificationService.create(membership.accountId, {
+                  type: 'system_alert',
+                  title: `Storage cluster ${clusterStatus}`,
+                  message: `Volume provider: ${health.volumes.status} (${health.volumes.message ?? 'no details'}). Object provider: ${health.objects.status} (${health.objects.message ?? 'no details'}).`,
+                });
+              }
+            }
+          } catch {
+            // Notification failure is not critical
+          }
+        }
+      }
+    }
+
+    // Update per-node health if node data is available
+    if (health.volumes.nodes) {
+      for (const nodeHealth of health.volumes.nodes) {
+        const sNode = await db.query.storageNodes.findFirst({
+          where: eq(storageNodes.ipAddress, nodeHealth.ipAddress),
+        });
+        if (sNode) {
+          await db.update(storageNodes).set({
+            status: nodeHealth.status === 'healthy' ? 'active' : 'offline',
+            usedGb: nodeHealth.usedGb ?? sNode.usedGb,
+            lastHealthCheck: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(storageNodes.id, sNode.id));
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, 'Storage health check failed');
+  }
+}
+
+async function executeStorageMigration(migrationId: string): Promise<void> {
+  try {
+    const { migrationService } = await import('../services/storage/migration.service.js');
+    await migrationService.executeMigration(migrationId);
+  } catch (err) {
+    logger.error({ err, migrationId }, 'Storage migration job failed');
+  }
+}
+
+async function pruneDeadContainers(): Promise<void> {
+  try {
+    const removed = await dockerService.pruneDeadContainers();
+    if (removed > 0) {
+      logger.info({ removed }, `Container prune: removed ${removed} dead container(s)`);
+    }
+  } catch (err) {
+    logger.error({ err }, 'Container prune failed');
+  }
+}
+
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
   switch (job.name) {
     case 'health-check':
@@ -395,6 +619,18 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'database-backup':
       await executeDatabaseBackup();
+      break;
+    case 'service-status-sync':
+      await syncServiceStatus();
+      break;
+    case 'container-prune':
+      await pruneDeadContainers();
+      break;
+    case 'storage-health-check':
+      await checkStorageHealth();
+      break;
+    case 'storage-migration':
+      await executeStorageMigration((job.data as StorageMigrationData).migrationId);
       break;
   }
 }

@@ -31,6 +31,18 @@ import { usageService } from '../services/usage.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
+import { emailService } from '../services/email.service.js';
+import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
+import type { EmailJobData } from '../workers/email.worker.js';
+
+async function queueEmail(data: EmailJobData): Promise<void> {
+  if (isQueueAvailable()) {
+    await getEmailQueue().add('send-email', data);
+  } else {
+    emailService.sendTemplateEmail(data.templateSlug, data.to, data.variables, data.accountId)
+      .catch((err) => logger.error({ err }, `Failed to send ${data.templateSlug} email`));
+  }
+}
 
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
 function validateRedirectUrl(url: string): boolean {
@@ -926,6 +938,28 @@ billing.post('/webhook', async (c) => {
             read: false,
           });
         } catch { /* notification is best-effort */ }
+
+        // Send payment-failed email to account owners
+        try {
+          const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+          const ownerMemberships = await db.query.userAccounts.findMany({
+            where: and(eq(userAccounts.accountId, dbSub.accountId), eq(userAccounts.role, 'owner')),
+            with: { user: true },
+          });
+          for (const m of ownerMemberships) {
+            if (m.user?.email) {
+              queueEmail({
+                templateSlug: 'payment-failed',
+                to: m.user.email,
+                variables: {
+                  planName: dbSub.planId ?? 'your',
+                  billingUrl: `${appUrl}/panel/billing`,
+                },
+                accountId: dbSub.accountId,
+              }).catch(() => {});
+            }
+          }
+        } catch { /* email is best-effort */ }
       } else {
         // Not final — just log warning
         logger.warn({ accountId: dbSub.accountId, attempt: invoice.attempt_count },

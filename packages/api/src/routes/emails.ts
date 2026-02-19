@@ -4,7 +4,7 @@ import { db, emailTemplates, insertReturning, updateReturning, deleteReturning, 
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
-import { requireMember } from '../middleware/rbac.js';
+import { requireMember, requireAdmin } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 
 const emails = new Hono<{
@@ -118,7 +118,7 @@ const updateTemplateSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-emails.patch('/templates/:slug', requireMember, async (c) => {
+emails.patch('/templates/:slug', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const slug = c.req.param('slug');
@@ -189,7 +189,7 @@ const testEmailSchema = z.object({
   variables: z.record(z.string()).optional(),
 });
 
-emails.post('/templates/:slug/test', requireMember, async (c) => {
+emails.post('/templates/:slug/test', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const slug = c.req.param('slug');
 
@@ -245,7 +245,7 @@ emails.post('/templates/:slug/test', requireMember, async (c) => {
 
 // POST /templates/:slug/reset — reset template to default
 // Deletes the account-specific override so the default is used again.
-emails.post('/templates/:slug/reset', requireMember, async (c) => {
+emails.post('/templates/:slug/reset', requireAdmin, async (c) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const slug = c.req.param('slug');

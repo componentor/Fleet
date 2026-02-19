@@ -3,12 +3,13 @@ import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
-import { requireMember } from '../middleware/rbac.js';
+import { requireMember, requireAdmin } from '../middleware/rbac.js';
 import { cache } from '../middleware/cache.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 
 const deployRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'marketplace-deploy' });
+const imageTagsRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 'image-tags' });
 
 const marketplace = new Hono<{
   Variables: {
@@ -60,11 +61,67 @@ marketplace.get('/templates/:slug', async (c) => {
   });
 });
 
+// GET /image-tags — fetch available Docker Hub tags for an image
+marketplace.get('/image-tags', imageTagsRateLimit, cache(600), async (c) => {
+  const image = c.req.query('image');
+  if (!image) {
+    return c.json({ error: 'image query parameter required' }, 400);
+  }
+
+  // Parse image into namespace/repo (official images use "library" namespace)
+  const parts = image.split(':')[0]!.split('/');
+  let namespace: string;
+  let repo: string;
+  if (parts.length === 1) {
+    namespace = 'library';
+    repo = parts[0]!;
+  } else {
+    namespace = parts[0]!;
+    repo = parts.slice(1).join('/');
+  }
+
+  // Extract the default tag from the full image string
+  const defaultTag = image.includes(':') ? image.split(':')[1]! : 'latest';
+
+  try {
+    const res = await fetch(
+      `https://hub.docker.com/v2/repositories/${namespace}/${repo}/tags?page_size=50&ordering=last_updated`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+
+    if (!res.ok) {
+      return c.json({ tags: [defaultTag], defaultTag });
+    }
+
+    const data = (await res.json()) as { results?: Array<{ name: string }> };
+    const rawTags = (data.results ?? []).map((t) => t.name);
+
+    // Filter out SHA digests and overly long tags, keep meaningful versions
+    const filtered = rawTags.filter((tag) => {
+      if (tag.length > 40) return false;
+      if (/^sha-/.test(tag)) return false;
+      if (/^[0-9a-f]{7,}$/.test(tag)) return false;
+      return true;
+    });
+
+    // Ensure the default tag is included at the top
+    const tags = filtered.includes(defaultTag)
+      ? [defaultTag, ...filtered.filter((t) => t !== defaultTag)]
+      : [defaultTag, ...filtered];
+
+    return c.json({ tags, defaultTag });
+  } catch (err) {
+    logger.error({ err, image }, 'Failed to fetch Docker Hub tags');
+    return c.json({ tags: [defaultTag], defaultTag });
+  }
+});
+
 // POST /deploy — deploy a template
 const deploySchema = z.object({
   slug: z.string().min(1),
   config: z.record(z.string()).default({}),
   composeOverride: z.string().optional(),
+  imageOverrides: z.record(z.string().min(1)).optional(),
   resourceOverrides: z.record(z.object({
     replicas: z.number().int().min(0).max(100).optional(),
     cpuLimit: z.number().int().min(0).optional(),
@@ -86,11 +143,12 @@ marketplace.post('/deploy', deployRateLimit, requireMember, async (c) => {
     return c.json({ error: 'Validation failed' }, 400);
   }
 
-  const { slug, config, composeOverride, resourceOverrides } = parsed.data;
+  const { slug, config, composeOverride, imageOverrides, resourceOverrides } = parsed.data;
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
       composeOverride,
+      imageOverrides,
       resourceOverrides,
     });
     return c.json(result, 201);
@@ -120,7 +178,7 @@ const createTemplateSchema = z.object({
   isBuiltin: z.boolean().optional(),
 });
 
-marketplace.post('/templates', requireMember, async (c) => {
+marketplace.post('/templates', requireAdmin, async (c) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
@@ -158,7 +216,7 @@ const updateTemplateSchema = z.object({
   composeTemplate: z.string().min(1).optional(),
 });
 
-marketplace.patch('/templates/:slug', requireMember, async (c) => {
+marketplace.patch('/templates/:slug', requireAdmin, async (c) => {
   const user = c.get('user');
   const slug = c.req.param('slug');
 
@@ -190,7 +248,7 @@ marketplace.patch('/templates/:slug', requireMember, async (c) => {
 });
 
 // DELETE /templates/:slug — delete a template
-marketplace.delete('/templates/:slug', requireMember, async (c) => {
+marketplace.delete('/templates/:slug', requireAdmin, async (c) => {
   const user = c.get('user');
   const slug = c.req.param('slug');
 

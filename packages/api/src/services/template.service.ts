@@ -237,6 +237,7 @@ export class TemplateService {
     config: Record<string, string>,
     options?: {
       composeOverride?: string;
+      imageOverrides?: Record<string, string>;
       resourceOverrides?: Record<string, { replicas?: number; cpuLimit?: number; memoryLimit?: number }>;
     },
   ): Promise<{
@@ -256,10 +257,12 @@ export class TemplateService {
     const stackId = randomBytes(16).toString('hex');
 
     // Build the variable values: use provided config, fall back to defaults, generate passwords
+    // Empty strings from the UI are treated as "not provided" so defaults can kick in
     const resolvedVars: Record<string, string> = {};
     for (const variable of parsed.variables) {
-      if (config[variable.name] !== undefined) {
-        resolvedVars[variable.name] = config[variable.name]!;
+      const configValue = config[variable.name];
+      if (configValue !== undefined && configValue !== '') {
+        resolvedVars[variable.name] = configValue;
       } else if (variable.generate) {
         resolvedVars[variable.name] = randomBytes(16).toString('hex');
       } else if (variable.default !== undefined) {
@@ -272,7 +275,9 @@ export class TemplateService {
     }
 
     // Build a map of service names to their Swarm service names for cross-references
-    const swarmNamePrefix = `fleet-${accountId.slice(0, 8)}`;
+    const swarmNamePrefix = `fleet-${accountId}`;
+    // Docker Desktop grouping — com.docker.compose.project groups all services from this template
+    const stackNamespace = `${swarmNamePrefix}-${slug}`;
     const serviceNameMap: Record<string, string> = {};
     for (const svcDef of parsed.services) {
       serviceNameMap[svcDef.name] = `${swarmNamePrefix}-${svcDef.name}`;
@@ -290,6 +295,13 @@ export class TemplateService {
       });
     };
 
+    // Create overlay network so services can resolve each other via DNS
+    const networkName = `fleet-account-${accountId}`;
+    const networkId = await dockerService.ensureNetwork(networkName);
+
+    // Images that need writable filesystem and default user (not UID 1000)
+    const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
+
     const createdServices: Array<{
       id: string;
       name: string;
@@ -297,6 +309,9 @@ export class TemplateService {
     }> = [];
 
     for (const svcDef of parsed.services) {
+      // Apply image override if provided (e.g., user selected a different version)
+      const image = options?.imageOverrides?.[svcDef.name] ?? svcDef.image;
+
       // Interpolate env vars
       const resolvedEnv: Record<string, string> = {};
       if (svcDef.env) {
@@ -325,7 +340,7 @@ export class TemplateService {
       const [svc] = await insertReturning(services, {
         accountId,
         name: svcDef.name,
-        image: svcDef.image,
+        image,
         replicas,
         env: resolvedEnv,
         ports: svcDef.ports ?? [],
@@ -347,9 +362,11 @@ export class TemplateService {
       try {
         const swarmName = serviceNameMap[svcDef.name]!;
 
+        const needsWritable = IMAGE_NEEDS_WRITABLE.test(image);
+
         const result = await dockerService.createService({
           name: swarmName,
-          image: svcDef.image,
+          image,
           replicas,
           env: resolvedEnv,
           ports: (svcDef.ports ?? []).map((p) => ({
@@ -362,8 +379,14 @@ export class TemplateService {
             'fleet.account-id': accountId,
             'fleet.service-id': svc.id,
             'fleet.template': slug,
+            'fleet.stack-id': stackId,
+            'com.docker.compose.project': stackNamespace,
+            'com.docker.compose.service': svcDef.name,
           },
           constraints: [],
+          networkId,
+          readOnly: !needsWritable,
+          user: needsWritable ? undefined : '1000',
           updateParallelism: 1,
           updateDelay: '10s',
           rollbackOnFailure: true,

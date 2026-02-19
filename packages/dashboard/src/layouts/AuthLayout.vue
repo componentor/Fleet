@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useTheme } from '@/composables/useTheme'
-import { Sun, Moon, Monitor } from 'lucide-vue-next'
+import { Sun, Moon } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -17,7 +17,10 @@ const { theme, toggle } = useTheme()
     >
       <Sun v-if="theme === 'light'" class="w-5 h-5" />
       <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
-      <Monitor v-else class="w-5 h-5" />
+      <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" />
+      </svg>
     </button>
 
     <!-- Logo -->

@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard,
   Layers,
+  Box,
   Rocket,
   Store,
   Globe,
@@ -27,7 +28,6 @@ import {
   X,
   Sun,
   Moon,
-  Monitor,
   ChevronDown,
   ArrowLeft,
   ShieldAlert,
@@ -66,7 +66,8 @@ const accountMenuOpen = ref(false)
 
 const navItems = [
   { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
-  { nameKey: 'nav.services', path: '/panel/services', icon: Layers },
+  { nameKey: 'nav.services', path: '/panel/services', icon: Box },
+  { nameKey: 'nav.stacks', path: '/panel/stacks', icon: Layers },
   { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
   { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
   { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
@@ -157,7 +158,7 @@ function changeLocale(newLocale: string) {
     </aside>
 
     <!-- Main content -->
-    <div class="lg:pl-64">
+    <div class="lg:pl-64 min-w-0 overflow-x-hidden">
       <!-- Top header -->
       <header class="sticky top-0 z-30 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
         <!-- Mobile hamburger -->
@@ -173,16 +174,19 @@ function changeLocale(newLocale: string) {
         <div class="relative">
           <button
             @click="accountMenuOpen = !accountMenuOpen"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors max-w-[160px] sm:max-w-[240px]"
+            class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors max-w-[120px] sm:max-w-[240px]"
           >
             <span class="truncate">{{ currentAccount?.name ?? $t('nav.selectAccount') }}</span>
             <ChevronDown class="w-4 h-4 shrink-0" />
           </button>
 
+          <!-- Click-outside overlay -->
+          <div v-if="accountMenuOpen" class="fixed inset-0 z-40" @click="accountMenuOpen = false" />
+
           <!-- Account dropdown -->
           <div
             v-if="accountMenuOpen"
-            class="absolute left-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50"
+            class="absolute left-0 mt-2 w-56 sm:w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50"
           >
             <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {{ $t('nav.accounts') }}
@@ -211,11 +215,11 @@ function changeLocale(newLocale: string) {
           <select
             :value="locale"
             @change="changeLocale(($event.target as HTMLSelectElement).value)"
-            class="px-2 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            class="px-1 sm:px-2 py-1.5 rounded-lg text-xs sm:text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            <option value="en">English</option>
-            <option value="nb">Norsk</option>
-            <option value="de">Deutsch</option>
+            <option value="en">EN</option>
+            <option value="nb">NO</option>
+            <option value="de">DE</option>
             <option value="zh">中文</option>
           </select>
 
@@ -227,7 +231,10 @@ function changeLocale(newLocale: string) {
           >
             <Sun v-if="theme === 'light'" class="w-5 h-5" />
             <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
-            <Monitor v-else class="w-5 h-5" />
+            <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" />
+            </svg>
           </button>
 
           <!-- Notifications -->
@@ -242,15 +249,16 @@ function changeLocale(newLocale: string) {
               <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold">
                 {{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}
               </div>
-              <span class="hidden sm:block text-sm font-medium">{{ user?.name ?? 'User' }}</span>
               <ChevronDown class="w-4 h-4" />
             </button>
+
+            <!-- Click-outside overlay -->
+            <div v-if="userMenuOpen" class="fixed inset-0 z-40" @click="userMenuOpen = false" />
 
             <!-- Dropdown -->
             <div
               v-if="userMenuOpen"
               class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50"
-              @click="userMenuOpen = false"
             >
               <div class="px-4 py-2 border-b border-gray-100 dark:border-gray-700">
                 <p class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ user?.name }}</p>

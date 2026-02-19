@@ -73,6 +73,26 @@ class SchedulerService {
       },
     );
 
+    // Service status sync — every 30 seconds
+    await getMaintenanceQueue().add(
+      'service-status-sync',
+      { type: 'service-status-sync' },
+      {
+        repeat: { every: 30 * 1000 },
+        jobId: 'system:service-status-sync',
+      },
+    );
+
+    // Dead container prune — every 10 minutes
+    await getMaintenanceQueue().add(
+      'container-prune',
+      { type: 'container-prune' },
+      {
+        repeat: { every: 10 * 60 * 1000 },
+        jobId: 'system:container-prune',
+      },
+    );
+
     // PostgreSQL database backup — daily at 2 AM UTC
     await getMaintenanceQueue().add(
       'database-backup',
@@ -80,6 +100,16 @@ class SchedulerService {
       {
         repeat: { pattern: '0 2 * * *' },
         jobId: 'system:database-backup',
+      },
+    );
+
+    // Storage health check — every 60 seconds
+    await getMaintenanceQueue().add(
+      'storage-health-check',
+      { type: 'storage-health-check' },
+      {
+        repeat: { every: 60 * 1000 },
+        jobId: 'system:storage-health-check',
       },
     );
 
@@ -93,7 +123,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 7 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 10 system jobs (BullMQ)`,
     );
   }
 

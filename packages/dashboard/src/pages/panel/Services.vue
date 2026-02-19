@@ -1,16 +1,47 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
+import { useApi } from '@/composables/useApi'
+import { useToast } from '@/composables/useToast'
 import { useRole } from '@/composables/useRole'
 
 const { t } = useI18n()
 
+const router = useRouter()
 const store = useServicesStore()
+const api = useApi()
+const toast = useToast()
 const { canWrite } = useRole()
 
+const stackActionLoading = ref<string | null>(null)
+
+const searchQuery = ref('')
+const page = ref(1)
+const pageSize = 20
+
 const collapsedStacks = ref<Set<string>>(new Set())
+
+const filteredServices = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return store.services
+  return store.services.filter((svc: any) =>
+    svc.name?.toLowerCase().includes(q) ||
+    svc.image?.toLowerCase().includes(q) ||
+    svc.status?.toLowerCase().includes(q),
+  )
+})
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredServices.value.length / pageSize)))
+
+const paginatedServices = computed(() => {
+  const start = (page.value - 1) * pageSize
+  return filteredServices.value.slice(start, start + pageSize)
+})
+
+watch(searchQuery, () => { page.value = 1 })
 
 function statusColor(status: string) {
   switch (status) {
@@ -37,7 +68,7 @@ const groupedServices = computed(() => {
   const stacks = new Map<string, any[]>()
   const standalone: any[] = []
 
-  for (const svc of store.services) {
+  for (const svc of paginatedServices.value) {
     if (svc.stackId) {
       const group = stacks.get(svc.stackId) || []
       group.push(svc)
@@ -76,6 +107,48 @@ function stackStatus(svcs: any[]) {
   return 'running'
 }
 
+async function startStack(svcs: any[]) {
+  const stopped = svcs.filter(s => s.status === 'stopped')
+  if (stopped.length === 0) return
+  stackActionLoading.value = svcs[0].stackId
+  try {
+    await Promise.all(stopped.map(s => api.post(`/services/${s.id}/start`, {})))
+    await store.fetchServices()
+  } catch {
+    toast.error('Failed to start some services')
+  } finally {
+    stackActionLoading.value = null
+  }
+}
+
+async function stopStack(svcs: any[]) {
+  const running = svcs.filter(s => s.status === 'running')
+  if (running.length === 0) return
+  stackActionLoading.value = svcs[0].stackId
+  try {
+    await Promise.all(running.map(s => api.post(`/services/${s.id}/stop`, {})))
+    await store.fetchServices()
+  } catch {
+    toast.error('Failed to stop some services')
+  } finally {
+    stackActionLoading.value = null
+  }
+}
+
+async function cancelDeployStack(svcs: any[]) {
+  const deploying = svcs.filter(s => s.status === 'deploying')
+  if (deploying.length === 0) return
+  stackActionLoading.value = svcs[0].stackId
+  try {
+    await Promise.all(deploying.map(s => api.post(`/services/${s.id}/cancel-deploy`, {})))
+    await store.fetchServices()
+  } catch {
+    toast.error('Failed to cancel some deployments')
+  } finally {
+    stackActionLoading.value = null
+  }
+}
+
 onMounted(() => {
   store.fetchServices()
 })
@@ -98,6 +171,19 @@ onMounted(() => {
       </router-link>
     </div>
 
+    <!-- Search -->
+    <div v-if="store.services.length > 0" class="mb-6">
+      <div class="relative">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          v-model="searchQuery"
+          type="text"
+          :placeholder="$t('services.searchPlaceholder', 'Search services...')"
+          class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+        />
+      </div>
+    </div>
+
     <!-- Loading state -->
     <div v-if="store.loading && store.services.length === 0" class="flex items-center justify-center py-20">
       <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
@@ -118,6 +204,13 @@ onMounted(() => {
       </router-link>
     </div>
 
+    <!-- No results for search -->
+    <div v-else-if="filteredServices.length === 0 && searchQuery" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
+      <Search class="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+      <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">No matching services</h3>
+      <p class="text-gray-500 dark:text-gray-400 text-sm">No services match "{{ searchQuery }}".</p>
+    </div>
+
     <div v-else class="space-y-6">
       <!-- Stack groups -->
       <div
@@ -126,20 +219,59 @@ onMounted(() => {
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
       >
         <!-- Stack header -->
-        <button
-          @click="toggleStack(group.stackId)"
-          class="flex items-center justify-between w-full px-5 py-3.5 bg-gray-50 dark:bg-gray-750 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-        >
-          <div class="flex items-center gap-3">
-            <Layers class="w-4 h-4 text-primary-600 dark:text-primary-400" />
-            <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ stackName(group.services) }}</span>
-            <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', statusBadge(stackStatus(group.services))]">
+        <div class="flex items-center justify-between w-full px-5 py-3.5 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <router-link
+              to="/panel/stacks"
+              class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+            >
+              <Layers class="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" />
+              <span class="text-sm font-semibold text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 transition-colors">{{ stackName(group.services) }}</span>
+            </router-link>
+            <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0', statusBadge(stackStatus(group.services))]">
               {{ stackStatus(group.services) }}
             </span>
-            <span class="text-xs text-gray-400 dark:text-gray-500">{{ group.services.length }} {{ $t('services.servicesInStack') }}</span>
+            <span class="text-xs text-gray-400 dark:text-gray-500 shrink-0">{{ group.services.length }} {{ $t('services.servicesInStack') }}</span>
+            <button @click="toggleStack(group.stackId)" class="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors shrink-0">
+              <component :is="collapsedStacks.has(group.stackId) ? ChevronRight : ChevronDown" class="w-4 h-4 text-gray-400" />
+            </button>
           </div>
-          <component :is="collapsedStacks.has(group.stackId) ? ChevronRight : ChevronDown" class="w-4 h-4 text-gray-400" />
-        </button>
+          <div v-if="canWrite" class="flex items-center gap-1.5 ml-3 shrink-0">
+            <button
+              v-if="group.services.some((s: any) => s.status === 'stopped')"
+              @click.stop="startStack(group.services)"
+              :disabled="stackActionLoading === group.stackId"
+              class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors disabled:opacity-50"
+              :title="$t('services.startAll', 'Start all')"
+            >
+              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <Play v-else class="w-3.5 h-3.5" />
+              <span class="hidden sm:inline">{{ $t('services.startAll', 'Start all') }}</span>
+            </button>
+            <button
+              v-if="group.services.some((s: any) => s.status === 'running')"
+              @click.stop="stopStack(group.services)"
+              :disabled="stackActionLoading === group.stackId"
+              class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors disabled:opacity-50"
+              :title="$t('services.stopAll', 'Stop all')"
+            >
+              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <Square v-else class="w-3.5 h-3.5" />
+              <span class="hidden sm:inline">{{ $t('services.stopAll', 'Stop all') }}</span>
+            </button>
+            <button
+              v-if="group.services.some((s: any) => s.status === 'deploying')"
+              @click.stop="cancelDeployStack(group.services)"
+              :disabled="stackActionLoading === group.stackId"
+              class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+              :title="$t('services.cancelDeploy', 'Cancel deploy')"
+            >
+              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <XCircle v-else class="w-3.5 h-3.5" />
+              <span class="hidden sm:inline">{{ $t('services.cancelDeploy', 'Cancel deploy') }}</span>
+            </button>
+          </div>
+        </div>
 
         <!-- Stack services -->
         <div v-if="!collapsedStacks.has(group.stackId)" class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -147,7 +279,7 @@ onMounted(() => {
             v-for="service in group.services"
             :key="service.id"
             :to="`/panel/services/${service.id}`"
-            class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors group"
+            class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group"
           >
             <div class="flex items-center gap-3 min-w-0">
               <span :class="[statusColor(service.status), 'w-2 h-2 rounded-full shrink-0']"></span>
@@ -199,6 +331,29 @@ onMounted(() => {
             </div>
           </div>
         </router-link>
+      </div>
+
+      <!-- Pagination -->
+      <div v-if="totalPages > 1" class="flex items-center justify-between pt-2">
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          Page {{ page }} of {{ totalPages }} &middot; {{ filteredServices.length }} services
+        </p>
+        <div class="flex gap-2">
+          <button
+            @click="page--"
+            :disabled="page <= 1"
+            class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Previous
+          </button>
+          <button
+            @click="page++"
+            :disabled="page >= totalPages"
+            class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   </div>

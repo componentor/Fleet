@@ -55,8 +55,9 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
 
         if (count > max) {
           const ttl = await valkey.ttl(key);
-          c.header('Retry-After', String(ttl > 0 ? ttl : windowSec));
-          return c.json({ error: 'Too many requests' }, 429);
+          const retryAfter = ttl > 0 ? ttl : windowSec;
+          c.header('Retry-After', String(retryAfter));
+          return c.json({ error: 'Too many requests', retryAfter }, 429);
         }
 
         await next();
@@ -82,8 +83,9 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
     entry.count++;
 
     if (entry.count > max) {
-      c.header('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
-      return c.json({ error: 'Too many requests' }, 429);
+      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+      c.header('Retry-After', String(retryAfter));
+      return c.json({ error: 'Too many requests', retryAfter }, 429);
     }
 
     await next();
