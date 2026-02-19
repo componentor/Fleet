@@ -62,17 +62,25 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
     where: eq(nodes.id, nodeId),
   });
 
-  // In dev mode, auto-register the node on first heartbeat
+  // In dev mode, auto-register the node on first heartbeat (reuse existing by hostname to prevent duplicates)
   if (!node && process.env.NODE_ENV !== 'production') {
-    const [created] = await insertReturning(nodes, {
-      hostname: hb.hostname ?? os.hostname(),
-      ipAddress: '127.0.0.1',
-      role: 'manager',
-      status: 'active',
+    const devHostname = hb.hostname ?? os.hostname();
+    const existing = await db.query.nodes.findFirst({
+      where: eq(nodes.hostname, devHostname),
     });
-    node = created;
-    if (node) {
-      logger.info(`Auto-registered dev node: ${node.id} (${node.hostname})`);
+    if (existing) {
+      node = existing;
+    } else {
+      const [created] = await insertReturning(nodes, {
+        hostname: devHostname,
+        ipAddress: '127.0.0.1',
+        role: 'manager',
+        status: 'active',
+      });
+      node = created;
+      if (node) {
+        logger.info(`Auto-registered dev node: ${node.id} (${node.hostname})`);
+      }
     }
   }
 
@@ -152,6 +160,14 @@ adminNodeRoutes.post('/', async (c) => {
 
   if (!parsed.success) {
     return c.json({ error: 'Validation failed' }, 400);
+  }
+
+  // Prevent duplicate registration by hostname + IP
+  const existing = await db.query.nodes.findFirst({
+    where: and(eq(nodes.hostname, parsed.data.hostname), eq(nodes.ipAddress, parsed.data.ipAddress)),
+  });
+  if (existing) {
+    return c.json({ error: 'A node with this hostname and IP already exists', existingNodeId: existing.id }, 409);
   }
 
   const [node] = await insertReturning(nodes, {
