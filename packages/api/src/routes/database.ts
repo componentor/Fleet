@@ -704,56 +704,8 @@ databaseRoutes.post('/:serviceId/export', dbExecRateLimit, requireMember, async 
   return c.json({ token, expiresIn: DOWNLOAD_TOKEN_TTL / 1000 });
 });
 
-// GET /:serviceId/export — stream a full database dump.
-// Accepts either normal auth (Authorization header) or a one-time download token (?token=...).
-databaseRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
-  const serviceId = c.req.param('serviceId');
-  const tokenParam = c.req.query('token');
-
-  let accountId: string | undefined;
-  let dbName: string | undefined;
-
-  if (tokenParam) {
-    // Token-based download (from browser window.open)
-    const entry = downloadTokens.get(tokenParam);
-    if (!entry || Date.now() > entry.expiresAt || entry.serviceId !== serviceId) {
-      return c.json({ error: 'Invalid or expired download token' }, 403);
-    }
-    downloadTokens.delete(tokenParam); // one-time use
-    accountId = entry.accountId;
-    dbName = entry.db;
-  } else {
-    // Normal authenticated request (fallback for API clients)
-    accountId = c.get('accountId');
-    dbName = c.req.query('db');
-    if (!accountId) return c.json({ error: 'Account context required' }, 400);
-  }
-
-  const container = await getDbContainer(accountId!, serviceId);
-  if (!container) return c.json({ error: 'Database container not available' }, 503);
-
-  const info = dbName ? { ...container.info, database: dbName } : container.info;
-
-  let cmd: string[];
-  let filename: string;
-  if (container.engine === 'postgres') {
-    cmd = ['pg_dump', '-U', info.user, '-d', info.database, '--no-owner', '--no-acl'];
-    filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
-  } else {
-    cmd = ['mysqldump', '-u', info.user, `-p${info.password}`, '--single-transaction', '--routines', '--triggers', info.database];
-    filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
-  }
-
-  try {
-    const { stream } = await dockerService.execCommandStream(container.containerId, cmd);
-    c.header('Content-Type', 'application/sql');
-    c.header('Content-Disposition', `attachment; filename="${filename}"`);
-    return c.body(stream as any);
-  } catch (err) {
-    logger.error({ err }, 'Database export failed');
-    return c.json({ error: 'Export failed' }, 500);
-  }
-});
+// The actual streaming GET is on databaseDownloadRoutes (no auth middleware)
+// so the browser can fetch it directly via anchor click with a token query param.
 
 // POST /:serviceId/import — restore a database from SQL dump
 databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
@@ -799,6 +751,52 @@ databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requir
   } catch (err) {
     logger.error({ err }, 'Database import failed');
     return c.json({ error: err instanceof Error ? err.message : 'Import failed' }, 500);
+  }
+});
+
+// ---- Public (unauthenticated) download route — token-gated ----
+// Mounted separately in app.ts without auth/tenant middleware so the browser
+// can stream the file directly via an anchor click.
+
+export const databaseDownloadRoutes = new Hono();
+
+databaseDownloadRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
+  const serviceId = c.req.param('serviceId');
+  const tokenParam = c.req.query('token');
+
+  if (!tokenParam) {
+    return c.json({ error: 'Download token required' }, 401);
+  }
+
+  const entry = downloadTokens.get(tokenParam);
+  if (!entry || Date.now() > entry.expiresAt || entry.serviceId !== serviceId) {
+    return c.json({ error: 'Invalid or expired download token' }, 403);
+  }
+  downloadTokens.delete(tokenParam); // one-time use
+
+  const container = await getDbContainer(entry.accountId, serviceId);
+  if (!container) return c.json({ error: 'Database container not available' }, 503);
+
+  const info = entry.db ? { ...container.info, database: entry.db } : container.info;
+
+  let cmd: string[];
+  let filename: string;
+  if (container.engine === 'postgres') {
+    cmd = ['pg_dump', '-U', info.user, '-d', info.database, '--no-owner', '--no-acl'];
+    filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
+  } else {
+    cmd = ['mysqldump', '-u', info.user, `-p${info.password}`, '--single-transaction', '--routines', '--triggers', info.database];
+    filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
+  }
+
+  try {
+    const { stream } = await dockerService.execCommandStream(container.containerId, cmd);
+    c.header('Content-Type', 'application/sql');
+    c.header('Content-Disposition', `attachment; filename="${filename}"`);
+    return c.body(stream as any);
+  } catch (err) {
+    logger.error({ err }, 'Database export failed');
+    return c.json({ error: 'Export failed' }, 500);
   }
 });
 

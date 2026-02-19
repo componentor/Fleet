@@ -422,17 +422,13 @@ async function exportDatabase() {
     // Get a short-lived download token, then open the URL directly so the
     // browser streams the file natively (progress bar, no memory buffering).
     const { token } = await api.post<{ token: string }>(`/database/${props.serviceId}/export${dbParams.value}`, {})
-    const downloadUrl = `/api/v1/database/${props.serviceId}/export?token=${encodeURIComponent(token)}`
-    // Use a hidden iframe so the current page stays intact
-    const iframe = document.createElement('iframe')
-    iframe.style.display = 'none'
-    iframe.src = downloadUrl
-    document.body.appendChild(iframe)
-    // Clean up iframe after download starts
-    setTimeout(() => {
-      try { document.body.removeChild(iframe) } catch {}
-    }, 120_000)
-    toast.success('Database export started — check your downloads')
+    const downloadUrl = `/api/v1/dl/database/${props.serviceId}/export?token=${encodeURIComponent(token)}`
+    const a = document.createElement('a')
+    a.href = downloadUrl
+    a.download = `${selectedDb.value || 'database'}-${new Date().toISOString().slice(0, 10)}.sql`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   } catch { /* error shown by useApi */ } finally {
     exportLoading.value = false
   }
