@@ -435,10 +435,16 @@ async function saveAutoDeploy() {
   }
 }
 
+function getReplicaLabel(containerId?: string): string | undefined {
+  if (terminalContainers.value.length <= 1) return undefined
+  const idx = terminalContainers.value.findIndex((c) => c.containerId === containerId)
+  return idx >= 0 ? `replica ${idx + 1}` : undefined
+}
+
 function switchTerminalContainer(containerId: string) {
   selectedContainerId.value = containerId
   terminalDisconnect()
-  terminalConnect(serviceId, containerId)
+  terminalConnect(serviceId, containerId, getReplicaLabel(containerId))
 }
 
 function addEnvVar() {
@@ -497,7 +503,7 @@ async function onTabChange(tabId: string) {
       if (!terminalCreated.value && terminalContainer.value) {
         createTerminal(terminalContainer.value)
         terminalCreated.value = true
-        terminalConnect(serviceId, selectedContainerId.value || undefined)
+        terminalConnect(serviceId, selectedContainerId.value || undefined, getReplicaLabel(selectedContainerId.value))
       } else {
         // Terminal already exists — just refit the canvas (v-show resize)
         terminalRefit()

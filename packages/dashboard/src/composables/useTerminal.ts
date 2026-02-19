@@ -22,6 +22,7 @@ export function useTerminal() {
   let resizeDisposable: { dispose(): void } | null = null
   let everConnected = false
   let currentContainerId: string | null = null
+  let currentReplicaLabel: string | null = null
 
   const MAX_RECONNECT_ATTEMPTS = 5
   const BASE_DELAY_MS = 1000
@@ -80,12 +81,31 @@ export function useTerminal() {
     }
   }
 
-  function connect(serviceId: string, containerId?: string) {
+  function connect(serviceId: string, containerId?: string, replicaLabel?: string) {
     if (!terminal) return
+
+    // Tear down any existing connection first to prevent orphaned WebSockets
+    // whose onclose handlers would interfere with the new connection state
+    if (ws || reconnectTimer) {
+      intentionalClose = true
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        ws.close()
+        ws = null
+      }
+    }
 
     intentionalClose = false
     currentServiceId = serviceId
     currentContainerId = containerId ?? null
+    currentReplicaLabel = replicaLabel ?? null
     reconnectAttempts = 0
     everConnected = false
     doConnect(serviceId)
@@ -115,10 +135,11 @@ export function useTerminal() {
       reconnectAttempts = 0
       everConnected = true
 
+      const replicaSuffix = currentReplicaLabel ? ` on ${currentReplicaLabel}` : ''
       if (!wasReconnecting) {
-        terminal?.writeln('Connected to terminal...')
+        terminal?.writeln(`Connected to terminal${replicaSuffix}...`)
       } else {
-        terminal?.writeln('\r\nReconnected.')
+        terminal?.writeln(`\r\nReconnected${replicaSuffix}.`)
       }
 
       if (terminal && fitAddon) {
@@ -149,22 +170,20 @@ export function useTerminal() {
 
       if (intentionalClose) return
 
-      // If we never connected at all, don't retry — the server is likely unreachable
-      if (!everConnected) {
-        terminal?.writeln('\r\nFailed to connect to terminal. The service may not be running or the terminal server is unavailable.')
-        return
-      }
-
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-        const delay = BASE_DELAY_MS * Math.pow(2, reconnectAttempts)
+        const delay = everConnected
+          ? BASE_DELAY_MS * Math.pow(2, reconnectAttempts)
+          : BASE_DELAY_MS  // short fixed delay for initial connection failures
         reconnectAttempts++
-        terminal?.writeln(`\r\nConnection lost. Reconnecting in ${delay / 1000}s... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
+        if (everConnected) {
+          terminal?.writeln(`\r\nConnection lost. Reconnecting in ${delay / 1000}s... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
+        }
         connectionState.value = 'reconnecting'
         reconnectTimer = setTimeout(() => {
           if (currentServiceId) doConnect(currentServiceId)
         }, delay)
       } else {
-        terminal?.writeln('\r\nConnection closed. Max reconnection attempts reached.')
+        terminal?.writeln('\r\nFailed to connect to terminal. The service may not be running or the terminal server is unavailable.')
       }
     }
 

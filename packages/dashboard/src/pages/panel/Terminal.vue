@@ -45,13 +45,19 @@ async function fetchContainers(serviceId: string) {
   }
 }
 
+function getReplicaLabel(containerId?: string): string | undefined {
+  if (terminalContainers.value.length <= 1) return undefined
+  const idx = terminalContainers.value.findIndex((c) => c.containerId === containerId)
+  return idx >= 0 ? `replica ${idx + 1}` : undefined
+}
+
 function connectToService(serviceId: string) {
   if (!terminalCreated.value && terminalContainer.value) {
     createTerminal(terminalContainer.value)
     terminalCreated.value = true
   }
 
-  connect(serviceId, selectedContainerId.value || undefined)
+  connect(serviceId, selectedContainerId.value || undefined, getReplicaLabel(selectedContainerId.value))
   sessionStorage.setItem(STORAGE_KEY, serviceId)
 }
 
@@ -59,7 +65,7 @@ function switchContainer(containerId: string) {
   selectedContainerId.value = containerId
   if (selectedService.value) {
     disconnect()
-    connect(selectedService.value, containerId)
+    connect(selectedService.value, containerId, getReplicaLabel(containerId))
   }
 }
 

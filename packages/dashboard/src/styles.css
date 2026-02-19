@@ -28,6 +28,11 @@ summary {
   scrollbar-width: thin;
 }
 
+/* Ensure the last terminal line is always visible with breathing room */
+.xterm-screen {
+  padding-bottom: 12px !important;
+}
+
 @theme {
   --color-primary-50: #eef2ff;
   --color-primary-100: #e0e7ff;
