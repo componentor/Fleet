@@ -1,4 +1,7 @@
 {
+  "demo": {
+    "banner": "This is a demo environment — data may be reset at any time."
+  },
   "nav": {
     "home": "Home",
     "features": "Features",

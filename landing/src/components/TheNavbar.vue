@@ -58,7 +58,7 @@ onUnmounted(() => {
   <nav
     ref="navRef"
     :class="[
-      'fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b',
+      'fixed top-[var(--banner-height,0px)] left-0 right-0 z-50 transition-all duration-300 border-b',
       isScrolled
         ? 'bg-white/80 dark:bg-surface-950/80 backdrop-blur-xl border-surface-200 dark:border-surface-800/50'
         : 'bg-transparent border-transparent',

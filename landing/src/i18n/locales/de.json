@@ -1,4 +1,7 @@
 {
+  "demo": {
+    "banner": "Dies ist eine Demo-Umgebung — Daten konnen jederzeit zuruckgesetzt werden."
+  },
   "nav": {
     "home": "Startseite",
     "features": "Funktionen",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TheNavbar from '@/components/TheNavbar.vue'
 import type { NavLink } from '@/components/TheNavbar.vue'
@@ -9,7 +9,19 @@ const { t } = useI18n()
 
 const dashboardUrl = import.meta.env.VITE_DASHBOARD_URL || 'http://localhost:5173'
 
+const demoBanner = ref<HTMLElement | null>(null)
+const bannerHeight = ref(36)
+
 onMounted(() => {
+  // Measure demo banner and set CSS variable for navbar offset
+  nextTick(() => {
+    if (demoBanner.value) {
+      const h = demoBanner.value.offsetHeight
+      bannerHeight.value = h
+      document.documentElement.style.setProperty('--banner-height', `${h}px`)
+    }
+  })
+
   // Intersection Observer for fade-in animations
   const observer = new IntersectionObserver(
     (entries) => {
@@ -26,6 +38,7 @@ onMounted(() => {
 
   onUnmounted(() => {
     observer.disconnect()
+    document.documentElement.style.removeProperty('--banner-height')
   })
 })
 
@@ -138,6 +151,17 @@ const navLinks = computed<NavLink[]>(() => [
 
 <template>
   <div class="min-h-screen bg-white dark:bg-surface-950 text-surface-700 dark:text-surface-200">
+    <!-- Demo Banner (fixed) + spacer -->
+    <div ref="demoBanner" class="fixed top-0 left-0 right-0 z-[60] bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 shadow-sm">
+      <div class="flex items-center justify-center gap-2 py-2 px-4">
+        <svg class="h-4 w-4 text-amber-900 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span class="text-sm font-semibold text-amber-950 tracking-wide">{{ $t('demo.banner') }}</span>
+      </div>
+    </div>
+    <div :style="{ height: bannerHeight + 'px' }"></div>
+
     <TheNavbar :nav-links="navLinks" :dashboard-url="dashboardUrl" />
 
     <!-- Hero Section -->

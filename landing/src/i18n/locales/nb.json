@@ -1,4 +1,7 @@
 {
+  "demo": {
+    "banner": "Dette er et demomiljo — data kan bli tilbakestilt nar som helst."
+  },
   "nav": {
     "home": "Hjem",
     "features": "Funksjoner",
