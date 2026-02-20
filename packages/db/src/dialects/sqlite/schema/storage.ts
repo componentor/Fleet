@@ -27,8 +27,8 @@ export const storageClustersRelations = relations(storageClusters, ({ many }) =>
 
 export const storageNodes = sqliteTable('storage_nodes', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  clusterId: text('cluster_id').references(() => storageClusters.id),
-  nodeId: text('node_id').references(() => nodes.id),
+  clusterId: text('cluster_id').references(() => storageClusters.id, { onDelete: 'cascade' }),
+  nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
   hostname: text('hostname').notNull(),
   ipAddress: text('ip_address').notNull(),
   role: text('role').default('storage').notNull(),
@@ -56,7 +56,7 @@ export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
 
 export const storageVolumes = sqliteTable('storage_volumes', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: text('account_id').references(() => accounts.id).notNull(),
+  accountId: text('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
   displayName: text('display_name'),
   sizeGb: integer('size_gb').notNull(),

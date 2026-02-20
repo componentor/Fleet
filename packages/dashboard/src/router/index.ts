@@ -81,8 +81,8 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/Marketplace.vue'),
       },
       {
-        path: 'audit-log',
-        name: 'super-audit-log',
+        path: 'events',
+        name: 'super-events',
         component: () => import('@/pages/super/AuditLog.vue'),
       },
       {

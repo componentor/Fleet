@@ -163,7 +163,7 @@ adminRoutes.patch('/users/:id/super', async (c) => {
     description: `Set super admin to ${!targetUser.isSuper} for ${targetUser.email}`,
     resourceType: 'user',
     resourceId: targetUserId,
-    resourceName: targetUser.email,
+    resourceName: targetUser.email ?? undefined,
   });
 
   return c.json({

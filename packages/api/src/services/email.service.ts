@@ -253,9 +253,18 @@ export class EmailService {
     const bodyHtml =
       template?.bodyHtml ?? defaultTpl?.bodyHtml ?? '<p>{{body}}</p>';
 
+    const escapeHtml = (str: string): string =>
+      str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
     const interpolate = (text: string): string => {
       return text.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
-        return variables[key] ?? '';
+        const value = variables[key] ?? '';
+        return escapeHtml(value);
       });
     };
 

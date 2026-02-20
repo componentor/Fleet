@@ -130,7 +130,7 @@ export class MinIOObjectProvider implements ObjectStorageProvider {
       await this.client.send(new DeleteObjectsCommand({
         Bucket: bucket,
         Delete: {
-          Objects: objects.map((o) => ({ Key: o.Key! })),
+          Objects: objects.map((o: any) => ({ Key: o.Key! })),
           Quiet: true,
         },
       }));

@@ -9,6 +9,7 @@ export interface CreateBackupJobData {
 
 export interface RestoreBackupJobData {
   backupId: string;
+  accountId: string;
 }
 
 type BackupJobData = CreateBackupJobData | RestoreBackupJobData;
@@ -23,7 +24,7 @@ async function processBackupJob(job: Job<BackupJobData>): Promise<void> {
     );
   } else if (job.name === 'restore-backup') {
     const data = job.data as RestoreBackupJobData;
-    await backupService.restoreBackup(data.backupId);
+    await backupService.restoreBackup(data.backupId, data.accountId);
   }
 }
 

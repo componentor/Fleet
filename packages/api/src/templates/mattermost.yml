@@ -1,0 +1,55 @@
+slug: mattermost
+name: Mattermost
+description: Open-source Slack alternative for team messaging and collaboration. Includes PostgreSQL.
+icon_url: https://mattermost.com/wp-content/uploads/2022/02/favicon.png
+category: productivity
+
+variables:
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: MM_SERVICESETTINGS_SITEURL
+    label: Site URL
+    type: string
+    required: false
+    default: http://localhost:8065
+
+services:
+  - name: mattermost
+    image: mattermost/mattermost-team-edition:10
+    ports:
+      - target: 8065
+        published: 8065
+    env:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: "postgres://mattermost:{{POSTGRES_PASSWORD}}@{{service:mattermost-db}}:5432/mattermost?sslmode=disable&connect_timeout=10"
+      MM_SERVICESETTINGS_SITEURL: "{{MM_SERVICESETTINGS_SITEURL}}"
+      TZ: UTC
+    volumes:
+      - source: mattermost_config
+        target: /mattermost/config
+      - source: mattermost_data
+        target: /mattermost/data
+      - source: mattermost_logs
+        target: /mattermost/logs
+      - source: mattermost_plugins
+        target: /mattermost/plugins
+
+  - name: mattermost-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: mattermost
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: mattermost
+    volumes:
+      - source: mattermost_db_data
+        target: /var/lib/postgresql/data
+
+volumes:
+  - mattermost_config
+  - mattermost_data
+  - mattermost_logs
+  - mattermost_plugins
+  - mattermost_db_data

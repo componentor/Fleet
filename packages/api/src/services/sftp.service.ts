@@ -1,4 +1,5 @@
-import { Server as SshServer, utils as ssh2Utils } from 'ssh2';
+import ssh2 from 'ssh2';
+const { Server: SshServer, utils: ssh2Utils } = ssh2;
 import type { Connection, Session } from 'ssh2';
 import {
   readFileSync, existsSync, writeFileSync, mkdirSync,
@@ -125,7 +126,7 @@ function formatLongname(name: string, st: { mode: number; size: number; mtime: D
 
 // ── SFTP Server ──────────────────────────────────────────────────────
 
-export function startSftpServer(): SshServer {
+export function startSftpServer(): InstanceType<typeof SshServer> {
   const hostKey = getOrGenerateHostKey();
 
   const sshServer = new SshServer({ hostKeys: [hostKey] }, (client: Connection) => {

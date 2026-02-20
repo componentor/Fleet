@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
@@ -183,6 +183,13 @@ function stopPolling() {
 
 onMounted(() => {
   fetchAll()
+})
+
+onUnmounted(() => {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval)
+    statusPollInterval = null
+  }
 })
 </script>
 

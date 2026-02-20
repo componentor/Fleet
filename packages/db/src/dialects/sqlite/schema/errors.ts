@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
@@ -20,4 +21,8 @@ export const errorLog = sqliteTable('error_log', {
   metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   resolved: integer('resolved', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_error_log_created_at').on(table.createdAt),
+  index('idx_error_log_level').on(table.level),
+  index('idx_error_log_resolved').on(table.resolved),
+]);

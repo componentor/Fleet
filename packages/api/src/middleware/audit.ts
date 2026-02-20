@@ -28,10 +28,13 @@ export const auditMiddleware = createMiddleware<{
     // Variables not set (unauthenticated route)
   }
 
-  let ip =
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
-    c.req.header('x-real-ip') ??
-    null;
+  let ip: string | null = null;
+
+  if (process.env['TRUST_PROXY'] === '1') {
+    ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
+      c.req.header('x-real-ip') ??
+      null;
+  }
 
   if (!ip) {
     try {

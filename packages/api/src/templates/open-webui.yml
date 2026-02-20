@@ -1,0 +1,42 @@
+slug: open-webui
+name: Open WebUI
+description: ChatGPT-style web interface for Ollama and OpenAI-compatible APIs. Includes Ollama backend.
+icon_url: https://openwebui.com/favicon.png
+category: ai
+
+variables:
+  - name: WEBUI_SECRET_KEY
+    label: Secret Key
+    type: password
+    required: true
+    generate: true
+  - name: OPENAI_API_KEY
+    label: OpenAI API Key (optional)
+    type: password
+    required: false
+
+services:
+  - name: open-webui
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - target: 8080
+        published: 8080
+    env:
+      OLLAMA_BASE_URL: "http://{{service:open-webui-ollama}}:11434"
+      WEBUI_SECRET_KEY: "{{WEBUI_SECRET_KEY}}"
+      OPENAI_API_KEY: "{{OPENAI_API_KEY}}"
+    volumes:
+      - source: open_webui_data
+        target: /app/backend/data
+
+  - name: open-webui-ollama
+    image: ollama/ollama:latest
+    env:
+      OLLAMA_HOST: "0.0.0.0"
+    volumes:
+      - source: ollama_models
+        target: /root/.ollama
+
+volumes:
+  - open_webui_data
+  - ollama_models

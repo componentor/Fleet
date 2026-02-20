@@ -1,0 +1,26 @@
+slug: ollama
+name: Ollama
+description: Run large language models locally. Supports Llama, Mistral, CodeLlama, and many more open-source models.
+icon_url: https://ollama.com/public/ollama.png
+category: ai
+
+variables:
+  - name: OLLAMA_MODELS
+    label: Models Directory
+    type: string
+    default: /root/.ollama
+
+services:
+  - name: ollama
+    image: ollama/ollama:latest
+    ports:
+      - target: 11434
+        published: 11434
+    env:
+      OLLAMA_HOST: "0.0.0.0"
+    volumes:
+      - source: ollama_models
+        target: /root/.ollama
+
+volumes:
+  - ollama_models

@@ -1,28 +1,63 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutDashboard, Box, Globe, HardDrive, DollarSign, Activity, Loader2, Clock } from 'lucide-vue-next'
+import { LayoutDashboard, Box, Globe, HardDrive, DollarSign, Activity, Loader2, Clock, Rocket, Layers, Sun, Moon, Sunset } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useServicesStore } from '@/stores/services'
 import { useAccount } from '@/composables/useAccount'
+import { useAuth } from '@/composables/useAuth'
 
 const { t } = useI18n()
 const api = useApi()
 const servicesStore = useServicesStore()
 const { currentAccount } = useAccount()
+const { user } = useAuth()
 
 const domains = ref<any[]>([])
 const activityFeed = ref<any[]>([])
 const loading = ref(true)
+
+// Animated count-up values
+const animatedRunning = ref(0)
+const animatedDomains = ref(0)
+const animatedTotal = ref(0)
+
+function animateValue(target: ReturnType<typeof ref<number>>, end: number, duration = 800) {
+  if (end === 0) { target.value = 0; return }
+  const start = performance.now()
+  const step = (now: number) => {
+    const progress = Math.min((now - start) / duration, 1)
+    const eased = 1 - Math.pow(1 - progress, 3)
+    target.value = Math.round(eased * end)
+    if (progress < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
+// Time-aware greeting
+const greetingIcon = computed(() => {
+  const h = new Date().getHours()
+  if (h < 12) return Sun
+  if (h < 18) return Sunset
+  return Moon
+})
+
+const greeting = computed(() => {
+  const h = new Date().getHours()
+  const name = user.value?.name?.split(' ')[0] ?? ''
+  if (h < 12) return `Good morning${name ? ', ' + name : ''}`
+  if (h < 18) return `Good afternoon${name ? ', ' + name : ''}`
+  return `Good evening${name ? ', ' + name : ''}`
+})
 
 const runningCount = computed(() =>
   servicesStore.services.filter((s: any) => s.status === 'running').length
 )
 
 const stats = computed(() => [
-  { label: t('dashboard.runningServices'), value: String(runningCount.value), icon: Box, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
-  { label: t('dashboard.domains'), value: String(domains.value.length), icon: Globe, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-  { label: t('dashboard.totalServices'), value: String(servicesStore.services.length), icon: HardDrive, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
+  { label: t('dashboard.runningServices'), value: String(animatedRunning.value), icon: Box, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
+  { label: t('dashboard.domains'), value: String(animatedDomains.value), icon: Globe, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+  { label: t('dashboard.totalServices'), value: String(animatedTotal.value), icon: HardDrive, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
   { label: t('dashboard.monthlyCost'), value: '$0', icon: DollarSign, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
 ])
 
@@ -72,6 +107,11 @@ onMounted(async () => {
             .catch(() => {})
         : Promise.resolve(),
     ])
+    // Trigger count-up animations after data loads
+    await nextTick()
+    animateValue(animatedRunning, runningCount.value)
+    animateValue(animatedDomains, domains.value.length, 900)
+    animateValue(animatedTotal, servicesStore.services.length, 1000)
   } finally {
     loading.value = false
   }
@@ -81,8 +121,8 @@ onMounted(async () => {
 <template>
   <div>
     <div class="flex items-center gap-3 mb-8">
-      <LayoutDashboard class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('dashboard.title') }}</h1>
+      <component :is="greetingIcon" class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ greeting }}</h1>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -95,7 +135,7 @@ onMounted(async () => {
         <div
           v-for="stat in stats"
           :key="stat.label"
-          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6"
+          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
         >
           <div class="flex items-center gap-4">
             <div :class="[stat.bg, 'p-3 rounded-lg']">
@@ -103,14 +143,46 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ stat.label }}</p>
-              <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ stat.value }}</p>
+              <p class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">{{ stat.value }}</p>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- Quick actions -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        <router-link
+          to="/panel/deploy"
+          class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+        >
+          <Rocket class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('services.deployNew', 'Deploy') }}</span>
+        </router-link>
+        <router-link
+          to="/panel/services"
+          class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+        >
+          <Box class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.services', 'Services') }}</span>
+        </router-link>
+        <router-link
+          to="/panel/domains"
+          class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+        >
+          <Globe class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.domains', 'Domains') }}</span>
+        </router-link>
+        <router-link
+          to="/panel/stacks"
+          class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+        >
+          <Layers class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.stacks', 'Stacks') }}</span>
+        </router-link>
+      </div>
+
       <!-- Recent services -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
           <Activity class="w-5 h-5 text-gray-500 dark:text-gray-400" />
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.recentServices') }}</h2>
@@ -129,7 +201,7 @@ onMounted(async () => {
               <span
                 :class="[
                   'w-2.5 h-2.5 rounded-full',
-                  svc.status === 'running' ? 'bg-green-500' :
+                  svc.status === 'running' ? 'bg-green-500 animate-pulse' :
                   svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
                 ]"
               ></span>
@@ -156,7 +228,7 @@ onMounted(async () => {
       </div>
 
       <!-- Recent Activity -->
-      <div class="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div class="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
           <Clock class="w-5 h-5 text-gray-500 dark:text-gray-400" />
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.recentActivity') }}</h2>

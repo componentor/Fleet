@@ -16,7 +16,7 @@ const addRole = ref<'worker' | 'manager'>('worker')
 const adding = ref(false)
 const error = ref('')
 const joinToken = ref('')
-const nodeMetrics = ref<Record<string, { cpuPercent: number; memoryPercent: number }>>({})
+const nodeMetrics = ref<Record<string, { cpuCount: number; memTotal: number; memUsed: number; memFree: number; memoryPercent: number; containerCount: number }>>({})
 
 function getHealthStatus(node: any): 'green' | 'yellow' | 'red' {
   if (!node.lastHeartbeat) return 'red'
@@ -35,16 +35,17 @@ const healthColorMap = {
 async function fetchNodeMetrics(nodeId: string) {
   try {
     const data = await api.get<any>(`/nodes/${nodeId}/metrics?hours=1`)
-    if (data && typeof data.cpuPercent === 'number') {
-      nodeMetrics.value[nodeId] = {
-        cpuPercent: data.cpuPercent,
-        memoryPercent: data.memoryPercent,
-      }
-    } else if (Array.isArray(data) && data.length > 0) {
+    if (Array.isArray(data) && data.length > 0) {
       const latest = data[data.length - 1]
+      const memTotal = latest.memTotal ?? 0
+      const memUsed = latest.memUsed ?? 0
       nodeMetrics.value[nodeId] = {
-        cpuPercent: latest.cpuPercent ?? 0,
-        memoryPercent: latest.memoryPercent ?? 0,
+        cpuCount: latest.cpuCount ?? 0,
+        memTotal,
+        memUsed,
+        memFree: latest.memFree ?? 0,
+        memoryPercent: memTotal > 0 ? (memUsed / memTotal) * 100 : 0,
+        containerCount: latest.containerCount ?? 0,
       }
     }
   } catch {}
@@ -252,31 +253,28 @@ onMounted(() => {
                 </span>
               </td>
               <td class="px-6 py-4 text-sm">
-                <div v-if="nodeMetrics[node.id]" class="space-y-1.5 min-w-[120px]">
+                <div v-if="nodeMetrics[node.id]" class="space-y-1.5 min-w-[140px]">
                   <div class="flex items-center gap-2">
                     <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">{{ t('super.nodes.cpu') }}</span>
-                    <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
-                      <div
-                        class="h-full rounded-full transition-all"
-                        :class="(nodeMetrics[node.id]?.cpuPercent ?? 0) > 80 ? 'bg-red-500' : (nodeMetrics[node.id]?.cpuPercent ?? 0) > 50 ? 'bg-yellow-500' : 'bg-green-500'"
-                        :style="{ width: `${Math.min(100, nodeMetrics[node.id]?.cpuPercent ?? 0)}%` }"
-                      ></div>
-                    </div>
-                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id]?.cpuPercent ?? 0) }}%</span>
+                    <span class="text-xs text-gray-700 dark:text-gray-300">{{ nodeMetrics[node.id]!.cpuCount }} {{ nodeMetrics[node.id]!.cpuCount === 1 ? 'core' : 'cores' }}</span>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">{{ t('super.nodes.memory') }}</span>
                     <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all"
-                        :class="(nodeMetrics[node.id]?.memoryPercent ?? 0) > 80 ? 'bg-red-500' : (nodeMetrics[node.id]?.memoryPercent ?? 0) > 50 ? 'bg-yellow-500' : 'bg-blue-500'"
-                        :style="{ width: `${Math.min(100, nodeMetrics[node.id]?.memoryPercent ?? 0)}%` }"
+                        :class="nodeMetrics[node.id]!.memoryPercent > 80 ? 'bg-red-500' : nodeMetrics[node.id]!.memoryPercent > 50 ? 'bg-yellow-500' : 'bg-blue-500'"
+                        :style="{ width: `${Math.min(100, nodeMetrics[node.id]!.memoryPercent)}%` }"
                       ></div>
                     </div>
-                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-8 text-right">{{ Math.round(nodeMetrics[node.id]?.memoryPercent ?? 0) }}%</span>
+                    <span class="text-[10px] text-gray-500 dark:text-gray-400 w-10 text-right">{{ Math.round(nodeMetrics[node.id]!.memoryPercent) }}%</span>
+                  </div>
+                  <div class="text-[10px] text-gray-400 dark:text-gray-500">
+                    {{ (nodeMetrics[node.id]!.memUsed / 1073741824).toFixed(1) }} / {{ (nodeMetrics[node.id]!.memTotal / 1073741824).toFixed(1) }} GB
+                    · {{ nodeMetrics[node.id]!.containerCount }} {{ nodeMetrics[node.id]!.containerCount === 1 ? 'container' : 'containers' }}
                   </div>
                 </div>
-                <span v-else class="text-xs text-gray-400 dark:text-gray-500">No data</span>
+                <span v-else class="text-xs text-gray-400 dark:text-gray-500">--</span>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                 <span v-if="node.docker" class="text-green-600 dark:text-green-400">{{ node.docker.Status?.State || 'linked' }}</span>

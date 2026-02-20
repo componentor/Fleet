@@ -1,0 +1,38 @@
+slug: netdata
+name: Netdata
+description: Real-time infrastructure monitoring with per-second granularity. Zero-config auto-detection of metrics.
+icon_url: https://www.netdata.cloud/favicon.ico
+category: monitoring
+
+variables:
+  - name: NETDATA_CLAIM_TOKEN
+    label: Cloud Claim Token (optional)
+    type: string
+    required: false
+  - name: NETDATA_CLAIM_ROOMS
+    label: Cloud Claim Room (optional)
+    type: string
+    required: false
+
+services:
+  - name: netdata
+    image: netdata/netdata:stable
+    ports:
+      - target: 19999
+        published: 19999
+    env:
+      NETDATA_CLAIM_TOKEN: "{{NETDATA_CLAIM_TOKEN}}"
+      NETDATA_CLAIM_ROOMS: "{{NETDATA_CLAIM_ROOMS}}"
+      NETDATA_CLAIM_URL: "https://app.netdata.cloud"
+    volumes:
+      - source: netdata_config
+        target: /etc/netdata
+      - source: netdata_lib
+        target: /var/lib/netdata
+      - source: netdata_cache
+        target: /var/cache/netdata
+
+volumes:
+  - netdata_config
+  - netdata_lib
+  - netdata_cache

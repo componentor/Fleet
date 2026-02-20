@@ -1,0 +1,55 @@
+slug: sonarqube
+name: SonarQube
+description: Code quality and security analysis platform. Detect bugs, vulnerabilities, and code smells. Includes PostgreSQL.
+icon_url: https://www.sonarsource.com/favicon.ico
+category: development
+
+variables:
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: SONAR_JDBC_USERNAME
+    label: Database User
+    type: string
+    default: sonarqube
+  - name: SONAR_JDBC_PASSWORD
+    label: JDBC Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: sonarqube
+    image: sonarqube:lts-community
+    ports:
+      - target: 9000
+        published: 9000
+    env:
+      SONAR_JDBC_URL: "jdbc:postgresql://{{service:sonarqube-db}}:5432/sonarqube"
+      SONAR_JDBC_USERNAME: "{{SONAR_JDBC_USERNAME}}"
+      SONAR_JDBC_PASSWORD: "{{SONAR_JDBC_PASSWORD}}"
+    volumes:
+      - source: sonarqube_data
+        target: /opt/sonarqube/data
+      - source: sonarqube_extensions
+        target: /opt/sonarqube/extensions
+      - source: sonarqube_logs
+        target: /opt/sonarqube/logs
+
+  - name: sonarqube-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: "{{SONAR_JDBC_USERNAME}}"
+      POSTGRES_PASSWORD: "{{SONAR_JDBC_PASSWORD}}"
+      POSTGRES_DB: sonarqube
+    volumes:
+      - source: sonarqube_db_data
+        target: /var/lib/postgresql/data
+
+volumes:
+  - sonarqube_data
+  - sonarqube_extensions
+  - sonarqube_logs
+  - sonarqube_db_data

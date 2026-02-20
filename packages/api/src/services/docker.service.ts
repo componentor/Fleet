@@ -35,6 +35,18 @@ export interface CreateSwarmServiceOptions {
   restartDelay?: string;
 }
 
+export interface ContainerStats {
+  cpuPercent: number;
+  memoryUsageBytes: number;
+  memoryLimitBytes: number;
+  memoryPercent: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
+  pids: number;
+}
+
 export interface ServiceTaskInfo {
   id: string;
   nodeId: string;
@@ -55,6 +67,8 @@ export class DockerService {
     'docker.sock',
     '/var/run',
     '/var/run/',
+    '/var/lib/docker',
+    '/var/lib/docker/',
     '/etc',
     '/etc/',
     '/proc',
@@ -63,6 +77,8 @@ export class DockerService {
     '/sys/',
     '/dev',
     '/dev/',
+    '/root',
+    '/root/',
   ];
 
   private validateVolumeMounts(volumes: CreateSwarmServiceOptions['volumes']): void {
@@ -114,6 +130,8 @@ export class DockerService {
               Type: 'volume' as const,
               ReadOnly: v.readonly ?? false,
               VolumeOptions: driver !== 'local' ? {
+                NoCopy: false,
+                Labels: {},
                 DriverConfig: { Name: driver, Options: driverOpts },
               } : undefined,
             };
@@ -347,6 +365,86 @@ export class DockerService {
 
   async scaleService(dockerServiceId: string, replicas: number): Promise<void> {
     await this.updateService(dockerServiceId, { replicas });
+  }
+
+  /**
+   * Get cumulative network rx/tx bytes for a running container.
+   * Uses Docker stats API with stream=false (one-shot).
+   */
+  async getContainerNetworkBytes(containerId: string): Promise<{ containerId: string; rxBytes: number; txBytes: number } | null> {
+    try {
+      const container = docker.getContainer(containerId);
+      const stats = await container.stats({ stream: false }) as any;
+
+      let rxBytes = 0;
+      let txBytes = 0;
+
+      if (stats.networks) {
+        for (const netStats of Object.values(stats.networks) as any[]) {
+          rxBytes += netStats.rx_bytes ?? 0;
+          txBytes += netStats.tx_bytes ?? 0;
+        }
+      }
+
+      return { containerId, rxBytes, txBytes };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get detailed container stats (CPU, memory, network, disk I/O).
+   * Uses Docker stats API with stream=false (one-shot).
+   */
+  async getContainerStats(containerId: string): Promise<ContainerStats | null> {
+    try {
+      const container = docker.getContainer(containerId);
+      const stats = await container.stats({ stream: false }) as any;
+
+      // CPU percent calculation
+      const cpuDelta = (stats.cpu_stats?.cpu_usage?.total_usage ?? 0) - (stats.precpu_stats?.cpu_usage?.total_usage ?? 0);
+      const systemDelta = (stats.cpu_stats?.system_cpu_usage ?? 0) - (stats.precpu_stats?.system_cpu_usage ?? 0);
+      const numCpus = stats.cpu_stats?.online_cpus ?? stats.cpu_stats?.cpu_usage?.percpu_usage?.length ?? 1;
+      const cpuPercent = systemDelta > 0 ? (cpuDelta / systemDelta) * numCpus * 100 : 0;
+
+      // Memory
+      const memoryUsageBytes = stats.memory_stats?.usage ?? 0;
+      const memoryLimitBytes = stats.memory_stats?.limit ?? 1;
+      const memoryPercent = (memoryUsageBytes / memoryLimitBytes) * 100;
+
+      // Network I/O
+      let networkRxBytes = 0;
+      let networkTxBytes = 0;
+      if (stats.networks) {
+        for (const netStats of Object.values(stats.networks) as any[]) {
+          networkRxBytes += netStats.rx_bytes ?? 0;
+          networkTxBytes += netStats.tx_bytes ?? 0;
+        }
+      }
+
+      // Block I/O
+      let blockReadBytes = 0;
+      let blockWriteBytes = 0;
+      const ioStats = stats.blkio_stats?.io_service_bytes_recursive ?? [];
+      for (const entry of ioStats) {
+        if (entry.op === 'read' || entry.op === 'Read') blockReadBytes += entry.value ?? 0;
+        if (entry.op === 'write' || entry.op === 'Write') blockWriteBytes += entry.value ?? 0;
+      }
+
+      return {
+        cpuPercent: Math.round(cpuPercent * 100) / 100,
+        memoryUsageBytes,
+        memoryLimitBytes,
+        memoryPercent: Math.round(memoryPercent * 100) / 100,
+        networkRxBytes,
+        networkTxBytes,
+        blockReadBytes,
+        blockWriteBytes,
+        pids: stats.pids_stats?.current ?? 0,
+      };
+    } catch {
+      return null;
+    }
   }
 
   // Node management

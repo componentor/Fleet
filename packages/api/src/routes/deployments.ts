@@ -151,6 +151,8 @@ webhookRoutes.post('/github/webhook', async (c) => {
       commitSha,
       status: 'building',
       log: triggerMessage,
+      trigger: 'webhook',
+      startedAt: new Date(),
     });
 
     if (!deployment) continue;
@@ -298,22 +300,40 @@ authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, a
     return c.json({ error: 'Service is already deploying. Wait for the current deployment to finish.' }, 409);
   }
 
+  // Per-account concurrent deployment limit (prevent resource exhaustion)
+  const MAX_CONCURRENT_DEPLOYS = 5;
+  const activeDeploys = await db.query.services.findMany({
+    where: and(
+      eq(services.accountId, accountId),
+      eq(services.status, 'deploying'),
+      isNull(services.deletedAt),
+    ),
+    columns: { id: true },
+  });
+  if (activeDeploys.length >= MAX_CONCURRENT_DEPLOYS) {
+    return c.json({
+      error: `Maximum ${MAX_CONCURRENT_DEPLOYS} concurrent deployments per account. Wait for active deployments to finish.`,
+    }, 429);
+  }
+
   // Create deployment record
   const [deployment] = await insertReturning(deployments, {
     serviceId: svc.id,
     status: 'building',
     log: `Manual deploy triggered by ${user.email}\n`,
+    trigger: 'manual',
+    startedAt: new Date(),
   });
 
   if (!deployment) {
     return c.json({ error: 'Failed to create deployment record' }, 500);
   }
 
-  // Update service status
+  // Update service status (optimistic guard to prevent race conditions)
   await db
     .update(services)
     .set({ status: 'deploying', updatedAt: new Date() })
-    .where(eq(services.id, svc.id));
+    .where(and(eq(services.id, svc.id), eq(services.status, svc.status as string)));
 
   // Queue build pipeline via BullMQ (or run in-process if Valkey unavailable)
   await enqueueOrRunDeployment({
@@ -417,6 +437,36 @@ authenticatedRoutes.post('/:id/rollback', requireMember, async (c) => {
   });
 
   return c.json({ message: 'Rollback succeeded', deploymentId: rollbackDeploy.id });
+});
+
+// PATCH /:id/notes — update deployment notes/annotations
+authenticatedRoutes.patch('/:id/notes', requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  const deploymentId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = (await c.req.json()) as { notes: string };
+  if (typeof body.notes !== 'string' || body.notes.length > 500) {
+    return c.json({ error: 'Notes must be a string (max 500 chars)' }, 400);
+  }
+
+  const deployment = await db.query.deployments.findFirst({
+    where: eq(deployments.id, deploymentId),
+    with: { service: true },
+  });
+
+  if (!deployment || deployment.service.accountId !== accountId) {
+    return c.json({ error: 'Deployment not found' }, 404);
+  }
+
+  await db.update(deployments)
+    .set({ notes: body.notes })
+    .where(eq(deployments.id, deploymentId));
+
+  return c.json({ message: 'Notes updated' });
 });
 
 // GET /:id/logs — get deployment logs

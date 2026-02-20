@@ -1,0 +1,61 @@
+slug: immich
+name: Immich
+description: High-performance self-hosted photo and video management. Google Photos alternative with ML-powered search. Includes PostgreSQL and Redis.
+icon_url: https://immich.app/img/favicon.ico
+category: media
+
+variables:
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: IMMICH_UPLOAD_LOCATION
+    label: Upload Location
+    type: string
+    default: /usr/src/app/upload
+
+services:
+  - name: immich-server
+    image: ghcr.io/immich-app/immich-server:release
+    ports:
+      - target: 2283
+        published: 2283
+    env:
+      DB_HOSTNAME: "{{service:immich-db}}"
+      DB_USERNAME: immich
+      DB_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: "{{service:immich-redis}}"
+    volumes:
+      - source: immich_upload
+        target: /usr/src/app/upload
+
+  - name: immich-machine-learning
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    volumes:
+      - source: immich_ml_cache
+        target: /cache
+
+  - name: immich-db
+    image: tensorchord/pgvecto-rs:pg16-v0.2.0
+    env:
+      POSTGRES_USER: immich
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - source: immich_db_data
+        target: /var/lib/postgresql/data
+
+  - name: immich-redis
+    image: redis:7-alpine
+    volumes:
+      - source: immich_redis_data
+        target: /data
+
+volumes:
+  - immich_upload
+  - immich_ml_cache
+  - immich_db_data
+  - immich_redis_data

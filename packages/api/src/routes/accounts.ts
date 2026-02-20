@@ -702,9 +702,9 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
   const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
   queueEmail({
     templateSlug: 'invite',
-    to: targetUser.email,
+    to: targetUser.email!,
     variables: {
-      userName: targetUser.name ?? targetUser.email,
+      userName: targetUser.name ?? targetUser.email ?? '',
       accountName: account.name ?? account.slug,
       platformName: 'Fleet',
       inviteUrl: `${appUrl}/panel`,
@@ -822,7 +822,7 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
         and(e(ua.userId, targetUserId), e(ua.accountId, account.id)),
     });
 
-    if (targetMembership && (ROLE_LEVELS[targetMembership.role] ?? 0) >= (ROLE_LEVELS[authMembership.role] ?? 0)) {
+    if (targetMembership && (ROLE_LEVELS[targetMembership.role ?? 'member'] ?? 0) >= (ROLE_LEVELS[authMembership.role ?? 'member'] ?? 0)) {
       return c.json({ error: 'Cannot remove a member with a role equal to or higher than your own' }, 403);
     }
   }

@@ -164,7 +164,7 @@ const navLinks = computed<NavLink[]>(() => [
 
         <h1 class="mx-auto max-w-4xl text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white sm:text-6xl lg:text-7xl">
           {{ $t('hero.deployManage') }}
-          <span class="bg-gradient-to-r from-primary-600 dark:from-primary-400 via-primary-500 dark:via-primary-300 to-blue-600 dark:to-blue-400 bg-clip-text text-transparent">
+          <span class="animate-gradient bg-[length:200%_auto] bg-gradient-to-r from-primary-600 via-blue-500 to-primary-600 dark:from-primary-400 dark:via-blue-400 dark:to-primary-400 bg-clip-text text-transparent">
             {{ $t('hero.dockerServices') }}
           </span>
           {{ $t('hero.atScale') }}
@@ -206,12 +206,23 @@ const navLinks = computed<NavLink[]>(() => [
               <div class="h-3 w-3 rounded-full bg-green-500/80"></div>
               <span class="ml-2 text-xs text-surface-500">{{ $t('terminal.title') }}</span>
             </div>
-            <pre class="p-6 font-mono text-sm leading-normal text-left"><span class="text-green-400">$</span> <span class="text-surface-300">{{ $t('terminal.command') }}</span>
-<span class="text-green-400">&#x2713; {{ $t('terminal.success') }}</span>
-<span class="text-white font-bold">  {{ $t('terminal.labelName') }}     </span><span class="text-surface-400">{{ $t('terminal.valueName') }}</span>
-<span class="text-white font-bold">  {{ $t('terminal.labelReplicas') }} </span><span class="text-surface-400">{{ $t('terminal.valueReplicas') }}</span>
-<span class="text-white font-bold">  {{ $t('terminal.labelUrl') }}      </span><span class="text-cyan-400">{{ $t('terminal.valueUrl') }}</span></pre>
+            <div class="p-6 font-mono text-sm leading-normal text-left space-y-0">
+              <div class="terminal-line" style="animation-delay: 0.3s"><span class="text-green-400">$</span> <span class="text-surface-300">{{ $t('terminal.command') }}</span></div>
+              <div class="terminal-line" style="animation-delay: 0.9s"><span class="text-green-400">&#x2713; {{ $t('terminal.success') }}</span></div>
+              <div class="terminal-line" style="animation-delay: 1.5s"><span class="text-white font-bold">  {{ $t('terminal.labelName') }}     </span><span class="text-surface-400">{{ $t('terminal.valueName') }}</span></div>
+              <div class="terminal-line" style="animation-delay: 2.0s"><span class="text-white font-bold">  {{ $t('terminal.labelReplicas') }} </span><span class="text-surface-400">{{ $t('terminal.valueReplicas') }}</span></div>
+              <div class="terminal-line cursor-blink" style="animation-delay: 2.5s"><span class="text-white font-bold">  {{ $t('terminal.labelUrl') }}      </span><span class="text-cyan-400">{{ $t('terminal.valueUrl') }}</span></div>
+            </div>
           </div>
+        </div>
+
+        <!-- Scroll indicator -->
+        <div class="mt-10 flex justify-center">
+          <a href="#features" class="animate-bounce text-surface-400 dark:text-surface-500 hover:text-primary-500 transition-colors">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+          </a>
         </div>
       </div>
     </section>
@@ -233,7 +244,7 @@ const navLinks = computed<NavLink[]>(() => [
           <div
             v-for="(feature, index) in features"
             :key="feature.id"
-            class="fade-in group relative overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/50 p-6 transition-all duration-300 hover:border-primary-500/30 hover:bg-surface-50 dark:hover:bg-surface-850"
+            class="fade-in group relative overflow-hidden rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/50 p-6 transition-all duration-300 hover:border-primary-500/30 hover:bg-surface-50 dark:hover:bg-surface-850 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary-500/5"
             :style="{ transitionDelay: `${index * 50}ms` }"
           >
             <!-- Hover glow -->
@@ -275,10 +286,10 @@ const navLinks = computed<NavLink[]>(() => [
             v-for="plan in plans"
             :key="plan.id"
             :class="[
-              'fade-in relative overflow-hidden rounded-2xl border p-8 transition-all duration-300',
+              'fade-in relative overflow-hidden rounded-2xl border p-8 transition-all duration-300 hover:-translate-y-1',
               plan.highlighted
-                ? 'border-primary-500/50 bg-white dark:bg-surface-900 shadow-xl shadow-primary-500/10'
-                : 'border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/50 hover:border-surface-300 dark:hover:border-surface-700',
+                ? 'border-primary-500/50 bg-white dark:bg-surface-900 shadow-xl shadow-primary-500/10 hover:shadow-2xl hover:shadow-primary-500/20'
+                : 'border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/50 hover:border-surface-300 dark:hover:border-surface-700 hover:shadow-lg',
             ]"
           >
             <!-- Popular badge -->

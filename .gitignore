@@ -23,6 +23,9 @@ pnpm-debug.log*
 # Docker
 docker/data/
 
+# API runtime data (keys, uploads)
+packages/api/data/
+
 # Coverage
 coverage/
 

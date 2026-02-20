@@ -292,7 +292,7 @@ auth.post('/login', authRateLimit, async (c) => {
     description: `User logged in`,
     resourceType: 'user',
     resourceId: user.id,
-    resourceName: user.email,
+    resourceName: user.email ?? undefined,
   });
 
   return c.json({

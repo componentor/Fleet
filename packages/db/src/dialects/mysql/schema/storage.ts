@@ -31,8 +31,8 @@ export const storageClustersRelations = relations(storageClusters, ({ many }) =>
 
 export const storageNodes = mysqlTable('storage_nodes', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  clusterId: varchar('cluster_id', { length: 36 }).references(() => storageClusters.id),
-  nodeId: varchar('node_id', { length: 36 }).references(() => nodes.id),
+  clusterId: varchar('cluster_id', { length: 36 }).references(() => storageClusters.id, { onDelete: 'cascade' }),
+  nodeId: varchar('node_id', { length: 36 }).references(() => nodes.id, { onDelete: 'set null' }),
   hostname: varchar('hostname', { length: 255 }).notNull(),
   ipAddress: varchar('ip_address', { length: 255 }).notNull(),
   role: varchar('role', { length: 255 }).default('storage').notNull(),
@@ -60,7 +60,7 @@ export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
 
 export const storageVolumes = mysqlTable('storage_volumes', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id).notNull(),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   displayName: varchar('display_name', { length: 255 }),
   sizeGb: int('size_gb').notNull(),

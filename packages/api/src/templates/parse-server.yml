@@ -1,0 +1,68 @@
+slug: parse-server
+name: Parse Server
+description: Open-source backend framework with dashboard, REST & GraphQL APIs, and push notifications.
+icon_url: https://parseplatform.org/img/logo.svg
+category: cms
+
+variables:
+  - name: PARSE_APP_ID
+    label: Application ID
+    type: string
+    default: myAppId
+  - name: PARSE_MASTER_KEY
+    label: Master Key
+    type: password
+    required: true
+    generate: true
+  - name: MONGO_INITDB_ROOT_PASSWORD
+    label: MongoDB Root Password
+    type: password
+    required: true
+    generate: true
+  - name: PARSE_DOMAIN
+    label: Domain
+    type: string
+    required: false
+    default: localhost
+
+services:
+  - name: parse-server
+    image: parseplatform/parse-server:7.3
+    ports:
+      - target: 1337
+        published: 1337
+    env:
+      PARSE_SERVER_APPLICATION_ID: "{{PARSE_APP_ID}}"
+      PARSE_SERVER_MASTER_KEY: "{{PARSE_MASTER_KEY}}"
+      PARSE_SERVER_DATABASE_URI: "mongodb://root:{{MONGO_INITDB_ROOT_PASSWORD}}@{{service:parse-db}}:27017/parse?authSource=admin"
+      PARSE_SERVER_URL: "http://localhost:1337/parse"
+      PARSE_SERVER_MOUNT_PATH: "/parse"
+    volumes:
+      - source: parse_files
+        target: /parse-server/files
+    domain: "{{PARSE_DOMAIN}}"
+
+  - name: parse-dashboard
+    image: parseplatform/parse-dashboard:6.0
+    ports:
+      - target: 4040
+        published: 4040
+    env:
+      PARSE_DASHBOARD_SERVER_URL: "http://{{service:parse-server}}:1337/parse"
+      PARSE_DASHBOARD_APP_ID: "{{PARSE_APP_ID}}"
+      PARSE_DASHBOARD_MASTER_KEY: "{{PARSE_MASTER_KEY}}"
+      PARSE_DASHBOARD_APP_NAME: "Parse Server"
+      PARSE_DASHBOARD_ALLOW_INSECURE_HTTP: "true"
+
+  - name: parse-db
+    image: mongo:7.0
+    env:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: "{{MONGO_INITDB_ROOT_PASSWORD}}"
+    volumes:
+      - source: parse_db
+        target: /data/db
+
+volumes:
+  - parse_files
+  - parse_db

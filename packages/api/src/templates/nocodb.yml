@@ -1,0 +1,44 @@
+slug: nocodb
+name: NocoDB
+description: Open-source Airtable alternative. Turn any database into a smart spreadsheet. Includes PostgreSQL.
+icon_url: https://nocodb.com/favicon.ico
+category: productivity
+
+variables:
+  - name: NC_AUTH_JWT_SECRET
+    label: JWT Secret
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: nocodb
+    image: nocodb/nocodb:latest
+    ports:
+      - target: 8080
+        published: 8080
+    env:
+      NC_DB: "pg://{{service:nocodb-db}}:5432?u=nocodb&p={{POSTGRES_PASSWORD}}&d=nocodb"
+      NC_AUTH_JWT_SECRET: "{{NC_AUTH_JWT_SECRET}}"
+    volumes:
+      - source: nocodb_data
+        target: /usr/app/data
+
+  - name: nocodb-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: nocodb
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: nocodb
+    volumes:
+      - source: nocodb_db_data
+        target: /var/lib/postgresql/data
+
+volumes:
+  - nocodb_data
+  - nocodb_db_data

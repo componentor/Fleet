@@ -12,6 +12,9 @@ import { buildService } from '../services/build.service.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { uploadService } from '../services/upload.service.js';
+import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
+import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 
 // Images that need writable filesystem and default user (not UID 1000)
 const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
@@ -125,7 +128,10 @@ serviceRoutes.get('/', cache(30), async (c) => {
 
         if (newStatus) {
           updateFields['status'] = newStatus;
-          await db.update(services).set(updateFields).where(eq(services.id, svc.id));
+          // Optimistic guard: only update if status hasn't changed since we read it
+          await db.update(services).set(updateFields).where(
+            and(eq(services.id, svc.id), eq(services.status, svc.status as string)),
+          );
           // Update in-memory result so the response reflects the corrected status
           (svc as any).status = newStatus;
           if (updateFields['dockerServiceId'] === null) (svc as any).dockerServiceId = null;
@@ -173,6 +179,7 @@ const createServiceSchema = z.object({
   autoDeploy: z.boolean().default(false),
   sourceType: z.enum(['docker', 'github', 'upload', 'marketplace']).nullable().optional(),
   sourcePath: z.string().nullable().optional(),
+  tags: z.array(z.string().max(50)).max(20).default([]),
 });
 
 serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('write'), async (c) => {
@@ -249,6 +256,7 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
     autoDeploy: data.autoDeploy,
     sourceType: data.sourceType ?? (data.githubRepo ? 'github' : 'docker'),
     sourcePath: data.sourcePath ?? null,
+    tags: data.tags,
     status: 'deploying',
   });
 
@@ -414,6 +422,70 @@ serviceRoutes.get('/:id', async (c) => {
   return c.json({ ...svc, dockerStatus });
 });
 
+// GET /:id/stats — live container resource stats
+serviceRoutes.get('/:id/stats', async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('id');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+
+  if (!svc) {
+    return c.json({ error: 'Service not found' }, 404);
+  }
+
+  if (!svc.dockerServiceId) {
+    return c.json({ error: 'Service has no Docker deployment' }, 400);
+  }
+
+  try {
+    const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+    const runningTasks = tasks.filter((t) => t.status === 'running');
+
+    // Fetch stats for all running containers in parallel (limit concurrency)
+    const containerStats: Array<{ containerId: string; stats: import('../services/docker.service.js').ContainerStats | null }> = [];
+    const CONCURRENCY = 10;
+    for (let i = 0; i < runningTasks.length; i += CONCURRENCY) {
+      const batch = runningTasks.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async (t) => {
+          const containerId = t.containerStatus?.containerId;
+          if (!containerId) return { containerId: '', stats: null };
+          const stats = await dockerService.getContainerStats(containerId);
+          return { containerId, stats };
+        }),
+      );
+      containerStats.push(...results);
+    }
+
+    // Uptime: time since last successful deployment
+    const lastDeploy = await db.query.deployments.findFirst({
+      where: and(eq(deployments.serviceId, serviceId), eq(deployments.status, 'succeeded')),
+      orderBy: (d, { desc }) => desc(d.createdAt),
+    });
+
+    return c.json({
+      containers: containerStats.filter((s) => s.stats).map((s) => ({
+        containerId: s.containerId,
+        ...s.stats,
+      })),
+      uptimeSince: lastDeploy?.createdAt ?? svc.createdAt,
+      taskCount: {
+        running: runningTasks.length,
+        total: tasks.length,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to fetch service stats');
+    return c.json({ error: 'Failed to fetch service stats' }, 500);
+  }
+});
+
 // PATCH /:id — update service
 const updateServiceSchema = z.object({
   name: z.string().min(1).max(255).optional(),
@@ -443,6 +515,7 @@ const updateServiceSchema = z.object({
   restartDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
   autoDeploy: z.boolean().optional(),
   githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
 });
 
 /**
@@ -522,6 +595,21 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
   }
 
   const data = parsed.data;
+
+  // Enforce per-account total replica quota when scaling
+  if (data.replicas !== undefined && data.replicas > (svc.replicas ?? 1)) {
+    const MAX_TOTAL_REPLICAS = parseInt(process.env['MAX_TOTAL_REPLICAS_PER_ACCOUNT'] ?? '200', 10);
+    const allServices = await db.query.services.findMany({
+      where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
+      columns: { id: true, replicas: true },
+    });
+    const currentTotal = allServices.reduce((sum, s) => sum + (s.id === serviceId ? 0 : (s.replicas ?? 1)), 0);
+    if (currentTotal + data.replicas > MAX_TOTAL_REPLICAS) {
+      return c.json({
+        error: `Total replica limit (${MAX_TOTAL_REPLICAS}) would be exceeded. Current: ${currentTotal}, requested: ${data.replicas}.`,
+      }, 429);
+    }
+  }
 
   // Handle auto-deploy webhook management
   const autoDeployChanged = data.autoDeploy !== undefined && data.autoDeploy !== (svc.autoDeploy ?? false);
@@ -769,7 +857,62 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
     return c.json({ error: 'Service is already deploying. Wait for the current deployment to finish.' }, 409);
   }
 
-  // Create deployment record
+  // Upload-based services need a full rebuild through the deployment worker
+  if (svc.sourceType === 'upload' && svc.sourcePath) {
+    const detection = await uploadService.detectProjectFiles(svc.sourcePath, svc.dockerfile ? undefined : undefined);
+    const buildMethod = svc.dockerfile ? 'dockerfile' : detection.buildMethod;
+    const buildFile = svc.dockerfile ? 'Dockerfile' : (detection.buildFile ?? undefined);
+
+    if (buildMethod === 'none') {
+      // Revert the status lock
+      await db.update(services).set({ status: svc.status ?? 'stopped', updatedAt: new Date() }).where(eq(services.id, serviceId));
+      return c.json({ error: 'No Dockerfile or docker-compose file found. Add one via the Files tab first.' }, 400);
+    }
+
+    const [deployment] = await insertReturning(deployments, {
+      serviceId,
+      status: 'building',
+    });
+
+    const jobData: DeploymentJobData = {
+      deploymentId: deployment!.id,
+      serviceId,
+      accountId,
+      commitSha: null,
+      sourceType: 'upload',
+      sourcePath: svc.sourcePath,
+      buildMethod,
+      buildFile,
+    };
+
+    if (isQueueAvailable()) {
+      try {
+        await getDeploymentQueue().add('build-and-deploy', jobData, {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 5000 },
+        });
+      } catch {
+        processDeploymentInline(jobData).catch((err) => {
+          logger.error({ err }, 'Inline redeploy rebuild failed');
+        });
+      }
+    } else {
+      processDeploymentInline(jobData).catch((err) => {
+        logger.error({ err }, 'Inline redeploy rebuild failed');
+      });
+    }
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.SERVICE_REDEPLOYED,
+      description: `Rebuild triggered for upload service '${svc.name}'`,
+      resourceId: serviceId,
+      resourceName: svc.name,
+    });
+    return c.json({ message: 'Rebuild initiated', deploymentId: deployment?.id });
+  }
+
+  // For image-based / GitHub services — re-pull the existing image
   const [deployment] = await insertReturning(deployments, {
     serviceId,
     status: 'deploying',
@@ -951,13 +1094,17 @@ serviceRoutes.post('/:id/cancel-deploy', requireMember, requireScope('write'), a
     return c.json({ error: 'Service not found' }, 404);
   }
 
-  if (svc.status !== 'deploying') {
+  if (svc.status !== 'deploying' && svc.status !== 'building') {
     return c.json({ error: 'Service is not currently deploying' }, 400);
   }
 
-  // Find the active deployment and cancel its build
+  // Find the active deployment and cancel its build (building or deploying)
   const activeDeployment = await db.query.deployments.findFirst({
-    where: and(eq(deployments.serviceId, serviceId), eq(deployments.status, 'building')),
+    where: and(
+      eq(deployments.serviceId, serviceId),
+      not(eq(deployments.status, 'succeeded')),
+      not(eq(deployments.status, 'failed')),
+    ),
     orderBy: desc(deployments.createdAt),
   });
 
@@ -1426,6 +1573,137 @@ serviceRoutes.get('/stack/:stackId/status', async (c) => {
       dockerServiceId: s.dockerServiceId,
     })),
   });
+});
+
+// GET /:serviceId/dockerfile — get Dockerfile content
+serviceRoutes.get('/:serviceId/dockerfile', async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  // 1. Check DB-stored Dockerfile (auto-generated or user-edited)
+  if (svc.dockerfile) {
+    return c.json({ content: svc.dockerfile, source: 'generated', runtime: null });
+  }
+
+  // 2. For upload services, try to read Dockerfile from source directory
+  if (svc.sourceType === 'upload' && svc.sourcePath) {
+    try {
+      const { uploadService } = await import('../services/upload.service.js');
+      const result = await uploadService.readFile(svc.sourcePath, 'Dockerfile');
+      return c.json({ content: result.content, source: 'file', runtime: null });
+    } catch {
+      // No Dockerfile on disk
+    }
+  }
+
+  return c.json({ content: null, source: 'none', runtime: null });
+});
+
+// POST /preview — dry-run deployment preview (no actual deployment)
+serviceRoutes.post('/preview', requireMember, async (c) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const body = await c.req.json();
+  const parsed = createServiceSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`) }, 400);
+  }
+
+  const data = parsed.data;
+  const warnings: string[] = [];
+
+  // Check service quota
+  const SERVICE_QUOTA = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
+  const existingCount = await db.query.services.findMany({
+    where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
+    columns: { id: true },
+  });
+  if (existingCount.length >= SERVICE_QUOTA) {
+    warnings.push(`Service limit reached (${SERVICE_QUOTA}). Deployment will fail.`);
+  }
+
+  // Check port collisions
+  if (data.ports.some((p) => p.published)) {
+    const publishedPorts = data.ports.filter((p) => p.published).map((p) => p.published!);
+    const otherServices = await db.query.services.findMany({
+      where: and(not(eq(services.accountId, accountId)), isNull(services.deletedAt)),
+      columns: { id: true, ports: true },
+    });
+    for (const existing of otherServices) {
+      const existingPorts = (existing.ports as any[])?.map((p: any) => p.published).filter(Boolean) ?? [];
+      for (const port of publishedPorts) {
+        if (existingPorts.includes(port)) {
+          warnings.push(`Port ${port} is already in use by another service`);
+        }
+      }
+    }
+  }
+
+  const traefikLabels = buildTraefikLabels(data.name, data.domain ?? null, data.sslEnabled);
+
+  return c.json({
+    preview: {
+      name: data.name,
+      image: data.image,
+      replicas: data.replicas,
+      ports: data.ports,
+      volumes: data.volumes,
+      domain: data.domain ?? null,
+      sslEnabled: data.sslEnabled,
+      envCount: Object.keys(data.env).length,
+      traefikEnabled: traefikLabels['traefik.enable'] === 'true',
+      sourceType: data.sourceType ?? (data.githubRepo ? 'github' : 'docker'),
+    },
+    warnings,
+    valid: warnings.length === 0,
+  });
+});
+
+// PUT /:serviceId/dockerfile — update Dockerfile content
+serviceRoutes.put('/:serviceId/dockerfile', requireMember, requireScope('write'), async (c) => {
+  const accountId = c.get('accountId');
+  const serviceId = c.req.param('serviceId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  const body = (await c.req.json()) as { content: string };
+  if (!body.content || typeof body.content !== 'string') {
+    return c.json({ error: 'Dockerfile content is required' }, 400);
+  }
+
+  // Limit Dockerfile size
+  if (body.content.length > 100_000) {
+    return c.json({ error: 'Dockerfile content too large (max 100KB)' }, 400);
+  }
+
+  // Save to DB
+  await db.update(services)
+    .set({ dockerfile: body.content, updatedAt: new Date() })
+    .where(eq(services.id, serviceId));
+
+  // Also write to disk for upload services
+  if (svc.sourceType === 'upload' && svc.sourcePath) {
+    try {
+      const { uploadService } = await import('../services/upload.service.js');
+      await uploadService.writeFile(svc.sourcePath, 'Dockerfile', body.content);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to write Dockerfile to source directory');
+    }
+  }
+
+  return c.json({ message: 'Dockerfile updated' });
 });
 
 export default serviceRoutes;

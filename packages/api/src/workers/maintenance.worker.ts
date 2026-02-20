@@ -350,14 +350,30 @@ async function enforceBillingGracePeriod(): Promise<void> {
       : sub.updatedAt ? new Date(sub.updatedAt) : null;
     if (!pastDueDate || pastDueDate > graceCutoff) continue;
 
-    // Suspend the account
+    // Suspend the account and stop all running services
     try {
       await db.update(accounts).set({
         status: 'suspended',
         updatedAt: new Date(),
       }).where(eq(accounts.id, sub.accountId));
 
-      logger.info({ accountId: sub.accountId, subscriptionId: sub.id },
+      // Stop all running Docker services for this account
+      const accountServices = await db.query.services.findMany({
+        where: and(eq(services.accountId, sub.accountId), isNull(services.deletedAt), isNotNull(services.dockerServiceId)),
+        columns: { id: true, name: true, dockerServiceId: true },
+      });
+      for (const svc of accountServices) {
+        try {
+          if (svc.dockerServiceId) {
+            await dockerService.scaleService(svc.dockerServiceId, 0);
+            await db.update(services).set({ status: 'suspended', updatedAt: new Date() }).where(eq(services.id, svc.id));
+          }
+        } catch (svcErr) {
+          logger.error({ err: svcErr, serviceId: svc.id }, 'Failed to suspend service for billing');
+        }
+      }
+
+      logger.info({ accountId: sub.accountId, subscriptionId: sub.id, servicesSuspended: accountServices.length },
         'Account suspended due to billing grace period expiry');
     } catch (err) {
       logger.error({ err, accountId: sub.accountId },
@@ -371,7 +387,7 @@ async function executeDatabaseBackup(): Promise<void> {
   const backupDir = process.env['DB_BACKUP_DIR'] ?? '/var/fleet/backups/database';
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const { spawn } = await import('node:child_process');
-  const { mkdir, createWriteStream } = await import('node:fs/promises');
+  const { mkdir } = await import('node:fs/promises');
   const { createWriteStream: fsCreateWriteStream } = await import('node:fs');
   const { pipeline } = await import('node:stream/promises');
 

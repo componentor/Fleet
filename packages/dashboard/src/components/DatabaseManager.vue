@@ -79,6 +79,7 @@ const importFileInput = ref<HTMLInputElement | null>(null)
 
 const dataTotalPages = computed(() => Math.max(1, Math.ceil(dataTotalRows.value / dataPageSize.value)))
 const dbParams = computed(() => selectedDb.value ? `?db=${encodeURIComponent(selectedDb.value)}` : '')
+const isMongo = computed(() => dbInfo.value?.engine === 'mongo')
 
 async function fetchInfo() {
   loading.value = true
@@ -154,10 +155,14 @@ async function fetchTableData() {
   }
   // Ensure we have PK info for editing
   if (primaryKeyColumns.value.length === 0) {
-    try {
-      const data = await api.get<{ columns: { name: string; isPrimaryKey: boolean }[] }>(`/database/${props.serviceId}/tables/${selectedTable.value}/columns${dbParams.value}`)
-      primaryKeyColumns.value = (data.columns ?? []).filter(c => c.isPrimaryKey).map(c => c.name)
-    } catch { /* best effort */ }
+    if (isMongo.value) {
+      primaryKeyColumns.value = ['_id']
+    } else {
+      try {
+        const data = await api.get<{ columns: { name: string; isPrimaryKey: boolean }[] }>(`/database/${props.serviceId}/tables/${selectedTable.value}/columns${dbParams.value}`)
+        primaryKeyColumns.value = (data.columns ?? []).filter(c => c.isPrimaryKey).map(c => c.name)
+      } catch { /* best effort */ }
+    }
   }
 }
 
@@ -327,7 +332,11 @@ async function deleteRow(rowIndex: number) {
 
 function openCreateTableForm() {
   newTableName.value = ''
-  newTableColumns.value = [{ name: 'id', type: 'SERIAL', nullable: false, defaultValue: '', primaryKey: true }]
+  if (isMongo.value) {
+    newTableColumns.value = []
+  } else {
+    newTableColumns.value = [{ name: 'id', type: 'SERIAL', nullable: false, defaultValue: '', primaryKey: true }]
+  }
   showCreateTableForm.value = true
 }
 
@@ -340,19 +349,23 @@ function removeColumnDef(index: number) {
 }
 
 async function createTable() {
-  if (!newTableName.value.trim() || newTableColumns.value.length === 0) return
+  if (!newTableName.value.trim()) return
+  if (!isMongo.value && newTableColumns.value.length === 0) return
   createTableLoading.value = true
   try {
-    await api.post(`/database/${props.serviceId}/tables${dbParams.value}`, {
-      name: newTableName.value,
-      columns: newTableColumns.value.map(c => ({
+    const body: any = { name: newTableName.value }
+    if (isMongo.value) {
+      body.columns = []
+    } else {
+      body.columns = newTableColumns.value.map(c => ({
         name: c.name,
         type: c.type,
         nullable: c.nullable,
         defaultValue: c.defaultValue || undefined,
         primaryKey: c.primaryKey,
-      })),
-    })
+      }))
+    }
+    await api.post(`/database/${props.serviceId}/tables${dbParams.value}`, body)
     showCreateTableForm.value = false
     toast.success('Table created')
     await fetchTables()
@@ -365,11 +378,12 @@ async function createTable() {
 // ---- Drop table ----
 
 async function dropTable(tableName: string) {
-  if (!confirm(`Drop table "${tableName}"? This cannot be undone and all data will be lost.`)) return
+  const label = isMongo.value ? 'collection' : 'table'
+  if (!confirm(`Drop ${label} "${tableName}"? This cannot be undone and all data will be lost.`)) return
   dropTableLoading.value = true
   try {
     await api.del(`/database/${props.serviceId}/tables/${tableName}${dbParams.value}`)
-    toast.success(`Table "${tableName}" dropped`)
+    toast.success(`${isMongo.value ? 'Collection' : 'Table'} "${tableName}" dropped`)
     if (selectedTable.value === tableName) selectedTable.value = ''
     await fetchTables()
   } catch { /* error shown by useApi */ } finally {
@@ -399,6 +413,9 @@ function copyToClipboard(text: string) {
 function getConnectionString(): string {
   if (!credentials.value) return ''
   const c = credentials.value
+  if (c.engine === 'mongo') {
+    return `mongodb://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}?authSource=admin`
+  }
   if (c.engine === 'postgres') {
     return `postgresql://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}`
   }
@@ -408,6 +425,9 @@ function getConnectionString(): string {
 function getCliCommand(): string {
   if (!credentials.value) return ''
   const c = credentials.value
+  if (c.engine === 'mongo') {
+    return `mongosh "mongodb://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}?authSource=admin"`
+  }
   if (c.engine === 'postgres') {
     return `psql -h <YOUR_HOST> -p ${c.port} -U ${c.user} -d ${c.database}`
   }
@@ -519,7 +539,7 @@ watch(() => props.serviceId, () => {
             <Upload v-else class="w-3.5 h-3.5" />
             Import
           </button>
-          <input ref="importFileInput" type="file" accept=".sql,.gz,.dump" class="hidden" @change="handleImportFile" />
+          <input ref="importFileInput" type="file" :accept="isMongo ? '.archive,.bson,.gz' : '.sql,.gz,.dump'" class="hidden" @change="handleImportFile" />
           <button @click="toggleConnectionGuide" :class="['flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors', showConnectionGuide ? 'border-primary-300 dark:border-primary-600 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-750']" title="Connection guide">
             <KeyRound class="w-3.5 h-3.5" />
             Connect
@@ -631,7 +651,7 @@ watch(() => props.serviceId, () => {
         <div class="w-56 shrink-0">
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
             <div class="px-3 py-2.5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tables</span>
+              <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ isMongo ? 'Collections' : 'Tables' }}</span>
               <button @click="openCreateTableForm" class="p-1 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors" title="Create table">
                 <Plus class="w-3.5 h-3.5" />
               </button>
@@ -640,7 +660,7 @@ watch(() => props.serviceId, () => {
               <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
             </div>
             <div v-else-if="tables.length === 0" class="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
-              No tables found.
+              {{ isMongo ? 'No collections found.' : 'No tables found.' }}
             </div>
             <div v-else class="max-h-[500px] overflow-y-auto">
               <button
@@ -675,7 +695,7 @@ watch(() => props.serviceId, () => {
           <!-- No table selected -->
           <div v-if="!selectedTable && activeView !== 'query'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
             <Table2 class="w-8 h-8 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
-            <p class="text-gray-500 dark:text-gray-400 text-sm">Select a table to view its data.</p>
+            <p class="text-gray-500 dark:text-gray-400 text-sm">{{ isMongo ? 'Select a collection to view its data.' : 'Select a table to view its data.' }}</p>
           </div>
 
           <!-- Data view -->
@@ -683,7 +703,7 @@ watch(() => props.serviceId, () => {
             <!-- Data toolbar -->
             <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
               <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ primaryKeyColumns.length > 0 ? 'Double-click a cell to edit' : 'No primary key — editing disabled' }}
+                {{ isMongo ? 'Double-click a cell to edit (documents)' : primaryKeyColumns.length > 0 ? 'Double-click a cell to edit' : 'No primary key — editing disabled' }}
               </span>
               <button @click="openAddRowForm" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors">
                 <Plus class="w-3.5 h-3.5" /> Add Row
@@ -852,7 +872,7 @@ watch(() => props.serviceId, () => {
           <div v-if="activeView === 'query'" class="space-y-4">
             <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
               <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">SQL Query</span>
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ isMongo ? 'MongoDB Shell' : 'SQL Query' }}</span>
                 <div class="flex items-center gap-3">
                   <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                     <input v-model="queryReadOnly" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
@@ -868,7 +888,7 @@ watch(() => props.serviceId, () => {
               <textarea
                 v-model="queryText"
                 @keydown="handleQueryKeydown"
-                placeholder="SELECT * FROM users LIMIT 10;"
+                :placeholder="isMongo ? 'return db.users.find({}).limit(10).toArray()' : 'SELECT * FROM users LIMIT 10;'"
                 class="w-full h-32 px-4 py-3 bg-gray-50 dark:bg-gray-900/50 text-gray-900 dark:text-white font-mono text-sm resize-y focus:outline-none placeholder-gray-400 dark:placeholder-gray-600"
               />
               <div class="px-4 py-2 border-t border-gray-200 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-600">
@@ -907,15 +927,15 @@ watch(() => props.serviceId, () => {
     <div v-if="showCreateTableForm" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showCreateTableForm = false">
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <span class="text-lg font-semibold text-gray-900 dark:text-white">Create Table</span>
+          <span class="text-lg font-semibold text-gray-900 dark:text-white">{{ isMongo ? 'Create Collection' : 'Create Table' }}</span>
           <button @click="showCreateTableForm = false" class="p-1 text-gray-400 hover:text-gray-600"><X class="w-5 h-5" /></button>
         </div>
         <div class="px-6 py-4 space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Table Name</label>
-            <input v-model="newTableName" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="my_table" />
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ isMongo ? 'Collection Name' : 'Table Name' }}</label>
+            <input v-model="newTableName" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" :placeholder="isMongo ? 'my_collection' : 'my_table'" />
           </div>
-          <div>
+          <div v-if="!isMongo">
             <div class="flex items-center justify-between mb-2">
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Columns</label>
               <button @click="addColumnDef" class="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700"><Plus class="w-3.5 h-3.5" /> Add Column</button>
@@ -936,12 +956,13 @@ watch(() => props.serviceId, () => {
               </div>
             </div>
           </div>
+          <p v-else class="text-sm text-gray-500 dark:text-gray-400">MongoDB collections are schema-less. Documents can have any structure.</p>
         </div>
         <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
           <button @click="showCreateTableForm = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800">Cancel</button>
-          <button @click="createTable" :disabled="createTableLoading || !newTableName.trim() || newTableColumns.length === 0" class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+          <button @click="createTable" :disabled="createTableLoading || !newTableName.trim() || (!isMongo && newTableColumns.length === 0)" class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
             <Loader2 v-if="createTableLoading" class="w-4 h-4 animate-spin inline mr-1" />
-            Create Table
+            {{ isMongo ? 'Create Collection' : 'Create Table' }}
           </button>
         </div>
       </div>

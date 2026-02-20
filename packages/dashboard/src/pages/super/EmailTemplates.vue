@@ -241,9 +241,14 @@ onMounted(() => {
                 />
               </div>
 
-              <!-- Preview -->
-              <div v-else class="border border-gray-200 dark:border-gray-600 rounded-lg p-4 bg-white dark:bg-gray-900 min-h-[200px]">
-                <div v-html="renderPreview()" />
+              <!-- Preview (sandboxed iframe to prevent XSS from template HTML) -->
+              <div v-else class="border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 min-h-[200px]">
+                <iframe
+                  :srcdoc="renderPreview()"
+                  sandbox=""
+                  class="w-full min-h-[200px] border-0"
+                  style="background: white;"
+                />
               </div>
 
               <!-- Actions -->

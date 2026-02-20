@@ -1,0 +1,75 @@
+slug: authentik
+name: Authentik
+description: Flexible identity provider with support for OAuth2, SAML, LDAP, and SCIM. Modern authentication for all apps. Includes PostgreSQL and Redis.
+icon_url: https://goauthentik.io/img/icon.png
+category: auth
+
+variables:
+  - name: AUTHENTIK_SECRET_KEY
+    label: Secret Key
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: authentik-server
+    image: ghcr.io/goauthentik/server:2024.12
+    command: server
+    ports:
+      - target: 9000
+        published: 9000
+    env:
+      AUTHENTIK_SECRET_KEY: "{{AUTHENTIK_SECRET_KEY}}"
+      AUTHENTIK_REDIS__HOST: "{{service:authentik-redis}}"
+      AUTHENTIK_POSTGRESQL__HOST: "{{service:authentik-db}}"
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: "{{POSTGRES_PASSWORD}}"
+    volumes:
+      - source: authentik_media
+        target: /media
+      - source: authentik_templates
+        target: /templates
+
+  - name: authentik-worker
+    image: ghcr.io/goauthentik/server:2024.12
+    command: worker
+    env:
+      AUTHENTIK_SECRET_KEY: "{{AUTHENTIK_SECRET_KEY}}"
+      AUTHENTIK_REDIS__HOST: "{{service:authentik-redis}}"
+      AUTHENTIK_POSTGRESQL__HOST: "{{service:authentik-db}}"
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: "{{POSTGRES_PASSWORD}}"
+    volumes:
+      - source: authentik_media
+        target: /media
+      - source: authentik_templates
+        target: /templates
+
+  - name: authentik-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: authentik
+    volumes:
+      - source: authentik_db_data
+        target: /var/lib/postgresql/data
+
+  - name: authentik-redis
+    image: redis:7-alpine
+    volumes:
+      - source: authentik_redis_data
+        target: /data
+
+volumes:
+  - authentik_media
+  - authentik_templates
+  - authentik_db_data
+  - authentik_redis_data

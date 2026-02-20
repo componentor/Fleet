@@ -86,6 +86,20 @@ const canProceed = computed(() => {
   return true
 })
 
+// ── One-click deploy for simple templates ──
+const isSimpleTemplate = computed(() => {
+  if (!template.value) return false
+  const vars = template.value.variables ?? []
+  // Simple = all variables are either auto-generated or have defaults
+  return vars.every((v: any) => v.generate || (v.default !== undefined && v.default !== '') || v.required === false)
+})
+
+async function quickDeploy() {
+  // Skip straight to deploy with default/generated config
+  currentStep.value = 4
+  await executeDeploy()
+}
+
 // ── Cost estimate ──
 const estimatedMonthlyCost = computed(() => {
   if (!pricingConfig.value) return null
@@ -469,6 +483,28 @@ onUnmounted(() => {
                 <p class="text-xs text-blue-700 dark:text-blue-300">
                   All {{ serviceDefinitions.length }} services will be deployed on a shared network and can communicate with each other automatically. Credentials and connection details are pre-configured.
                 </p>
+              </div>
+            </div>
+
+            <!-- Quick deploy for simple templates -->
+            <div v-if="isSimpleTemplate" class="mt-5 p-4 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex items-start gap-2">
+                  <CheckCircle2 class="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p class="text-sm font-medium text-green-800 dark:text-green-200">Ready for one-click deploy</p>
+                    <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">This template has no required configuration. All secrets are auto-generated.</p>
+                  </div>
+                </div>
+                <button
+                  @click="quickDeploy"
+                  :disabled="deploying"
+                  class="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition-all hover:shadow-lg active:scale-[0.98]"
+                >
+                  <Loader2 v-if="deploying" class="w-4 h-4 animate-spin" />
+                  <Rocket v-else class="w-4 h-4" />
+                  {{ deploying ? 'Deploying...' : 'Quick Deploy' }}
+                </button>
               </div>
             </div>
           </div>

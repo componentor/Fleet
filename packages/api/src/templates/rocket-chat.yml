@@ -1,0 +1,63 @@
+slug: rocket-chat
+name: Rocket.Chat
+description: Open-source team communication platform with channels, direct messaging, and video calls.
+icon_url: https://rocket.chat/images/default/favicon.svg
+category: cms
+
+variables:
+  - name: ROOT_URL
+    label: Site URL
+    type: string
+    required: true
+    default: http://localhost:3000
+  - name: MONGO_INITDB_ROOT_PASSWORD
+    label: MongoDB Root Password
+    type: password
+    required: true
+    generate: true
+  - name: ADMIN_USERNAME
+    label: Admin Username
+    type: string
+    default: admin
+  - name: ADMIN_PASS
+    label: Admin Password
+    type: password
+    required: true
+    generate: true
+  - name: ADMIN_EMAIL
+    label: Admin Email
+    type: string
+    default: admin@example.com
+
+services:
+  - name: rocket-chat
+    image: rocketchat/rocket.chat:7.2
+    ports:
+      - target: 3000
+        published: 3000
+    env:
+      ROOT_URL: "{{ROOT_URL}}"
+      MONGO_URL: "mongodb://root:{{MONGO_INITDB_ROOT_PASSWORD}}@{{service:rocket-chat-db}}:27017/rocketchat?authSource=admin"
+      MONGO_OPLOG_URL: "mongodb://root:{{MONGO_INITDB_ROOT_PASSWORD}}@{{service:rocket-chat-db}}:27017/local?authSource=admin"
+      OVERWRITE_SETTING_Show_Setup_Wizard: "completed"
+      ADMIN_USERNAME: "{{ADMIN_USERNAME}}"
+      ADMIN_PASS: "{{ADMIN_PASS}}"
+      ADMIN_EMAIL: "{{ADMIN_EMAIL}}"
+    volumes:
+      - source: rocketchat_uploads
+        target: /app/uploads
+    domain: "{{ROOT_URL}}"
+
+  - name: rocket-chat-db
+    image: mongo:7.0
+    env:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: "{{MONGO_INITDB_ROOT_PASSWORD}}"
+    volumes:
+      - source: rocketchat_db
+        target: /data/db
+    command: ["--replSet", "rs0", "--oplogSize", "128"]
+
+volumes:
+  - rocketchat_uploads
+  - rocketchat_db

@@ -4,7 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, eq, and, isNull, errorLog, userAccounts } from '@fleet/db';
+import { db, services, deployments, eq, and, isNull, errorLog, userAccounts } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
 import { logger } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
@@ -84,16 +84,23 @@ app.use('*', rateLimiter({ windowMs: 60_000, max: 120, keyPrefix: 'global' }));
 app.use('*', requestLogger);
 
 // Global error handler — logs to DB for super admin error tracking
-app.onError((err, c) => {
+app.onError(async (err, c) => {
   // Return 400 for malformed JSON bodies instead of 500
   if (err instanceof SyntaxError && err.message.includes('JSON')) {
     return c.json({ error: 'Invalid JSON in request body' }, 400);
   }
 
-  const ip =
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
-    c.req.header('x-real-ip') ??
-    'unknown';
+  let ip = 'unknown';
+  if (process.env['TRUST_PROXY'] === '1') {
+    ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
+      c.req.header('x-real-ip') ?? 'unknown';
+  } else {
+    try {
+      const { getConnInfo } = await import('@hono/node-server/conninfo');
+      const conn = getConnInfo(c);
+      ip = conn.remote.address ?? 'unknown';
+    } catch { /* conninfo not available */ }
+  }
 
   let userId: string | null = null;
   try {
@@ -291,7 +298,276 @@ api.get(
   }),
 );
 
+// ── Per-account deploy WS connection limiter ──
+const MAX_DEPLOY_STREAMS_PER_ACCOUNT = 20;
+const activeDeployStreams = new Map<string, number>();
+
+// ── Shared Valkey subscriber for deploy log fan-out ──
+// Uses a single Redis connection for ALL deploy WS clients instead of one per client.
+// At 1000 concurrent deployments × N viewers, this saves ~1000 TCP connections.
+type DeployListener = (message: string) => void;
+const deployChannelListeners = new Map<string, Set<DeployListener>>();
+let sharedDeploySubscriber: Awaited<ReturnType<typeof getValkey>> = null;
+let subscriberInitPromise: Promise<boolean> | null = null;
+
+async function initSharedSubscriber(): Promise<boolean> {
+  const valkey = await getValkey();
+  if (!valkey) return false;
+
+  sharedDeploySubscriber = valkey.duplicate();
+  sharedDeploySubscriber.on('message', (channel: string, message: string) => {
+    const listeners = deployChannelListeners.get(channel);
+    if (!listeners) return;
+    for (const listener of listeners) {
+      try { listener(message); } catch { /* individual listener error */ }
+    }
+  });
+
+  // Reconnect handling — re-subscribe to active channels
+  sharedDeploySubscriber.on('ready', () => {
+    const channels = [...deployChannelListeners.keys()];
+    if (channels.length > 0) {
+      sharedDeploySubscriber!.subscribe(...channels).catch((err) => {
+        logger.error({ err }, 'Failed to re-subscribe deploy channels');
+      });
+    }
+  });
+
+  return true;
+}
+
+// Singleton pattern — prevents double-init race when concurrent WS connections arrive at startup
+function ensureSharedSubscriber(): Promise<boolean> {
+  if (!subscriberInitPromise) {
+    subscriberInitPromise = initSharedSubscriber();
+  }
+  return subscriberInitPromise;
+}
+
+function addDeployListener(deploymentId: string, listener: DeployListener) {
+  const channel = `deploy:${deploymentId}`;
+  let listeners = deployChannelListeners.get(channel);
+  const isNewChannel = !listeners || listeners.size === 0;
+  if (!listeners) {
+    listeners = new Set();
+    deployChannelListeners.set(channel, listeners);
+  }
+  listeners.add(listener);
+
+  // Only subscribe to Valkey if this is the first listener for this channel
+  if (isNewChannel && sharedDeploySubscriber) {
+    sharedDeploySubscriber.subscribe(channel).catch((err) => {
+      logger.error({ err, deploymentId }, 'Failed to subscribe to deploy channel');
+    });
+  }
+}
+
+function removeDeployListener(deploymentId: string, listener: DeployListener) {
+  const channel = `deploy:${deploymentId}`;
+  const listeners = deployChannelListeners.get(channel);
+  if (!listeners) return;
+  listeners.delete(listener);
+
+  // Unsubscribe from Valkey when no more listeners on this channel
+  if (listeners.size === 0) {
+    deployChannelListeners.delete(channel);
+    if (sharedDeploySubscriber) {
+      sharedDeploySubscriber.unsubscribe(channel).catch(() => {});
+    }
+  }
+}
+
+// ── WebSocket: Live deployment log streaming ──
+api.get(
+  '/terminal/deploy/:deploymentId',
+  upgradeWebSocket((c) => {
+    const deploymentId = c.req.param('deploymentId');
+    const token = c.req.query('token');
+    const accountId = c.req.query('accountId');
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let pollTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+    let activeListener: DeployListener | null = null;
+    let trackedAccountId: string | null = null;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000 ||
+              !accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId) ||
+              !deploymentId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deploymentId)) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+
+          const membership = await db.query.userAccounts.findFirst({
+            where: and(
+              eq(userAccounts.userId, wsUser.userId),
+              eq(userAccounts.accountId, accountId),
+            ),
+          });
+
+          if (!membership && !wsUser.isSuper) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          // Per-account connection limit
+          const currentStreams = activeDeployStreams.get(accountId) ?? 0;
+          if (currentStreams >= MAX_DEPLOY_STREAMS_PER_ACCOUNT) {
+            ws.close(4003, 'Too many concurrent deploy streams');
+            return;
+          }
+          activeDeployStreams.set(accountId, currentStreams + 1);
+          trackedAccountId = accountId;
+
+          // Verify deployment belongs to this account
+          const deployment = await db.query.deployments.findFirst({
+            where: eq(deployments.id, deploymentId),
+          });
+
+          if (!deployment) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          // Verify the deployment's service belongs to the account
+          const svc = await db.query.services.findFirst({
+            where: and(eq(services.id, deployment.serviceId), eq(services.accountId, accountId)),
+            columns: { id: true },
+          });
+
+          if (!svc) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          // Send existing log as initial payload
+          if (deployment.log) {
+            ws.send(JSON.stringify({ type: 'init', log: deployment.log, status: deployment.status, step: deployment.progressStep }));
+          }
+
+          // If already terminal, send status and close
+          if (deployment.status === 'succeeded' || deployment.status === 'failed') {
+            ws.send(JSON.stringify({ type: 'status', status: deployment.status, step: deployment.progressStep }));
+            ws.close(1000, 'Deployment already complete');
+            return;
+          }
+
+          // Subscribe via shared subscriber (1 Redis connection for all deploy WS clients)
+          const hasValkey = await ensureSharedSubscriber();
+          if (hasValkey) {
+            activeListener = (message: string) => {
+              if (closed) return;
+              try {
+                const data = JSON.parse(message);
+                // Backpressure: skip if WS buffer is backed up (> 64KB queued)
+                const rawWs = (ws as any).raw;
+                if (rawWs?.bufferedAmount > 65536) return;
+
+                ws.send(JSON.stringify({ type: 'log', ...data }));
+
+                if (data.status === 'succeeded' || data.status === 'failed') {
+                  closed = true;
+                  ws.close(1000, `Deployment ${data.status}`);
+                }
+              } catch {
+                // Ignore malformed messages
+              }
+            };
+            addDeployListener(deploymentId, activeListener);
+          } else {
+            // Fallback: poll DB every 2 seconds
+            let lastLogLength = (deployment.log ?? '').length;
+            pollTimer = setInterval(async () => {
+              if (closed) return;
+              try {
+                const current = await db.query.deployments.findFirst({
+                  where: eq(deployments.id, deploymentId),
+                  columns: { log: true, status: true, progressStep: true },
+                });
+                if (!current) return;
+
+                const newContent = (current.log ?? '').slice(lastLogLength);
+                lastLogLength = (current.log ?? '').length;
+
+                if (newContent) {
+                  ws.send(JSON.stringify({ type: 'log', logLine: newContent, status: current.status, step: current.progressStep }));
+                }
+
+                if (current.status === 'succeeded' || current.status === 'failed') {
+                  ws.send(JSON.stringify({ type: 'status', status: current.status, step: current.progressStep }));
+                  closed = true;
+                  ws.close(1000, `Deployment ${current.status}`);
+                }
+              } catch (err) {
+                logger.error({ err }, 'Deploy WS poll error');
+              }
+            }, 2000);
+
+            // Safety timeout: close poll after 30 minutes to prevent indefinite polling
+            pollTimeoutTimer = setTimeout(() => {
+              if (!closed) {
+                closed = true;
+                ws.close(1000, 'Poll timeout');
+              }
+            }, 30 * 60 * 1000);
+          }
+
+          // Keepalive pings
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 25_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS deploy auth failed');
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      onClose() {
+        closed = true;
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        if (pollTimeoutTimer) {
+          clearTimeout(pollTimeoutTimer);
+          pollTimeoutTimer = null;
+        }
+        if (activeListener) {
+          removeDeployListener(deploymentId, activeListener);
+          activeListener = null;
+        }
+        // Decrement per-account stream counter
+        if (trackedAccountId) {
+          const count = activeDeployStreams.get(trackedAccountId) ?? 0;
+          if (count <= 1) {
+            activeDeployStreams.delete(trackedAccountId);
+          } else {
+            activeDeployStreams.set(trackedAccountId, count - 1);
+          }
+          trackedAccountId = null;
+        }
+      },
+    };
+  }),
+);
+
 // ── WebSocket: Interactive terminal (PTY) ──
+// Per-account concurrent terminal session limiter
+const MAX_TERMINAL_SESSIONS_PER_ACCOUNT = 10;
+const activeTerminalSessions = new Map<string, number>();
+
 api.get(
   '/terminal/:serviceId',
   upgradeWebSocket((c) => {
@@ -302,6 +578,7 @@ api.get(
     let dockerStream: import('node:stream').Duplex | null = null;
     let execId: string | null = null;
     let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+    let sessionAccountId: string | null = null;
 
     return {
       async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
@@ -331,6 +608,15 @@ api.get(
             ws.close(4003, 'Access denied to this account');
             return;
           }
+
+          // Enforce per-account concurrent terminal session limit
+          const currentSessions = activeTerminalSessions.get(accountId) ?? 0;
+          if (currentSessions >= MAX_TERMINAL_SESSIONS_PER_ACCOUNT) {
+            ws.close(4029, `Too many terminal sessions (max ${MAX_TERMINAL_SESSIONS_PER_ACCOUNT})`);
+            return;
+          }
+          activeTerminalSessions.set(accountId, currentSessions + 1);
+          sessionAccountId = accountId;
 
           const svc = await db.query.services.findFirst({
             where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
@@ -421,6 +707,13 @@ api.get(
           dockerStream = null;
         }
         execId = null;
+        // Release terminal session slot
+        if (sessionAccountId) {
+          const count = activeTerminalSessions.get(sessionAccountId) ?? 1;
+          if (count <= 1) activeTerminalSessions.delete(sessionAccountId);
+          else activeTerminalSessions.set(sessionAccountId, count - 1);
+          sessionAccountId = null;
+        }
       },
     };
   }),

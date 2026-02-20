@@ -72,7 +72,7 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <Layers class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">All Services</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.services.title') }}</h1>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -83,23 +83,23 @@ onMounted(() => {
       <!-- Stats -->
       <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total</p>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.total') }}</p>
           <p class="text-2xl font-bold text-gray-900 dark:text-white mt-1">{{ stats.total }}</p>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
-          <p class="text-xs font-medium text-green-600 dark:text-green-400 uppercase">Running</p>
+          <p class="text-xs font-medium text-green-600 dark:text-green-400 uppercase">{{ t('super.services.running') }}</p>
           <p class="text-2xl font-bold text-gray-900 dark:text-white mt-1">{{ stats.running }}</p>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Stopped</p>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.stopped') }}</p>
           <p class="text-2xl font-bold text-gray-900 dark:text-white mt-1">{{ stats.stopped }}</p>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
-          <p class="text-xs font-medium text-red-600 dark:text-red-400 uppercase">Failed</p>
+          <p class="text-xs font-medium text-red-600 dark:text-red-400 uppercase">{{ t('super.services.failed') }}</p>
           <p class="text-2xl font-bold text-gray-900 dark:text-white mt-1">{{ stats.failed }}</p>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
-          <p class="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase">Deploying</p>
+          <p class="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase">{{ t('super.services.deploying') }}</p>
           <p class="text-2xl font-bold text-gray-900 dark:text-white mt-1">{{ stats.deploying }}</p>
         </div>
       </div>
@@ -110,7 +110,7 @@ onMounted(() => {
         <input
           v-model="searchQuery"
           type="text"
-          placeholder="Search by name, image, account, or domain..."
+          :placeholder="t('super.services.searchPlaceholder')"
           class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
         />
       </div>
@@ -118,20 +118,20 @@ onMounted(() => {
       <!-- Services table -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
         <div v-if="filteredServices.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-          {{ searchQuery ? 'No services match your search.' : 'No services found across any accounts.' }}
+          {{ searchQuery ? t('super.services.noMatch') : t('super.services.noServices') }}
         </div>
 
         <div v-else class="overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Service</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Account</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Image</th>
-                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Status</th>
-                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Replicas</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Domain</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Created</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.service') }}</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.account') }}</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.image') }}</th>
+                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.status') }}</th>
+                <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.replicas') }}</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.domain') }}</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.created') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">

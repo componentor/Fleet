@@ -2,6 +2,7 @@ import {
   db,
   services,
   usageRecords,
+  storageVolumes,
   pricingConfig,
   locationMultipliers,
   accountBillingOverrides,
@@ -16,14 +17,15 @@ import {
 } from '@fleet/db';
 import type { UsageSummary } from '@fleet/types';
 import { stripeService } from './stripe.service.js';
+import { dockerService } from './docker.service.js';
+import { uploadService } from './upload.service.js';
+import { getValkey } from './valkey.service.js';
 import { logger } from './logger.js';
 
 const COLLECTION_INTERVAL_SECONDS = 300; // 5 minutes
-
-// Warn at startup if storage/bandwidth metrics are not yet implemented
-if (process.env['NODE_ENV'] === 'production') {
-  logger.warn('Storage and bandwidth usage metrics are not yet implemented. Usage-based billing will report 0 for these metrics.');
-}
+const BANDWIDTH_KEY_PREFIX = 'fleet:bw:';
+const BANDWIDTH_TTL = 600; // 10 minutes (2x collection interval)
+const STATS_CONCURRENCY = 20;
 
 class UsageService {
   /**
@@ -47,6 +49,9 @@ class UsageService {
         byAccount.set(svc.accountId, list);
       }
 
+      // ── Bulk bandwidth collection ──
+      const bandwidthByDockerServiceId = await this.collectBulkBandwidth(runningServices);
+
       const now = new Date();
       const periodStart = new Date(now.getTime() - COLLECTION_INTERVAL_SECONDS * 1000);
 
@@ -66,6 +71,18 @@ class UsageService {
         const cpuSeconds = BigInt(Math.round((totalCpuMillicores / 1000) * COLLECTION_INTERVAL_SECONDS));
         const memoryMbHours = BigInt(Math.round(totalMemoryMb * (COLLECTION_INTERVAL_SECONDS / 3600)));
 
+        // Collect storage usage
+        const storageGb = await this.collectAccountStorageGb(accountId);
+
+        // Compute bandwidth from bulk collection
+        let totalBandwidthBytes = 0;
+        for (const svc of accountServices) {
+          if (svc.dockerServiceId) {
+            totalBandwidthBytes += bandwidthByDockerServiceId.get(svc.dockerServiceId) ?? 0;
+          }
+        }
+        const bandwidthGb = Math.floor(totalBandwidthBytes / (1024 * 1024 * 1024));
+
         await db.insert(usageRecords).values({
           accountId,
           periodStart,
@@ -73,8 +90,8 @@ class UsageService {
           containers: containerCount,
           cpuSeconds,
           memoryMbHours,
-          storageGb: 0,   // WARNING: Not implemented — usage-based billing will undercharge
-          bandwidthGb: 0, // WARNING: Not implemented — usage-based billing will undercharge
+          storageGb,
+          bandwidthGb,
           recordedAt: now,
         });
       }
@@ -86,6 +103,134 @@ class UsageService {
     } catch (err) {
       logger.error({ err }, 'Usage collection failed');
     }
+  }
+
+  /**
+   * Collect storage usage for an account from volumes + upload directories.
+   */
+  private async collectAccountStorageGb(accountId: string): Promise<number> {
+    try {
+      // Source 1: Sum usedGb from storage volumes
+      const volumeResult = await db
+        .select({ total: sql<number>`COALESCE(SUM(${storageVolumes.usedGb}), 0)` })
+        .from(storageVolumes)
+        .where(and(
+          eq(storageVolumes.accountId, accountId),
+          isNull(storageVolumes.deletedAt),
+        ));
+      const volumeGb = volumeResult[0]?.total ?? 0;
+
+      // Source 2: Upload directory size
+      const uploadBytes = await uploadService.getAccountUploadSizeBytes(accountId);
+      const uploadGb = Math.ceil(uploadBytes / (1024 * 1024 * 1024));
+
+      return volumeGb + uploadGb;
+    } catch (err) {
+      logger.warn({ err, accountId }, 'Failed to collect storage usage, reporting 0');
+      return 0;
+    }
+  }
+
+  /**
+   * Bulk-collect bandwidth deltas for all running services.
+   * Uses Docker container stats + Valkey for delta tracking.
+   * Returns a map of dockerServiceId → deltaBytes.
+   */
+  private async collectBulkBandwidth(
+    allRunningServices: Array<{ dockerServiceId: string | null }>,
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    const valkey = await getValkey();
+    if (!valkey) return result;
+
+    try {
+      // Get all Docker service IDs
+      const dockerServiceIds = allRunningServices
+        .map((s) => s.dockerServiceId)
+        .filter((id): id is string => id !== null);
+
+      if (dockerServiceIds.length === 0) return result;
+
+      // Bulk-fetch tasks for all fleet services
+      const allTasks = await dockerService.listTasks({
+        'desired-state': ['running'],
+      });
+
+      // Map Docker service ID → running container IDs
+      const containersByService = new Map<string, string[]>();
+      const allContainerIds: string[] = [];
+
+      for (const task of allTasks) {
+        const state = (task as any).Status?.State;
+        const containerId = (task as any).Status?.ContainerStatus?.ContainerID;
+        const serviceId = (task as any).ServiceID;
+        if (state !== 'running' || !containerId || !serviceId) continue;
+        if (!dockerServiceIds.includes(serviceId)) continue;
+
+        const list = containersByService.get(serviceId) ?? [];
+        list.push(containerId);
+        containersByService.set(serviceId, list);
+        allContainerIds.push(containerId);
+      }
+
+      if (allContainerIds.length === 0) return result;
+
+      // Fetch network stats for all containers with concurrency limit
+      const statsByContainer = new Map<string, number>();
+      for (let i = 0; i < allContainerIds.length; i += STATS_CONCURRENCY) {
+        const batch = allContainerIds.slice(i, i + STATS_CONCURRENCY);
+        const batchResults = await Promise.all(
+          batch.map((cid) => dockerService.getContainerNetworkBytes(cid)),
+        );
+        for (const r of batchResults) {
+          if (r) statsByContainer.set(r.containerId, r.rxBytes + r.txBytes);
+        }
+      }
+
+      // Read previous values from Valkey (pipeline for performance)
+      const keys = allContainerIds.map((cid) => `${BANDWIDTH_KEY_PREFIX}${cid}`);
+      const prevValues = keys.length > 0 ? await valkey.mget(...keys) : [];
+
+      // Write new values to Valkey (pipeline)
+      const pipeline = valkey.pipeline();
+      const deltaByContainer = new Map<string, number>();
+
+      for (let idx = 0; idx < allContainerIds.length; idx++) {
+        const cid = allContainerIds[idx]!;
+        const currentTotal = statsByContainer.get(cid);
+        if (currentTotal === undefined) continue;
+
+        const prev = prevValues[idx] ? parseInt(prevValues[idx]!, 10) : 0;
+
+        // Compute delta
+        let delta = 0;
+        if (prev > 0 && currentTotal >= prev) {
+          delta = currentTotal - prev;
+        } else if (prev > 0 && currentTotal < prev) {
+          // Counter reset (container restarted)
+          delta = currentTotal;
+        }
+        // else: first reading, delta = 0
+
+        deltaByContainer.set(cid, delta);
+        pipeline.set(`${BANDWIDTH_KEY_PREFIX}${cid}`, String(currentTotal), 'EX', BANDWIDTH_TTL);
+      }
+
+      await pipeline.exec();
+
+      // Aggregate deltas per Docker service ID
+      for (const [dockerSvcId, containerIds] of containersByService) {
+        let svcDelta = 0;
+        for (const cid of containerIds) {
+          svcDelta += deltaByContainer.get(cid) ?? 0;
+        }
+        result.set(dockerSvcId, svcDelta);
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Bandwidth collection failed, reporting 0');
+    }
+
+    return result;
   }
 
   /**
@@ -188,11 +333,6 @@ class UsageService {
    * Called hourly for accounts on usage or hybrid billing model.
    */
   async reportUsageToStripe(): Promise<void> {
-    // GUARD: If storage/bandwidth metrics aren't implemented, warn loudly
-    if (process.env['NODE_ENV'] === 'production') {
-      logger.warn('Storage and bandwidth metrics are still returning 0 — usage-based billing will undercharge for these resources');
-    }
-
     try {
       const activeSubscriptions = await db.query.subscriptions.findMany({
         where: and(

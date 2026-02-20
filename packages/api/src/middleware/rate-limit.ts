@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { getValkey } from '../services/valkey.service.js';
 
 interface RateLimitEntry {
@@ -10,6 +11,29 @@ interface RateLimiterOptions {
   windowMs: number;
   max: number;
   keyPrefix?: string;
+}
+
+/**
+ * Extract the real client IP. Only trust X-Forwarded-For / X-Real-IP when
+ * TRUST_PROXY=1 (i.e. the app sits behind a reverse proxy that sets these).
+ * Otherwise, use the socket-level remote address to prevent spoofing.
+ */
+function getClientIp(c: Parameters<Parameters<typeof createMiddleware>[0]>[0]): string {
+  if (process.env['TRUST_PROXY'] === '1') {
+    const xff = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+    if (xff) return xff;
+    const xri = c.req.header('x-real-ip');
+    if (xri) return xri;
+  }
+
+  try {
+    const conn = getConnInfo(c);
+    if (conn.remote.address) return conn.remote.address;
+  } catch {
+    // conninfo not available in some environments
+  }
+
+  return 'unknown';
 }
 
 export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimiterOptions) {
@@ -36,10 +60,7 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
   }
 
   return createMiddleware(async (c, next) => {
-    const ip =
-      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
-      c.req.header('x-real-ip') ??
-      'unknown';
+    const ip = getClientIp(c);
 
     const valkey = await getValkey();
 

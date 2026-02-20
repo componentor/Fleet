@@ -208,8 +208,16 @@ export class UpdateService {
         await this.verifyImageDigests(imageTag, expectedChecksums);
         this.appendLog('Image digest verification passed.');
       } else {
-        this.appendLog('No checksums in release notes — skipping digest verification.');
-        this.appendLog('  TIP: Add a "## Checksums" section to release notes for image integrity verification.');
+        const skipVerify = process.env['SKIP_UPDATE_DIGEST_VERIFICATION'] === '1';
+        if (skipVerify) {
+          this.appendLog('WARNING: No checksums in release notes — digest verification skipped (SKIP_UPDATE_DIGEST_VERIFICATION=1).');
+          this.appendLog('  This is NOT recommended for production deployments.');
+        } else {
+          throw new Error(
+            'Release has no checksums — image integrity cannot be verified. ' +
+            'Add a "## Checksums" section to release notes, or set SKIP_UPDATE_DIGEST_VERIFICATION=1 to bypass (NOT recommended).'
+          );
+        }
       }
 
       // 5. Run database migrations (transactional + advisory-locked)

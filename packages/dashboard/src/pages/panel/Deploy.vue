@@ -17,6 +17,9 @@ import {
   Check,
   FolderUp,
   Archive,
+  AlertTriangle,
+  CheckCircle2,
+  Shield,
 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
@@ -55,6 +58,64 @@ const replicas = ref(1)
 const domain = ref('')
 const loading = ref(false)
 const error = ref('')
+
+// Validation
+const validationErrors = ref<Record<string, string>>({})
+
+function validateServiceName(name: string): string | null {
+  if (!name.trim()) return 'Service name is required'
+  if (!/^[a-z0-9][a-z0-9_-]*[a-z0-9]$/i.test(name) && name.length > 1) return 'Must contain only letters, numbers, hyphens, and underscores'
+  if (name.length < 2) return 'Must be at least 2 characters'
+  if (name.length > 63) return 'Must be 63 characters or fewer'
+  return null
+}
+
+function validateDomain(d: string): string | null {
+  if (!d) return null
+  if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/.test(d)) return 'Invalid domain format'
+  return null
+}
+
+function validateDockerImage(image: string): string | null {
+  if (!image.trim()) return 'Docker image is required'
+  if (image.includes(' ')) return 'Image name cannot contain spaces'
+  return null
+}
+
+// Confirmation modal
+const showConfirmModal = ref(false)
+const confirmAction = ref<(() => Promise<void>) | null>(null)
+const confirmConfig = ref<{ name: string; image?: string; domain?: string; repo?: string; method: string }>({ name: '', method: '' })
+const previewData = ref<any>(null)
+const previewLoading = ref(false)
+
+async function fetchPreview(config: any) {
+  previewLoading.value = true
+  try {
+    previewData.value = await api.post('/services/preview', config)
+  } catch {
+    previewData.value = null
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function openConfirmModal(config: { name: string; image?: string; domain?: string; repo?: string; method: string }, action: () => Promise<void>) {
+  confirmConfig.value = config
+  confirmAction.value = action
+  showConfirmModal.value = true
+  fetchPreview({
+    name: config.name,
+    image: config.image || 'ghcr.io/placeholder',
+    ...(config.domain ? { domain: config.domain } : {}),
+    ports: buildPortsPayload(),
+  })
+}
+
+async function executeConfirmedDeploy() {
+  showConfirmModal.value = false
+  if (confirmAction.value) await confirmAction.value()
+}
 
 // GitHub flow state
 const githubStep = ref<'checking' | 'connect' | 'repos' | 'configure'>('checking')
@@ -109,13 +170,25 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-async function deployUpload() {
+function confirmUploadDeploy() {
   if (!uploadServiceName.value || !uploadFile.value) return
+  validationErrors.value = {}
+  const nameErr = validateServiceName(uploadServiceName.value)
+  if (nameErr) { validationErrors.value.uploadServiceName = nameErr; return }
+  const domErr = validateDomain(domain.value)
+  if (domErr) { validationErrors.value.domain = domErr; return }
+  openConfirmModal(
+    { name: uploadServiceName.value, domain: domain.value, method: 'File Upload' },
+    executeUploadDeploy,
+  )
+}
+
+async function executeUploadDeploy() {
   uploadLoading.value = true
   error.value = ''
   try {
     const formData = new FormData()
-    formData.append('file', uploadFile.value)
+    formData.append('file', uploadFile.value!)
     formData.append('name', uploadServiceName.value)
     if (uploadBuildFile.value) formData.append('buildFile', uploadBuildFile.value)
     if (buildEnvVarsPayload()) formData.append('env', JSON.stringify(buildEnvVarsPayload()))
@@ -176,8 +249,26 @@ function buildPortsPayload():
   }))
 }
 
-async function deployDocker() {
-  if (!serviceName.value || !dockerImage.value) return
+function validateDockerForm(): boolean {
+  validationErrors.value = {}
+  const nameErr = validateServiceName(serviceName.value)
+  if (nameErr) validationErrors.value.serviceName = nameErr
+  const imgErr = validateDockerImage(dockerImage.value)
+  if (imgErr) validationErrors.value.dockerImage = imgErr
+  const domErr = validateDomain(domain.value)
+  if (domErr) validationErrors.value.domain = domErr
+  return Object.keys(validationErrors.value).length === 0
+}
+
+function confirmDockerDeploy() {
+  if (!validateDockerForm()) return
+  openConfirmModal(
+    { name: serviceName.value, image: dockerImage.value, domain: domain.value, method: 'Docker Image' },
+    executeDockerDeploy,
+  )
+}
+
+async function executeDockerDeploy() {
   loading.value = true
   error.value = ''
   try {
@@ -197,15 +288,25 @@ async function deployDocker() {
   }
 }
 
-async function deployGithub() {
+function confirmGithubDeploy() {
   if (!selectedRepo.value || !ghServiceName.value) return
+  validationErrors.value = {}
+  const nameErr = validateServiceName(ghServiceName.value)
+  if (nameErr) { validationErrors.value.ghServiceName = nameErr; return }
+  openConfirmModal(
+    { name: ghServiceName.value, repo: selectedRepo.value.fullName, method: 'GitHub' },
+    executeGithubDeploy,
+  )
+}
+
+async function executeGithubDeploy() {
   loading.value = true
   error.value = ''
   try {
     await store.createService({
       name: ghServiceName.value,
       image: 'ghcr.io/placeholder',
-      githubRepo: selectedRepo.value.fullName,
+      githubRepo: selectedRepo.value!.fullName,
       githubBranch: selectedBranch.value,
       autoDeploy: autoDeploy.value,
       envVars: buildEnvVarsPayload(),
@@ -419,7 +520,7 @@ onMounted(() => {
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('deploy.deployDockerImage') }}</h2>
         </div>
-        <form @submit.prevent="deployDocker" class="p-6 space-y-5">
+        <form @submit.prevent="confirmDockerDeploy" class="p-6 space-y-5">
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
               >{{ $t('deploy.serviceName') }}</label
@@ -429,8 +530,9 @@ onMounted(() => {
               type="text"
               placeholder="my-app"
               required
-              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              :class="['w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm', validationErrors.serviceName ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600']"
             />
+            <p v-if="validationErrors.serviceName" class="mt-1 text-xs text-red-500">{{ validationErrors.serviceName }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
@@ -441,8 +543,9 @@ onMounted(() => {
               type="text"
               placeholder="nginx:latest"
               required
-              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              :class="['w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono', validationErrors.dockerImage ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600']"
             />
+            <p v-if="validationErrors.dockerImage" class="mt-1 text-xs text-red-500">{{ validationErrors.dockerImage }}</p>
           </div>
           <div class="grid grid-cols-2 gap-5">
             <div>
@@ -921,7 +1024,7 @@ onMounted(() => {
             <!-- Deploy Button -->
             <div class="pt-2 flex justify-end">
               <button
-                @click="deployGithub"
+                @click="confirmGithubDeploy"
                 :disabled="loading || !selectedRepo || !ghServiceName"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
@@ -1065,7 +1168,7 @@ onMounted(() => {
 
           <div class="pt-2 flex justify-end">
             <button
-              @click="deployUpload"
+              @click="confirmUploadDeploy"
               :disabled="uploadLoading || !uploadServiceName || !uploadFile"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
@@ -1077,5 +1180,77 @@ onMounted(() => {
         </div>
       </div>
     </div>
+    <!-- Confirmation Modal -->
+    <Teleport to="body">
+      <div v-if="showConfirmModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" @click="showConfirmModal = false" />
+        <div class="relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-2xl max-w-md w-full overflow-hidden">
+          <div class="px-6 py-5 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                <Rocket class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Confirm Deployment</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Review your configuration before deploying</p>
+              </div>
+            </div>
+          </div>
+          <div class="px-6 py-4 space-y-3">
+            <div class="flex items-center justify-between py-1.5">
+              <span class="text-sm text-gray-500 dark:text-gray-400">Method</span>
+              <span class="text-sm font-medium text-gray-900 dark:text-white">{{ confirmConfig.method }}</span>
+            </div>
+            <div class="flex items-center justify-between py-1.5">
+              <span class="text-sm text-gray-500 dark:text-gray-400">Service Name</span>
+              <span class="text-sm font-medium text-gray-900 dark:text-white font-mono">{{ confirmConfig.name }}</span>
+            </div>
+            <div v-if="confirmConfig.image" class="flex items-center justify-between py-1.5">
+              <span class="text-sm text-gray-500 dark:text-gray-400">Image</span>
+              <span class="text-sm font-medium text-gray-900 dark:text-white font-mono">{{ confirmConfig.image }}</span>
+            </div>
+            <div v-if="confirmConfig.repo" class="flex items-center justify-between py-1.5">
+              <span class="text-sm text-gray-500 dark:text-gray-400">Repository</span>
+              <span class="text-sm font-medium text-gray-900 dark:text-white font-mono">{{ confirmConfig.repo }}</span>
+            </div>
+            <div v-if="confirmConfig.domain" class="flex items-center justify-between py-1.5">
+              <span class="text-sm text-gray-500 dark:text-gray-400">Domain</span>
+              <span class="text-sm font-medium text-gray-900 dark:text-white">{{ confirmConfig.domain }}</span>
+            </div>
+
+            <!-- Preview warnings -->
+            <div v-if="previewLoading" class="flex items-center gap-2 py-2 text-xs text-gray-400">
+              <Loader2 class="w-3.5 h-3.5 animate-spin" />
+              Checking configuration...
+            </div>
+            <div v-else-if="previewData?.warnings?.length" class="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 p-3 space-y-1.5">
+              <div v-for="(warning, idx) in previewData.warnings" :key="idx" class="flex items-start gap-2">
+                <AlertTriangle class="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                <span class="text-xs text-amber-700 dark:text-amber-300">{{ warning }}</span>
+              </div>
+            </div>
+            <div v-else-if="previewData?.valid" class="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+              <CheckCircle2 class="w-3.5 h-3.5" />
+              Configuration looks good
+            </div>
+          </div>
+          <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3">
+            <button
+              @click="showConfirmModal = false"
+              class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              @click="executeConfirmedDeploy"
+              class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+            >
+              <Rocket class="w-4 h-4" />
+              Deploy Now
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

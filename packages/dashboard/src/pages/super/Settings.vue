@@ -46,6 +46,8 @@ const resendFrom = ref('')
 const registrarProvider = ref('resellerclub')
 const registrarResellerId = ref('')
 const registrarApiKey = ref('')
+const registrarApiSecret = ref('')
+const registrarSandbox = ref(false)
 const registrarConfigured = ref(false)
 const registrarApiKeyMasked = ref('')
 const testingConnection = ref(false)
@@ -85,6 +87,7 @@ async function fetchRegistrar() {
       registrarApiKeyMasked.value = data.apiKeyMasked ?? ''
       const config = data.config as Record<string, string> | null
       registrarResellerId.value = config?.resellerId ?? ''
+      registrarSandbox.value = config?.sandbox === 'true'
     }
   } catch {
     // Not configured
@@ -185,10 +188,13 @@ async function saveRegistrar() {
     await api.patch('/settings/registrar', {
       provider: registrarProvider.value,
       apiKey: registrarApiKey.value,
+      apiSecret: registrarApiSecret.value || undefined,
       resellerId: registrarResellerId.value || undefined,
+      sandbox: registrarSandbox.value || undefined,
     })
     success.value = 'Domain registrar saved'
     registrarApiKey.value = ''
+    registrarApiSecret.value = ''
     await fetchRegistrar()
     setTimeout(() => { success.value = '' }, 3000)
   } catch (err: any) {
@@ -425,17 +431,36 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Provider</label>
               <select v-model="registrarProvider" class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
                 <option value="resellerclub">ResellerClub</option>
+                <option value="namecom">Name.com</option>
               </select>
             </div>
 
+            <!-- ResellerClub fields -->
             <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Reseller ID</label>
               <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
 
-            <div>
+            <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Key</label>
               <input v-model="registrarApiKey" type="password" placeholder="Enter API key" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+
+            <!-- Name.com fields -->
+            <div v-if="registrarProvider === 'namecom'">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Username</label>
+              <input v-model="registrarApiKey" type="text" placeholder="Your Name.com username" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+
+            <div v-if="registrarProvider === 'namecom'">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Token</label>
+              <input v-model="registrarApiSecret" type="password" placeholder="Enter API token" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+
+            <!-- Sandbox toggle (shared) -->
+            <div class="flex items-center gap-3">
+              <input id="registrar-sandbox" v-model="registrarSandbox" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+              <label for="registrar-sandbox" class="text-sm text-gray-700 dark:text-gray-300">Sandbox mode (use test API)</label>
             </div>
 
             <div class="flex items-center gap-3">

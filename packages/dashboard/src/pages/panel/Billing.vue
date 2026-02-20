@@ -321,11 +321,17 @@ onMounted(() => { fetchAll() })
         <div class="p-6">
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
-              <div class="flex items-center gap-2 mb-2">
-                <Box class="w-4 h-4 text-blue-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.containers') }}</span>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <Box class="w-4 h-4 text-blue-500" />
+                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.containers') }}</span>
+                </div>
+                <span v-if="limits?.maxContainers" class="text-[10px] text-gray-400">{{ Math.round((usage.runningContainers / limits.maxContainers) * 100) }}%</span>
               </div>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.runningContainers }} <span class="text-sm font-normal text-gray-400">/ {{ usage.totalContainers }}</span></p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.runningContainers }} <span v-if="limits?.maxContainers" class="text-sm font-normal text-gray-400">/ {{ limits.maxContainers }}</span></p>
+              <div v-if="limits?.maxContainers" class="mt-2 w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500" :class="(usage.runningContainers / limits.maxContainers) > 0.9 ? 'bg-red-500' : (usage.runningContainers / limits.maxContainers) > 0.7 ? 'bg-yellow-500' : 'bg-blue-500'" :style="{ width: Math.min((usage.runningContainers / limits.maxContainers) * 100, 100) + '%' }" />
+              </div>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div class="flex items-center gap-2 mb-2">
@@ -342,36 +348,78 @@ onMounted(() => { fetchAll() })
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.memoryGbHours?.toFixed(1) ?? 0 }}</p>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
-              <div class="flex items-center gap-2 mb-2">
-                <HardDrive class="w-4 h-4 text-green-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.storageGb') }}</span>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <HardDrive class="w-4 h-4 text-green-500" />
+                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.storageGb') }}</span>
+                </div>
+                <span v-if="limits?.maxStorageGb" class="text-[10px] text-gray-400">{{ Math.round(((usage.storageGb ?? 0) / limits.maxStorageGb) * 100) }}%</span>
               </div>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.storageGb ?? 0 }}</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.storageGb ?? 0 }} <span v-if="limits?.maxStorageGb" class="text-sm font-normal text-gray-400">/ {{ limits.maxStorageGb }} GB</span></p>
+              <div v-if="limits?.maxStorageGb" class="mt-2 w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500" :class="((usage.storageGb ?? 0) / limits.maxStorageGb) > 0.9 ? 'bg-red-500' : ((usage.storageGb ?? 0) / limits.maxStorageGb) > 0.7 ? 'bg-yellow-500' : 'bg-green-500'" :style="{ width: Math.min(((usage.storageGb ?? 0) / limits.maxStorageGb) * 100, 100) + '%' }" />
+              </div>
             </div>
             <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
-              <div class="flex items-center gap-2 mb-2">
-                <Wifi class="w-4 h-4 text-teal-500" />
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.bandwidthGb') }}</span>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <Wifi class="w-4 h-4 text-teal-500" />
+                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ $t('billing.bandwidthGb') }}</span>
+                </div>
+                <span v-if="limits?.maxBandwidthGb" class="text-[10px] text-gray-400">{{ Math.round(((usage.bandwidthGb ?? 0) / limits.maxBandwidthGb) * 100) }}%</span>
               </div>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.bandwidthGb ?? 0 }}</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ usage.bandwidthGb ?? 0 }} <span v-if="limits?.maxBandwidthGb" class="text-sm font-normal text-gray-400">/ {{ limits.maxBandwidthGb }} GB</span></p>
+              <div v-if="limits?.maxBandwidthGb" class="mt-2 w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500" :class="((usage.bandwidthGb ?? 0) / limits.maxBandwidthGb) > 0.9 ? 'bg-red-500' : ((usage.bandwidthGb ?? 0) / limits.maxBandwidthGb) > 0.7 ? 'bg-yellow-500' : 'bg-teal-500'" :style="{ width: Math.min(((usage.bandwidthGb ?? 0) / limits.maxBandwidthGb) * 100, 100) + '%' }" />
+              </div>
             </div>
           </div>
 
-          <!-- Cost estimate -->
+          <!-- Cost Breakdown -->
           <div v-if="usage.estimatedCostCents > 0" class="p-4 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between mb-4">
               <div class="flex items-center gap-2">
                 <Gauge class="w-5 h-5 text-primary-600 dark:text-primary-400" />
                 <span class="text-sm font-medium text-primary-700 dark:text-primary-300">{{ $t('billing.estimatedUsageCost') }}</span>
               </div>
               <span class="text-lg font-bold text-primary-700 dark:text-primary-300">{{ formatCents(usage.estimatedCostCents) }}</span>
             </div>
-            <div class="mt-2 grid grid-cols-5 gap-2 text-xs text-primary-600 dark:text-primary-400">
-              <span>CPU: {{ formatCents(usage.breakdown?.cpuCents ?? 0) }}</span>
-              <span>Memory: {{ formatCents(usage.breakdown?.memoryCents ?? 0) }}</span>
-              <span>Storage: {{ formatCents(usage.breakdown?.storageCents ?? 0) }}</span>
-              <span>Bandwidth: {{ formatCents(usage.breakdown?.bandwidthCents ?? 0) }}</span>
-              <span>Containers: {{ formatCents(usage.breakdown?.containerCents ?? 0) }}</span>
+            <div class="space-y-2.5">
+              <div v-if="usage.breakdown?.cpuCents" class="flex items-center gap-3">
+                <span class="w-20 text-xs text-gray-600 dark:text-gray-400 text-right">CPU</span>
+                <div class="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-orange-500 transition-all duration-500" :style="{ width: ((usage.breakdown.cpuCents / usage.estimatedCostCents) * 100) + '%' }" />
+                </div>
+                <span class="w-16 text-xs font-medium text-gray-900 dark:text-white text-right">{{ formatCents(usage.breakdown.cpuCents) }}</span>
+              </div>
+              <div v-if="usage.breakdown?.memoryCents" class="flex items-center gap-3">
+                <span class="w-20 text-xs text-gray-600 dark:text-gray-400 text-right">Memory</span>
+                <div class="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-purple-500 transition-all duration-500" :style="{ width: ((usage.breakdown.memoryCents / usage.estimatedCostCents) * 100) + '%' }" />
+                </div>
+                <span class="w-16 text-xs font-medium text-gray-900 dark:text-white text-right">{{ formatCents(usage.breakdown.memoryCents) }}</span>
+              </div>
+              <div v-if="usage.breakdown?.storageCents" class="flex items-center gap-3">
+                <span class="w-20 text-xs text-gray-600 dark:text-gray-400 text-right">Storage</span>
+                <div class="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-green-500 transition-all duration-500" :style="{ width: ((usage.breakdown.storageCents / usage.estimatedCostCents) * 100) + '%' }" />
+                </div>
+                <span class="w-16 text-xs font-medium text-gray-900 dark:text-white text-right">{{ formatCents(usage.breakdown.storageCents) }}</span>
+              </div>
+              <div v-if="usage.breakdown?.bandwidthCents" class="flex items-center gap-3">
+                <span class="w-20 text-xs text-gray-600 dark:text-gray-400 text-right">Bandwidth</span>
+                <div class="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-teal-500 transition-all duration-500" :style="{ width: ((usage.breakdown.bandwidthCents / usage.estimatedCostCents) * 100) + '%' }" />
+                </div>
+                <span class="w-16 text-xs font-medium text-gray-900 dark:text-white text-right">{{ formatCents(usage.breakdown.bandwidthCents) }}</span>
+              </div>
+              <div v-if="usage.breakdown?.containerCents" class="flex items-center gap-3">
+                <span class="w-20 text-xs text-gray-600 dark:text-gray-400 text-right">Containers</span>
+                <div class="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-blue-500 transition-all duration-500" :style="{ width: ((usage.breakdown.containerCents / usage.estimatedCostCents) * 100) + '%' }" />
+                </div>
+                <span class="w-16 text-xs font-medium text-gray-900 dark:text-white text-right">{{ formatCents(usage.breakdown.containerCents) }}</span>
+              </div>
             </div>
           </div>
         </div>

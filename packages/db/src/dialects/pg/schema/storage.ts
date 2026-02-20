@@ -31,8 +31,8 @@ export const storageClustersRelations = relations(storageClusters, ({ many }) =>
 
 export const storageNodes = pgTable('storage_nodes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  clusterId: uuid('cluster_id').references(() => storageClusters.id),
-  nodeId: uuid('node_id').references(() => nodes.id),
+  clusterId: uuid('cluster_id').references(() => storageClusters.id, { onDelete: 'cascade' }),
+  nodeId: uuid('node_id').references(() => nodes.id, { onDelete: 'set null' }),
   hostname: varchar('hostname').notNull(),
   ipAddress: varchar('ip_address').notNull(),
   role: varchar('role').default('storage').notNull(),
@@ -60,7 +60,7 @@ export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
 
 export const storageVolumes = pgTable('storage_volumes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  accountId: uuid('account_id').references(() => accounts.id).notNull(),
+  accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name').notNull(),
   displayName: varchar('display_name'),
   sizeGb: integer('size_gb').notNull(),

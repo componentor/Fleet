@@ -7,6 +7,7 @@ import {
   boolean,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -24,4 +25,8 @@ export const errorLog = pgTable('error_log', {
   metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
   resolved: boolean('resolved').default(false),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_error_log_created_at').on(table.createdAt),
+  index('idx_error_log_level').on(table.level),
+  index('idx_error_log_resolved').on(table.resolved),
+]);

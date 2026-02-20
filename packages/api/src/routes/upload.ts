@@ -8,7 +8,7 @@ import { requireActiveSubscription } from '../middleware/subscription.js';
 import { dockerService } from '../services/docker.service.js';
 import { uploadService } from '../services/upload.service.js';
 import { logger } from '../services/logger.js';
-import { getDeploymentQueue } from '../services/queue.service.js';
+import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -103,6 +103,11 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
     // Detect project files and build method (never fails)
     const detection = await uploadService.detectProjectFiles(sourcePath, buildFile || undefined);
 
+    // If runtime detection set a default port and user didn't specify ports, use it
+    if (detection.defaultPort && ports.length === 0) {
+      ports = [{ target: detection.defaultPort, published: detection.defaultPort, protocol: 'tcp' }];
+    }
+
     const traefikLabels = buildTraefikLabels(name, domain, sslEnabled);
     const initialStatus = detection.buildMethod === 'none' ? 'stopped' : 'deploying';
 
@@ -119,6 +124,7 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
       sslEnabled,
       sourceType: 'upload',
       sourcePath,
+      dockerfile: detection.generatedDockerfile ?? null,
       status: initialStatus,
     });
 
@@ -186,21 +192,20 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
       buildFile: detection.buildFile ?? undefined,
     };
 
-    try {
-      const queue = getDeploymentQueue();
-      if (queue) {
-        await queue.add('build-and-deploy', jobData, {
+    if (isQueueAvailable()) {
+      try {
+        await getDeploymentQueue().add('build-and-deploy', jobData, {
           attempts: 2,
           backoff: { type: 'exponential', delay: 5000 },
         });
-      } else {
-        // Fallback: run inline
+      } catch {
+        // Queue add failed — run inline
         processDeploymentInline(jobData).catch((err) => {
           logger.error({ err }, 'Inline deployment failed');
         });
       }
-    } catch {
-      // Fallback: run inline
+    } else {
+      // No workers running — run inline in-process
       processDeploymentInline(jobData).catch((err) => {
         logger.error({ err }, 'Inline deployment failed');
       });
@@ -212,6 +217,7 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
       detectedFiles: detection.detectedFiles,
       buildMethod: detection.buildMethod,
       buildFile: detection.buildFile,
+      detectedRuntime: detection.detectedRuntime,
     }, 201);
   } finally {
     // Clean up temp file
@@ -289,19 +295,18 @@ uploadRoutes.post('/:serviceId/rebuild', requireMember, requireScope('write'), a
       buildFile: detection.buildFile ?? undefined,
     };
 
-    try {
-      const queue = getDeploymentQueue();
-      if (queue) {
-        await queue.add('build-and-deploy', jobData, {
+    if (isQueueAvailable()) {
+      try {
+        await getDeploymentQueue().add('build-and-deploy', jobData, {
           attempts: 2,
           backoff: { type: 'exponential', delay: 5000 },
         });
-      } else {
+      } catch {
         processDeploymentInline(jobData).catch((err) => {
           logger.error({ err }, 'Inline rebuild failed');
         });
       }
-    } catch {
+    } else {
       processDeploymentInline(jobData).catch((err) => {
         logger.error({ err }, 'Inline rebuild failed');
       });

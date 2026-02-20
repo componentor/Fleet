@@ -186,7 +186,7 @@ onMounted(() => {
       <div class="flex items-center gap-3">
         <ScrollText class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.auditLog.title') }}</h1>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('nav.events') }}</h1>
           <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} events</p>
         </div>
       </div>

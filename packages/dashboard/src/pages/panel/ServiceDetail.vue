@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle } from 'lucide-vue-next'
+import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity } from 'lucide-vue-next'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
 import { useApi, ApiError } from '@/composables/useApi'
 import { useLogStream } from '@/composables/useLogStream'
+import { useDeployStream } from '@/composables/useDeployStream'
 import { useTerminal } from '@/composables/useTerminal'
 import { useToast } from '@/composables/useToast'
 import { useI18n } from 'vue-i18n'
@@ -18,6 +19,7 @@ const toast = useToast()
 const { t } = useI18n()
 const serviceId = route.params.id as string
 const logStream = useLogStream()
+const deployStream = useDeployStream()
 
 const activeTab = ref('overview')
 const tabs = computed(() => {
@@ -29,6 +31,9 @@ const tabs = computed(() => {
   }
   if (service.value?.image && isDatabaseImage(service.value.image)) {
     base.push({ id: 'database', label: 'Database' })
+  }
+  if (service.value?.sourceType === 'upload' || service.value?.sourceType === 'github') {
+    base.push({ id: 'docker', label: 'Docker' })
   }
   base.push(
     { id: 'logs', label: 'Logs' },
@@ -60,6 +65,48 @@ const logsContainer = ref<HTMLElement | null>(null)
 const envVars = ref<{ key: string; value: string }[]>([])
 const settingsLoading = ref(false)
 
+// Service stats (health dashboard)
+const serviceStats = ref<any>(null)
+const statsLoading = ref(false)
+let statsInterval: ReturnType<typeof setInterval> | null = null
+
+async function fetchServiceStats() {
+  statsLoading.value = true
+  try {
+    serviceStats.value = await api.get(`/services/${serviceId}/stats`)
+  } catch {
+    serviceStats.value = null
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+function formatUptime(since: string | null) {
+  if (!since) return '--'
+  const ms = Date.now() - new Date(since).getTime()
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h`
+}
+
+function startStatsPolling() {
+  stopStatsPolling()
+  fetchServiceStats()
+  statsInterval = setInterval(fetchServiceStats, 10_000)
+}
+
+function stopStatsPolling() {
+  if (statsInterval) {
+    clearInterval(statsInterval)
+    statsInterval = null
+  }
+}
+
 // Auto-deploy settings
 const autoDeployEnabled = ref(false)
 const autoDeployBranch = ref('')
@@ -84,6 +131,247 @@ const restartPolicyLabel = computed(() => {
   const delay = service.value?.restartDelay ?? '10s'
   return `On failure (${attempts}x, ${delay})`
 })
+
+// Deployment progress tracking
+const latestDeployment = ref<any>(null)
+const deploymentPolling = ref<ReturnType<typeof setInterval> | null>(null)
+const showSuccessBanner = ref(false)
+
+const progressSteps = [
+  { key: 'queued', label: 'Queued' },
+  { key: 'cloning', label: 'Cloning' },
+  { key: 'building', label: 'Building' },
+  { key: 'pushing', label: 'Pushing' },
+  { key: 'deploying', label: 'Deploying' },
+  { key: 'health_check', label: 'Health Check' },
+  { key: 'succeeded', label: 'Live' },
+]
+
+function getStepStatus(stepKey: string): 'done' | 'active' | 'pending' {
+  if (!latestDeployment.value?.progressStep) return 'pending'
+  const current = latestDeployment.value.progressStep
+  if (current === 'failed') {
+    const idx = progressSteps.findIndex(s => s.key === stepKey)
+    const failedIdx = progressSteps.findIndex(s => s.key === latestDeployment.value._lastActiveStep || 'building')
+    if (idx < failedIdx) return 'done'
+    if (idx === failedIdx) return 'active'
+    return 'pending'
+  }
+  const currentIdx = progressSteps.findIndex(s => s.key === current)
+  const stepIdx = progressSteps.findIndex(s => s.key === stepKey)
+  if (stepIdx < currentIdx) return 'done'
+  if (stepIdx === currentIdx) return current === 'succeeded' ? 'done' : 'active'
+  return 'pending'
+}
+
+function formatDuration(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt) return '--'
+  const start = new Date(startedAt).getTime()
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now()
+  const seconds = Math.floor((end - start) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${minutes}m ${secs}s`
+}
+
+async function pollLatestDeployment() {
+  try {
+    const deploys = await api.get<any[]>(`/services/${serviceId}/deployments`)
+    if (deploys.length > 0) {
+      const prev = latestDeployment.value
+      latestDeployment.value = deploys[0]
+      const wasActive = prev && (prev.status === 'building' || prev.status === 'deploying')
+      // Check if deployment just succeeded
+      if (wasActive && deploys[0].status === 'succeeded') {
+        showSuccessBanner.value = true
+        setTimeout(() => { showSuccessBanner.value = false }, 10000)
+        toast.success('Deployment succeeded!')
+        deployStream.stop()
+        stopDeploymentPolling()
+        // Gracefully update service status without full page refresh
+        if (service.value) {
+          service.value = { ...service.value, status: 'running', image: deploys[0].imageTag || service.value.image }
+        }
+      } else if (wasActive && deploys[0].status === 'failed') {
+        toast.error('Deployment failed')
+        deployStream.stop()
+        stopDeploymentPolling()
+        // Gracefully update service status without full page refresh
+        if (service.value) {
+          service.value = { ...service.value, status: 'failed' }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function startDeploymentPolling() {
+  stopDeploymentPolling()
+  pollLatestDeployment()
+  deploymentPolling.value = setInterval(pollLatestDeployment, 3000)
+}
+
+function stopDeploymentPolling() {
+  if (deploymentPolling.value) {
+    clearInterval(deploymentPolling.value)
+    deploymentPolling.value = null
+  }
+}
+
+// Rollback
+async function rollbackToDeployment(deploymentId: string) {
+  if (!confirm('Roll back to this deployment? This will replace the current running version.')) return
+  try {
+    await api.post(`/deployments/${deploymentId}/rollback`, {})
+    toast.success('Rollback initiated')
+    await fetchService()
+    await fetchDeployments()
+  } catch (err: any) {
+    toast.error(err?.body?.error || 'Rollback failed')
+  }
+}
+
+// Deployment notes
+const editingNotes = ref<string | null>(null)
+const editNotesValue = ref('')
+
+async function saveDeploymentNotes(deploymentId: string) {
+  try {
+    await api.patch(`/deployments/${deploymentId}/notes`, { notes: editNotesValue.value })
+    editingNotes.value = null
+    await fetchDeployments()
+    toast.success('Notes saved')
+  } catch (err: any) {
+    toast.error(err?.body?.error || 'Failed to save notes')
+  }
+}
+
+// Auto-scroll log
+const userScrolledUp = ref(false)
+function onLogsScroll() {
+  if (!logsContainer.value) return
+  const el = logsContainer.value
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50
+  userScrolledUp.value = !atBottom
+}
+function scrollToBottom() {
+  if (logsContainer.value) {
+    logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+    userScrolledUp.value = false
+  }
+}
+
+// Build output panel scroll
+const buildOutputContainer = ref<HTMLElement | null>(null)
+const buildOutputScrolledUp = ref(false)
+
+function onBuildOutputScroll() {
+  if (!buildOutputContainer.value) return
+  const el = buildOutputContainer.value
+  buildOutputScrolledUp.value = el.scrollHeight - el.scrollTop - el.clientHeight >= 50
+}
+
+// Auto-scroll build output
+watch(() => deployStream.logLines.value.length, () => {
+  if (buildOutputContainer.value && !buildOutputScrolledUp.value) {
+    nextTick(() => {
+      if (buildOutputContainer.value) {
+        buildOutputContainer.value.scrollTop = buildOutputContainer.value.scrollHeight
+      }
+    })
+  }
+})
+
+// Extracting build error summary from log
+const buildErrorSummary = computed(() => {
+  if (!latestDeployment.value || latestDeployment.value.status !== 'failed') return null
+  const log = latestDeployment.value.log || ''
+  // Look for common error patterns
+  const patterns = [
+    /error:\s*(.+)/i,
+    /Error:\s*(.+)/,
+    /FATAL:\s*(.+)/i,
+    /Module not found:\s*(.+)/i,
+    /Cannot find module\s+'([^']+)'/,
+    /failed to solve:?\s*(.+)/i,
+    /npm ERR!\s+(.+)/,
+    /exited with code (\d+)/i,
+  ]
+  const lines = log.split('\n').reverse()
+  for (const line of lines) {
+    for (const pat of patterns) {
+      const m = line.match(pat)
+      if (m) return m[0].trim()
+    }
+  }
+  // Fallback: last meaningful line
+  const lastLine = lines.find((l: string) => l.trim().length > 10)
+  return lastLine?.trim().slice(0, 200) || null
+})
+
+// Docker tab
+const dockerfileContent = ref('')
+const dockerfileSource = ref<'generated' | 'file' | 'none'>('none')
+const dockerfileLoading = ref(false)
+const dockerfileSaving = ref(false)
+const dockerfileError = ref('')
+
+async function fetchDockerfile() {
+  dockerfileLoading.value = true
+  dockerfileError.value = ''
+  try {
+    const data = await api.get<{ content: string | null; source: string }>(`/services/${serviceId}/dockerfile`)
+    dockerfileContent.value = data.content ?? ''
+    dockerfileSource.value = (data.source as 'generated' | 'file' | 'none') ?? 'none'
+  } catch (err: any) {
+    dockerfileError.value = err?.body?.error || 'Failed to load Dockerfile'
+  } finally {
+    dockerfileLoading.value = false
+  }
+}
+
+async function saveDockerfile() {
+  if (!dockerfileContent.value.trim()) return
+  dockerfileSaving.value = true
+  dockerfileError.value = ''
+  try {
+    await api.put(`/services/${serviceId}/dockerfile`, { content: dockerfileContent.value })
+    dockerfileSource.value = 'generated'
+    toast.success('Dockerfile saved')
+  } catch (err: any) {
+    dockerfileError.value = err?.body?.error || 'Failed to save Dockerfile'
+  } finally {
+    dockerfileSaving.value = false
+  }
+}
+
+function insertDockerfileTemplate() {
+  dockerfileContent.value = 'FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install\nEXPOSE 3000\nCMD ["npm", "start"]\n'
+}
+
+async function rebuildService() {
+  if (!confirm('Rebuild the service with the current Dockerfile?')) return
+  try {
+    let result: any
+    if (service.value?.sourceType === 'upload') {
+      result = await api.post(`/upload/${serviceId}/rebuild`, new FormData())
+    } else {
+      result = await api.post('/deployments/trigger', { serviceId })
+    }
+    toast.success('Rebuild triggered')
+    await fetchService()
+    // Auto-start deployment tracking and deploy stream
+    startDeploymentPolling()
+    const newDeploymentId = result?.deploymentId
+    if (newDeploymentId) {
+      latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
+      deployStream.start(newDeploymentId)
+    }
+  } catch (err: any) {
+    toast.error(err?.body?.error || 'Failed to trigger rebuild')
+  }
+}
 
 // Backups
 const serviceBackups = ref<any[]>([])
@@ -202,10 +490,29 @@ function formatSize(bytes: any) {
 }
 
 function isDatabaseImage(image: string): boolean {
-  return /^(postgres|mysql|mariadb|bitnami\/(postgresql|mysql|mariadb))/i.test(image)
+  return /^(postgres|mysql|mariadb|mongo|bitnami\/(postgresql|mysql|mariadb|mongodb))/i.test(image)
 }
 
+const isDeployStreaming = computed(() => liveMode.value && deployStream.state.value !== 'disconnected')
 const displayedLogs = computed(() => liveMode.value ? logStream.logs.value : logs.value)
+
+function logLevelColor(level: string): string {
+  switch (level) {
+    case 'error': return 'text-red-400'
+    case 'warn': return 'text-yellow-400'
+    case 'debug': return 'text-gray-500'
+    default: return 'text-gray-300'
+  }
+}
+
+function logLevelBadgeClass(level: string): string {
+  switch (level) {
+    case 'error': return 'bg-red-900/50 text-red-400'
+    case 'warn': return 'bg-yellow-900/50 text-yellow-400'
+    case 'debug': return 'bg-gray-700 text-gray-400'
+    default: return 'bg-gray-700 text-gray-400'
+  }
+}
 
 const dockerStatus = computed(() => service.value?.dockerStatus ?? null)
 
@@ -235,18 +542,52 @@ const failureReason = computed(() => {
 function toggleLiveMode() {
   liveMode.value = !liveMode.value
   if (liveMode.value) {
-    logStream.start(serviceId)
+    startLiveForCurrentState()
   } else {
     logStream.stop()
+    deployStream.stop()
     fetchLogs()
   }
 }
 
-// Auto-scroll logs when new content arrives in live mode
+function startLiveForCurrentState() {
+  const svc = service.value
+  if (!svc) return
+
+  if ((svc.status === 'deploying' || svc.status === 'building') && latestDeployment.value?.id) {
+    // During build/deploy — stream deployment logs
+    logStream.stop()
+    deployStream.start(latestDeployment.value.id)
+  } else if (svc.status === 'running' || svc.dockerServiceId) {
+    // Running — stream Docker service logs
+    deployStream.stop()
+    logStream.start(serviceId)
+  } else if (svc.status === 'failed' && latestDeployment.value?.log) {
+    // Failed — show deployment build log as static content
+    deployStream.stop()
+    logStream.stop()
+    liveMode.value = false
+    logs.value = latestDeployment.value.log
+    logStream.parseStaticLogs(latestDeployment.value.log)
+  }
+}
+
+// Auto-scroll logs when new content arrives in live mode (only if user hasn't scrolled up)
 watch(() => logStream.logs.value, () => {
-  if (liveMode.value && logsContainer.value) {
+  if (liveMode.value && logsContainer.value && !userScrolledUp.value) {
     nextTick(() => {
       logsContainer.value!.scrollTop = logsContainer.value!.scrollHeight
+    })
+  }
+})
+
+// Also auto-scroll when deploy stream lines arrive in logs tab
+watch(() => deployStream.logLines.value.length, () => {
+  if (liveMode.value && logsContainer.value && !userScrolledUp.value) {
+    nextTick(() => {
+      if (logsContainer.value) {
+        logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+      }
     })
   }
 })
@@ -272,9 +613,16 @@ async function fetchLogs() {
   try {
     const data = await api.get<{ logs: string }>(`/services/${serviceId}/logs?tail=200`)
     logs.value = data.logs || 'No logs available.'
+    logStream.parseStaticLogs(data.logs || '')
   } catch (err: any) {
     if (err instanceof ApiError && err.status === 404) {
-      logs.value = 'No logs available yet. The service needs to be deployed first.'
+      // No Docker logs available — show deployment build log if we have one
+      if (latestDeployment.value?.log) {
+        logs.value = latestDeployment.value.log
+        logStream.parseStaticLogs(latestDeployment.value.log)
+      } else {
+        logs.value = 'No logs available yet. The service needs to be deployed first.'
+      }
     } else {
       logs.value = 'Failed to fetch logs.'
     }
@@ -333,8 +681,15 @@ async function restartService() {
 async function redeployService() {
   actionLoading.value = 'redeploy'
   try {
-    await api.post(`/services/${serviceId}/redeploy`, {})
+    const result: any = await api.post(`/services/${serviceId}/redeploy`, {})
     await fetchService()
+    // Auto-start deployment tracking and deploy stream
+    startDeploymentPolling()
+    const newDeploymentId = result?.deploymentId
+    if (newDeploymentId) {
+      latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
+      deployStream.start(newDeploymentId)
+    }
   } catch {
     toast.error(t('service.redeployFailed', 'Failed to redeploy service'))
   } finally {
@@ -346,7 +701,16 @@ async function cancelDeploy() {
   actionLoading.value = 'cancel'
   try {
     await api.post(`/services/${serviceId}/cancel-deploy`, {})
-    await fetchService()
+    deployStream.stop()
+    stopDeploymentPolling()
+    toast.success('Deployment cancelled')
+    // Gracefully update service status
+    if (service.value) {
+      service.value = { ...service.value, status: service.value.dockerServiceId ? 'running' : 'stopped' }
+    }
+    if (latestDeployment.value) {
+      latestDeployment.value = { ...latestDeployment.value, status: 'failed', log: (latestDeployment.value.log || '') + 'Deployment cancelled by user.\n' }
+    }
   } catch {
     toast.error('Failed to cancel deployment')
   } finally {
@@ -453,6 +817,72 @@ function addEnvVar() {
 
 function removeEnvVar(index: number) {
   envVars.value.splice(index, 1)
+  maskedVars.value.delete(index)
+}
+
+// Tags
+const serviceTags = ref<string[]>([])
+const newTagInput = ref('')
+const tagsLoading = ref(false)
+
+function addTag() {
+  const tag = newTagInput.value.trim()
+  if (!tag || serviceTags.value.includes(tag) || serviceTags.value.length >= 20) return
+  serviceTags.value.push(tag)
+  newTagInput.value = ''
+}
+
+function removeTag(index: number) {
+  serviceTags.value.splice(index, 1)
+}
+
+async function saveTags() {
+  tagsLoading.value = true
+  try {
+    await api.patch(`/services/${serviceId}`, { tags: serviceTags.value })
+    await fetchService()
+    toast.success('Tags saved')
+  } catch {
+    toast.error('Failed to save tags')
+  } finally {
+    tagsLoading.value = false
+  }
+}
+
+// Env var masking
+const maskedVars = ref<Set<number>>(new Set())
+const showBulkImport = ref(false)
+const bulkEnvInput = ref('')
+const sensitivePattern = /password|secret|token|key|api_key|apikey|auth|credential|private/i
+
+function initMasking() {
+  maskedVars.value.clear()
+  envVars.value.forEach((v, i) => {
+    if (sensitivePattern.test(v.key)) maskedVars.value.add(i)
+  })
+}
+
+function toggleMask(index: number) {
+  if (maskedVars.value.has(index)) maskedVars.value.delete(index)
+  else maskedVars.value.add(index)
+}
+
+function parseBulkEnv() {
+  const lines = bulkEnvInput.value.split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIndex = trimmed.indexOf('=')
+    if (eqIndex === -1) continue
+    const key = trimmed.substring(0, eqIndex).trim()
+    const value = trimmed.substring(eqIndex + 1).trim().replace(/^["']|["']$/g, '')
+    const existing = envVars.value.findIndex(v => v.key === key)
+    if (existing >= 0) envVars.value[existing]!.value = value
+    else envVars.value.push({ key, value })
+  }
+  showBulkImport.value = false
+  bulkEnvInput.value = ''
+  initMasking()
 }
 
 function formatDate(ts: any) {
@@ -466,14 +896,40 @@ async function onTabChange(tabId: string) {
   if (activeTab.value === 'logs' && tabId !== 'logs' && liveMode.value) {
     liveMode.value = false
     logStream.stop()
+    deployStream.stop()
+  }
+
+  // Manage stats polling
+  if (tabId === 'overview' && service.value?.status === 'running') {
+    startStatsPolling()
+  } else {
+    stopStatsPolling()
   }
 
   activeTab.value = tabId
-  if (tabId === 'logs') fetchLogs()
+  if (tabId === 'logs') {
+    fetchLogs()
+    // Auto-start live mode if service is running or deploying
+    const svc = service.value
+    if (svc && (svc.status === 'running' || svc.status === 'deploying' || svc.status === 'building')) {
+      nextTick(() => {
+        liveMode.value = true
+        startLiveForCurrentState()
+      })
+    }
+    // If service failed and we have build logs, show them as static logs
+    if (svc?.status === 'failed' && latestDeployment.value?.log && !logs.value) {
+      logs.value = latestDeployment.value.log
+      logStream.parseStaticLogs(latestDeployment.value.log)
+    }
+  }
+  if (tabId === 'docker') fetchDockerfile()
   if (tabId === 'deployments') fetchDeployments()
   if (tabId === 'settings' && service.value) {
     const env = service.value.env ?? {}
     envVars.value = Object.entries(env).map(([key, value]) => ({ key, value: String(value) }))
+    initMasking()
+    serviceTags.value = [...(service.value.tags ?? [])]
     autoDeployEnabled.value = service.value.autoDeploy ?? false
     autoDeployBranch.value = service.value.githubBranch ?? ''
     autoDeployError.value = ''
@@ -512,8 +968,28 @@ async function onTabChange(tabId: string) {
   }
 }
 
-onMounted(() => {
-  fetchService()
+onMounted(async () => {
+  await fetchService()
+  // Start stats polling if we're on the overview tab and service is running
+  if (activeTab.value === 'overview' && service.value?.status === 'running') {
+    startStatsPolling()
+  }
+  // Start deployment polling if service is deploying
+  if (service.value?.status === 'deploying') {
+    startDeploymentPolling()
+  }
+  // Load latest deployment for progress stepper
+  await pollLatestDeployment()
+  // Auto-start deploy stream for build output panel if deploying
+  if (service.value?.status === 'deploying' && latestDeployment.value?.id) {
+    deployStream.start(latestDeployment.value.id)
+  }
+})
+
+onUnmounted(() => {
+  stopStatsPolling()
+  stopDeploymentPolling()
+  deployStream.stop()
 })
 </script>
 
@@ -674,6 +1150,102 @@ onMounted(() => {
             </div>
           </div>
 
+          <!-- Success banner -->
+          <div v-if="showSuccessBanner" class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-5 transition-all">
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <div class="flex-1">
+                <h3 class="text-sm font-semibold text-green-800 dark:text-green-200">Deployment Succeeded!</h3>
+                <p class="text-sm text-green-700 dark:text-green-300 mt-1">Your service is now live and running.</p>
+                <div class="flex items-center gap-3 mt-3">
+                  <a v-if="service.domain" :href="'https://' + service.domain" target="_blank" class="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-300 hover:underline">
+                    Visit Site &rarr;
+                  </a>
+                  <button @click="onTabChange('logs')" class="text-xs font-medium text-green-600 dark:text-green-400 hover:underline">View Logs</button>
+                  <button @click="showSuccessBanner = false" class="text-xs text-green-500 dark:text-green-500 hover:underline ml-auto">Dismiss</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deployment Progress Stepper -->
+          <div v-if="service.status === 'deploying' && latestDeployment" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Deployment Progress</h3>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDuration(latestDeployment.startedAt, latestDeployment.completedAt) }}</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <template v-for="(step, idx) in progressSteps" :key="step.key">
+                <div class="flex flex-col items-center flex-1 min-w-0">
+                  <div :class="[
+                    'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all',
+                    getStepStatus(step.key) === 'done' ? 'bg-green-500 text-white' :
+                    getStepStatus(step.key) === 'active' ? 'bg-primary-500 text-white animate-pulse' :
+                    'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                  ]">
+                    <svg v-if="getStepStatus(step.key) === 'done'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                    <Loader2 v-else-if="getStepStatus(step.key) === 'active'" class="w-4 h-4 animate-spin" />
+                    <span v-else>{{ idx + 1 }}</span>
+                  </div>
+                  <span :class="['text-[10px] mt-1 text-center truncate w-full', getStepStatus(step.key) === 'active' ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-400 dark:text-gray-500']">{{ step.label }}</span>
+                </div>
+                <div v-if="idx < progressSteps.length - 1" :class="['h-0.5 flex-1 -mt-4 rounded', getStepStatus(progressSteps[idx + 1]!.key) !== 'pending' ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-700']" />
+              </template>
+            </div>
+          </div>
+
+          <!-- Build Output Panel (live during deploy) -->
+          <div v-if="service.status === 'deploying' && latestDeployment" class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Code2 class="w-4 h-4 text-gray-400" />
+                <span class="text-sm font-medium text-gray-300">Build Output</span>
+                <span
+                  v-if="deployStream.state.value === 'connected'"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-900/40 text-green-400"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                  Live
+                </span>
+              </div>
+              <span class="text-xs text-gray-500">{{ deployStream.logLines.value.length }} lines</span>
+            </div>
+            <div
+              ref="buildOutputContainer"
+              @scroll="onBuildOutputScroll"
+              class="h-80 overflow-y-auto font-mono text-xs leading-relaxed p-4"
+            >
+              <div v-if="deployStream.logLines.value.length > 0">
+                <div
+                  v-for="(line, idx) in deployStream.logLines.value"
+                  :key="idx"
+                  class="text-gray-300 py-px hover:bg-gray-800/50"
+                >{{ line }}</div>
+              </div>
+              <div v-else class="flex items-center justify-center h-full text-gray-500">
+                <Loader2 class="w-5 h-5 animate-spin mr-2" />
+                Waiting for build output...
+              </div>
+            </div>
+          </div>
+
+          <!-- Build Error Summary -->
+          <div v-if="latestDeployment?.status === 'failed' && buildErrorSummary" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+            <div class="flex items-start gap-3">
+              <XCircle class="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <div class="min-w-0 flex-1">
+                <h4 class="text-sm font-semibold text-red-800 dark:text-red-200">Build Failed</h4>
+                <p class="text-xs font-mono text-red-700 dark:text-red-300 mt-1 break-all">{{ buildErrorSummary }}</p>
+                <div class="flex items-center gap-3 mt-2">
+                  <button @click="onTabChange('logs')" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline">View Full Logs</button>
+                  <span class="text-xs text-red-500">Duration: {{ formatDuration(latestDeployment.startedAt, latestDeployment.completedAt) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Failure alert -->
           <div v-if="service.status === 'failed' && failedTasks.length > 0" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-5">
             <div class="flex items-start gap-3">
@@ -729,6 +1301,97 @@ onMounted(() => {
               </div>
             </dl>
           </div>
+
+          <!-- Resource Usage -->
+          <div v-if="service.status === 'running'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Activity class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Resource Usage</h3>
+              </div>
+              <div class="flex items-center gap-2">
+                <span v-if="serviceStats" class="text-xs text-gray-500 dark:text-gray-400">
+                  Uptime: {{ formatUptime(serviceStats.uptimeSince) }}
+                </span>
+                <button @click="fetchServiceStats" class="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                  <RefreshCcw :class="['w-3.5 h-3.5', statsLoading ? 'animate-spin' : '']" />
+                </button>
+              </div>
+            </div>
+            <div class="p-6">
+              <div v-if="statsLoading && !serviceStats" class="flex items-center justify-center py-8">
+                <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+              </div>
+              <div v-else-if="!serviceStats" class="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
+                Stats unavailable. Service may still be starting.
+              </div>
+              <div v-else class="space-y-4">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  {{ serviceStats.taskCount.running }} / {{ serviceStats.taskCount.total }} tasks running
+                </div>
+                <div v-for="(ctr, idx) in serviceStats.containers" :key="ctr.containerId" class="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">
+                      Container {{ serviceStats.containers.length > 1 ? idx + 1 : '' }}
+                      <span class="text-gray-400 font-mono ml-1">{{ ctr.containerId.slice(0, 12) }}</span>
+                    </span>
+                    <span class="text-[10px] text-gray-400">{{ ctr.pids }} processes</span>
+                  </div>
+
+                  <!-- CPU -->
+                  <div>
+                    <div class="flex items-center justify-between text-xs mb-1">
+                      <span class="text-gray-500 dark:text-gray-400">CPU</span>
+                      <span class="font-medium text-gray-700 dark:text-gray-300">{{ ctr.cpuPercent.toFixed(1) }}%</span>
+                    </div>
+                    <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        :class="['h-full rounded-full transition-all', ctr.cpuPercent < 70 ? 'bg-green-500' : ctr.cpuPercent < 90 ? 'bg-yellow-500' : 'bg-red-500']"
+                        :style="{ width: Math.min(ctr.cpuPercent, 100) + '%' }"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- Memory -->
+                  <div>
+                    <div class="flex items-center justify-between text-xs mb-1">
+                      <span class="text-gray-500 dark:text-gray-400">Memory</span>
+                      <span class="font-medium text-gray-700 dark:text-gray-300">
+                        {{ formatSize(ctr.memoryUsageBytes) }} / {{ formatSize(ctr.memoryLimitBytes) }}
+                        <span :class="[ctr.memoryPercent > 90 ? 'text-red-500' : ctr.memoryPercent > 70 ? 'text-yellow-500' : 'text-gray-400']">({{ ctr.memoryPercent.toFixed(1) }}%)</span>
+                      </span>
+                    </div>
+                    <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        :class="['h-full rounded-full transition-all', ctr.memoryPercent < 70 ? 'bg-purple-500' : ctr.memoryPercent < 90 ? 'bg-yellow-500' : 'bg-red-500']"
+                        :style="{ width: Math.min(ctr.memoryPercent, 100) + '%' }"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- Network I/O -->
+                  <div class="flex gap-4 text-xs">
+                    <div>
+                      <span class="text-gray-500 dark:text-gray-400">Net RX:</span>
+                      <span class="ml-1 text-gray-700 dark:text-gray-300 font-medium">{{ formatSize(ctr.networkRxBytes) }}</span>
+                    </div>
+                    <div>
+                      <span class="text-gray-500 dark:text-gray-400">Net TX:</span>
+                      <span class="ml-1 text-gray-700 dark:text-gray-300 font-medium">{{ formatSize(ctr.networkTxBytes) }}</span>
+                    </div>
+                    <div>
+                      <span class="text-gray-500 dark:text-gray-400">Disk R:</span>
+                      <span class="ml-1 text-gray-700 dark:text-gray-300 font-medium">{{ formatSize(ctr.blockReadBytes) }}</span>
+                    </div>
+                    <div>
+                      <span class="text-gray-500 dark:text-gray-400">Disk W:</span>
+                      <span class="ml-1 text-gray-700 dark:text-gray-300 font-medium">{{ formatSize(ctr.blockWriteBytes) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Files -->
@@ -741,23 +1404,80 @@ onMounted(() => {
           <DatabaseManager :serviceId="serviceId" />
         </div>
 
+        <!-- Docker -->
+        <div v-if="activeTab === 'docker'">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Dockerfile</h3>
+                <p v-if="dockerfileSource === 'generated'" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                  Auto-generated from runtime detection. Edit below to customize.
+                </p>
+                <p v-else-if="dockerfileSource === 'file'" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Dockerfile from project source files.
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="saveDockerfile"
+                  :disabled="dockerfileSaving || !dockerfileContent.trim()"
+                  class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  {{ dockerfileSaving ? 'Saving...' : 'Save' }}
+                </button>
+                <button
+                  @click="rebuildService"
+                  :disabled="service.status === 'deploying'"
+                  class="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  Rebuild
+                </button>
+              </div>
+            </div>
+            <div v-if="dockerfileLoading" class="p-12 flex items-center justify-center">
+              <Loader2 class="w-6 h-6 text-primary-500 animate-spin" />
+            </div>
+            <div v-else-if="dockerfileSource === 'none' && !dockerfileContent" class="p-12 text-center">
+              <p class="text-gray-500 dark:text-gray-400 text-sm">No Dockerfile found. The system will auto-detect your runtime on the next deploy, or you can write one below.</p>
+              <button
+                @click="insertDockerfileTemplate"
+                class="mt-4 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+              >
+                Start with template
+              </button>
+            </div>
+            <div v-else>
+              <textarea
+                v-model="dockerfileContent"
+                spellcheck="false"
+                class="w-full min-h-[400px] p-4 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono text-sm leading-relaxed resize-y border-0 focus:outline-none focus:ring-0"
+                placeholder="# Write your Dockerfile here..."
+              />
+            </div>
+            <div v-if="dockerfileError" class="px-6 py-3 border-t border-gray-200 dark:border-gray-700">
+              <p class="text-sm text-red-600 dark:text-red-400">{{ dockerfileError }}</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Logs -->
         <div v-if="activeTab === 'logs'">
-          <div class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
+          <div class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden relative">
+            <!-- Header -->
             <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <span class="text-sm font-medium text-gray-300">Service Logs</span>
+                <span class="text-sm font-medium text-gray-300">{{ liveMode && deployStream.state.value !== 'disconnected' ? 'Build Logs' : 'Service Logs' }}</span>
                 <span
                   v-if="liveMode"
                   :class="[
                     'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                    logStream.state.value === 'connected'
+                    (logStream.state.value === 'connected' || deployStream.state.value === 'connected')
                       ? 'bg-green-900/40 text-green-400'
                       : 'bg-yellow-900/40 text-yellow-400'
                   ]"
                 >
                   <span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                  {{ logStream.state.value === 'connected' ? 'Live' : 'Connecting...' }}
+                  {{ (logStream.state.value === 'connected' || deployStream.state.value === 'connected') ? 'Live' : 'Connecting...' }}
                 </span>
               </div>
               <div class="flex items-center gap-3">
@@ -776,11 +1496,106 @@ onMounted(() => {
                 <button v-if="!liveMode" @click="fetchLogs" class="text-xs text-gray-400 hover:text-gray-300 transition-colors">Refresh</button>
               </div>
             </div>
-            <div ref="logsContainer" class="p-4 h-96 overflow-y-auto font-mono text-xs text-gray-300 leading-relaxed whitespace-pre-wrap">
+
+            <!-- Toolbar -->
+            <div class="px-4 py-2 border-b border-gray-700/50 flex flex-wrap items-center gap-2">
+              <!-- Level filter -->
+              <select
+                v-model="logStream.filterLevel.value"
+                class="px-2 py-1 rounded-md bg-gray-800 border border-gray-600 text-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">All Levels</option>
+                <option value="error">Error</option>
+                <option value="warn">Warning</option>
+                <option value="info">Info</option>
+                <option value="debug">Debug</option>
+              </select>
+
+              <!-- Search -->
+              <div class="relative flex-1 min-w-[120px] max-w-[240px]">
+                <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" />
+                <input
+                  v-model="logStream.searchQuery.value"
+                  type="text"
+                  placeholder="Filter logs..."
+                  class="w-full pl-7 pr-2 py-1 rounded-md bg-gray-800 border border-gray-600 text-gray-300 text-xs placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                />
+              </div>
+
+              <!-- JSON toggle -->
+              <button
+                @click="logStream.jsonPrettyPrint.value = !logStream.jsonPrettyPrint.value"
+                :class="[
+                  'flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors',
+                  logStream.jsonPrettyPrint.value
+                    ? 'bg-primary-900/40 text-primary-400'
+                    : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800'
+                ]"
+              >
+                <Code2 class="w-3 h-3" />
+                JSON
+              </button>
+
+              <!-- Export -->
+              <button
+                @click="logStream.exportLogs()"
+                class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-gray-400 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+              >
+                <FileDown class="w-3 h-3" />
+                Export
+              </button>
+
+              <!-- Count -->
+              <span class="text-[10px] text-gray-500 ml-auto">
+                {{ isDeployStreaming ? deployStream.logLines.value.length : logStream.filteredLogs.value.length }} / {{ isDeployStreaming ? deployStream.logLines.value.length : logStream.rawLogs.value.length }} lines
+              </span>
+            </div>
+
+            <!-- Log entries -->
+            <div ref="logsContainer" @scroll="onLogsScroll" class="h-96 overflow-y-auto font-mono text-xs leading-relaxed">
               <div v-if="logsLoading && !liveMode" class="flex items-center justify-center h-full">
                 <Loader2 class="w-6 h-6 text-gray-500 animate-spin" />
               </div>
-              <template v-else>{{ displayedLogs || 'No logs available.' }}</template>
+              <!-- Deploy stream mode: show build/deploy output -->
+              <template v-else-if="isDeployStreaming && deployStream.logLines.value.length > 0">
+                <div
+                  v-for="(line, idx) in deployStream.logLines.value"
+                  :key="idx"
+                  class="px-4 py-0.5 hover:bg-gray-800/50 text-gray-300"
+                >{{ line }}</div>
+              </template>
+              <!-- Normal service log mode -->
+              <template v-else-if="!isDeployStreaming && logStream.filteredLogs.value.length > 0">
+                <div
+                  v-for="(entry, idx) in logStream.filteredLogs.value"
+                  :key="idx"
+                  :class="['px-4 py-0.5 hover:bg-gray-800/50 border-l-2', entry.level === 'error' ? 'border-red-500/60' : entry.level === 'warn' ? 'border-yellow-500/60' : 'border-transparent']"
+                >
+                  <span v-if="entry.timestamp" class="text-gray-500 mr-2">{{ entry.timestamp }}</span>
+                  <span v-if="entry.level !== 'info'" :class="['inline-flex px-1 py-0 rounded text-[10px] font-semibold uppercase mr-1.5', logLevelBadgeClass(entry.level)]">{{ entry.level }}</span>
+                  <template v-if="entry.isJson && logStream.jsonPrettyPrint.value && entry.parsedJson">
+                    <pre class="inline text-gray-300 whitespace-pre-wrap">{{ JSON.stringify(entry.parsedJson, null, 2) }}</pre>
+                  </template>
+                  <span v-else :class="logLevelColor(entry.level)">{{ entry.message }}</span>
+                </div>
+              </template>
+              <div v-else-if="isDeployStreaming" class="flex items-center justify-center h-full text-gray-500">
+                <Loader2 class="w-5 h-5 animate-spin mr-2" />
+                Waiting for build output...
+              </div>
+              <div v-else class="flex items-center justify-center h-full text-gray-500">
+                {{ logStream.rawLogs.value.length > 0 ? 'No logs match your filters.' : 'No logs available.' }}
+              </div>
+            </div>
+            <!-- Scroll to bottom button -->
+            <div v-if="userScrolledUp && liveMode" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+              <button
+                @click="scrollToBottom"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium shadow-lg transition-all"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+                Scroll to bottom
+              </button>
             </div>
           </div>
         </div>
@@ -852,20 +1667,23 @@ onMounted(() => {
               <table class="w-full">
                 <thead>
                   <tr class="border-b border-gray-200 dark:border-gray-700">
-                    <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Image Tag</th>
-                    <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                    <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Deployed At</th>
-                    <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Commit</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Image Tag</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Trigger</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Deployed At</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Commit</th>
+                    <th class="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                   <tr
                     v-for="deploy in deployments"
                     :key="deploy.id"
-                    class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                    class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group"
                   >
-                    <td class="px-6 py-4 text-sm font-mono text-gray-900 dark:text-white">{{ deploy.imageTag || '--' }}</td>
-                    <td class="px-6 py-4 text-sm">
+                    <td class="px-5 py-3.5 text-sm font-mono text-gray-900 dark:text-white">{{ deploy.imageTag || '--' }}</td>
+                    <td class="px-5 py-3.5 text-sm">
                       <span
                         :class="[
                           'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
@@ -877,11 +1695,70 @@ onMounted(() => {
                         {{ deploy.status }}
                       </span>
                     </td>
-                    <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(deploy.createdAt) }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ deploy.commitSha ? deploy.commitSha.slice(0, 7) : '--' }}</td>
+                    <td class="px-5 py-3.5 text-xs text-gray-500 dark:text-gray-400">
+                      <span v-if="deploy.trigger === 'webhook'" class="inline-flex items-center gap-1">
+                        <Webhook class="w-3 h-3" /> Auto
+                      </span>
+                      <span v-else-if="deploy.trigger === 'manual'" class="inline-flex items-center gap-1">
+                        <Play class="w-3 h-3" /> Manual
+                      </span>
+                      <span v-else>--</span>
+                    </td>
+                    <td class="px-5 py-3.5 text-xs font-mono text-gray-500 dark:text-gray-400">
+                      {{ formatDuration(deploy.startedAt, deploy.completedAt) }}
+                    </td>
+                    <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(deploy.createdAt) }}</td>
+                    <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ deploy.commitSha ? deploy.commitSha.slice(0, 7) : '--' }}</td>
+                    <td class="px-5 py-3.5 text-right">
+                      <div class="flex items-center justify-end gap-2">
+                        <!-- Notes -->
+                        <button
+                          v-if="editingNotes !== deploy.id"
+                          @click="editingNotes = deploy.id; editNotesValue = deploy.notes || ''"
+                          class="text-xs text-gray-400 hover:text-primary-500 transition-colors opacity-0 group-hover:opacity-100"
+                          :title="deploy.notes ? 'Edit note' : 'Add note'"
+                        >
+                          {{ deploy.notes ? 'Edit note' : '+ Note' }}
+                        </button>
+                        <!-- Rollback -->
+                        <button
+                          v-if="deploy.status === 'succeeded' && deploy.imageTag && deployments[0]?.id !== deploy.id"
+                          @click="rollbackToDeployment(deploy.id)"
+                          class="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          Rollback
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  <!-- Notes editing row -->
+                  <tr v-if="editingNotes" v-for="deploy in deployments.filter(d => d.id === editingNotes)" :key="'notes-' + deploy.id">
+                    <td colspan="7" class="px-5 py-3 bg-gray-50 dark:bg-gray-900/50">
+                      <div class="flex items-center gap-2">
+                        <input
+                          v-model="editNotesValue"
+                          type="text"
+                          placeholder="Add a note about this deployment..."
+                          maxlength="500"
+                          class="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          @keydown.enter="saveDeploymentNotes(deploy.id)"
+                          @keydown.escape="editingNotes = null"
+                        />
+                        <button @click="saveDeploymentNotes(deploy.id)" class="px-2.5 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors">Save</button>
+                        <button @click="editingNotes = null" class="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">Cancel</button>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <!-- Notes display under table -->
+            <div v-if="deployments.some(d => d.notes)" class="hidden sm:block mt-2">
+              <div v-for="deploy in deployments.filter(d => d.notes)" :key="'note-display-' + deploy.id" class="flex items-center gap-2 px-5 py-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <span class="font-mono text-gray-400">{{ deploy.imageTag?.slice(0, 12) || deploy.id.slice(0, 8) }}</span>
+                <span class="text-gray-300 dark:text-gray-600">—</span>
+                <span class="italic">{{ deploy.notes }}</span>
+              </div>
             </div>
             <!-- Mobile cards -->
             <div class="sm:hidden space-y-3">
@@ -900,8 +1777,44 @@ onMounted(() => {
                   </span>
                 </div>
                 <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                  <span>{{ formatDate(deploy.createdAt) }}</span>
+                  <div class="flex items-center gap-3">
+                    <span>{{ formatDate(deploy.createdAt) }}</span>
+                    <span class="font-mono">{{ formatDuration(deploy.startedAt, deploy.completedAt) }}</span>
+                  </div>
                   <span v-if="deploy.commitSha" class="font-mono">{{ deploy.commitSha.slice(0, 7) }}</span>
+                </div>
+                <div v-if="deploy.trigger" class="text-xs text-gray-400 dark:text-gray-500">
+                  Trigger: {{ deploy.trigger === 'webhook' ? 'Auto (webhook)' : 'Manual' }}
+                </div>
+                <div v-if="deploy.notes" class="text-xs text-gray-500 dark:text-gray-400 italic">{{ deploy.notes }}</div>
+                <div class="flex items-center gap-3 pt-1">
+                  <button
+                    v-if="deploy.status === 'succeeded' && deploy.imageTag && deployments[0]?.id !== deploy.id"
+                    @click="rollbackToDeployment(deploy.id)"
+                    class="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline"
+                  >
+                    Rollback
+                  </button>
+                  <button
+                    @click="editingNotes = deploy.id; editNotesValue = deploy.notes || ''"
+                    class="text-xs text-gray-400 hover:text-primary-500"
+                  >
+                    {{ deploy.notes ? 'Edit note' : '+ Note' }}
+                  </button>
+                </div>
+                <!-- Mobile notes editing -->
+                <div v-if="editingNotes === deploy.id" class="flex items-center gap-2">
+                  <input
+                    v-model="editNotesValue"
+                    type="text"
+                    placeholder="Add a note..."
+                    maxlength="500"
+                    class="flex-1 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    @keydown.enter="saveDeploymentNotes(deploy.id)"
+                    @keydown.escape="editingNotes = null"
+                  />
+                  <button @click="saveDeploymentNotes(deploy.id)" class="px-2 py-1.5 rounded bg-primary-600 text-white text-xs font-medium">Save</button>
+                  <button @click="editingNotes = null" class="text-xs text-gray-400">Cancel</button>
                 </div>
               </div>
             </div>
@@ -1098,19 +2011,85 @@ onMounted(() => {
 
         <!-- Settings -->
         <div v-if="activeTab === 'settings'" class="space-y-6">
+          <!-- Tags -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Tags</h3>
+            </div>
+            <div class="p-6">
+              <div class="flex flex-wrap gap-2 mb-3">
+                <span
+                  v-for="(tag, idx) in serviceTags"
+                  :key="idx"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300"
+                >
+                  {{ tag }}
+                  <button @click="removeTag(idx)" class="hover:text-red-500 transition-colors">
+                    <XCircle class="w-3 h-3" />
+                  </button>
+                </span>
+                <span v-if="serviceTags.length === 0" class="text-sm text-gray-500 dark:text-gray-400">No tags. Add tags to organize your services.</span>
+              </div>
+              <div class="flex gap-2">
+                <input
+                  v-model="newTagInput"
+                  @keydown.enter.prevent="addTag"
+                  type="text"
+                  placeholder="Add a tag..."
+                  maxlength="50"
+                  class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <button @click="addTag" :disabled="!newTagInput.trim()" class="px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                  Add
+                </button>
+              </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+              <button @click="saveTags" :disabled="tagsLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ tagsLoading ? 'Saving...' : 'Save Tags' }}
+              </button>
+            </div>
+          </div>
+
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Environment Variables</h3>
-              <button @click="addEnvVar" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">+ Add Variable</button>
+              <div class="flex items-center gap-3">
+                <button @click="showBulkImport = !showBulkImport" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+                  <Upload class="w-3 h-3" /> Import .env
+                </button>
+                <button @click="addEnvVar" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">+ Add Variable</button>
+              </div>
             </div>
             <div class="p-6">
+              <!-- Bulk Import -->
+              <div v-if="showBulkImport" class="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Paste .env file contents. Lines starting with # are ignored.</p>
+                <textarea v-model="bulkEnvInput" rows="6" placeholder="KEY=value&#10;ANOTHER_KEY=value&#10;# comment lines are ignored" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                <div class="flex gap-2 mt-2">
+                  <button @click="parseBulkEnv" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors">Import</button>
+                  <button @click="showBulkImport = false" class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+                </div>
+              </div>
+
               <div v-if="envVars.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
                 No environment variables configured. Click "Add Variable" to add one.
               </div>
               <div v-else class="space-y-3">
                 <div v-for="(v, i) in envVars" :key="i" class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
                   <input v-model="v.key" type="text" placeholder="KEY" class="w-full sm:flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
-                  <input v-model="v.value" type="text" placeholder="value" class="w-full sm:flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                  <div class="relative w-full sm:flex-1">
+                    <input v-model="v.value" :type="maskedVars.has(i) ? 'password' : 'text'" placeholder="value" class="w-full px-3 py-2 pr-10 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                    <button
+                      @click="toggleMask(i)"
+                      type="button"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                      :title="maskedVars.has(i) ? 'Show value' : 'Hide value'"
+                    >
+                      <EyeOff v-if="maskedVars.has(i)" class="w-4 h-4" />
+                      <Eye v-else class="w-4 h-4" />
+                    </button>
+                  </div>
                   <button @click="removeEnvVar(i)" class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-sm self-end sm:self-auto">Remove</button>
                 </div>
               </div>

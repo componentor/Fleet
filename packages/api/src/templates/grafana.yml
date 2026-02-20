@@ -1,0 +1,42 @@
+slug: grafana
+name: Grafana
+description: Beautiful analytics and monitoring dashboards. Visualize metrics from Prometheus, InfluxDB, and more. Includes Prometheus.
+icon_url: https://grafana.com/static/assets/img/fav32.png
+category: monitoring
+
+variables:
+  - name: GF_SECURITY_ADMIN_USER
+    label: Admin Username
+    type: string
+    default: admin
+  - name: GF_SECURITY_ADMIN_PASSWORD
+    label: Admin Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: grafana
+    image: grafana/grafana-oss:11.4
+    ports:
+      - target: 3000
+        published: 3000
+    env:
+      GF_SECURITY_ADMIN_USER: "{{GF_SECURITY_ADMIN_USER}}"
+      GF_SECURITY_ADMIN_PASSWORD: "{{GF_SECURITY_ADMIN_PASSWORD}}"
+    volumes:
+      - source: grafana_data
+        target: /var/lib/grafana
+
+  - name: grafana-prometheus
+    image: prom/prometheus:v2.54
+    ports:
+      - target: 9090
+        published: 9090
+    volumes:
+      - source: prometheus_data
+        target: /prometheus
+
+volumes:
+  - grafana_data
+  - prometheus_data

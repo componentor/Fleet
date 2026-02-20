@@ -242,6 +242,13 @@ export class RegistrarService {
           });
           break;
         }
+        case 'namecom': {
+          const { NamecomProvider } = await import('./namecom.provider.js');
+          this.provider = new NamecomProvider(decryptedKey, decryptedSecret ?? '', {
+            sandbox: config['sandbox'] === 'true',
+          });
+          break;
+        }
         default:
           this.provider = new SimulatedRegistrarProvider();
       }

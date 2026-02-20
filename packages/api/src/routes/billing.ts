@@ -48,10 +48,13 @@ async function queueEmail(data: EmailJobData): Promise<void> {
 function validateRedirectUrl(url: string): boolean {
   const appUrl = process.env['APP_URL'];
   if (!appUrl) return process.env['NODE_ENV'] !== 'production'; // Reject in production if APP_URL not set
-  if (url.startsWith('/')) return true; // Relative path
+  // Only allow relative paths starting with / (but not // which is protocol-relative)
+  if (url.startsWith('/') && !url.startsWith('//')) return true;
   try {
     const parsed = new URL(url);
     const app = new URL(appUrl);
+    // Only allow http/https protocols (block javascript:, data:, etc.)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     return parsed.origin === app.origin;
   } catch {
     return false;
@@ -483,7 +486,7 @@ authed.delete('/payment-methods/:id', requireOwner, async (c) => {
 
   // Verify the payment method belongs to this account's Stripe customer
   const account = await db.query.accounts.findFirst({
-    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+    where: and(eq(accounts.id, accountId!), isNull(accounts.deletedAt)),
   });
   if (!account?.stripeCustomerId) {
     return c.json({ error: 'No billing account found' }, 400);
@@ -919,6 +922,7 @@ billing.post('/webhook', async (c) => {
         await db.update(subscriptions)
           .set({
             status: 'past_due',
+            pastDueSince: new Date(),
             updatedAt: new Date()
           })
           .where(eq(subscriptions.id, dbSub.id));

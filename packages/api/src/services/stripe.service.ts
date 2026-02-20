@@ -278,7 +278,7 @@ export class StripeService {
   ): Promise<Stripe.SetupIntent> {
     return getStripe().setupIntents.create({
       customer: customerId,
-      payment_method_types: ['card'],
+      automatic_payment_methods: { enabled: true },
     });
   }
 

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle } from 'lucide-vue-next'
+import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, Tag } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
@@ -21,17 +21,43 @@ const stackActionLoading = ref<string | null>(null)
 const searchQuery = ref('')
 const page = ref(1)
 const pageSize = 20
+const selectedTags = ref<Set<string>>(new Set())
 
 const collapsedStacks = ref<Set<string>>(new Set())
 
+const allTags = computed(() => {
+  const tags = new Set<string>()
+  for (const svc of store.services) {
+    const svcTags = (svc as any).tags as string[] | undefined
+    if (svcTags) for (const t of svcTags) tags.add(t)
+  }
+  return [...tags].sort()
+})
+
+function toggleTag(tag: string) {
+  if (selectedTags.value.has(tag)) selectedTags.value.delete(tag)
+  else selectedTags.value.add(tag)
+  page.value = 1
+}
+
 const filteredServices = computed(() => {
+  let result = store.services
   const q = searchQuery.value.toLowerCase().trim()
-  if (!q) return store.services
-  return store.services.filter((svc: any) =>
-    svc.name?.toLowerCase().includes(q) ||
-    svc.image?.toLowerCase().includes(q) ||
-    svc.status?.toLowerCase().includes(q),
-  )
+  if (q) {
+    result = result.filter((svc: any) =>
+      svc.name?.toLowerCase().includes(q) ||
+      svc.image?.toLowerCase().includes(q) ||
+      svc.status?.toLowerCase().includes(q),
+    )
+  }
+  if (selectedTags.value.size > 0) {
+    result = result.filter((svc: any) => {
+      const svcTags = (svc as any).tags as string[] | undefined
+      if (!svcTags) return false
+      return [...selectedTags.value].some(t => svcTags.includes(t))
+    })
+  }
+  return result
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredServices.value.length / pageSize)))
@@ -60,6 +86,16 @@ function statusBadge(status: string) {
     case 'stopped': return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
     case 'failed': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
     default: return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+  }
+}
+
+function statusBorderColor(status: string) {
+  switch (status) {
+    case 'running': return 'border-l-green-500'
+    case 'deploying': return 'border-l-yellow-500'
+    case 'stopped': return 'border-l-gray-300 dark:border-l-gray-600'
+    case 'failed': return 'border-l-red-500'
+    default: return 'border-l-gray-300 dark:border-l-gray-600'
   }
 }
 
@@ -149,8 +185,38 @@ async function cancelDeployStack(svcs: any[]) {
   }
 }
 
+// Auto-refresh when any service is deploying
+const refreshInterval = ref<ReturnType<typeof setInterval> | null>(null)
+
+const hasDeployingServices = computed(() =>
+  store.services.some((s: any) => s.status === 'deploying')
+)
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  refreshInterval.value = setInterval(() => {
+    store.fetchServices()
+  }, 5000)
+}
+
+function stopAutoRefresh() {
+  if (refreshInterval.value) {
+    clearInterval(refreshInterval.value)
+    refreshInterval.value = null
+  }
+}
+
+watch(hasDeployingServices, (deploying) => {
+  if (deploying) startAutoRefresh()
+  else stopAutoRefresh()
+})
+
 onMounted(() => {
   store.fetchServices()
+})
+
+onUnmounted(() => {
+  stopAutoRefresh()
 })
 </script>
 
@@ -171,8 +237,8 @@ onMounted(() => {
       </router-link>
     </div>
 
-    <!-- Search -->
-    <div v-if="store.services.length > 0" class="mb-6">
+    <!-- Search & tag filters -->
+    <div v-if="store.services.length > 0" class="mb-6 space-y-3">
       <div class="relative">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
@@ -181,6 +247,22 @@ onMounted(() => {
           :placeholder="$t('services.searchPlaceholder', 'Search services...')"
           class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
         />
+      </div>
+      <div v-if="allTags.length > 0" class="flex flex-wrap gap-1.5">
+        <button
+          v-for="tag in allTags"
+          :key="tag"
+          @click="toggleTag(tag)"
+          :class="[
+            'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
+            selectedTags.has(tag)
+              ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 ring-1 ring-primary-300 dark:ring-primary-700'
+              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+          ]"
+        >
+          <Tag class="w-3 h-3" />
+          {{ tag }}
+        </button>
       </div>
     </div>
 
@@ -282,7 +364,7 @@ onMounted(() => {
             class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group"
           >
             <div class="flex items-center gap-3 min-w-0">
-              <span :class="[statusColor(service.status), 'w-2 h-2 rounded-full shrink-0']"></span>
+              <span :class="[statusColor(service.status), 'w-2 h-2 rounded-full shrink-0', service.status === 'deploying' ? 'animate-pulse' : '']"></span>
               <div class="min-w-0">
                 <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ service.name }}</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{{ service.image }}</p>
@@ -307,13 +389,13 @@ onMounted(() => {
           v-for="service in groupedServices.standalone"
           :key="service.id"
           :to="`/panel/services/${service.id}`"
-          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow overflow-hidden group"
+          :class="['bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 border-l-[3px] shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-primary-200 dark:hover:border-primary-800 transition-all duration-200 overflow-hidden group', statusBorderColor(service.status)]"
         >
           <div class="p-6">
             <div class="flex items-start justify-between mb-3">
               <div class="flex items-center gap-3">
                 <div class="flex items-center gap-2">
-                  <span :class="[statusColor(service.status), 'w-2.5 h-2.5 rounded-full']"></span>
+                  <span :class="[statusColor(service.status), 'w-2.5 h-2.5 rounded-full', service.status === 'deploying' ? 'animate-pulse' : '']"></span>
                   <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ service.name }}</h3>
                 </div>
               </div>
@@ -321,7 +403,12 @@ onMounted(() => {
                 {{ service.status }}
               </span>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 font-mono mb-3">{{ service.image }}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 font-mono mb-2">{{ service.image }}</p>
+            <div v-if="(service as any).tags?.length" class="flex flex-wrap gap-1 mb-2">
+              <span v-for="tag in (service as any).tags" :key="tag" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                {{ tag }}
+              </span>
+            </div>
             <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
               <div>
                 <span>{{ service.replicas ?? 1 }} {{ (service.replicas ?? 1) !== 1 ? $t('services.replicas') : $t('services.replica') }}</span>

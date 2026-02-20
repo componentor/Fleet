@@ -197,7 +197,7 @@ storageAdmin.delete('/nodes/:id', async (c) => {
   if (storageManager.config?.provider === 'glusterfs') {
     try {
       const { GlusterFSVolumeProvider } = await import('../services/storage/providers/glusterfs-volume.provider.js');
-      const provider = storageManager.volumes as GlusterFSVolumeProvider;
+      const provider = storageManager.volumes as InstanceType<typeof GlusterFSVolumeProvider>;
       if (typeof provider.removePeer === 'function') {
         await provider.removePeer(node.ipAddress);
       }

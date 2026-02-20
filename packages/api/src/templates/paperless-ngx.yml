@@ -1,0 +1,82 @@
+slug: paperless-ngx
+name: Paperless-ngx
+description: Document management system that transforms physical documents into a searchable online archive. Includes PostgreSQL and Redis.
+icon_url: https://docs.paperless-ngx.com/assets/favicon.png
+category: other
+
+variables:
+  - name: PAPERLESS_SECRET_KEY
+    label: Secret Key
+    type: password
+    required: true
+    generate: true
+  - name: POSTGRES_PASSWORD
+    label: Database Password
+    type: password
+    required: true
+    generate: true
+  - name: PAPERLESS_ADMIN_USER
+    label: Admin Username
+    type: string
+    default: admin
+  - name: PAPERLESS_ADMIN_PASSWORD
+    label: Admin Password
+    type: password
+    required: true
+    generate: true
+  - name: PAPERLESS_URL
+    label: Application URL
+    type: string
+    required: false
+    default: http://localhost:8000
+
+services:
+  - name: paperless-ngx
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    ports:
+      - target: 8000
+        published: 8000
+    env:
+      PAPERLESS_SECRET_KEY: "{{PAPERLESS_SECRET_KEY}}"
+      PAPERLESS_DBHOST: "{{service:paperless-db}}"
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: "{{POSTGRES_PASSWORD}}"
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_REDIS: "redis://{{service:paperless-redis}}:6379"
+      PAPERLESS_ADMIN_USER: "{{PAPERLESS_ADMIN_USER}}"
+      PAPERLESS_ADMIN_PASSWORD: "{{PAPERLESS_ADMIN_PASSWORD}}"
+      PAPERLESS_URL: "{{PAPERLESS_URL}}"
+      PAPERLESS_OCR_LANGUAGE: eng
+    volumes:
+      - source: paperless_data
+        target: /usr/src/paperless/data
+      - source: paperless_media
+        target: /usr/src/paperless/media
+      - source: paperless_consume
+        target: /usr/src/paperless/consume
+      - source: paperless_export
+        target: /usr/src/paperless/export
+
+  - name: paperless-db
+    image: postgres:17-alpine
+    env:
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: "{{POSTGRES_PASSWORD}}"
+      POSTGRES_DB: paperless
+    volumes:
+      - source: paperless_db_data
+        target: /var/lib/postgresql/data
+
+  - name: paperless-redis
+    image: redis:7-alpine
+    volumes:
+      - source: paperless_redis_data
+        target: /data
+
+volumes:
+  - paperless_data
+  - paperless_media
+  - paperless_consume
+  - paperless_export
+  - paperless_db_data
+  - paperless_redis_data

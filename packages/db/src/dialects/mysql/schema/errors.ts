@@ -7,6 +7,7 @@ import {
   boolean,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 
 export const errorLog = mysqlTable('error_log', {
@@ -23,4 +24,8 @@ export const errorLog = mysqlTable('error_log', {
   metadata: json('metadata').$type<Record<string, unknown> | null>(),
   resolved: boolean('resolved').default(false),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_error_log_created_at').on(table.createdAt),
+  index('idx_error_log_level').on(table.level),
+  index('idx_error_log_resolved').on(table.resolved),
+]);

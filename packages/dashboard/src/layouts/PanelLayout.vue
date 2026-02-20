@@ -33,11 +33,17 @@ import {
   ArrowLeft,
   ShieldAlert,
   Languages,
+  Search,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
+import { useCommandPalette } from '@/composables/useCommandPalette'
+
+const commandPalette = useCommandPalette()
 
 const { t, locale } = useI18n()
 const route = useRoute()
+const isMac = typeof globalThis.navigator !== 'undefined' && globalThis.navigator.platform?.includes('Mac')
 const { theme, toggle } = useTheme()
 const { user, isSuper, logout } = useAuth()
 const { currentAccount, accounts, switchAccount } = useAccount()
@@ -135,10 +141,10 @@ function changeLocale(newLocale: string) {
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px]',
             isActive(item.path)
-              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
+              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
           ]"
           @click="sidebarOpen = false"
         >
@@ -239,6 +245,16 @@ function changeLocale(newLocale: string) {
             </svg>
           </button>
 
+          <!-- Search trigger -->
+          <button
+            @click="commandPalette.open()"
+            class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-xs"
+          >
+            <Search class="w-3.5 h-3.5" />
+            <span class="hidden md:inline">{{ $t('common.search') }}</span>
+            <kbd class="ml-1 px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">{{ isMac ? '⌘' : 'Ctrl+' }}K</kbd>
+          </button>
+
           <!-- Notifications -->
           <NotificationBell />
 
@@ -301,8 +317,15 @@ function changeLocale(newLocale: string) {
 
       <!-- Page content -->
       <main class="p-6">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
+
+    <!-- Command Palette -->
+    <CommandPalette />
   </div>
 </template>

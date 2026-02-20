@@ -29,10 +29,15 @@ import {
   HardDrive,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
+import { useCommandPalette } from '@/composables/useCommandPalette'
+
+const commandPalette = useCommandPalette()
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const isMac = typeof globalThis.navigator !== 'undefined' && globalThis.navigator.platform?.includes('Mac')
 const { theme, toggle } = useTheme()
 const { user, logout } = useAuth()
 
@@ -46,7 +51,7 @@ const navItems = [
   { nameKey: 'nav.users', path: '/admin/users', icon: Users },
   { nameKey: 'nav.marketplace', path: '/admin/marketplace', icon: Store },
   { nameKey: 'nav.status', path: '/admin/status', icon: Activity },
-  { nameKey: 'nav.auditLog', path: '/admin/audit-log', icon: ScrollText },
+  { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText },
   { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings },
   { nameKey: 'nav.billing', path: '/admin/billing', icon: CreditCard },
   { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug },
@@ -109,10 +114,10 @@ function changeLocale(newLocale: string) {
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px]',
             isActive(item.path)
-              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
+              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
           ]"
           @click="sidebarOpen = false"
         >
@@ -146,16 +151,16 @@ function changeLocale(newLocale: string) {
           <X v-else class="w-5 h-5" />
         </button>
 
-        <!-- Search -->
+        <!-- Search trigger -->
         <div class="hidden sm:block flex-1 max-w-md">
-          <div class="relative">
-            <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              :placeholder="$t('common.search')"
-              class="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            />
-          </div>
+          <button
+            @click="commandPalette.open()"
+            class="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+          >
+            <Search class="w-4 h-4" />
+            <span class="flex-1 text-left">{{ $t('common.search') }}</span>
+            <kbd class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 rounded text-[10px] font-mono">{{ isMac ? '⌘' : 'Ctrl+' }}K</kbd>
+          </button>
         </div>
 
         <div class="flex items-center gap-2 ml-auto">
@@ -226,8 +231,15 @@ function changeLocale(newLocale: string) {
 
       <!-- Page content -->
       <main class="p-6">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
+
+    <!-- Command Palette -->
+    <CommandPalette />
   </div>
 </template>

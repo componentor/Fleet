@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { EventEmitter } from 'node:events';
 
@@ -22,19 +22,27 @@ export interface BuildInfo {
 const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
 const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
 
-function scrubSecrets(log: string): string {
+export function scrubSecrets(log: string): string {
   return log
     // Mask credentials embedded in URLs (e.g., https://x-access-token:TOKEN@github.com)
     .replace(/\/\/[^@\s]+@/g, '//[REDACTED]@')
     // Mask environment variable assignments with sensitive names
-    .replace(/(?:PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|API_KEY|AUTH|PRIVATE)[\s]*[=:]\s*\S+/gi, (match) => {
+    .replace(/(?:PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|API_KEY|AUTH|PRIVATE|DATABASE_URL|REDIS_URL|MONGO_URI|DSN|CONNECTION_STRING)[\s]*[=:]\s*\S+/gi, (match) => {
       const eqIdx = match.search(/[=:]/);
       return match.slice(0, eqIdx + 1) + ' [REDACTED]';
     })
     // Mask Bearer tokens
     .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
     // Mask base64-encoded strings that look like secrets (40+ chars)
-    .replace(/(?:eyJ|ghp_|gho_|github_pat_|sk-|pk_live_|pk_test_|sk_live_|sk_test_)\S{20,}/g, '[REDACTED]');
+    .replace(/(?:eyJ|ghp_|gho_|github_pat_|sk-|pk_live_|pk_test_|sk_live_|sk_test_|npm_[A-Za-z0-9])\S{20,}/g, '[REDACTED]')
+    // Mask connection strings (postgres://, mysql://, mongodb://, redis://, amqp://)
+    .replace(/(?:postgres|postgresql|mysql|mongodb|mongodb\+srv|redis|rediss|amqp|amqps):\/\/[^\s'"]+/gi, '[REDACTED_CONNECTION_STRING]')
+    // Mask AWS-style keys
+    .replace(/(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}/g, '[REDACTED_AWS_KEY]')
+    // Mask Stripe/Sendgrid/Twilio keys
+    .replace(/(?:sk_live_|rk_live_|whsec_|SG\.|AC[a-f0-9]{32})\S+/g, '[REDACTED]')
+    // Mask Docker build --build-arg values with sensitive names
+    .replace(/--build-arg\s+(?:PASSWORD|SECRET|TOKEN|KEY|AUTH|PRIVATE|API_KEY)[=]\S+/gi, '--build-arg [REDACTED]');
 }
 
 export class BuildService {
@@ -48,6 +56,7 @@ export class BuildService {
     dockerfile?: string;
     imageTag: string;
     buildArgs?: Record<string, string>;
+    generatedDockerfile?: string;
   }): Promise<BuildInfo> {
     const buildId = randomUUID();
     const workDir = join(BUILD_DIR, buildId);
@@ -71,7 +80,7 @@ export class BuildService {
     this.activeBuilds.set(buildId, { aborted: false, info });
 
     // Run the build pipeline asynchronously
-    this.runBuildPipeline(buildId, workDir, opts.cloneUrl, opts.branch, dockerfile, fullImageTag, opts.buildArgs ?? {}, info)
+    this.runBuildPipeline(buildId, workDir, opts.cloneUrl, opts.branch, dockerfile, fullImageTag, opts.buildArgs ?? {}, info, opts.generatedDockerfile)
       .catch((err) => {
         if (info.status !== 'cancelled') {
           info.status = 'failed';
@@ -93,11 +102,12 @@ export class BuildService {
     imageTag: string,
     buildArgs: Record<string, string>,
     info: BuildInfo,
+    generatedDockerfile?: string,
   ): Promise<void> {
     try {
       // 1. Clone
       info.status = 'cloning';
-      info.log += `[clone] Cloning ${cloneUrl} branch ${branch}...\n`;
+      info.log += `[clone] Cloning ${scrubSecrets(cloneUrl)} branch ${branch}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
       await mkdir(workDir, { recursive: true });
@@ -108,6 +118,14 @@ export class BuildService {
         120_000, // 2 minute timeout for git clone
       );
       info.log += scrubSecrets(cloneResult);
+
+      // Write auto-generated Dockerfile if provided
+      if (generatedDockerfile) {
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(join(workDir, dockerfile), generatedDockerfile, 'utf-8');
+        info.log += `[detect] Auto-generated ${dockerfile} from runtime detection\n`;
+        this.events.emit(`build:${buildId}`, info);
+      }
 
       // 2. Build
       info.status = 'building';
@@ -120,16 +138,14 @@ export class BuildService {
       }
       buildCmdArgs.push(workDir);
 
-      const buildLog = await this.exec('docker', buildCmdArgs, workDir, 600_000); // 10 minute timeout for docker build
-      info.log += scrubSecrets(buildLog);
+      await this.execStreaming(buildId, info, 'docker', buildCmdArgs, workDir, 600_000); // 10 minute timeout
 
       // 3. Push
       info.status = 'pushing';
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
-      const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000); // 10 minute timeout for docker push
-      info.log += scrubSecrets(pushLog);
+      await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000); // 10 minute timeout
 
       // Done
       info.status = 'succeeded';
@@ -161,12 +177,109 @@ export class BuildService {
       return stdout + (stderr ? `\n${stderr}` : '');
     } catch (err: unknown) {
       const execErr = err as { stdout?: string; stderr?: string; code?: number; killed?: boolean };
+      // Scrub command args and output to prevent token leakage (e.g. git clone URLs with OAuth tokens)
+      const safeArgs = scrubSecrets(args.join(' '));
       if (execErr.killed) {
-        throw new Error(`Command "${cmd} ${args.join(' ')}" timed out after ${timeout}ms`);
+        throw new Error(`Command "${cmd} ${safeArgs}" timed out after ${timeout}ms`);
       }
-      const output = (execErr.stdout ?? '') + (execErr.stderr ?? '');
-      throw new Error(`Command "${cmd} ${args.join(' ')}" failed with code ${execErr.code}\n${output}`);
+      const output = scrubSecrets((execErr.stdout ?? '') + (execErr.stderr ?? ''));
+      throw new Error(`Command "${cmd} ${safeArgs}" failed with code ${execErr.code}\n${output}`);
     }
+  }
+
+  /**
+   * Streaming exec — uses spawn to stream stdout/stderr line-by-line,
+   * emitting build events in real-time so clients can see output as it happens.
+   */
+  private execStreaming(
+    buildId: string,
+    info: BuildInfo,
+    cmd: string,
+    args: string[],
+    cwd: string,
+    timeout?: number,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = '';
+      let lastEmit = 0;
+      const THROTTLE_MS = 100;
+      let settled = false;
+
+      const emitThrottled = () => {
+        const now = Date.now();
+        if (now - lastEmit >= THROTTLE_MS) {
+          lastEmit = now;
+          this.events.emit(`build:${buildId}`, info);
+        }
+      };
+
+      // Cap log at 2MB to prevent unbounded memory growth during verbose builds.
+      // At 1000 concurrent builds × 2MB = 2GB worst-case, which is manageable.
+      const MAX_LOG_BYTES = 2 * 1024 * 1024;
+      let logCapped = false;
+
+      const handleLine = (line: string) => {
+        if (!line) return;
+        const scrubbed = scrubSecrets(line);
+        // Cap output at same limit as info.log to prevent memory exhaustion
+        if (output.length < MAX_LOG_BYTES) {
+          output += scrubbed + '\n';
+        }
+        if (!logCapped) {
+          if (info.log.length + scrubbed.length + 1 > MAX_LOG_BYTES) {
+            info.log += '\n[log truncated — exceeded 2MB limit]\n';
+            logCapped = true;
+          } else {
+            info.log += scrubbed + '\n';
+          }
+        }
+        emitThrottled();
+      };
+
+      let stdoutBuf = '';
+      proc.stdout!.on('data', (chunk: Buffer) => {
+        stdoutBuf += chunk.toString();
+        const lines = stdoutBuf.split('\n');
+        stdoutBuf = lines.pop() ?? '';
+        for (const line of lines) handleLine(line);
+      });
+
+      let stderrBuf = '';
+      proc.stderr!.on('data', (chunk: Buffer) => {
+        stderrBuf += chunk.toString();
+        const lines = stderrBuf.split('\n');
+        stderrBuf = lines.pop() ?? '';
+        for (const line of lines) handleLine(line);
+      });
+
+      const timer = timeout ? setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          proc.kill('SIGKILL');
+          reject(new Error(`Command "${cmd}" timed out after ${timeout}ms`));
+        }
+      }, timeout) : null;
+
+      proc.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (stdoutBuf) handleLine(stdoutBuf);
+        if (stderrBuf) handleLine(stderrBuf);
+        this.events.emit(`build:${buildId}`, info);
+
+        if (code === 0) resolve(output);
+        else reject(new Error(`Command "${cmd}" failed with code ${code}\n${output}`));
+      });
+
+      proc.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        reject(err);
+      });
+    });
   }
 
   async buildFromDirectory(opts: {
@@ -175,6 +288,7 @@ export class BuildService {
     dockerfile?: string;
     imageTag: string;
     buildArgs?: Record<string, string>;
+    generatedDockerfile?: string;
   }): Promise<BuildInfo> {
     const buildId = randomUUID();
     const workDir = join(BUILD_DIR, buildId);
@@ -197,7 +311,7 @@ export class BuildService {
     this.activeBuilds.set(buildId, { aborted: false, info });
 
     // Copy source to temp build dir, then build + push
-    this.runDirectoryBuildPipeline(buildId, workDir, opts.sourceDir, dockerfile, fullImageTag, opts.buildArgs ?? {}, info)
+    this.runDirectoryBuildPipeline(buildId, workDir, opts.sourceDir, dockerfile, fullImageTag, opts.buildArgs ?? {}, info, opts.generatedDockerfile)
       .catch((err) => {
         if (info.status !== 'cancelled') {
           info.status = 'failed';
@@ -218,6 +332,7 @@ export class BuildService {
     imageTag: string,
     buildArgs: Record<string, string>,
     info: BuildInfo,
+    generatedDockerfile?: string,
   ): Promise<void> {
     try {
       // 1. Copy source to temp build dir
@@ -227,6 +342,14 @@ export class BuildService {
 
       await mkdir(workDir, { recursive: true });
       await this.exec('cp', ['-a', `${sourceDir}/.`, workDir], workDir);
+
+      // Write auto-generated Dockerfile if provided
+      if (generatedDockerfile) {
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(join(workDir, dockerfile), generatedDockerfile, 'utf-8');
+        info.log += `[detect] Auto-generated ${dockerfile} from runtime detection\n`;
+        this.events.emit(`build:${buildId}`, info);
+      }
 
       // 2. Build
       info.status = 'building';
@@ -239,16 +362,14 @@ export class BuildService {
       }
       buildCmdArgs.push(workDir);
 
-      const buildLog = await this.exec('docker', buildCmdArgs, workDir, 600_000);
-      info.log += scrubSecrets(buildLog);
+      await this.execStreaming(buildId, info, 'docker', buildCmdArgs, workDir, 600_000);
 
       // 3. Push
       info.status = 'pushing';
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
-      const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000);
-      info.log += scrubSecrets(pushLog);
+      await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000);
 
       // Done
       info.status = 'succeeded';
@@ -332,13 +453,13 @@ export class BuildService {
 
       const projectName = `fleet-${buildId.slice(0, 8)}`;
 
-      const buildLog = await this.exec(
+      await this.execStreaming(
+        buildId, info,
         'docker',
         ['compose', '-f', join(workDir, composeFile), '-p', projectName, 'build'],
         workDir,
         600_000,
       );
-      info.log += scrubSecrets(buildLog);
 
       // 3. Get the built service name
       const servicesOutput = await this.exec(
@@ -363,8 +484,7 @@ export class BuildService {
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
-      const pushLog = await this.exec('docker', ['push', imageTag], workDir, 600_000);
-      info.log += scrubSecrets(pushLog);
+      await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000);
 
       // Cleanup local compose image
       await this.exec('docker', ['rmi', composeBuildImage], workDir).catch(() => {});
@@ -412,7 +532,10 @@ export class BuildService {
     return () => this.events.off(eventName, callback);
   }
 
-  async detectDockerfile(cloneUrl: string, branch: string): Promise<string[]> {
+  async detectDockerfile(cloneUrl: string, branch: string): Promise<{
+    dockerfiles: string[];
+    allFiles: string[];
+  }> {
     const workDir = join(BUILD_DIR, `detect-${randomUUID()}`);
     try {
       await mkdir(workDir, { recursive: true });
@@ -426,7 +549,7 @@ export class BuildService {
 
       // List top-level files
       const output = await this.exec('git', ['ls-tree', '--name-only', 'HEAD'], workDir);
-      const files = output.trim().split('\n');
+      const files = output.trim().split('\n').filter(Boolean);
 
       const dockerfiles: string[] = [];
       for (const file of files) {
@@ -435,7 +558,10 @@ export class BuildService {
         }
       }
 
-      return dockerfiles.length > 0 ? dockerfiles : ['Dockerfile'];
+      return {
+        dockerfiles: dockerfiles.length > 0 ? dockerfiles : [],
+        allFiles: files,
+      };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }

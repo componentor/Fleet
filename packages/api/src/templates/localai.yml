@@ -1,0 +1,31 @@
+slug: localai
+name: LocalAI
+description: Drop-in OpenAI API replacement. Run LLMs, generate images, and audio locally with GPU or CPU.
+icon_url: https://localai.io/favicon.ico
+category: ai
+
+variables:
+  - name: LOCALAI_THREADS
+    label: CPU Threads
+    type: string
+    default: "4"
+  - name: LOCALAI_CONTEXT_SIZE
+    label: Context Size
+    type: string
+    default: "512"
+
+services:
+  - name: localai
+    image: localai/localai:latest-cpu
+    ports:
+      - target: 8080
+        published: 8080
+    env:
+      THREADS: "{{LOCALAI_THREADS}}"
+      CONTEXT_SIZE: "{{LOCALAI_CONTEXT_SIZE}}"
+    volumes:
+      - source: localai_models
+        target: /models
+
+volumes:
+  - localai_models

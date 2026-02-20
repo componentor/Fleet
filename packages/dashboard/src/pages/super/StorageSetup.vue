@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 import {
   HardDrive, Server, Shield, CheckCircle2, ArrowRight, ArrowLeft,
@@ -8,6 +9,7 @@ import {
   ChevronUp, Lock, Network, Terminal,
 } from 'lucide-vue-next'
 
+const { t } = useI18n()
 const api = useApi()
 
 // ── State ────────────────────────────────────────────────────────────────
@@ -104,12 +106,12 @@ const verifyHealth = ref<any>(null)
 // ── Computed ─────────────────────────────────────────────────────────────
 
 const steps = computed(() => [
-  { number: 1, label: 'Choose Mode', icon: Monitor },
-  { number: 2, label: 'Storage Nodes', icon: Server },
-  { number: 3, label: 'Configure', icon: Settings },
-  { number: 4, label: 'Initialize', icon: Database },
-  { number: 5, label: 'Migrate Data', icon: HardDrive },
-  { number: 6, label: 'Verify', icon: CheckCircle2 },
+  { number: 1, label: t('storageSetup.stepChooseMode'), icon: Monitor },
+  { number: 2, label: t('storageSetup.stepStorageNodes'), icon: Server },
+  { number: 3, label: t('storageSetup.stepConfigure'), icon: Settings },
+  { number: 4, label: t('storageSetup.stepInitialize'), icon: Database },
+  { number: 5, label: t('storageSetup.stepMigrateData'), icon: HardDrive },
+  { number: 6, label: t('storageSetup.stepVerify'), icon: CheckCircle2 },
 ])
 
 const canProceed = computed(() => {
@@ -188,16 +190,16 @@ function removeNode(index: number) {
 async function testNode(index: number) {
   const node = storageNodes.value[index]!
   node.testStatus = 'testing'
-  node.testMessage = 'Testing connectivity...'
+  node.testMessage = t('storageSetup.testingConnectivity')
 
   try {
     // For now, just validate via API health check
     const result = await api.post('/admin/storage/cluster/test', {}) as any
     node.testStatus = 'ok'
-    node.testMessage = 'Connected'
+    node.testMessage = t('storageSetup.connected')
   } catch (err: any) {
     node.testStatus = 'error'
-    node.testMessage = err?.body?.error || 'Connection failed'
+    node.testMessage = err?.body?.error || t('storageSetup.connectionFailed')
   }
 }
 
@@ -211,7 +213,7 @@ async function initializeCluster() {
   try {
     // Register nodes first
     if (isDistributed) {
-      initLogs.value.push('Registering storage nodes...')
+      initLogs.value.push(t('storageSetup.registeringNodes'))
       for (const node of storageNodes.value) {
         await api.post('/admin/storage/nodes', {
           hostname: node.hostname,
@@ -225,7 +227,7 @@ async function initializeCluster() {
     }
 
     // Configure cluster
-    initLogs.value.push('Configuring storage cluster...')
+    initLogs.value.push(t('storageSetup.configuringCluster'))
 
     // Build volume provider config
     let volumeConfig: any = {}
@@ -288,19 +290,19 @@ async function initializeCluster() {
     }
 
     const result = await api.post('/admin/storage/cluster', clusterConfig) as any
-    initLogs.value.push(`Cluster status: ${result.status}`)
+    initLogs.value.push(t('storageSetup.clusterStatusLog', { status: result.status }))
 
     if (result.status === 'healthy') {
-      initLogs.value.push('Storage cluster initialized successfully!')
+      initLogs.value.push(t('storageSetup.initSuccess'))
       initStatus.value = 'success'
     } else {
-      initLogs.value.push(`Warning: cluster status is ${result.status}`)
+      initLogs.value.push(t('storageSetup.clusterStatusWarning', { status: result.status }))
       initStatus.value = 'error'
-      error.value = result.error || 'Cluster initialization returned non-healthy status'
+      error.value = result.error || t('storageSetup.initNonHealthy')
     }
   } catch (err: any) {
     initStatus.value = 'error'
-    error.value = err?.body?.error || 'Failed to initialize storage cluster'
+    error.value = err?.body?.error || t('storageSetup.initFailed')
     initLogs.value.push(`ERROR: ${error.value}`)
   }
 }
@@ -308,7 +310,7 @@ async function initializeCluster() {
 async function startMigration() {
   migrationStatus.value = 'running'
   migrationProgress.value = 0
-  migrationItem.value = 'Starting migration...'
+  migrationItem.value = t('storageSetup.startingMigration')
 
   try {
     const toProvider = selectedMode.value === 'distributed' ? selectedVolumeProvider.value : 'local'
@@ -332,17 +334,17 @@ async function startMigration() {
         } else if (status.status === 'failed') {
           clearInterval(interval)
           migrationStatus.value = 'idle'
-          error.value = 'Migration failed: ' + (status.log || 'Unknown error')
+          error.value = t('storageSetup.migrationFailed') + ': ' + (status.log || t('storageSetup.unknownError'))
         }
       } catch {
         clearInterval(interval)
         migrationStatus.value = 'idle'
-        error.value = 'Failed to check migration status'
+        error.value = t('storageSetup.migrationStatusCheckFailed')
       }
     }, 2000)
   } catch (err: any) {
     migrationStatus.value = 'idle'
-    error.value = err?.body?.error || 'Failed to start migration'
+    error.value = err?.body?.error || t('storageSetup.startMigrationFailed')
   }
 }
 
@@ -350,7 +352,7 @@ async function verifyCluster() {
   try {
     verifyHealth.value = await api.get('/admin/storage/health')
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to verify cluster health'
+    error.value = err?.body?.error || t('storageSetup.verifyFailed')
   }
 }
 
@@ -438,7 +440,7 @@ async function startProviderMigration() {
           clearInterval(migrationPollInterval.value!)
           migrationPollInterval.value = null
           migrationStatus.value = 'idle'
-          error.value = 'Migration failed. Check the log for details.'
+          error.value = t('storageSetup.migrationFailedCheckLog')
         } else if (status.status === 'paused') {
           clearInterval(migrationPollInterval.value!)
           migrationPollInterval.value = null
@@ -450,7 +452,7 @@ async function startProviderMigration() {
     }, 2000)
   } catch (err: any) {
     migrationStatus.value = 'idle'
-    error.value = err?.body?.error || 'Failed to start migration'
+    error.value = err?.body?.error || t('storageSetup.startMigrationFailed')
   }
 }
 
@@ -459,9 +461,9 @@ async function pauseActiveMigration() {
   try {
     await api.post(`/admin/storage/migrate/${activeMigrationId.value}/pause`, {})
     migrationStatus.value = 'idle'
-    migrationItem.value = 'Paused'
+    migrationItem.value = t('storageSetup.paused')
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to pause migration'
+    error.value = err?.body?.error || t('storageSetup.pauseFailed')
   }
 }
 
@@ -495,7 +497,7 @@ async function resumeActiveMigration() {
       }
     }, 2000)
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to resume migration'
+    error.value = err?.body?.error || t('storageSetup.resumeFailed')
   }
 }
 
@@ -503,10 +505,10 @@ async function rollbackActiveMigration() {
   if (!activeMigrationId.value) return
   try {
     await api.post(`/admin/storage/migrate/${activeMigrationId.value}/rollback`, {})
-    success.value = 'Migration rolled back successfully'
+    success.value = t('storageSetup.rollbackSuccess')
     closeMigrationWizard()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to rollback migration'
+    error.value = err?.body?.error || t('storageSetup.rollbackFailed')
   }
 }
 </script>
@@ -517,7 +519,7 @@ async function rollbackActiveMigration() {
     <div class="flex items-center justify-between mb-8">
       <div class="flex items-center gap-3">
         <HardDrive class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Storage</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('storageSetup.title') }}</h1>
       </div>
       <div v-if="!showWizard && !showMigrationWizard" class="flex items-center gap-3">
         <button
@@ -526,14 +528,14 @@ async function rollbackActiveMigration() {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium transition-colors"
         >
           <RefreshCw class="w-4 h-4" />
-          Migrate Storage
+          {{ t('storageSetup.migrateStorage') }}
         </button>
         <button
           @click="startWizard"
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
           <Settings class="w-4 h-4" />
-          {{ isConfigured ? 'Reconfigure Storage' : 'Configure Storage' }}
+          {{ isConfigured ? t('storageSetup.reconfigureStorage') : t('storageSetup.configureStorage') }}
         </button>
       </div>
     </div>
@@ -545,7 +547,7 @@ async function rollbackActiveMigration() {
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
           <div class="flex items-center gap-3 mb-3">
             <Database class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">Volume Provider</h3>
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('storageSetup.volumeProvider') }}</h3>
           </div>
           <p class="text-lg font-semibold text-gray-900 dark:text-white capitalize">
             {{ clusterData?.cluster?.provider ?? 'local' }}
@@ -555,7 +557,7 @@ async function rollbackActiveMigration() {
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
           <div class="flex items-center gap-3 mb-3">
             <Cloud class="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">Object Provider</h3>
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('storageSetup.objectProvider') }}</h3>
           </div>
           <p class="text-lg font-semibold text-gray-900 dark:text-white capitalize">
             {{ clusterData?.cluster?.objectProvider ?? 'local' }}
@@ -565,10 +567,10 @@ async function rollbackActiveMigration() {
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
           <div class="flex items-center gap-3 mb-3">
             <Activity class="w-5 h-5" :class="clusterData?.cluster?.status === 'healthy' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" />
-            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">Status</h3>
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('storageSetup.status') }}</h3>
           </div>
           <p class="text-lg font-semibold capitalize" :class="clusterData?.cluster?.status === 'healthy' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
-            {{ clusterData?.cluster?.status ?? 'Not configured' }}
+            {{ clusterData?.cluster?.status ?? t('storageSetup.notConfigured') }}
           </p>
         </div>
       </div>
@@ -576,17 +578,17 @@ async function rollbackActiveMigration() {
       <!-- Replication Info -->
       <div v-if="clusterData?.cluster?.replicationFactor > 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Replication</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.replication') }}</h2>
         </div>
         <div class="p-6">
           <div class="flex items-center gap-4">
             <Shield class="w-8 h-8 text-green-600 dark:text-green-400" />
             <div>
               <p class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ clusterData.cluster.replicationFactor }}-way replication active
+                {{ t('storageSetup.replicationActive', { factor: clusterData.cluster.replicationFactor }) }}
               </p>
               <p class="text-sm text-gray-500 dark:text-gray-400">
-                Your data is replicated across {{ clusterData.cluster.replicationFactor }} nodes. Up to {{ clusterData.cluster.replicationFactor - 1 }} node(s) can fail without data loss.
+                {{ t('storageSetup.replicationDesc', { factor: clusterData.cluster.replicationFactor, failCount: clusterData.cluster.replicationFactor - 1 }) }}
               </p>
             </div>
           </div>
@@ -596,17 +598,17 @@ async function rollbackActiveMigration() {
       <!-- Storage Nodes -->
       <div v-if="clusterData?.nodes?.length" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage Nodes</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.storageNodes') }}</h2>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Hostname</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">IP</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Role</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Status</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Capacity</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.hostname') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.ip') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.role') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.status') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.capacity') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -632,16 +634,16 @@ async function rollbackActiveMigration() {
       <!-- No storage configured -->
       <div v-if="!isConfigured" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
         <HardDrive class="w-16 h-16 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">No Storage Configured</h2>
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">{{ t('storageSetup.noStorageConfigured') }}</h2>
         <p class="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6">
-          Set up your storage system to enable volume replication, object storage for uploads and backups, and automatic failover across nodes.
+          {{ t('storageSetup.noStorageDesc') }}
         </p>
         <button
           @click="startWizard"
           class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
           <Settings class="w-4 h-4" />
-          Configure Storage
+          {{ t('storageSetup.configureStorage') }}
         </button>
       </div>
     </template>
@@ -649,7 +651,7 @@ async function rollbackActiveMigration() {
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12 gap-3 text-gray-500 dark:text-gray-400">
       <Loader2 class="w-5 h-5 animate-spin" />
-      <span class="text-sm">Loading storage configuration...</span>
+      <span class="text-sm">{{ t('storageSetup.loading') }}</span>
     </div>
 
     <!-- ═══ WIZARD ═══ -->
@@ -694,8 +696,8 @@ async function rollbackActiveMigration() {
       <!-- Step 1: Choose Mode -->
       <div v-if="currentStep === 1" class="space-y-6">
         <div class="text-center mb-8">
-          <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Choose Storage Mode</h2>
-          <p class="text-gray-500 dark:text-gray-400">Select how you want Fleet to manage storage across your infrastructure.</p>
+          <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">{{ t('storageSetup.chooseStorageMode') }}</h2>
+          <p class="text-gray-500 dark:text-gray-400">{{ t('storageSetup.chooseModeDesc') }}</p>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
@@ -711,13 +713,13 @@ async function rollbackActiveMigration() {
             <div class="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-4">
               <Monitor class="w-6 h-6 text-gray-600 dark:text-gray-400" />
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Local / Single Node</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('storageSetup.localSingleNode') }}</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400">
-              For development or single-server setups. No replication. Uses local filesystem and NFS. This is the current default.
+              {{ t('storageSetup.localDesc') }}
             </p>
             <div class="mt-4 flex flex-wrap gap-2">
-              <span class="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">Simple setup</span>
-              <span class="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">No replication</span>
+              <span class="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{{ t('storageSetup.simpleSetup') }}</span>
+              <span class="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{{ t('storageSetup.noReplication') }}</span>
             </div>
           </button>
 
@@ -733,14 +735,14 @@ async function rollbackActiveMigration() {
             <div class="w-12 h-12 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mb-4">
               <Shield class="w-6 h-6 text-primary-600 dark:text-primary-400" />
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Distributed Cluster</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('storageSetup.distributedCluster') }}</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400">
-              Production-grade. Replicates data across 3+ nodes with automatic failover and self-healing.
+              {{ t('storageSetup.distributedDesc') }}
             </p>
             <div class="mt-4 flex flex-wrap gap-2">
-              <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">3-way replication</span>
-              <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">Auto-failover</span>
-              <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">Self-healing</span>
+              <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">{{ t('storageSetup.threeWayReplication') }}</span>
+              <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">{{ t('storageSetup.autoFailover') }}</span>
+              <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">{{ t('storageSetup.selfHealing') }}</span>
             </div>
           </button>
         </div>
@@ -749,7 +751,7 @@ async function rollbackActiveMigration() {
         <div v-if="selectedMode === 'distributed'" class="max-w-3xl mx-auto space-y-6 mt-8">
           <!-- Volume Provider -->
           <div>
-            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Volume Storage Provider</h3>
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{{ t('storageSetup.volumeStorageProvider') }}</h3>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
                 @click="selectedVolumeProvider = 'glusterfs'"
@@ -762,11 +764,11 @@ async function rollbackActiveMigration() {
               >
                 <p class="text-sm font-semibold text-gray-900 dark:text-white">GlusterFS</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Distributed replicated filesystem. Great for bare metal and VMs. POSIX-compatible, auto-heal, Docker volume plugin.
+                  {{ t('storageSetup.glusterfsDesc') }}
                 </p>
                 <div class="mt-2 flex flex-wrap gap-1">
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">Bare metal</span>
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">GCP VMs</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">{{ t('storageSetup.bareMetal') }}</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">{{ t('storageSetup.gcpVms') }}</span>
                 </div>
               </button>
               <button
@@ -780,11 +782,11 @@ async function rollbackActiveMigration() {
               >
                 <p class="text-sm font-semibold text-gray-900 dark:text-white">Ceph RBD</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Enterprise-grade block storage. Scales to exabytes. Erasure coding, snapshots, thin provisioning. Industry standard.
+                  {{ t('storageSetup.cephDesc') }}
                 </p>
                 <div class="mt-2 flex flex-wrap gap-1">
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">Datacenter</span>
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">Petabyte+</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">{{ t('storageSetup.datacenter') }}</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">{{ t('storageSetup.petabytePlus') }}</span>
                 </div>
               </button>
             </div>
@@ -792,7 +794,7 @@ async function rollbackActiveMigration() {
 
           <!-- Object Provider -->
           <div>
-            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Object Storage Provider</h3>
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{{ t('storageSetup.objectStorageProvider') }}</h3>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <button
                 @click="selectedObjectProvider = 'minio'"
@@ -805,7 +807,7 @@ async function rollbackActiveMigration() {
               >
                 <p class="text-sm font-semibold text-gray-900 dark:text-white">MinIO</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Self-hosted S3-compatible. Runs on your own nodes. No vendor lock-in.
+                  {{ t('storageSetup.minioDesc') }}
                 </p>
               </button>
               <button
@@ -819,7 +821,7 @@ async function rollbackActiveMigration() {
               >
                 <p class="text-sm font-semibold text-gray-900 dark:text-white">AWS S3</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Amazon S3 or S3-compatible services (Backblaze B2, Wasabi, etc.)
+                  {{ t('storageSetup.s3Desc') }}
                 </p>
               </button>
               <button
@@ -833,7 +835,7 @@ async function rollbackActiveMigration() {
               >
                 <p class="text-sm font-semibold text-gray-900 dark:text-white">Google Cloud</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Google Cloud Storage. Native GCS integration for GCP deployments.
+                  {{ t('storageSetup.gcsDesc') }}
                 </p>
               </button>
             </div>
@@ -844,13 +846,13 @@ async function rollbackActiveMigration() {
       <!-- Step 2: Add Storage Nodes -->
       <div v-if="currentStep === 2" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage Nodes</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.storageNodes') }}</h2>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
             <template v-if="selectedMode === 'distributed'">
-              Add at least {{ replicationFactor }} nodes to form the storage cluster. Each node stores a full copy of your data.
+              {{ t('storageSetup.addNodesDesc', { count: replicationFactor }) }}
             </template>
             <template v-else>
-              Local mode uses the current server. No additional nodes needed.
+              {{ t('storageSetup.localNoNodes') }}
             </template>
           </p>
         </div>
@@ -859,7 +861,7 @@ async function rollbackActiveMigration() {
           <div class="flex items-center gap-3 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
             <Monitor class="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
             <p class="text-sm text-blue-700 dark:text-blue-300">
-              Local mode uses this server's filesystem. All volumes and objects are stored on a single node. You can upgrade to distributed mode later.
+              {{ t('storageSetup.localModeInfo') }}
             </p>
           </div>
         </div>
@@ -873,9 +875,9 @@ async function rollbackActiveMigration() {
             <div class="flex items-center gap-3">
               <BookOpen class="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
               <div>
-                <p class="text-sm font-semibold text-indigo-700 dark:text-indigo-300">Node Setup Guide</p>
+                <p class="text-sm font-semibold text-indigo-700 dark:text-indigo-300">{{ t('storageSetup.nodeSetupGuide') }}</p>
                 <p class="text-xs text-indigo-600/70 dark:text-indigo-400/70 mt-0.5">
-                  Prerequisites, firewall ports, security, and step-by-step instructions
+                  {{ t('storageSetup.nodeSetupGuideDesc') }}
                 </p>
               </div>
             </div>
@@ -888,18 +890,18 @@ async function rollbackActiveMigration() {
             <div class="p-4 rounded-lg bg-white dark:bg-gray-750 border border-gray-200 dark:border-gray-600 space-y-3">
               <h4 class="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Server class="w-4 h-4 text-gray-500" />
-                Overview
+                {{ t('storageSetup.overview') }}
               </h4>
               <p class="text-sm text-gray-600 dark:text-gray-400">
-                Each storage node is a server (bare metal or VM) that stores and replicates your data. Nodes can be
-                <span class="font-medium text-gray-900 dark:text-white">dedicated</span> (better I/O) or
-                <span class="font-medium text-gray-900 dark:text-white">shared with compute</span> (runs services too).
-                You need at least <span class="font-medium text-gray-900 dark:text-white">{{ replicationFactor }} nodes</span> for {{ replicationFactor }}-way replication.
+                {{ t('storageSetup.overviewPart1') }}
+                <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.dedicated') }}</span> {{ t('storageSetup.overviewPart2') }}
+                <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.sharedWithCompute') }}</span> {{ t('storageSetup.overviewPart3') }}
+                {{ t('storageSetup.overviewMinNodes', { count: replicationFactor }) }}
               </p>
               <div class="flex flex-wrap gap-2 text-xs">
-                <span class="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Minimum 50 GB disk space</span>
-                <span class="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Ubuntu 22.04+ / Debian 12+</span>
-                <span class="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Root / sudo access required</span>
+                <span class="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">{{ t('storageSetup.minDiskSpace') }}</span>
+                <span class="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">{{ t('storageSetup.osRequirement') }}</span>
+                <span class="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">{{ t('storageSetup.rootRequired') }}</span>
               </div>
             </div>
 
@@ -907,20 +909,20 @@ async function rollbackActiveMigration() {
             <div class="p-4 rounded-lg bg-white dark:bg-gray-750 border border-gray-200 dark:border-gray-600 space-y-3">
               <h4 class="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Network class="w-4 h-4 text-gray-500" />
-                Network Requirements
+                {{ t('storageSetup.networkRequirements') }}
               </h4>
               <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <div class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                  <p><span class="font-medium text-gray-900 dark:text-white">Static IP required.</span> Each storage node must have a fixed IP address (static assignment or DHCP reservation). Changing IPs will break the storage cluster.</p>
+                  <p><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.staticIpRequired') }}</span> {{ t('storageSetup.staticIpDesc') }}</p>
                 </div>
                 <div class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
-                  <p><span class="font-medium text-gray-900 dark:text-white">Private network recommended.</span> Storage traffic should stay on a private/internal network (e.g. <code class="text-xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700">10.0.x.x</code>). Do not expose storage ports to the public internet.</p>
+                  <p><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.privateNetworkRecommended') }}</span> {{ t('storageSetup.privateNetworkDesc') }}</p>
                 </div>
                 <div class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
-                  <p><span class="font-medium text-gray-900 dark:text-white">Low latency between nodes.</span> All storage nodes should be in the same datacenter or availability zone. High latency will degrade performance and replication speed.</p>
+                  <p><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.lowLatency') }}</span> {{ t('storageSetup.lowLatencyDesc') }}</p>
                 </div>
               </div>
             </div>
@@ -929,20 +931,20 @@ async function rollbackActiveMigration() {
             <div class="p-4 rounded-lg bg-white dark:bg-gray-750 border border-gray-200 dark:border-gray-600 space-y-3">
               <h4 class="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Database class="w-4 h-4 text-gray-500" />
-                Docker Swarm &amp; Storage Nodes
+                {{ t('storageSetup.swarmAndStorage') }}
               </h4>
               <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <div class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></span>
-                  <p><span class="font-medium text-gray-900 dark:text-white">Storage-only nodes do NOT need Docker Swarm.</span> Dedicated storage nodes run only the storage services ({{ selectedVolumeProvider === 'glusterfs' ? 'GlusterFS' : 'Ceph' }}{{ selectedObjectProvider === 'minio' ? ' + MinIO' : '' }}). They are managed by Fleet over SSH.</p>
+                  <p><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.storageOnlyNoSwarm') }}</span> {{ t('storageSetup.storageOnlyNoSwarmDesc', { services: (selectedVolumeProvider === 'glusterfs' ? 'GlusterFS' : 'Ceph') + (selectedObjectProvider === 'minio' ? ' + MinIO' : '') }) }}</p>
                 </div>
                 <div class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></span>
-                  <p><span class="font-medium text-gray-900 dark:text-white">Storage+Compute nodes are part of Docker Swarm.</span> These nodes join the swarm as workers AND run storage. Use this when you want fewer servers doing both jobs.</p>
+                  <p><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.storageComputeSwarm') }}</span> {{ t('storageSetup.storageComputeSwarmDesc') }}</p>
                 </div>
                 <div class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></span>
-                  <p><span class="font-medium text-gray-900 dark:text-white">Swarm worker nodes need the volume client.</span> Any Docker Swarm node that runs containers with storage volumes needs the {{ selectedVolumeProvider === 'glusterfs' ? 'GlusterFS client' : 'Ceph RBD client' }} installed so it can mount volumes.</p>
+                  <p><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.swarmNeedsClient') }}</span> {{ t('storageSetup.swarmNeedsClientDesc', { client: selectedVolumeProvider === 'glusterfs' ? 'GlusterFS client' : 'Ceph RBD client' }) }}</p>
                 </div>
               </div>
             </div>
@@ -951,47 +953,47 @@ async function rollbackActiveMigration() {
             <div class="p-4 rounded-lg bg-white dark:bg-gray-750 border border-gray-200 dark:border-gray-600 space-y-3">
               <h4 class="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Lock class="w-4 h-4 text-gray-500" />
-                Required Firewall Ports
+                {{ t('storageSetup.requiredFirewallPorts') }}
               </h4>
               <p class="text-xs text-gray-500 dark:text-gray-400">
-                Open these ports between storage nodes and from Swarm workers to storage nodes. Only allow traffic from your internal network.
+                {{ t('storageSetup.firewallPortsDesc') }}
               </p>
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                   <thead>
                     <tr class="border-b border-gray-200 dark:border-gray-600">
-                      <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Port</th>
-                      <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Protocol</th>
-                      <th class="text-left py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Service</th>
+                      <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.port') }}</th>
+                      <th class="text-left py-2 pr-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.protocol') }}</th>
+                      <th class="text-left py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('storageSetup.service') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
                     <tr>
                       <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">22</td>
                       <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                      <td class="py-2 text-gray-600 dark:text-gray-300">SSH — Fleet manages nodes via SSH</td>
+                      <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.sshServiceDesc') }}</td>
                     </tr>
                     <!-- GlusterFS ports -->
                     <template v-if="selectedVolumeProvider === 'glusterfs'">
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">24007</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">GlusterFS daemon (glusterd)</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsDaemon') }}</td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">24008</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">GlusterFS management</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsManagement') }}</td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">49152–49251</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">GlusterFS bricks (one port per volume)</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsBricks') }}</td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">111</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP/UDP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">RPCBind / Portmapper</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.rpcbind') }}</td>
                       </tr>
                     </template>
                     <!-- Ceph ports -->
@@ -999,17 +1001,17 @@ async function rollbackActiveMigration() {
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">6789</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">Ceph Monitor (MON) — v1 protocol</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.cephMonV1') }}</td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">3300</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">Ceph Monitor (MON) — v2 protocol</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.cephMonV2') }}</td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">6800–7300</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">Ceph OSD (Object Storage Daemons)</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.cephOsd') }}</td>
                       </tr>
                     </template>
                     <!-- MinIO ports -->
@@ -1017,12 +1019,12 @@ async function rollbackActiveMigration() {
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">9000</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">MinIO S3 API</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.minioS3Api') }}</td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">9001</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">MinIO Console (optional — admin UI)</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.minioConsole') }}</td>
                       </tr>
                     </template>
                   </tbody>
@@ -1030,7 +1032,7 @@ async function rollbackActiveMigration() {
               </div>
               <div class="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
                 <p class="text-xs text-yellow-700 dark:text-yellow-300">
-                  <span class="font-medium">Important:</span> Never expose storage ports ({{ selectedVolumeProvider === 'glusterfs' ? '24007, 49152+' : '6789, 6800+' }}{{ selectedObjectProvider === 'minio' ? ', 9000' : '' }}) to the public internet. Use <code class="px-1 py-0.5 rounded bg-yellow-100 dark:bg-yellow-800/50">ufw</code> or <code class="px-1 py-0.5 rounded bg-yellow-100 dark:bg-yellow-800/50">iptables</code> to restrict access to your internal network CIDR only.
+                  <span class="font-medium">{{ t('storageSetup.important') }}</span> {{ t('storageSetup.neverExposePorts', { ports: (selectedVolumeProvider === 'glusterfs' ? '24007, 49152+' : '6789, 6800+') + (selectedObjectProvider === 'minio' ? ', 9000' : '') }) }}
                 </p>
               </div>
             </div>
@@ -1039,32 +1041,32 @@ async function rollbackActiveMigration() {
             <div class="p-4 rounded-lg bg-white dark:bg-gray-750 border border-gray-200 dark:border-gray-600 space-y-3">
               <h4 class="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Shield class="w-4 h-4 text-gray-500" />
-                Security Recommendations
+                {{ t('storageSetup.securityRecommendations') }}
               </h4>
               <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <li class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>
-                  <p>Use <span class="font-medium text-gray-900 dark:text-white">SSH key authentication</span> (disable password login). Fleet connects to nodes via SSH for management operations.</p>
+                  <p>{{ t('storageSetup.secSshKeyPart1') }} <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.sshKeyAuth') }}</span> {{ t('storageSetup.secSshKeyPart2') }}</p>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>
-                  <p>Place storage nodes on a <span class="font-medium text-gray-900 dark:text-white">dedicated VLAN or subnet</span> separate from public-facing services if possible.</p>
+                  <p>{{ t('storageSetup.secVlanPart1') }} <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.dedicatedVlan') }}</span> {{ t('storageSetup.secVlanPart2') }}</p>
                 </li>
                 <li v-if="selectedVolumeProvider === 'glusterfs'" class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>
-                  <p>GlusterFS uses <span class="font-medium text-gray-900 dark:text-white">IP-based authentication</span>. Ensure only trusted IPs can reach port 24007. Consider TLS encryption for GlusterFS (available in v3.12+).</p>
+                  <p>{{ t('storageSetup.secGlusterfsPart1') }} <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.ipBasedAuth') }}</span>{{ t('storageSetup.secGlusterfsPart2') }}</p>
                 </li>
                 <li v-if="selectedVolumeProvider === 'ceph'" class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>
-                  <p>Ceph uses <span class="font-medium text-gray-900 dark:text-white">CephX authentication</span> by default. Keep the keyring file secure and restrict access to the admin user.</p>
+                  <p>{{ t('storageSetup.secCephPart1') }} <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.cephxAuth') }}</span> {{ t('storageSetup.secCephPart2') }}</p>
                 </li>
                 <li v-if="selectedObjectProvider === 'minio'" class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>
-                  <p>Enable <span class="font-medium text-gray-900 dark:text-white">TLS on MinIO</span> for production. Use strong access key and secret key (auto-generated during setup).</p>
+                  <p>{{ t('storageSetup.secMinioPart1') }} <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.tlsOnMinio') }}</span> {{ t('storageSetup.secMinioPart2') }}</p>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0"></span>
-                  <p>Keep the operating system and storage software <span class="font-medium text-gray-900 dark:text-white">up to date</span> with security patches. Enable <code class="text-xs px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700">unattended-upgrades</code> for automatic security updates.</p>
+                  <p>{{ t('storageSetup.secUpdatesPart1') }} <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.upToDate') }}</span> {{ t('storageSetup.secUpdatesPart2') }}</p>
                 </li>
               </ul>
             </div>
@@ -1073,10 +1075,10 @@ async function rollbackActiveMigration() {
             <div class="p-4 rounded-lg bg-white dark:bg-gray-750 border border-gray-200 dark:border-gray-600 space-y-3">
               <h4 class="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <Terminal class="w-4 h-4 text-gray-500" />
-                Quick Setup — Run on Each Storage Node
+                {{ t('storageSetup.quickSetup') }}
               </h4>
               <p class="text-xs text-gray-500 dark:text-gray-400">
-                SSH into each node and run the following commands to prepare it for Fleet storage.
+                {{ t('storageSetup.quickSetupDesc') }}
               </p>
               <div class="bg-gray-900 rounded-lg p-4 font-mono text-xs text-green-400 overflow-x-auto space-y-1">
                 <p class="text-gray-500"># Update system packages</p>
@@ -1124,7 +1126,7 @@ async function rollbackActiveMigration() {
               <!-- Client install on Swarm workers -->
               <div class="mt-3">
                 <p class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  On Docker Swarm workers (so containers can mount volumes):
+                  {{ t('storageSetup.swarmWorkersInstall') }}
                 </p>
                 <div class="bg-gray-900 rounded-lg p-4 font-mono text-xs text-green-400 overflow-x-auto space-y-1">
                   <template v-if="selectedVolumeProvider === 'glusterfs'">
@@ -1162,7 +1164,7 @@ async function rollbackActiveMigration() {
                 <CheckCircle2 v-if="node.testStatus === 'ok'" class="w-4 h-4 text-green-500" />
                 <AlertTriangle v-else-if="node.testStatus === 'error'" class="w-4 h-4 text-red-500" />
                 <Loader2 v-else-if="node.testStatus === 'testing'" class="w-4 h-4 animate-spin text-gray-400" />
-                <button @click="testNode(index)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">Test</button>
+                <button @click="testNode(index)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ t('storageSetup.test') }}</button>
                 <button @click="removeNode(index)" class="text-red-500 hover:text-red-700">
                   <Trash2 class="w-4 h-4" />
                 </button>
@@ -1174,29 +1176,29 @@ async function rollbackActiveMigration() {
           <div v-if="showAddNode" class="p-4 rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50/50 dark:bg-primary-900/10 space-y-3">
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Hostname</label>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.hostname') }}</label>
                 <input v-model="newNode.hostname" type="text" placeholder="storage-1" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address</label>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.ipAddress') }}</label>
                 <input v-model="newNode.ipAddress" type="text" placeholder="10.0.1.10" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Storage Path</label>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.storagePath') }}</label>
                 <input v-model="newNode.storagePathRoot" type="text" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.role') }}</label>
                 <select v-model="newNode.role" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-                  <option value="storage">Storage only</option>
-                  <option value="storage+compute">Storage + Compute</option>
-                  <option value="arbiter">Arbiter (metadata only)</option>
+                  <option value="storage">{{ t('storageSetup.roleStorageOnly') }}</option>
+                  <option value="storage+compute">{{ t('storageSetup.roleStorageCompute') }}</option>
+                  <option value="arbiter">{{ t('storageSetup.roleArbiter') }}</option>
                 </select>
               </div>
             </div>
             <div class="flex gap-2">
-              <button @click="addNode" :disabled="!newNode.hostname || !newNode.ipAddress" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">Add</button>
-              <button @click="showAddNode = false" class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium">Cancel</button>
+              <button @click="addNode" :disabled="!newNode.hostname || !newNode.ipAddress" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">{{ t('storageSetup.add') }}</button>
+              <button @click="showAddNode = false" class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium">{{ t('storageSetup.cancel') }}</button>
             </div>
           </div>
 
@@ -1206,7 +1208,7 @@ async function rollbackActiveMigration() {
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-primary-400 hover:text-primary-600 transition-colors text-sm w-full justify-center"
           >
             <Plus class="w-4 h-4" />
-            Add Storage Node
+            {{ t('storageSetup.addStorageNode') }}
           </button>
         </div>
       </div>
@@ -1214,14 +1216,14 @@ async function rollbackActiveMigration() {
       <!-- Step 3: Configure -->
       <div v-if="currentStep === 3" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Configure Replication</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Set the replication factor and object storage settings.</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.configureReplication') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('storageSetup.configureReplicationDesc') }}</p>
         </div>
         <div class="p-6 space-y-6">
           <template v-if="selectedMode === 'distributed'">
             <!-- Replication factor -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Replication Factor</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ t('storageSetup.replicationFactor') }}</label>
               <div class="flex gap-4">
                 <button
                   v-for="factor in [2, 3]"
@@ -1234,9 +1236,9 @@ async function rollbackActiveMigration() {
                       : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                   ]"
                 >
-                  <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ factor }}-way Replica</p>
+                  <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.nWayReplica', { n: factor }) }}</p>
                   <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    {{ factor === 2 ? 'Survives 1 node failure. Minimum setup.' : 'Survives 2 node failures. Recommended for production.' }}
+                    {{ factor === 2 ? t('storageSetup.twoWayDesc') : t('storageSetup.threeWayDesc') }}
                   </p>
                 </button>
               </div>
@@ -1244,22 +1246,22 @@ async function rollbackActiveMigration() {
 
             <!-- Ceph config (when Ceph is selected) -->
             <div v-if="selectedVolumeProvider === 'ceph'" class="space-y-3">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Ceph Configuration</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('storageSetup.cephConfiguration') }}</label>
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Monitor Addresses</label>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.monitorAddresses') }}</label>
                   <input v-model="cephMonitors" type="text" placeholder="10.0.1.10,10.0.1.11,10.0.1.12" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Pool Name</label>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.poolName') }}</label>
                   <input v-model="cephPool" type="text" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Auth User</label>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.authUser') }}</label>
                   <input v-model="cephUser" type="text" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Keyring Path</label>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.keyringPath') }}</label>
                   <input v-model="cephKeyring" type="text" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 </div>
               </div>
@@ -1268,27 +1270,27 @@ async function rollbackActiveMigration() {
             <!-- Object storage config based on selected provider -->
             <div class="space-y-3">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Object Storage — {{ selectedObjectProvider === 'minio' ? 'MinIO' : selectedObjectProvider === 's3' ? 'AWS S3' : 'Google Cloud Storage' }}
+                {{ t('storageSetup.objectStorageLabel') }} — {{ selectedObjectProvider === 'minio' ? 'MinIO' : selectedObjectProvider === 's3' ? 'AWS S3' : 'Google Cloud Storage' }}
               </label>
 
               <!-- MinIO config -->
               <template v-if="selectedObjectProvider === 'minio'">
                 <label class="flex items-center gap-2 mb-3 cursor-pointer">
                   <input type="checkbox" v-model="autoConfigureMinio" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
-                  <span class="text-sm text-gray-700 dark:text-gray-300">Auto-configure on storage nodes (recommended)</span>
+                  <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('storageSetup.autoConfigureMinio') }}</span>
                 </label>
                 <div v-if="!autoConfigureMinio" class="space-y-3 pl-6">
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">MinIO Endpoint</label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.minioEndpoint') }}</label>
                     <input v-model="minioEndpoint" type="text" placeholder="http://10.0.1.10:9000" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                   <div class="grid grid-cols-2 gap-3">
                     <div>
-                      <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Access Key</label>
+                      <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.accessKey') }}</label>
                       <input v-model="minioAccessKey" type="text" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                     </div>
                     <div>
-                      <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Secret Key</label>
+                      <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.secretKey') }}</label>
                       <input v-model="minioSecretKey" type="password" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                     </div>
                   </div>
@@ -1299,25 +1301,25 @@ async function rollbackActiveMigration() {
               <template v-if="selectedObjectProvider === 's3'">
                 <div class="grid grid-cols-2 gap-3">
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Region</label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.region') }}</label>
                     <input v-model="s3Region" type="text" placeholder="us-east-1" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Bucket Prefix <span class="text-gray-400">(optional)</span></label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.bucketPrefix') }} <span class="text-gray-400">({{ t('storageSetup.optional') }})</span></label>
                     <input v-model="s3BucketPrefix" type="text" placeholder="my-fleet" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Access Key ID</label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.accessKeyId') }}</label>
                     <input v-model="s3AccessKeyId" type="text" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Secret Access Key</label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.secretAccessKey') }}</label>
                     <input v-model="s3SecretAccessKey" type="password" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Custom Endpoint <span class="text-gray-400">(for S3-compatible services like Backblaze B2, Wasabi)</span></label>
-                  <input v-model="s3Endpoint" type="text" placeholder="Leave empty for AWS S3" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.customEndpoint') }} <span class="text-gray-400">({{ t('storageSetup.customEndpointHint') }})</span></label>
+                  <input v-model="s3Endpoint" type="text" :placeholder="t('storageSetup.leaveEmptyForS3')" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 </div>
               </template>
 
@@ -1325,32 +1327,32 @@ async function rollbackActiveMigration() {
               <template v-if="selectedObjectProvider === 'gcs'">
                 <div class="grid grid-cols-2 gap-3">
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">GCP Project ID</label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.gcpProjectId') }}</label>
                     <input v-model="gcsProjectId" type="text" placeholder="my-project-123" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Storage Location</label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.storageLocation') }}</label>
                     <select v-model="gcsLocation" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-                      <option value="US">US (Multi-region)</option>
-                      <option value="EU">EU (Multi-region)</option>
-                      <option value="ASIA">Asia (Multi-region)</option>
+                      <option value="US">{{ t('storageSetup.usMultiRegion') }}</option>
+                      <option value="EU">{{ t('storageSetup.euMultiRegion') }}</option>
+                      <option value="ASIA">{{ t('storageSetup.asiaMultiRegion') }}</option>
                       <option value="us-central1">us-central1</option>
                       <option value="us-east1">us-east1</option>
                       <option value="europe-west1">europe-west1</option>
                     </select>
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Service Account Key File <span class="text-gray-400">(path on server)</span></label>
-                    <input v-model="gcsKeyFile" type="text" placeholder="/etc/fleet/gcs-key.json (optional with workload identity)" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.serviceAccountKeyFile') }} <span class="text-gray-400">({{ t('storageSetup.pathOnServer') }})</span></label>
+                    <input v-model="gcsKeyFile" type="text" :placeholder="t('storageSetup.gcsKeyFilePlaceholder')" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Bucket Prefix <span class="text-gray-400">(optional)</span></label>
+                    <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.bucketPrefix') }} <span class="text-gray-400">({{ t('storageSetup.optional') }})</span></label>
                     <input v-model="gcsBucketPrefix" type="text" placeholder="my-fleet" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   </div>
                 </div>
                 <div class="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                   <p class="text-xs text-blue-700 dark:text-blue-300">
-                    If running on GCP with workload identity, you can leave the key file empty. The GCS client will use the default credentials automatically.
+                    {{ t('storageSetup.gcsWorkloadIdentityNote') }}
                   </p>
                 </div>
               </template>
@@ -1361,7 +1363,7 @@ async function rollbackActiveMigration() {
             <div class="flex items-center gap-3 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
               <CheckCircle2 class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
               <p class="text-sm text-green-700 dark:text-green-300">
-                Local mode requires no additional configuration. Storage will use the local filesystem on this server.
+                {{ t('storageSetup.localNoConfig') }}
               </p>
             </div>
           </template>
@@ -1371,20 +1373,20 @@ async function rollbackActiveMigration() {
       <!-- Step 4: Initialize -->
       <div v-if="currentStep === 4" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Initialize Storage Cluster</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">This will set up the storage system and verify everything is working.</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.initializeStorageCluster') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('storageSetup.initializeDesc') }}</p>
         </div>
         <div class="p-6">
           <div v-if="initStatus === 'idle'" class="text-center py-8">
             <Database class="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Click the button below to initialize the {{ selectedMode === 'distributed' ? 'GlusterFS cluster and MinIO' : 'local storage system' }}.
+              {{ selectedMode === 'distributed' ? t('storageSetup.clickInitDistributed') : t('storageSetup.clickInitLocal') }}
             </p>
             <button
               @click="initializeCluster"
               class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
             >
-              Initialize
+              {{ t('storageSetup.initialize') }}
             </button>
           </div>
 
@@ -1394,13 +1396,13 @@ async function rollbackActiveMigration() {
               <div v-for="(log, i) in initLogs" :key="i" class="py-0.5">{{ log }}</div>
               <div v-if="initStatus === 'running'" class="flex items-center gap-2 py-0.5">
                 <Loader2 class="w-3 h-3 animate-spin" />
-                Working...
+                {{ t('storageSetup.working') }}
               </div>
             </div>
 
             <div v-if="initStatus === 'success'" class="flex items-center gap-3 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
               <CheckCircle2 class="w-5 h-5 text-green-600 dark:text-green-400" />
-              <p class="text-sm font-medium text-green-700 dark:text-green-300">Storage cluster initialized successfully!</p>
+              <p class="text-sm font-medium text-green-700 dark:text-green-300">{{ t('storageSetup.initSuccess') }}</p>
             </div>
 
             <div v-if="initStatus === 'error'" class="flex items-center gap-3">
@@ -1409,7 +1411,7 @@ async function rollbackActiveMigration() {
                 class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium"
               >
                 <RefreshCw class="w-4 h-4" />
-                Retry
+                {{ t('storageSetup.retry') }}
               </button>
             </div>
           </div>
@@ -1419,27 +1421,27 @@ async function rollbackActiveMigration() {
       <!-- Step 5: Migrate -->
       <div v-if="currentStep === 5" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Migrate Existing Data</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Move your existing volumes, uploads, and backups to the new storage system.</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.migrateExistingData') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('storageSetup.migrateExistingDesc') }}</p>
         </div>
         <div class="p-6">
           <div v-if="!hasMigratableData" class="flex items-center gap-3 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
             <CheckCircle2 class="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <p class="text-sm text-blue-700 dark:text-blue-300">No existing data to migrate. You can skip this step.</p>
+            <p class="text-sm text-blue-700 dark:text-blue-300">{{ t('storageSetup.noDataToMigrate') }}</p>
           </div>
 
           <div v-else>
             <div v-if="migrationStatus === 'idle'" class="space-y-4">
               <div class="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
                 <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                  Services will continue running during migration. A brief switchover happens at the end when the active provider is changed.
+                  {{ t('storageSetup.migrationOnlineNotice') }}
                 </p>
               </div>
               <button
                 @click="startMigration"
                 class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium"
               >
-                Start Migration
+                {{ t('storageSetup.startMigration') }}
               </button>
             </div>
 
@@ -1452,7 +1454,7 @@ async function rollbackActiveMigration() {
 
             <div v-if="migrationStatus === 'complete'" class="flex items-center gap-3 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
               <CheckCircle2 class="w-5 h-5 text-green-600 dark:text-green-400" />
-              <p class="text-sm font-medium text-green-700 dark:text-green-300">Migration complete!</p>
+              <p class="text-sm font-medium text-green-700 dark:text-green-300">{{ t('storageSetup.migrationComplete') }}</p>
             </div>
           </div>
         </div>
@@ -1462,22 +1464,22 @@ async function rollbackActiveMigration() {
       <div v-if="currentStep === 6" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="p-12 text-center">
           <CheckCircle2 class="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Storage Configured!</h2>
+          <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">{{ t('storageSetup.storageConfigured') }}</h2>
           <p class="text-gray-500 dark:text-gray-400 text-sm max-w-md mx-auto mb-6">
-            Your storage system is ready. All volumes and objects will now use the {{ selectedMode === 'distributed' ? 'distributed cluster' : 'local filesystem' }}.
+            {{ selectedMode === 'distributed' ? t('storageSetup.readyDistributed') : t('storageSetup.readyLocal') }}
           </p>
 
           <div v-if="verifyHealth" class="inline-flex flex-col items-start gap-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-6 py-4 mb-4">
-            <div><span class="font-medium text-gray-900 dark:text-white">Volume Provider:</span> {{ verifyHealth?.cluster?.provider ?? 'local' }}</div>
-            <div><span class="font-medium text-gray-900 dark:text-white">Object Provider:</span> {{ verifyHealth?.cluster?.objectProvider ?? 'local' }}</div>
-            <div><span class="font-medium text-gray-900 dark:text-white">Replication:</span> {{ verifyHealth?.cluster?.replicationFactor ?? 1 }}x</div>
+            <div><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.volumeProvider') }}:</span> {{ verifyHealth?.cluster?.provider ?? 'local' }}</div>
+            <div><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.objectProvider') }}:</span> {{ verifyHealth?.cluster?.objectProvider ?? 'local' }}</div>
+            <div><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.replication') }}:</span> {{ verifyHealth?.cluster?.replicationFactor ?? 1 }}x</div>
             <div>
-              <span class="font-medium text-gray-900 dark:text-white">Status:</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.status') }}:</span>
               <span :class="verifyHealth?.cluster?.status === 'healthy' ? 'text-green-600' : 'text-yellow-600'" class="ml-1 capitalize">
                 {{ verifyHealth?.cluster?.status ?? 'unknown' }}
               </span>
             </div>
-            <div v-if="verifyHealth?.nodes?.length"><span class="font-medium text-gray-900 dark:text-white">Nodes:</span> {{ verifyHealth.nodes.length }}</div>
+            <div v-if="verifyHealth?.nodes?.length"><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.nodes') }}:</span> {{ verifyHealth.nodes.length }}</div>
           </div>
         </div>
       </div>
@@ -1490,7 +1492,7 @@ async function rollbackActiveMigration() {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
         >
           <ArrowLeft class="w-4 h-4" />
-          Back
+          {{ t('storageSetup.back') }}
         </button>
         <div v-else></div>
 
@@ -1500,14 +1502,14 @@ async function rollbackActiveMigration() {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
           <template v-if="currentStep === 6">
-            Finish
+            {{ t('storageSetup.finish') }}
             <CheckCircle2 class="w-4 h-4" />
           </template>
           <template v-else-if="currentStep === 4 && initStatus === 'idle'">
-            Initialize
+            {{ t('storageSetup.initialize') }}
           </template>
           <template v-else>
-            Next
+            {{ t('storageSetup.next') }}
             <ArrowRight class="w-4 h-4" />
           </template>
         </button>
@@ -1521,9 +1523,9 @@ async function rollbackActiveMigration() {
           <!-- Modal Header -->
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 rounded-t-2xl z-10">
             <div>
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Migrate Storage Provider</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storageSetup.migrateStorageProvider') }}</h2>
               <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                Move all data between storage providers with zero downtime.
+                {{ t('storageSetup.migrateStorageProviderDesc') }}
               </p>
             </div>
             <button
@@ -1564,15 +1566,15 @@ async function rollbackActiveMigration() {
             <div v-if="migrationWizardStep === 1" class="space-y-6">
               <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  Current configuration: <span class="font-medium text-gray-900 dark:text-white">{{ clusterData?.cluster?.provider ?? 'local' }}</span> volumes,
-                  <span class="font-medium text-gray-900 dark:text-white">{{ clusterData?.cluster?.objectProvider ?? 'local' }}</span> objects.
-                  Select the target providers below.
+                  {{ t('storageSetup.currentConfig') }}: <span class="font-medium text-gray-900 dark:text-white">{{ clusterData?.cluster?.provider ?? 'local' }}</span> {{ t('storageSetup.volumes') }},
+                  <span class="font-medium text-gray-900 dark:text-white">{{ clusterData?.cluster?.objectProvider ?? 'local' }}</span> {{ t('storageSetup.objects') }}.
+                  {{ t('storageSetup.selectTargetProviders') }}
                 </p>
               </div>
 
               <!-- Target Volume Provider -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Volume Provider</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ t('storageSetup.targetVolumeProvider') }}</label>
                 <div class="grid grid-cols-3 gap-3">
                   <button
                     v-for="vp in (['local', 'glusterfs', 'ceph'] as const)"
@@ -1590,16 +1592,16 @@ async function rollbackActiveMigration() {
                   >
                     <p class="font-semibold text-gray-900 dark:text-white capitalize">{{ vp === 'glusterfs' ? 'GlusterFS' : vp === 'ceph' ? 'Ceph RBD' : 'Local' }}</p>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {{ vp === 'local' ? 'Single node NFS' : vp === 'glusterfs' ? 'Distributed replicated' : 'Enterprise block storage' }}
+                      {{ vp === 'local' ? t('storageSetup.singleNodeNfs') : vp === 'glusterfs' ? t('storageSetup.distributedReplicated') : t('storageSetup.enterpriseBlockStorage') }}
                     </p>
-                    <span v-if="vp === clusterData?.cluster?.provider" class="text-xs text-gray-400 italic">Current</span>
+                    <span v-if="vp === clusterData?.cluster?.provider" class="text-xs text-gray-400 italic">{{ t('storageSetup.current') }}</span>
                   </button>
                 </div>
               </div>
 
               <!-- Target Object Provider -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Object Provider</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ t('storageSetup.targetObjectProvider') }}</label>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <button
                     v-for="op in (['local', 'minio', 's3', 'gcs'] as const)"
@@ -1616,7 +1618,7 @@ async function rollbackActiveMigration() {
                     ]"
                   >
                     <p class="font-semibold text-gray-900 dark:text-white">{{ op === 'local' ? 'Local' : op === 'minio' ? 'MinIO' : op === 's3' ? 'AWS S3' : 'GCS' }}</p>
-                    <span v-if="op === clusterData?.cluster?.objectProvider" class="text-xs text-gray-400 italic">Current</span>
+                    <span v-if="op === clusterData?.cluster?.objectProvider" class="text-xs text-gray-400 italic">{{ t('storageSetup.current') }}</span>
                   </button>
                 </div>
               </div>
@@ -1627,7 +1629,7 @@ async function rollbackActiveMigration() {
                   :disabled="migrationTargetVolume === clusterData?.cluster?.provider && migrationTargetObject === clusterData?.cluster?.objectProvider"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                 >
-                  Next
+                  {{ t('storageSetup.next') }}
                   <ArrowRight class="w-4 h-4" />
                 </button>
               </div>
@@ -1636,10 +1638,10 @@ async function rollbackActiveMigration() {
             <!-- Step 2: Confirm -->
             <div v-if="migrationWizardStep === 2" class="space-y-6">
               <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Migration Summary</h3>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">{{ t('storageSetup.migrationSummary') }}</h3>
                 <div class="space-y-2 text-sm">
                   <div class="flex items-center justify-between">
-                    <span class="text-gray-500 dark:text-gray-400">Volume Provider</span>
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('storageSetup.volumeProvider') }}</span>
                     <span class="text-gray-900 dark:text-white">
                       <span class="capitalize">{{ clusterData?.cluster?.provider ?? 'local' }}</span>
                       <ArrowRight class="w-3 h-3 inline mx-1" />
@@ -1647,7 +1649,7 @@ async function rollbackActiveMigration() {
                     </span>
                   </div>
                   <div class="flex items-center justify-between">
-                    <span class="text-gray-500 dark:text-gray-400">Object Provider</span>
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('storageSetup.objectProvider') }}</span>
                     <span class="text-gray-900 dark:text-white">
                       <span class="capitalize">{{ clusterData?.cluster?.objectProvider ?? 'local' }}</span>
                       <ArrowRight class="w-3 h-3 inline mx-1" />
@@ -1661,12 +1663,12 @@ async function rollbackActiveMigration() {
                 <div class="flex gap-3">
                   <AlertTriangle class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
                   <div class="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
-                    <p class="font-medium">Before you proceed:</p>
+                    <p class="font-medium">{{ t('storageSetup.beforeYouProceed') }}</p>
                     <ul class="list-disc pl-4 space-y-0.5">
-                      <li>Services will remain online during migration</li>
-                      <li>A brief switchover occurs when data is fully copied</li>
-                      <li>You can pause and resume the migration at any time</li>
-                      <li>Rollback is available if anything goes wrong</li>
+                      <li>{{ t('storageSetup.servicesOnline') }}</li>
+                      <li>{{ t('storageSetup.briefSwitchover') }}</li>
+                      <li>{{ t('storageSetup.pauseResume') }}</li>
+                      <li>{{ t('storageSetup.rollbackAvailable') }}</li>
                     </ul>
                   </div>
                 </div>
@@ -1678,14 +1680,14 @@ async function rollbackActiveMigration() {
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors"
                 >
                   <ArrowLeft class="w-4 h-4" />
-                  Back
+                  {{ t('storageSetup.back') }}
                 </button>
                 <button
                   @click="startProviderMigration"
                   class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
                 >
                   <RefreshCw class="w-4 h-4" />
-                  Start Migration
+                  {{ t('storageSetup.startMigration') }}
                 </button>
               </div>
             </div>
@@ -1696,7 +1698,7 @@ async function rollbackActiveMigration() {
               <div>
                 <div class="flex items-center justify-between mb-2">
                   <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {{ migrationStatus === 'running' ? 'Migrating...' : migrationStatus === 'idle' ? 'Paused' : 'Complete' }}
+                    {{ migrationStatus === 'running' ? t('storageSetup.migrating') : migrationStatus === 'idle' ? t('storageSetup.paused') : t('storageSetup.complete') }}
                   </span>
                   <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ migrationProgress }}%</span>
                 </div>
@@ -1720,21 +1722,21 @@ async function rollbackActiveMigration() {
                   @click="pauseActiveMigration"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg border border-yellow-300 dark:border-yellow-600 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 text-sm font-medium transition-colors"
                 >
-                  Pause
+                  {{ t('storageSetup.pause') }}
                 </button>
                 <button
                   v-if="migrationStatus === 'idle' && activeMigrationId"
                   @click="resumeActiveMigration"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
                 >
-                  Resume
+                  {{ t('storageSetup.resume') }}
                 </button>
                 <button
                   v-if="activeMigrationId && migrationStatus !== 'complete'"
                   @click="rollbackActiveMigration"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 dark:border-red-600 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors"
                 >
-                  Rollback
+                  {{ t('storageSetup.rollback') }}
                 </button>
               </div>
             </div>
@@ -1742,11 +1744,9 @@ async function rollbackActiveMigration() {
             <!-- Step 4: Complete -->
             <div v-if="migrationWizardStep === 4" class="text-center py-6 space-y-4">
               <CheckCircle2 class="w-14 h-14 text-green-500 mx-auto" />
-              <h3 class="text-xl font-bold text-gray-900 dark:text-white">Migration Complete</h3>
+              <h3 class="text-xl font-bold text-gray-900 dark:text-white">{{ t('storageSetup.migrationComplete') }}</h3>
               <p class="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-                All data has been migrated to the new providers. The storage system is now using
-                <span class="font-semibold text-gray-900 dark:text-white capitalize">{{ migrationTargetVolume === 'glusterfs' ? 'GlusterFS' : migrationTargetVolume === 'ceph' ? 'Ceph RBD' : 'Local' }}</span> for volumes and
-                <span class="font-semibold text-gray-900 dark:text-white">{{ migrationTargetObject === 'local' ? 'Local' : migrationTargetObject === 'minio' ? 'MinIO' : migrationTargetObject === 's3' ? 'AWS S3' : 'GCS' }}</span> for objects.
+                {{ t('storageSetup.migrationCompleteDesc', { volumeProvider: migrationTargetVolume === 'glusterfs' ? 'GlusterFS' : migrationTargetVolume === 'ceph' ? 'Ceph RBD' : 'Local', objectProvider: migrationTargetObject === 'local' ? 'Local' : migrationTargetObject === 'minio' ? 'MinIO' : migrationTargetObject === 's3' ? 'AWS S3' : 'GCS' }) }}
               </p>
 
               <div class="flex items-center justify-center gap-3 pt-2">
@@ -1754,14 +1754,14 @@ async function rollbackActiveMigration() {
                   @click="rollbackActiveMigration"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors"
                 >
-                  Rollback
+                  {{ t('storageSetup.rollback') }}
                 </button>
                 <button
                   @click="closeMigrationWizard"
                   class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
                 >
                   <CheckCircle2 class="w-4 h-4" />
-                  Done
+                  {{ t('storageSetup.done') }}
                 </button>
               </div>
             </div>

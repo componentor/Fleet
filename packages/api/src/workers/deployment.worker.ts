@@ -1,6 +1,6 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
 import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull } from '@fleet/db';
-import { buildService } from '../services/build.service.js';
+import { buildService, scrubSecrets } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
@@ -72,17 +72,47 @@ async function getGitHubTokenForService(accountId: string): Promise<string | nul
   return hasAccess ? decrypt(result.accessToken) : null;
 }
 
-async function publishProgress(deploymentId: string, status: string, log: string) {
-  const valkey = await getValkey();
+type ProgressStep = 'queued' | 'cloning' | 'building' | 'pushing' | 'deploying' | 'health_check' | 'succeeded' | 'failed';
+
+// Cached Valkey client — resolved once, reused for all publishes.
+// Avoids ~10,000 async getValkey() calls/sec at 1000 concurrent deploys.
+let cachedValkey: Awaited<ReturnType<typeof getValkey>> = undefined as any;
+
+async function getValkeyClient() {
+  if (cachedValkey !== undefined) return cachedValkey;
+  cachedValkey = await getValkey();
+  return cachedValkey;
+}
+
+async function publishProgress(deploymentId: string, status: string, log: string, step?: ProgressStep, logLine?: string) {
+  const valkey = await getValkeyClient();
   if (valkey) {
-    await valkey.publish(`deploy:${deploymentId}`, JSON.stringify({ status, log })).catch((err) => {
+    valkey.publish(`deploy:${deploymentId}`, JSON.stringify({ status, step, logLine })).catch((err) => {
       logger.error({ err, deploymentId }, 'Failed to publish deployment progress');
     });
   }
 }
 
+async function setProgressStep(deploymentId: string, step: ProgressStep) {
+  await db.update(deployments)
+    .set({ progressStep: step })
+    .where(eq(deployments.id, deploymentId));
+  await publishProgress(deploymentId, step === 'succeeded' ? 'succeeded' : step === 'failed' ? 'failed' : 'building', '', step);
+}
+
 async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
   const { deploymentId, serviceId, accountId, commitSha, sourceType, sourcePath, buildMethod, buildFile } = job.data;
+
+  try {
+  // Idempotency guard: if deployment is already terminal (succeeded/failed), skip
+  const existing = await db.query.deployments.findFirst({
+    where: eq(deployments.id, deploymentId),
+    columns: { status: true },
+  });
+  if (existing && (existing.status === 'succeeded' || existing.status === 'failed')) {
+    logger.warn({ deploymentId, status: existing.status }, 'Skipping already-completed deployment (idempotency guard)');
+    return;
+  }
 
   const svc = await db.query.services.findFirst({
     where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
@@ -97,9 +127,14 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
 
   const imageTag = `${accountId}-${svc.name}:${commitSha?.slice(0, 7) ?? Date.now()}`;
 
-  try {
-    let buildInfo;
+  // Track deployment start time
+  await db.update(deployments)
+    .set({ startedAt: new Date(), progressStep: 'queued' })
+    .where(eq(deployments.id, deploymentId));
 
+  let buildInfo: { id: string; status: string; log: string; imageTag: string; finishedAt: Date | null } | undefined;
+
+  try {
     if (sourceType === 'upload' && sourcePath) {
       if (buildMethod === 'none') {
         // No build file — upload complete, service stays stopped until user adds one
@@ -114,6 +149,8 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         await publishProgress(deploymentId, 'succeeded', 'No build file found');
         return;
       }
+
+      await setProgressStep(deploymentId, 'building');
 
       if (buildMethod === 'compose') {
         buildInfo = await buildService.buildFromCompose({
@@ -132,6 +169,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       }
     } else {
       // GitHub build flow
+      await setProgressStep(deploymentId, 'cloning');
       if (!svc.githubRepo || !svc.githubBranch) {
         await db.update(deployments)
           .set({ status: 'failed', log: 'Service has no GitHub repository configured' })
@@ -152,49 +190,138 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         ? githubService.getAuthenticatedCloneUrl(githubToken, owner, repo)
         : `https://github.com/${svc.githubRepo}.git`;
 
+      // Detect Dockerfiles and project files for runtime detection
+      let generatedDockerfile: string | undefined;
+      let dockerfile: string | undefined;
+      try {
+        const detection = await buildService.detectDockerfile(cloneUrl, svc.githubBranch);
+        if (detection.dockerfiles.length > 0) {
+          dockerfile = detection.dockerfiles[0];
+        } else {
+          // No Dockerfile found — try runtime detection
+          const { detectRuntime } = await import('../services/runtime.service.js');
+          const runtimeResult = await detectRuntime(detection.allFiles, null);
+          if (runtimeResult) {
+            generatedDockerfile = runtimeResult.dockerfile;
+            // Store the generated Dockerfile on the service record
+            await db.update(services)
+              .set({ dockerfile: runtimeResult.dockerfile })
+              .where(eq(services.id, svc.id));
+            logger.info({ serviceId: svc.id, runtime: runtimeResult.runtime }, 'Auto-detected runtime for GitHub deploy');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, serviceId: svc.id }, 'Failed to detect Dockerfiles — will try default Dockerfile');
+      }
+
+      await setProgressStep(deploymentId, 'building');
       buildInfo = await buildService.buildImage({
         serviceId: svc.id,
         cloneUrl,
         branch: svc.githubBranch,
+        dockerfile,
         imageTag,
+        generatedDockerfile,
       });
     }
 
-    // Wait for build to complete
-    await new Promise<void>((resolve, reject) => {
-      const unsubscribe = buildService.onBuildUpdate(buildInfo.id, (info) => {
-        // Update deployment in DB and publish progress
-        db.update(deployments)
-          .set({
-            log: info.log,
-            status: info.status === 'succeeded' ? 'deploying'
-              : info.status === 'failed' ? 'failed'
-              : 'building',
-          })
-          .where(eq(deployments.id, deploymentId))
-          .then(() => publishProgress(deploymentId, info.status, info.log))
-          .catch((err) => {
-            logger.error({ err, deploymentId }, 'Failed to update deployment status in DB');
-          });
+    if (!buildInfo) {
+      throw new Error('No build info — buildMethod may be unsupported');
+    }
+    const build = buildInfo;
 
-        if (info.status === 'succeeded') {
+    // Wait for build to complete (30-minute timeout to prevent indefinite hangs)
+    const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        let lastDbWrite = 0;
+        let dbWriteTimer: ReturnType<typeof setTimeout> | null = null;
+        let lastLogLength = 0;
+        const DB_WRITE_INTERVAL_MS = 3000;
+
+        let lastFlushedLogLength = 0;
+
+        const flushToDb = (info: { log: string; status: string }) => {
+          // Skip write if log hasn't changed (avoids redundant DB pressure)
+          if (info.log.length === lastFlushedLogLength && info.status !== 'succeeded' && info.status !== 'failed') return;
+          lastFlushedLogLength = info.log.length;
+
+          const dbStatus = info.status === 'succeeded' ? 'deploying'
+            : info.status === 'failed' ? 'failed'
+            : 'building';
+          db.update(deployments)
+            .set({ log: info.log, status: dbStatus })
+            .where(eq(deployments.id, deploymentId))
+            .catch((err) => {
+              logger.error({ err, deploymentId }, 'Failed to update deployment log in DB');
+            });
+          lastDbWrite = Date.now();
+        };
+
+        const unsubscribe = buildService.onBuildUpdate(build.id, (info) => {
+          // Extract new log content since last publish
+          const newContent = info.log.slice(lastLogLength);
+          lastLogLength = info.log.length;
+
+          // Publish incremental line to Valkey immediately (for real-time WS streaming)
+          publishProgress(deploymentId, info.status, '', undefined, newContent || undefined);
+
+          // Throttle DB writes to every 3 seconds
+          const now = Date.now();
+          if (info.status === 'succeeded' || info.status === 'failed' || info.status === 'cancelled') {
+            // Always flush on terminal status
+            if (dbWriteTimer) { clearTimeout(dbWriteTimer); dbWriteTimer = null; }
+            flushToDb(info);
+          } else if (now - lastDbWrite >= DB_WRITE_INTERVAL_MS) {
+            flushToDb(info);
+          } else if (!dbWriteTimer) {
+            dbWriteTimer = setTimeout(() => {
+              dbWriteTimer = null;
+              flushToDb(info);
+            }, DB_WRITE_INTERVAL_MS - (now - lastDbWrite));
+          }
+
+          if (info.status === 'succeeded') {
+            unsubscribe();
+            resolve();
+          } else if (info.status === 'failed' || info.status === 'cancelled') {
+            unsubscribe();
+            reject(new Error(`Build ${info.status}`));
+          }
+        });
+
+        // Race condition guard: the build pipeline runs async and may complete
+        // before the listener above is registered (especially for fast builds like
+        // cached nginx). Check buildInfo status immediately after listener setup.
+        if (build.status === 'succeeded') {
           unsubscribe();
+          flushToDb(build);
           resolve();
-        } else if (info.status === 'failed' || info.status === 'cancelled') {
+        } else if (build.status === 'failed' || build.status === 'cancelled') {
           unsubscribe();
-          reject(new Error(`Build ${info.status}`));
+          flushToDb(build);
+          reject(new Error(`Build ${build.status}`));
         }
-      });
-    });
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Build timed out after ${BUILD_TIMEOUT_MS / 60000} minutes`)), BUILD_TIMEOUT_MS),
+      ),
+    ]);
 
     // Deploy the newly built image
-    const fullImageTag = buildInfo.imageTag;
+    const fullImageTag = build.imageTag;
 
+    // Persist final build log (handles cases where intermediate DB writes were missed)
+    if (build.log) {
+      await db.update(deployments)
+        .set({ log: build.log })
+        .where(eq(deployments.id, deploymentId));
+    }
+
+    await setProgressStep(deploymentId, 'deploying');
     await db.update(deployments)
       .set({ status: 'deploying', imageTag: fullImageTag })
       .where(eq(deployments.id, deploymentId));
-
-    await publishProgress(deploymentId, 'deploying', '');
 
     if (svc.dockerServiceId) {
       // Clean up old failed/dead containers before deploying new version
@@ -216,14 +343,14 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
 
     // Mark as succeeded
     await db.update(deployments)
-      .set({ status: 'succeeded', commitSha })
+      .set({ status: 'succeeded', commitSha, progressStep: 'succeeded', completedAt: new Date() })
       .where(eq(deployments.id, deploymentId));
 
     await db.update(services)
       .set({ image: fullImageTag, status: svc.dockerServiceId ? 'running' : 'stopped', updatedAt: new Date() })
       .where(eq(services.id, svc.id));
 
-    await publishProgress(deploymentId, 'succeeded', '');
+    await publishProgress(deploymentId, 'succeeded', '', 'succeeded');
 
     // Notify account owners
     notifyAccountMembers(accountId, 'deploy-success', {
@@ -231,23 +358,54 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       imageTag: fullImageTag,
     });
   } catch (err) {
+    // Scrub error messages to prevent token leakage (e.g. git clone URLs with OAuth tokens)
+    const safeError = scrubSecrets(String(err));
+
+    // Preserve build log from buildInfo if available, append the error
+    const existingLog = (buildInfo?.log ?? '').trim();
+    const failLog = existingLog
+      ? `${existingLog}\n\n[error] Build/deploy failed: ${safeError}`
+      : `Build/deploy failed: ${safeError}`;
+
     await db.update(deployments)
-      .set({ status: 'failed', log: `Build/deploy failed: ${String(err)}` })
+      .set({ status: 'failed', log: failLog, progressStep: 'failed', completedAt: new Date() })
       .where(eq(deployments.id, deploymentId));
 
     await db.update(services)
       .set({ status: 'failed', updatedAt: new Date() })
       .where(eq(services.id, svc.id));
 
-    await publishProgress(deploymentId, 'failed', String(err));
+    await publishProgress(deploymentId, 'failed', safeError, 'failed');
 
     // Notify account owners of failure
     notifyAccountMembers(accountId, 'deploy-failed', {
       serviceName: svc.name,
-      errorMessage: String(err),
+      errorMessage: safeError,
     });
 
     throw err;
+  }
+  } catch (outerErr) {
+    // Catch-all: ensure deployment is NEVER left stuck at "building" on unexpected errors
+    // (e.g. DB connection failure during setup, import errors, etc.)
+    logger.error({ err: outerErr, deploymentId }, 'Deployment failed with unhandled error');
+    try {
+      const current = await db.query.deployments.findFirst({
+        where: eq(deployments.id, deploymentId),
+        columns: { status: true },
+      });
+      // Only update if still in a non-terminal state
+      if (current && current.status !== 'succeeded' && current.status !== 'failed') {
+        const safeMsg = scrubSecrets(String(outerErr));
+        await db.update(deployments)
+          .set({ status: 'failed', log: `Deployment failed: ${safeMsg}`, progressStep: 'failed', completedAt: new Date() })
+          .where(eq(deployments.id, deploymentId));
+        await publishProgress(deploymentId, 'failed', safeMsg, 'failed');
+      }
+    } catch (dbErr) {
+      logger.error({ err: dbErr, deploymentId }, 'Failed to mark deployment as failed in catch-all');
+    }
+    throw outerErr;
   }
 }
 

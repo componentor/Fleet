@@ -305,6 +305,7 @@ const registrarSchema = z.object({
   apiKey: z.string().min(1),
   apiSecret: z.string().optional(),
   resellerId: z.string().optional(),
+  sandbox: z.boolean().optional(),
 });
 
 settings.patch('/registrar', settingsRateLimit, requireAdmin, async (c) => {
@@ -319,14 +320,16 @@ settings.patch('/registrar', settingsRateLimit, requireAdmin, async (c) => {
     return c.json({ error: 'Validation failed' }, 400);
   }
 
-  const { provider, apiKey, apiSecret, resellerId } = parsed.data;
+  const { provider, apiKey, apiSecret, resellerId, sandbox } = parsed.data;
   const { domainRegistrars, eq: eqOp, insertReturning, updateReturning } = await import('@fleet/db');
 
   const existing = await db.query.domainRegistrars.findFirst({
     where: eqOp(domainRegistrars.enabled, true),
   });
 
-  const config = resellerId ? { resellerId } : {};
+  const config: Record<string, string> = {};
+  if (resellerId) config['resellerId'] = resellerId;
+  if (sandbox !== undefined) config['sandbox'] = String(sandbox);
 
   if (existing) {
     const [updated] = await updateReturning(domainRegistrars, {

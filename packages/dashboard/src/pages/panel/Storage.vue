@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { HardDrive, Plus, Loader2, Info } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
+const { t } = useI18n()
 const api = useApi()
 const { canWrite } = useRole()
 
@@ -42,7 +44,7 @@ async function createVolume() {
     showCreate.value = false
     await fetchVolumes()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to create volume'
+    error.value = err?.body?.error || t('storagePage.createFailed')
   } finally {
     creating.value = false
   }
@@ -75,12 +77,12 @@ async function fetchLimitsAndPricing() {
 }
 
 async function deleteVolume(volumeId: string) {
-  if (!confirm('Delete this volume? All data will be lost.')) return
+  if (!confirm(t('storagePage.confirmDelete'))) return
   try {
     await api.del(`/storage/volumes/${volumeId}`)
     await fetchVolumes()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to delete volume'
+    error.value = err?.body?.error || t('storagePage.deleteFailed')
   }
 }
 
@@ -100,7 +102,7 @@ onMounted(() => {
     <div class="flex items-center justify-between mb-8">
       <div class="flex items-center gap-3">
         <HardDrive class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Storage</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('storage.title') }}</h1>
       </div>
       <button
         v-if="canWrite"
@@ -108,7 +110,7 @@ onMounted(() => {
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
         <Plus class="w-4 h-4" />
-        Create Volume
+        {{ t('storage.createVolume') }}
       </button>
     </div>
 
@@ -118,29 +120,29 @@ onMounted(() => {
 
     <!-- Create volume form -->
     <div v-if="showCreate" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-      <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Create New Volume</h3>
+      <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ t('storagePage.createNew') }}</h3>
 
       <!-- Storage info bar -->
       <div v-if="maxStorageGb !== null || estimatedMonthlyCost" class="mb-4 flex flex-wrap items-center gap-4 px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700 text-xs">
         <div v-if="maxStorageGb !== null" class="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
           <Info class="w-3.5 h-3.5 shrink-0" />
           <span>
-            <span class="font-medium text-gray-900 dark:text-white">{{ usedStorageGb }} GB</span> of
-            <span class="font-medium text-gray-900 dark:text-white">{{ maxStorageGb }} GB</span> used
+            <span class="font-medium text-gray-900 dark:text-white">{{ usedStorageGb }} GB</span> {{ t('storagePage.of') }}
+            <span class="font-medium text-gray-900 dark:text-white">{{ maxStorageGb }} GB</span> {{ t('storage.used') }}
             <template v-if="remainingStorageGb !== null">
-              &middot; <span class="font-medium text-green-600 dark:text-green-400">{{ remainingStorageGb }} GB</span> available
+              &middot; <span class="font-medium text-green-600 dark:text-green-400">{{ remainingStorageGb }} GB</span> {{ t('storage.available') }}
             </template>
           </span>
         </div>
         <div v-if="estimatedMonthlyCost" class="flex items-center gap-1.5 text-gray-600 dark:text-gray-400 ml-auto">
-          Est. <span class="font-medium text-gray-900 dark:text-white">${{ estimatedMonthlyCost }}/mo</span> for {{ newSize }} GB
+          {{ t('storagePage.estimated', { cost: estimatedMonthlyCost, size: newSize }) }}
         </div>
       </div>
 
       <form @submit.prevent="createVolume" class="space-y-3">
         <div class="flex items-end gap-3 flex-wrap">
           <div class="flex-1 min-w-48">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('storagePage.name') }}</label>
             <input
               v-model="newName"
               type="text"
@@ -150,7 +152,7 @@ onMounted(() => {
             />
           </div>
           <div class="w-32">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Size (GB)</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('storagePage.sizeGb') }}</label>
             <input
               v-model.number="newSize"
               type="number"
@@ -161,13 +163,13 @@ onMounted(() => {
             />
           </div>
           <button type="submit" :disabled="creating" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-            {{ creating ? 'Creating...' : 'Create' }}
+            {{ creating ? t('storagePage.creating') : t('storagePage.create') }}
           </button>
           <button type="button" @click="showCreate = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
-            Cancel
+            {{ t('storagePage.cancel') }}
           </button>
         </div>
-        <p class="text-xs text-gray-400 dark:text-gray-500">Lowercase letters, numbers, and hyphens only.</p>
+        <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('storagePage.nameHint') }}</p>
       </form>
     </div>
 
@@ -180,16 +182,16 @@ onMounted(() => {
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Driver</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Created</th>
-              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.name') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.driver') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.created') }}</th>
+              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="volumes.length === 0">
               <td colspan="4" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                No storage volumes created yet.
+                {{ t('storagePage.noVolumes') }}
               </td>
             </tr>
             <tr
@@ -205,7 +207,7 @@ onMounted(() => {
                   @click="deleteVolume(volume.name)"
                   class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
                 >
-                  Delete
+                  {{ t('storagePage.delete') }}
                 </button>
               </td>
             </tr>

@@ -299,8 +299,11 @@ export class BackupService {
       const sizeBytes = await this.calculateDirSize(workDir);
 
       // Clean up temp directory if using object storage (files already uploaded)
+      // Note: Also cleaned in finally block as a safety net
       if (useObjectStorage) {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+        await rm(tempDir, { recursive: true, force: true }).catch((err) => {
+          logger.warn({ err, tempDir }, 'Failed to clean up temp backup directory');
+        });
       }
 
       // Mark as completed
@@ -321,9 +324,11 @@ export class BackupService {
         .set({ status: 'failed' })
         .where(eq(backups.id, backupId));
     } finally {
-      // Always clean up temp dir
-      if (useObjectStorage) {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      // Always clean up temp dir (safety net for both success and failure paths)
+      if (useObjectStorage && tempDir) {
+        await rm(tempDir, { recursive: true, force: true }).catch((err) => {
+          logger.warn({ err, tempDir }, 'Failed to clean up temp backup directory in finally block');
+        });
       }
     }
   }

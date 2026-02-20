@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge } from 'lucide-vue-next'
+import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -298,6 +298,22 @@ onMounted(() => { fetchAll() })
       </div>
       <div v-if="success" class="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
         <p class="text-sm text-green-700 dark:text-green-300">{{ success }}</p>
+      </div>
+
+      <!-- Stripe Payment Methods Notice -->
+      <div class="mb-8 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+        <div class="flex gap-3">
+          <Info class="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+          <div>
+            <h3 class="text-sm font-semibold text-blue-800 dark:text-blue-200 mb-1.5">{{ t('super.billing.stripePaymentMethods') }}</h3>
+            <p class="text-sm text-blue-700 dark:text-blue-300 mb-2">{{ t('super.billing.stripePaymentMethodsDesc') }}</p>
+            <ol class="text-sm text-blue-700 dark:text-blue-300 list-decimal list-inside space-y-1">
+              <li>{{ t('super.billing.stripeStep1') }}</li>
+              <li>{{ t('super.billing.stripeStep2') }}</li>
+              <li>{{ t('super.billing.stripeStep3') }}</li>
+            </ol>
+          </div>
+        </div>
       </div>
 
       <!-- Section 1: Billing Model Configuration -->

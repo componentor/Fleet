@@ -1,0 +1,33 @@
+slug: pgadmin
+name: pgAdmin
+description: Feature-rich PostgreSQL administration and management tool with a web-based interface.
+icon_url: https://www.pgadmin.org/static/COMPILED/assets/img/favicon.ico
+category: database
+
+variables:
+  - name: PGADMIN_DEFAULT_EMAIL
+    label: Admin Email
+    type: string
+    required: true
+    default: admin@example.com
+  - name: PGADMIN_DEFAULT_PASSWORD
+    label: Admin Password
+    type: password
+    required: true
+    generate: true
+
+services:
+  - name: pgadmin
+    image: dpage/pgadmin4:8
+    ports:
+      - target: 80
+        published: 5050
+    env:
+      PGADMIN_DEFAULT_EMAIL: "{{PGADMIN_DEFAULT_EMAIL}}"
+      PGADMIN_DEFAULT_PASSWORD: "{{PGADMIN_DEFAULT_PASSWORD}}"
+    volumes:
+      - source: pgadmin_data
+        target: /var/lib/pgadmin
+
+volumes:
+  - pgadmin_data

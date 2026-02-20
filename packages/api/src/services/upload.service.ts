@@ -162,10 +162,16 @@ export class UploadService {
     detectedFiles: string[];
     buildMethod: 'dockerfile' | 'compose' | 'none';
     buildFile: string | null;
+    detectedRuntime: string | null;
+    generatedDockerfile: string | null;
+    defaultPort: number | null;
   }> {
     const detectedFiles: string[] = [];
     let buildMethod: 'dockerfile' | 'compose' | 'none' = 'none';
     let resolvedBuildFile: string | null = null;
+    let detectedRuntime: string | null = null;
+    let generatedDockerfile: string | null = null;
+    let defaultPort: number | null = null;
 
     try {
       const entries = await readdir(sourcePath);
@@ -223,6 +229,31 @@ export class UploadService {
         if (entry === 'go.mod') detectedFiles.push(entry);
         if (entry === 'Cargo.toml') detectedFiles.push(entry);
       }
+
+      // Auto-detect runtime and generate Dockerfile when no build file found
+      if (buildMethod === 'none') {
+        const { detectRuntime } = await import('./runtime.service.js');
+        const fileReader = async (name: string): Promise<string | null> => {
+          try {
+            const filePath = this.resolveSafePath(sourcePath, name);
+            const content = await readFile(filePath, 'utf-8');
+            return content;
+          } catch {
+            return null;
+          }
+        };
+        const detection = await detectRuntime(entries, fileReader);
+        if (detection) {
+          // Write generated Dockerfile to source directory
+          await writeFile(join(sourcePath, 'Dockerfile'), detection.dockerfile, 'utf-8');
+          buildMethod = 'dockerfile';
+          resolvedBuildFile = 'Dockerfile';
+          detectedRuntime = detection.runtime;
+          generatedDockerfile = detection.dockerfile;
+          defaultPort = detection.port;
+          detectedFiles.push('Dockerfile');
+        }
+      }
     } catch {
       // Directory read failed — that's OK, we still accept the upload
     }
@@ -231,6 +262,9 @@ export class UploadService {
       detectedFiles: [...new Set(detectedFiles)],
       buildMethod,
       buildFile: resolvedBuildFile,
+      detectedRuntime,
+      generatedDockerfile,
+      defaultPort,
     };
   }
 
@@ -435,6 +469,26 @@ export class UploadService {
       }
     }
     return total;
+  }
+
+  /**
+   * Get total upload directory size for an account in bytes.
+   * Returns 0 if the account has no uploads.
+   */
+  async getAccountUploadSizeBytes(accountId: string): Promise<number> {
+    const accountPath = join(UPLOAD_BASE, accountId);
+    try {
+      await stat(accountPath);
+      // Wrap with timeout to prevent slow scans from blocking usage collection
+      return await Promise.race([
+        this.getDirectorySize(accountPath),
+        new Promise<number>((_, reject) =>
+          setTimeout(() => reject(new Error('Upload size scan timed out')), 10_000),
+        ),
+      ]);
+    } catch {
+      return 0;
+    }
   }
 
   /**

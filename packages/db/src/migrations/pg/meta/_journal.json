@@ -57,6 +57,20 @@
       "when": 1772000000000,
       "tag": "0007_add_event_log_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1772100000000,
+      "tag": "0008_add_service_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1772200000000,
+      "tag": "0009_add_missing_columns",
+      "breakpoints": true
     }
   ]
 }

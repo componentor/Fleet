@@ -1,0 +1,62 @@
+slug: drone
+name: Drone CI
+description: Container-native continuous integration and delivery platform. Lightweight and powerful CI/CD.
+icon_url: https://www.drone.io/favicon.ico
+category: development
+
+variables:
+  - name: DRONE_RPC_SECRET
+    label: RPC Secret
+    type: password
+    required: true
+    generate: true
+  - name: DRONE_SERVER_HOST
+    label: Server Host
+    type: string
+    required: true
+    default: localhost
+  - name: DRONE_SERVER_PROTO
+    label: Server Protocol
+    type: string
+    default: http
+  - name: DRONE_GITEA_SERVER
+    label: Gitea Server URL
+    type: string
+    required: false
+  - name: DRONE_GITEA_CLIENT_ID
+    label: Gitea OAuth Client ID
+    type: string
+    required: false
+  - name: DRONE_GITEA_CLIENT_SECRET
+    label: Gitea OAuth Client Secret
+    type: password
+    required: false
+
+services:
+  - name: drone
+    image: drone/drone:2
+    ports:
+      - target: 80
+        published: 8080
+    env:
+      DRONE_RPC_SECRET: "{{DRONE_RPC_SECRET}}"
+      DRONE_SERVER_HOST: "{{DRONE_SERVER_HOST}}"
+      DRONE_SERVER_PROTO: "{{DRONE_SERVER_PROTO}}"
+      DRONE_GITEA_SERVER: "{{DRONE_GITEA_SERVER}}"
+      DRONE_GITEA_CLIENT_ID: "{{DRONE_GITEA_CLIENT_ID}}"
+      DRONE_GITEA_CLIENT_SECRET: "{{DRONE_GITEA_CLIENT_SECRET}}"
+    volumes:
+      - source: drone_data
+        target: /data
+
+  - name: drone-runner
+    image: drone/drone-runner-docker:1
+    env:
+      DRONE_RPC_PROTO: "{{DRONE_SERVER_PROTO}}"
+      DRONE_RPC_HOST: "{{service:drone}}"
+      DRONE_RPC_SECRET: "{{DRONE_RPC_SECRET}}"
+      DRONE_RUNNER_CAPACITY: "2"
+      DRONE_RUNNER_NAME: fleet-runner
+
+volumes:
+  - drone_data

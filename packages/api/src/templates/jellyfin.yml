@@ -1,0 +1,33 @@
+slug: jellyfin
+name: Jellyfin
+description: Free media server for movies, TV shows, music, and photos. Stream anywhere with no subscription needed.
+icon_url: https://jellyfin.org/images/favicon.ico
+category: media
+
+variables:
+  - name: JELLYFIN_PublishedServerUrl
+    label: Published Server URL
+    type: string
+    required: false
+    default: http://localhost:8096
+
+services:
+  - name: jellyfin
+    image: jellyfin/jellyfin:latest
+    ports:
+      - target: 8096
+        published: 8096
+    env:
+      JELLYFIN_PublishedServerUrl: "{{JELLYFIN_PublishedServerUrl}}"
+    volumes:
+      - source: jellyfin_config
+        target: /config
+      - source: jellyfin_cache
+        target: /cache
+      - source: jellyfin_media
+        target: /media
+
+volumes:
+  - jellyfin_config
+  - jellyfin_cache
+  - jellyfin_media

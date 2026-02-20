@@ -1,0 +1,24 @@
+slug: portainer
+name: Portainer
+description: Lightweight container management UI for Docker, Swarm, and Kubernetes. Manage containers visually.
+icon_url: https://www.portainer.io/hubfs/favicon.ico
+category: development
+
+variables:
+  - name: PORTAINER_ADMIN_PASSWORD
+    label: Admin Password
+    type: password
+    required: true
+
+services:
+  - name: portainer
+    image: portainer/portainer-ce:lts
+    ports:
+      - target: 9000
+        published: 9000
+    volumes:
+      - source: portainer_data
+        target: /data
+
+volumes:
+  - portainer_data
