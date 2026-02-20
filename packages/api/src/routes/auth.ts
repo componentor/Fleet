@@ -13,6 +13,7 @@ import { logger } from '../services/logger.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { emailService } from '../services/email.service.js';
 import { getValkey } from '../services/valkey.service.js';
+import { getGitHubConfig } from '../services/github.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
@@ -901,7 +902,8 @@ auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
 
 // GET /github — redirect to GitHub OAuth
 auth.get('/github', oauthRateLimit, async (c) => {
-  const clientId = process.env['GITHUB_CLIENT_ID'];
+  const ghConfig = await getGitHubConfig();
+  const clientId = ghConfig.clientId;
   if (!clientId) {
     return c.json({ error: 'GitHub OAuth is not configured' }, 500);
   }
@@ -965,8 +967,9 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
     return c.redirect('/auth/callback?error=Missing+authorization+code');
   }
 
-  const clientId = process.env['GITHUB_CLIENT_ID'];
-  const clientSecret = process.env['GITHUB_CLIENT_SECRET'];
+  const ghConfig = await getGitHubConfig();
+  const clientId = ghConfig.clientId;
+  const clientSecret = ghConfig.clientSecret;
   if (!clientId || !clientSecret) {
     return c.redirect('/auth/callback?error=GitHub+OAuth+not+configured');
   }

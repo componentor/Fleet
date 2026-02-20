@@ -310,6 +310,83 @@ export class StripeService {
   }
 
   /**
+   * Create and finalize a Stripe invoice for automatic domain renewal.
+   * Uses the customer's default payment method to charge off-session.
+   * Returns the invoice object (check invoice.status for payment result).
+   */
+  async createDomainRenewalInvoice(
+    customerId: string,
+    domain: string,
+    amountCents: number,
+    currency: string,
+    years: number,
+    accountId: string,
+    registrationId: string,
+  ): Promise<Stripe.Invoice> {
+    const stripe = getStripe();
+
+    // Create an invoice item (automatically attached to the next invoice)
+    await stripe.invoiceItems.create({
+      customer: customerId,
+      amount: amountCents,
+      currency: currency.toLowerCase(),
+      description: `Domain Renewal: ${domain} (${years} year${years > 1 ? 's' : ''})`,
+      metadata: {
+        type: 'domain_renewal',
+        domain,
+        years: String(years),
+        accountId,
+        registrationId,
+      },
+    });
+
+    // Create and finalize the invoice (auto-charges the default payment method)
+    const invoice = await stripe.invoices.create({
+      customer: customerId,
+      collection_method: 'charge_automatically',
+      auto_advance: true, // Stripe will attempt to charge immediately
+      metadata: {
+        type: 'domain_renewal',
+        domain,
+        years: String(years),
+        accountId,
+        registrationId,
+      },
+    });
+
+    // Finalize it so Stripe attempts payment
+    const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
+    return finalized;
+  }
+
+  /**
+   * Find an open/paid domain renewal invoice for a specific registration.
+   * Used to avoid creating duplicate invoices for the same renewal period.
+   */
+  async findDomainRenewalInvoice(
+    customerId: string,
+    registrationId: string,
+  ): Promise<Stripe.Invoice | null> {
+    const stripe = getStripe();
+    // Search for recent invoices with matching metadata
+    const invoices = await stripe.invoices.list({
+      customer: customerId,
+      limit: 10,
+    });
+
+    for (const inv of invoices.data) {
+      if (
+        inv.metadata?.type === 'domain_renewal' &&
+        inv.metadata?.registrationId === registrationId &&
+        (inv.status === 'open' || inv.status === 'paid')
+      ) {
+        return inv;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */
   constructWebhookEvent(

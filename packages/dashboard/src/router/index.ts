@@ -125,6 +125,11 @@ const superRoutes: RouteRecordRaw[] = [
         name: 'super-storage',
         component: () => import('@/pages/super/StorageSetup.vue'),
       },
+      {
+        path: 'shared-domains',
+        name: 'super-shared-domains',
+        component: () => import('@/pages/super/SharedDomains.vue'),
+      },
     ],
   },
 ]

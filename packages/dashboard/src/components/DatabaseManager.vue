@@ -3,10 +3,13 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Database, Table2, Play, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, Eye, Columns3, Terminal, Plus, Trash2, X, Check, Download, Upload, KeyRound, Copy, EyeOff, Eye as EyeIcon, Info } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
+import { usePlatformDomain } from '@/composables/usePlatformDomain'
 
 const props = defineProps<{ serviceId: string }>()
 const api = useApi()
 const toast = useToast()
+const { domain: platformHost, fetchDomain: fetchPlatformDomain } = usePlatformDomain()
+fetchPlatformDomain()
 
 // State
 const loading = ref(true)
@@ -413,25 +416,27 @@ function copyToClipboard(text: string) {
 function getConnectionString(): string {
   if (!credentials.value) return ''
   const c = credentials.value
+  const host = platformHost.value
   if (c.engine === 'mongo') {
-    return `mongodb://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}?authSource=admin`
+    return `mongodb://${c.user}:${c.password}@${host}:${c.port}/${c.database}?authSource=admin`
   }
   if (c.engine === 'postgres') {
-    return `postgresql://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}`
+    return `postgresql://${c.user}:${c.password}@${host}:${c.port}/${c.database}`
   }
-  return `mysql://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}`
+  return `mysql://${c.user}:${c.password}@${host}:${c.port}/${c.database}`
 }
 
 function getCliCommand(): string {
   if (!credentials.value) return ''
   const c = credentials.value
+  const host = platformHost.value
   if (c.engine === 'mongo') {
-    return `mongosh "mongodb://${c.user}:${c.password}@<YOUR_HOST>:${c.port}/${c.database}?authSource=admin"`
+    return `mongosh "mongodb://${c.user}:${c.password}@${host}:${c.port}/${c.database}?authSource=admin"`
   }
   if (c.engine === 'postgres') {
-    return `psql -h <YOUR_HOST> -p ${c.port} -U ${c.user} -d ${c.database}`
+    return `psql -h ${host} -p ${c.port} -U ${c.user} -d ${c.database}`
   }
-  return `mysql -h <YOUR_HOST> -P ${c.port} -u ${c.user} -p ${c.database}`
+  return `mysql -h ${host} -P ${c.port} -u ${c.user} -p ${c.database}`
 }
 
 // ---- Export / Import ----
@@ -638,9 +643,9 @@ watch(() => props.serviceId, () => {
           <div class="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
             <Info class="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
             <div class="text-xs text-blue-700 dark:text-blue-300">
-              <p>Replace <code class="bg-blue-100 dark:bg-blue-900/30 px-1 rounded">&lt;YOUR_HOST&gt;</code> with your server's IP address or domain name. The database port must be published and accessible from your network.</p>
+              <p>The database port must be published and accessible from your network.</p>
               <p class="mt-1">For services on an internal network, consider using an SSH tunnel:</p>
-              <code class="block mt-1 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded font-mono">ssh -L {{ credentials.port }}:{{ credentials.host }}:{{ credentials.port }} user@your-server</code>
+              <code class="block mt-1 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded font-mono">ssh -L {{ credentials.port }}:{{ platformHost }}:{{ credentials.port }} user@{{ platformHost }}</code>
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink } from 'lucide-vue-next'
+import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink, Share2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
@@ -8,7 +8,7 @@ const api = useApi()
 const { canWrite } = useRole()
 
 type Tab = 'my-domains' | 'add-domain'
-type AddMode = null | 'buy' | 'byod'
+type AddMode = null | 'buy' | 'byod' | 'subdomain'
 type BuyStep = 'search' | 'results'
 type ByodStep = 'enter' | 'instructions' | 'verify'
 
@@ -36,6 +36,15 @@ const byodZone = ref<any>(null)
 const verifying = ref(false)
 const copyFeedback = ref('')
 
+// Subdomain claim
+const availableDomains = ref<any[]>([])
+const subdomainClaims = ref<any[]>([])
+const loadingSubdomains = ref(false)
+const selectedParent = ref<any>(null)
+const subdomainInput = ref('')
+const claimingSubdomain = ref(false)
+const claimSuccess = ref(false)
+
 const allDomains = computed(() => {
   const purchased = registrations.value.map((r: any) => ({
     id: r.id,
@@ -57,11 +66,22 @@ const allDomains = computed(() => {
     createdAt: z.createdAt,
   }))
 
+  const subdomain = subdomainClaims.value.map((cl: any) => ({
+    id: cl.id,
+    domain: cl.fullDomain,
+    type: 'subdomain' as const,
+    status: cl.status === 'active' ? 'active' : 'pending',
+    verified: true,
+    expiresAt: null,
+    createdAt: cl.createdAt,
+    serviceName: cl.serviceName,
+  }))
+
   // Deduplicate — if a domain is both a zone and a registration, prefer registration
   const purchasedDomains = new Set(purchased.map((p: any) => p.domain))
   const filtered = external.filter((e: any) => !purchasedDomains.has(e.domain))
 
-  return [...purchased, ...filtered].sort((a, b) => {
+  return [...purchased, ...filtered, ...subdomain].sort((a, b) => {
     const da = a.createdAt ? new Date(a.createdAt).getTime() : 0
     const db = b.createdAt ? new Date(b.createdAt).getTime() : 0
     return db - da
@@ -71,15 +91,18 @@ const allDomains = computed(() => {
 async function fetchDomains() {
   loading.value = true
   try {
-    const [z, r] = await Promise.all([
+    const [z, r, sc] = await Promise.all([
       api.get<any[]>('/dns/zones'),
       api.get<any[]>('/domains/registrations'),
+      api.get<any[]>('/shared-domains/mine').catch(() => []),
     ])
     zones.value = z
     registrations.value = r
+    subdomainClaims.value = sc
   } catch {
     zones.value = []
     registrations.value = []
+    subdomainClaims.value = []
   } finally {
     loading.value = false
   }
@@ -190,6 +213,51 @@ function copyToClipboard(text: string) {
   setTimeout(() => { copyFeedback.value = '' }, 2000)
 }
 
+async function fetchAvailableDomains() {
+  loadingSubdomains.value = true
+  try {
+    availableDomains.value = await api.get<any[]>('/shared-domains/available')
+  } catch {
+    availableDomains.value = []
+  } finally {
+    loadingSubdomains.value = false
+  }
+}
+
+async function claimSubdomain() {
+  if (!selectedParent.value || !subdomainInput.value.trim()) return
+  claimingSubdomain.value = true
+  error.value = ''
+  try {
+    await api.post('/shared-domains/claim', {
+      sharedDomainId: selectedParent.value.id,
+      subdomain: subdomainInput.value.trim().toLowerCase(),
+    })
+    claimSuccess.value = true
+    await fetchDomains()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to claim subdomain'
+  } finally {
+    claimingSubdomain.value = false
+  }
+}
+
+async function releaseSubdomain(id: string) {
+  if (!confirm('Are you sure you want to release this subdomain?')) return
+  try {
+    await api.del(`/shared-domains/${id}`)
+    await fetchDomains()
+  } catch {
+    // ignore
+  }
+}
+
+function formatSubdomainPrice(d: any): string {
+  if (d.pricingType === 'free') return 'Free'
+  const formatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: d.currency }).format(d.price / 100)
+  return d.pricingType === 'one_time' ? `${formatted} one-time` : `${formatted}/mo`
+}
+
 function resetWizard() {
   addMode.value = null
   buyStep.value = 'search'
@@ -199,6 +267,9 @@ function resetWizard() {
   byodDomain.value = ''
   byodZone.value = null
   error.value = ''
+  selectedParent.value = null
+  subdomainInput.value = ''
+  claimSuccess.value = false
 }
 
 function goToAddDomain() {
@@ -304,10 +375,12 @@ onMounted(() => {
                       'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
                       d.type === 'purchased'
                         ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
-                        : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                        : d.type === 'subdomain'
+                          ? 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300'
+                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     ]"
                   >
-                    {{ d.type === 'purchased' ? 'Purchased' : 'External' }}
+                    {{ d.type === 'purchased' ? 'Purchased' : d.type === 'subdomain' ? 'Subdomain' : 'External' }}
                   </span>
                 </td>
                 <td class="px-6 py-4">
@@ -331,6 +404,13 @@ onMounted(() => {
                   >
                     Remove
                   </button>
+                  <button
+                    v-if="d.type === 'subdomain'"
+                    @click="releaseSubdomain(d.id)"
+                    class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                  >
+                    Release
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -342,7 +422,7 @@ onMounted(() => {
     <!-- Add Domain Tab -->
     <div v-if="activeTab === 'add-domain'">
       <!-- Choose mode -->
-      <div v-if="!addMode" class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-2xl">
+      <div v-if="!addMode" class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl">
         <button
           @click="addMode = 'buy'"
           class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all"
@@ -363,6 +443,17 @@ onMounted(() => {
           </div>
           <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Use Your Own Domain</h3>
           <p class="text-sm text-gray-500 dark:text-gray-400">Point your existing domain to your Fleet account. SSL included automatically.</p>
+        </button>
+
+        <button
+          @click="addMode = 'subdomain'; fetchAvailableDomains()"
+          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all"
+        >
+          <div class="w-12 h-12 rounded-lg bg-teal-600 flex items-center justify-center mb-4">
+            <Share2 class="w-6 h-6 text-white" />
+          </div>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Claim a Subdomain</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Get a subdomain on a platform-provided domain. Instant setup with SSL.</p>
         </button>
       </div>
 
@@ -435,6 +526,114 @@ onMounted(() => {
             <div v-else-if="buyStep === 'results' && !searching" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
               No results found. Try a different search term.
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Claim Subdomain Flow -->
+      <div v-if="addMode === 'subdomain'" class="max-w-2xl">
+        <button @click="resetWizard()" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors flex items-center gap-1">
+          <ArrowLeft class="w-4 h-4" /> Back to options
+        </button>
+
+        <!-- Success -->
+        <div v-if="claimSuccess" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="p-8 text-center">
+            <div class="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-4">
+              <Check class="w-8 h-8 text-green-600 dark:text-green-400" />
+            </div>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Subdomain Claimed!</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+              Your subdomain <strong>{{ subdomainInput }}.{{ selectedParent?.domain }}</strong> is ready. SSL will be provisioned automatically.
+            </p>
+            <button
+              @click="activeTab = 'my-domains'; resetWizard()"
+              class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+            >
+              Go to My Domains
+            </button>
+          </div>
+        </div>
+
+        <!-- Loading -->
+        <div v-else-if="loadingSubdomains" class="flex items-center justify-center py-20">
+          <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+        </div>
+
+        <!-- No available domains -->
+        <div v-else-if="availableDomains.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-center">
+          <p class="text-sm text-gray-500 dark:text-gray-400">No shared domains available. Contact your platform administrator.</p>
+        </div>
+
+        <!-- Pick parent + enter subdomain -->
+        <div v-else class="space-y-6">
+          <!-- Step 1: Choose parent domain -->
+          <div v-if="!selectedParent" class="space-y-3">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a domain</h2>
+            <div
+              v-for="d in availableDomains"
+              :key="d.id"
+              @click="selectedParent = d"
+              class="flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-600 cursor-pointer transition-all"
+            >
+              <div>
+                <span class="text-sm font-medium text-gray-900 dark:text-white">*.{{ d.domain }}</span>
+                <p v-if="d.maxPerAccount > 0" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {{ d.myClaimCount }}/{{ d.maxPerAccount }} used
+                </p>
+              </div>
+              <span
+                :class="[
+                  'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
+                  d.pricingType === 'free'
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                ]"
+              >
+                {{ formatSubdomainPrice(d) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Step 2: Enter subdomain -->
+          <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Claim a subdomain</h2>
+                <button @click="selectedParent = null" class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                  Change domain
+                </button>
+              </div>
+            </div>
+            <form @submit.prevent="claimSubdomain" class="p-6 space-y-5">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Subdomain</label>
+                <div class="flex items-center">
+                  <input
+                    v-model="subdomainInput"
+                    type="text"
+                    placeholder="myapp"
+                    required
+                    pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+                    class="flex-1 px-3.5 py-2.5 rounded-l-lg border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                  />
+                  <span class="px-3.5 py-2.5 border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400 text-sm rounded-r-lg">
+                    .{{ selectedParent.domain }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Lowercase letters, numbers, and hyphens only.</p>
+              </div>
+              <div class="flex justify-end">
+                <button
+                  type="submit"
+                  :disabled="claimingSubdomain || !subdomainInput.trim()"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="claimingSubdomain" class="w-4 h-4 animate-spin" />
+                  Claim Subdomain
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </div>

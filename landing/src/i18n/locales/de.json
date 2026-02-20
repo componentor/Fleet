@@ -1,5 +1,6 @@
 {
   "nav": {
+    "home": "Startseite",
     "features": "Funktionen",
     "pricing": "Preise",
     "github": "GitHub",
@@ -110,8 +111,104 @@
     "builtWith": "Erstellt mit Vue, Hono, Docker Swarm",
     "github": "GitHub",
     "docs": "Dokumentation",
+    "privacy": "Datenschutz",
+    "terms": "AGB",
     "discord": "Discord",
     "rights": "Fleet. Alle Rechte vorbehalten."
+  },
+  "privacy": {
+    "title": "Datenschutzerklärung",
+    "lastUpdated": "Zuletzt aktualisiert: 20. Februar 2026",
+    "intro": "Diese Datenschutzerklärung erläutert, wie {platformName} (\"wir\", \"uns\" oder \"unser\") Ihre Informationen erhebt, nutzt und schützt, wenn Sie unsere Plattform nutzen. Wir verpflichten uns, Ihre Privatsphäre zu schützen und Ihre Daten transparent zu behandeln.",
+    "infoCollect": {
+      "title": "1. Informationen, die wir erheben",
+      "body": "Kontoinformationen: Bei der Erstellung eines Kontos erheben wir Ihren Namen, Ihre E-Mail-Adresse und Ihr Passwort (gespeichert als Argon2-Hash — wir speichern niemals Passwörter im Klartext).\n\nNutzungsdaten: Wir erheben Informationen darüber, wie Sie die Plattform nutzen, einschließlich bereitgestellter Dienste, Ressourcennutzung (CPU, Speicher, Festplatte), Bereitstellungsprotokolle und API-Zugriffsmuster.\n\nZahlungsinformationen: Wenn Sie einen kostenpflichtigen Plan abonnieren, werden Zahlungsdetails von Stripe verarbeitet und gespeichert. Wir speichern Ihre vollständige Kreditkartennummer nicht auf unseren Servern.\n\nTechnische Daten: Wir erheben automatisch IP-Adressen, Browsertyp und Geräteinformationen, wenn Sie auf das Dashboard zugreifen. Diese Daten werden für Sicherheitsüberwachung und Ratenbegrenzung verwendet.\n\nDienstdaten: Alle Daten, die Sie in Ihren bereitgestellten Containern, Volumes und Backups speichern, sind Ihre Daten. Wir greifen nur darauf zu, um den Dienst bereitzustellen (z.B. Backups durchführen, Dienste wiederherstellen) und niemals für andere Zwecke."
+    },
+    "howWeUse": {
+      "title": "2. Wie wir Ihre Informationen verwenden",
+      "body": "Wir verwenden die erhobenen Informationen, um:\n\n- Die {platformName}-Plattform bereitzustellen, zu warten und zu verbessern\n- Transaktionen zu verarbeiten und abrechnungsbezogene Mitteilungen zu senden\n- Die Plattformsicherheit zu überwachen, Missbrauch zu erkennen und Ratenbegrenzungen durchzusetzen\n- Dienstbenachrichtigungen zu senden (Bereitstellungsstatus, Gesundheitswarnungen, Backup-Abschluss)\n- Auf Supportanfragen zu antworten und über Ihr Konto zu kommunizieren\n- Anonymisierte, aggregierte Analysen zur Verbesserung unseres Dienstes zu erstellen\n\nWir verkaufen Ihre persönlichen Informationen nicht an Dritte. Wir verwenden Ihre Daten nicht für Werbezwecke."
+    },
+    "dataStorage": {
+      "title": "3. Datenspeicherung und Sicherheit",
+      "body": "Alle sensiblen Daten werden mit AES-256-GCM-Verschlüsselung im Ruhezustand verschlüsselt. Backup-Archive werden vor der Speicherung verschlüsselt. Datenbank-Anmeldedaten und API-Schlüssel werden mit einem separaten Verschlüsselungsschlüssel verschlüsselt.\n\nIhre bereitgestellten Dienste laufen in isolierten Docker-Containern mit entfernten Berechtigungen (CAP_DROP ALL), schreibgeschützten Dateisystemen wo anwendbar und Netzwerkisolation über Docker Swarm Overlay-Netzwerke.\n\nWir verwenden JWT-Token mit HS256-Algorithmus-Pinning für die Authentifizierung, mit kurzlebigen Zugangstokens (15 Minuten) und sicheren httpOnly-Cookies für Aktualisierungstokens.\n\nDie gesamte API-Kommunikation ist bei der Übertragung über TLS verschlüsselt. Interne Knoten-zu-Knoten-Kommunikation innerhalb des Swarm-Clusters verwendet verschlüsselte Overlay-Netzwerke."
+    },
+    "thirdParty": {
+      "title": "4. Drittanbieterdienste",
+      "body": "Wir nutzen folgende Drittanbieterdienste, die Ihre Daten verarbeiten können:\n\n- Stripe: Zahlungsabwicklung. Unterliegt der Datenschutzerklärung von Stripe.\n- E-Mail-Anbieter (SMTP/Resend): Transaktions-E-Mails (Verifizierung, Passwort-Zurücksetzung, Bereitstellungsbenachrichtigungen). Nur Ihre E-Mail-Adresse und der Nachrichteninhalt werden geteilt.\n- Docker Hub / Container-Registries: Bei der Bereitstellung aus öffentlichen Images. Nur die Image-Referenz wird gesendet.\n\nWir teilen Ihre persönlichen Daten nicht mit anderen Dritten, es sei denn, dies ist gesetzlich vorgeschrieben."
+    },
+    "dataRetention": {
+      "title": "5. Datenaufbewahrung und Löschung",
+      "body": "Aktive Konten: Ihre Daten werden aufbewahrt, solange Ihr Konto aktiv ist.\n\nGelöschte Konten: Wenn Sie Ihr Konto löschen, planen wir die Löschung aller zugehörigen Daten, einschließlich Dienste, Volumes, Backups und persönlicher Informationen. Weich gelöschte Datensätze werden nach 30 Tagen dauerhaft entfernt.\n\nBackups: Backup-Archive werden gemäß Ihrer konfigurierten Aufbewahrungsrichtlinie aufbewahrt (Standard: 30 Tage, maximal 10 Backups pro Zeitplan).\n\nAudit-Protokolle: Sicherheits-Audit-Protokolle werden 90 Tage lang für Sicherheitsüberwachungszwecke aufbewahrt.\n\nSie können die sofortige Löschung aller Ihrer Daten beantragen, indem Sie uns kontaktieren."
+    },
+    "yourRights": {
+      "title": "6. Ihre Rechte",
+      "body": "Sie haben das Recht auf:\n\n- Auskunft: Fordern Sie eine Kopie aller personenbezogenen Daten an, die wir über Sie gespeichert haben.\n- Berichtigung: Aktualisieren oder korrigieren Sie Ihre persönlichen Informationen über das Dashboard.\n- Löschung: Löschen Sie Ihr Konto und alle zugehörigen Daten.\n- Export: Exportieren Sie Ihre Dienstkonfigurationen und Daten.\n- Einschränkung: Fordern Sie an, dass wir die Verarbeitung Ihrer Daten einschränken.\n- Datenübertragbarkeit: Erhalten Sie Ihre Daten in einem strukturierten, maschinenlesbaren Format.\n\nUm eines dieser Rechte auszuüben, kontaktieren Sie uns unter der unten angegebenen Adresse oder nutzen Sie die Kontoeinstellungen in Ihrem Dashboard."
+    },
+    "cookies": {
+      "title": "7. Cookies",
+      "body": "Wir verwenden folgende Cookies:\n\n- fleet_refresh: Ein httpOnly-sicheres Cookie, das Ihr Aktualisierungstoken enthält. Essentiell für die Authentifizierung.\n- fleet_locale: Speichert Ihre bevorzugte Spracheinstellung. Wird nicht an unsere Server gesendet.\n- fleet_landing_theme: Speichert Ihr bevorzugtes Theme (hell/dunkel/System). Wird nicht an unsere Server gesendet.\n\nWir verwenden keine Tracking-, Analyse- oder Werbe-Cookies."
+    },
+    "changes": {
+      "title": "8. Änderungen dieser Richtlinie",
+      "body": "Wir können diese Datenschutzerklärung von Zeit zu Zeit aktualisieren. Bei wesentlichen Änderungen werden wir Sie per E-Mail oder durch einen auffälligen Hinweis auf der Plattform benachrichtigen. Ihre fortgesetzte Nutzung von {platformName} nach Veröffentlichung der Änderungen stellt Ihre Zustimmung zur aktualisierten Richtlinie dar."
+    },
+    "contact": {
+      "title": "9. Kontaktieren Sie uns",
+      "body": "Wenn Sie Fragen zu dieser Datenschutzerklärung haben oder Ihre Datenrechte ausüben möchten, kontaktieren Sie uns bitte unter:\n\nE-Mail: {contactEmail}"
+    }
+  },
+  "terms": {
+    "title": "Nutzungsbedingungen",
+    "lastUpdated": "Zuletzt aktualisiert: 20. Februar 2026",
+    "intro": "Durch den Zugriff auf oder die Nutzung von {platformName} (\"der Dienst\") erklären Sie sich mit diesen Nutzungsbedingungen (\"Bedingungen\") einverstanden. Wenn Sie diesen Bedingungen nicht zustimmen, nutzen Sie den Dienst nicht.",
+    "description": {
+      "title": "1. Beschreibung des Dienstes",
+      "body": "{platformName} ist eine Open-Source, mandantenfähige Platform-as-a-Service (PaaS), die auf Docker Swarm aufbaut. Der Dienst bietet Container-Orchestrierung, automatisierte Bereitstellungen, Domänenverwaltung, Backup-Verwaltung, Abrechnungsintegration und verwandte Infrastruktur-Management-Tools.\n\n{platformName} kann auf Ihrer eigenen Infrastruktur selbst gehostet oder über eine verwaltete Instanz genutzt werden. Diese Bedingungen gelten für Ihre Nutzung des Dienstes, unabhängig davon, wie er bereitgestellt wird."
+    },
+    "account": {
+      "title": "2. Kontoregistrierung und Sicherheit",
+      "body": "Sie müssen bei der Kontoerstellung genaue und vollständige Informationen angeben. Sie sind verantwortlich für die Wahrung der Vertraulichkeit Ihrer Kontodaten, einschließlich Ihres Passworts und Ihrer API-Schlüssel.\n\nSie müssen ein starkes Passwort mit mindestens 8 Zeichen verwenden, das Groß- und Kleinbuchstaben sowie Zahlen enthält. Wir empfehlen dringend die Aktivierung der Zwei-Faktor-Authentifizierung (2FA).\n\nSie sind für alle Aktivitäten verantwortlich, die unter Ihrem Konto stattfinden. Benachrichtigen Sie uns sofort, wenn Sie einen unbefugten Zugriff auf Ihr Konto vermuten.\n\nWir behalten uns das Recht vor, Konten zu sperren oder zu kündigen, die gegen diese Bedingungen verstoßen oder die unserer begründeten Überzeugung nach für böswillige Zwecke verwendet werden."
+    },
+    "acceptableUse": {
+      "title": "3. Richtlinie zur akzeptablen Nutzung",
+      "body": "Sie stimmen zu, den Dienst nicht zu nutzen, um:\n\n- Inhalte bereitzustellen oder zu hosten, die illegal, schädlich, bedrohlich, beleidigend, belästigend, verleumderisch oder anderweitig anstößig sind\n- Kryptowährungs-Mining, Proof-of-Work-Berechnungen oder ähnliche ressourcenintensive Operationen durchzuführen, die keine legitimen Anwendungslasten sind\n- Spam, unerwünschte Massennachrichten zu senden oder Phishing zu betreiben\n- Malware, Viren oder andere schädliche Software zu verbreiten\n- Unbefugten Zugang zu anderen Konten, Diensten oder Systemen zu erlangen\n- Den Dienst oder mit dem Dienst verbundene Server/Netzwerke zu stören\n- Die Ressourcennutzung in einer Weise zu überschreiten, die den Dienst für andere Benutzer beeinträchtigt\n- Gegen geltende Gesetze oder Vorschriften zu verstoßen\n\nWir behalten uns das Recht vor, Dienste, die gegen diese Richtlinie verstoßen, ohne vorherige Ankündigung zu sperren oder zu kündigen."
+    },
+    "availability": {
+      "title": "4. Dienstverfügbarkeit",
+      "body": "Wir streben eine hohe Verfügbarkeit des Dienstes an, garantieren jedoch keinen ununterbrochenen Zugang. Der Dienst kann vorübergehend nicht verfügbar sein aufgrund von:\n\n- Geplanter Wartung (wir werden nach Möglichkeit im Voraus informieren)\n- Infrastrukturausfällen oder Netzwerkproblemen\n- Sicherheitsvorfällen, die eine sofortige Reaktion erfordern\n- Höherer Gewalt, die außerhalb unserer zumutbaren Kontrolle liegt\n\nBei selbst gehosteten Bereitstellungen hängt die Verfügbarkeit von Ihrer Infrastruktur ab und liegt in Ihrer Verantwortung."
+    },
+    "billing": {
+      "title": "5. Abrechnung und Zahlungen",
+      "body": "Kostenloser Tarif: {platformName} bietet einen kostenlosen Tarif mit begrenzten Ressourcen. Für den kostenlosen Tarif sind keine Zahlungsinformationen erforderlich.\n\nKostenpflichtige Pläne: Kostenpflichtige Abonnements werden monatlich über Stripe abgerechnet. Mit dem Abonnement eines kostenpflichtigen Plans ermächtigen Sie uns, Ihre Zahlungsmethode wiederkehrend zu belasten.\n\nUpgrades und Downgrades: Planänderungen treten zu Beginn des nächsten Abrechnungszyklus in Kraft.\n\nFehlgeschlagene Zahlungen: Bei fehlgeschlagener Zahlung werden wir einen erneuten Versuch unternehmen. Nach anhaltend fehlgeschlagenen Zahlungen kann Ihr Konto auf den kostenlosen Tarif herabgestuft werden.\n\nRückerstattungen: Wir bieten keine Rückerstattungen für Teilmonate des Dienstes an. Bei Kündigung behalten Sie den Zugang zu kostenpflichtigen Funktionen bis zum Ende Ihres aktuellen Abrechnungszeitraums."
+    },
+    "ip": {
+      "title": "6. Geistiges Eigentum",
+      "body": "{platformName} ist Open-Source-Software, die unter ihrer jeweiligen Lizenz lizenziert ist. Ihre Nutzung der {platformName}-Plattform gewährt Ihnen keine Eigentumsrechte am geistigen Eigentum der Plattform.\n\nSie behalten das vollständige Eigentum an allem Code, allen Daten und Inhalten, die Sie auf dem Dienst bereitstellen. Wir beanspruchen keine geistigen Eigentumsrechte an Ihren Inhalten."
+    },
+    "dataPrivacy": {
+      "title": "7. Daten und Datenschutz",
+      "body": "Ihre Nutzung des Dienstes unterliegt auch unserer Datenschutzerklärung, die beschreibt, wie wir Ihre Daten erheben, nutzen und schützen. Durch die Nutzung des Dienstes stimmen Sie den in unserer Datenschutzerklärung beschriebenen Datenpraktiken zu.\n\nSie sind verantwortlich für die Daten, die Sie auf dem Dienst speichern, und dafür, dass diese den geltenden Datenschutzgesetzen entsprechen."
+    },
+    "termination": {
+      "title": "8. Kündigung",
+      "body": "Sie können Ihr Konto jederzeit über die Dashboard-Einstellungen kündigen.\n\nWir können Ihr Konto kündigen oder sperren, wenn:\n\n- Sie gegen diese Bedingungen oder die Richtlinie zur akzeptablen Nutzung verstoßen\n- Ihr Konto für illegale oder missbräuchliche Zwecke verwendet wird\n- Sie nach wiederholten Versuchen nicht für ein kostenpflichtiges Abonnement zahlen\n- Wir gesetzlich dazu verpflichtet sind\n\nBei Kündigung werden Ihre Daten gemäß unserer Datenaufbewahrungsrichtlinie zur Löschung eingeplant. Sie können vor der Kündigung einen Datenexport anfordern."
+    },
+    "liability": {
+      "title": "9. Haftungsbeschränkung",
+      "body": "SOWEIT GESETZLICH ZULÄSSIG, HAFTEN {platformNameUpper} UND SEINE BETREIBER NICHT FÜR INDIREKTE, ZUFÄLLIGE, BESONDERE, FOLGE- ODER STRAFSCHÄDEN, EINSCHLIESSLICH, ABER NICHT BESCHRÄNKT AUF ENTGANGENE GEWINNE, DATEN ODER GESCHÄFTSMÖGLICHKEITEN.\n\nUNSERE GESAMTHAFTUNG FÜR ANSPRÜCHE, DIE AUS DEM DIENST ENTSTEHEN ODER DAMIT ZUSAMMENHÄNGEN, DARF DEN BETRAG NICHT ÜBERSCHREITEN, DEN SIE UNS IN DEN 12 MONATEN VOR DEM ANSPRUCH GEZAHLT HABEN.\n\nDER DIENST WIRD \"WIE BESEHEN\" UND \"WIE VERFÜGBAR\" OHNE JEGLICHE GEWÄHRLEISTUNG BEREITGESTELLT, WEDER AUSDRÜCKLICH NOCH STILLSCHWEIGEND."
+    },
+    "governingLaw": {
+      "title": "10. Anwendbares Recht",
+      "body": "Diese Bedingungen unterliegen dem anwendbaren Recht und werden in Übereinstimmung damit ausgelegt. Streitigkeiten, die sich aus diesen Bedingungen oder Ihrer Nutzung des Dienstes ergeben, sollen zunächst durch Verhandlungen in gutem Glauben und, falls erforderlich, durch verbindliche Schlichtung oder vor den zuständigen Gerichten beigelegt werden."
+    },
+    "changes": {
+      "title": "11. Änderungen dieser Bedingungen",
+      "body": "Wir können diese Bedingungen von Zeit zu Zeit aktualisieren. Bei wesentlichen Änderungen werden wir Sie mindestens 30 Tage vor Inkrafttreten der Änderungen per E-Mail oder durch einen auffälligen Hinweis auf der Plattform benachrichtigen.\n\nIhre fortgesetzte Nutzung des Dienstes nach Inkrafttreten der aktualisierten Bedingungen stellt Ihre Zustimmung zu den Änderungen dar. Wenn Sie den aktualisierten Bedingungen nicht zustimmen, müssen Sie die Nutzung des Dienstes einstellen."
+    },
+    "contact": {
+      "title": "12. Kontaktieren Sie uns",
+      "body": "Wenn Sie Fragen zu diesen Nutzungsbedingungen haben, kontaktieren Sie uns bitte unter:\n\nE-Mail: {contactEmail}"
+    }
   },
   "docs": {
     "title": "Dokumentation",

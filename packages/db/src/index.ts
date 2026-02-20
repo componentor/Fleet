@@ -61,6 +61,10 @@ export const dnsRecordsRelations = _schema.dnsRecordsRelations;
 export const domainRegistrarsRelations = _schema.domainRegistrarsRelations;
 export const domainRegistrationsRelations = _schema.domainRegistrationsRelations;
 export const domainTldPricing = _schema.domainTldPricing as typeof PgSchema.domainTldPricing;
+export const sharedDomains = _schema.sharedDomains as typeof PgSchema.sharedDomains;
+export const subdomainClaims = _schema.subdomainClaims as typeof PgSchema.subdomainClaims;
+export const sharedDomainsRelations = _schema.sharedDomainsRelations;
+export const subdomainClaimsRelations = _schema.subdomainClaimsRelations;
 
 // nodes.ts
 export const nodes = _schema.nodes as typeof PgSchema.nodes;

@@ -171,7 +171,8 @@
     "updates": "Updates",
     "emailTemplates": "Email Templates",
     "stacks": "Stacks",
-    "activity": "Activity Log"
+    "activity": "Activity Log",
+    "sharedDomains": "Shared Domains"
   },
   "stacks": {
     "title": "Stacks",
@@ -1040,6 +1041,9 @@
       "title": "Platform Settings",
       "platformName": "Platform Name",
       "platformDomain": "Platform Domain",
+      "rootDomain": "Root Domain",
+      "rootDomainDesc": "The base domain for your platform (e.g. fleet.example.com). Used for SFTP, database connections, webhooks, and DNS.",
+      "platformUrl": "Platform URL",
       "registrationEnabled": "Registration Enabled",
       "emailVerificationRequired": "Email Verification Required",
       "maintenanceMode": "Maintenance Mode",
@@ -1067,7 +1071,13 @@
       "tld": "TLD",
       "registerPrice": "Register Price",
       "renewPrice": "Renew Price",
-      "transferPrice": "Transfer Price"
+      "transferPrice": "Transfer Price",
+      "githubConfig": "GitHub",
+      "githubConfigDesc": "Configure GitHub OAuth for auto-deploy from repositories.",
+      "githubClientId": "Client ID",
+      "githubClientSecret": "Client Secret",
+      "githubWebhookSecret": "Webhook Secret",
+      "githubOAuthHint": "Create a GitHub OAuth App at github.com/settings/developers. Set the callback URL to your-domain.com/api/v1/auth/github/callback."
     },
     "billing": {
       "title": "Billing Configuration",
@@ -1246,6 +1256,30 @@
       "down": "Down",
       "database": "Database",
       "cache": "Cache"
+    },
+    "sharedDomains": {
+      "title": "Shared Domains",
+      "add": "Add Domain",
+      "edit": "Edit Domain",
+      "domain": "Domain",
+      "pricing": "Pricing",
+      "pricingType": "Pricing Type",
+      "priceLabel": "Price (cents)",
+      "priceHint": "Price in smallest currency unit (e.g. cents)",
+      "currency": "Currency",
+      "limit": "Limit",
+      "claims": "Claims",
+      "enabled": "Enabled",
+      "maxPerAccount": "Max per Account",
+      "maxHint": "0 = unlimited",
+      "free": "Free",
+      "oneTime": "One-time",
+      "monthly": "Monthly",
+      "month": "mo",
+      "unlimited": "Unlimited",
+      "empty": "No shared domains configured. Add a domain to let users claim subdomains.",
+      "confirmDelete": "Delete this shared domain? All subdomain claims will be removed.",
+      "dnsHint": "For each shared domain, configure a wildcard DNS record (*.example.com) pointing to your platform IP. Traefik will automatically handle SSL certificates for each claimed subdomain."
     }
   },
   "setup": {

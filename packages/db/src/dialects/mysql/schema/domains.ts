@@ -11,6 +11,7 @@ import {
 import { relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { users } from './users';
+import { services } from './services';
 
 export const dnsZones = mysqlTable('dns_zones', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -89,6 +90,41 @@ export const domainTldPricing = mysqlTable('domain_tld_pricing', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const sharedDomains = mysqlTable('shared_domains', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  domain: varchar('domain', { length: 255 }).notNull().unique(),
+  enabled: boolean('enabled').default(true),
+  pricingType: varchar('pricing_type', { length: 20 }).notNull().default('free'),
+  price: int('price').notNull().default(0),
+  currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+  maxPerAccount: int('max_per_account').notNull().default(0),
+  createdBy: varchar('created_by', { length: 36 })
+    .references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const subdomainClaims = mysqlTable('subdomain_claims', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sharedDomainId: varchar('shared_domain_id', { length: 36 })
+    .references(() => sharedDomains.id, { onDelete: 'cascade' })
+    .notNull(),
+  accountId: varchar('account_id', { length: 36 })
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  subdomain: varchar('subdomain', { length: 63 }).notNull(),
+  serviceId: varchar('service_id', { length: 36 })
+    .references(() => services.id, { onDelete: 'set null' }),
+  status: varchar('status', { length: 20 }).notNull().default('active'),
+  stripePaymentId: varchar('stripe_payment_id', { length: 255 }),
+  stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_subdomain_claims_shared_domain_id').on(table.sharedDomainId),
+  index('idx_subdomain_claims_account_id').on(table.accountId),
+]);
+
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({
   account: one(accounts, {
     fields: [dnsZones.accountId],
@@ -125,6 +161,35 @@ export const domainRegistrationsRelations = relations(
     registrar: one(domainRegistrars, {
       fields: [domainRegistrations.registrarId],
       references: [domainRegistrars.id],
+    }),
+  }),
+);
+
+export const sharedDomainsRelations = relations(
+  sharedDomains,
+  ({ one, many }) => ({
+    createdByUser: one(users, {
+      fields: [sharedDomains.createdBy],
+      references: [users.id],
+    }),
+    claims: many(subdomainClaims),
+  }),
+);
+
+export const subdomainClaimsRelations = relations(
+  subdomainClaims,
+  ({ one }) => ({
+    sharedDomain: one(sharedDomains, {
+      fields: [subdomainClaims.sharedDomainId],
+      references: [sharedDomains.id],
+    }),
+    account: one(accounts, {
+      fields: [subdomainClaims.accountId],
+      references: [accounts.id],
+    }),
+    service: one(services, {
+      fields: [subdomainClaims.serviceId],
+      references: [services.id],
     }),
   }),
 );

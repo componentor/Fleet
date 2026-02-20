@@ -4,7 +4,7 @@ import { db, services, deployments, oauthProviders, resourceLimits, insertReturn
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
-import { githubService } from '../services/github.service.js';
+import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
@@ -15,6 +15,7 @@ import { eventService, EventTypes, eventContext } from '../services/event.servic
 import { uploadService } from '../services/upload.service.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
+import { getPlatformDomain } from './settings.js';
 
 // Images that need writable filesystem and default user (not UID 1000)
 const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
@@ -546,15 +547,16 @@ async function manageWebhook(opts: {
 
   if (opts.enable) {
     // Build webhook URL from platform domain
-    const platformDomain = process.env['PLATFORM_DOMAIN'] || process.env['CORS_ORIGIN']?.replace(/^https?:\/\//, '');
-    const apiBase = platformDomain
+    const platformDomain = await getPlatformDomain();
+    const apiBase = platformDomain && platformDomain !== 'fleet.local'
       ? `https://${platformDomain}/api/v1`
       : `http://localhost:${process.env['PORT'] ?? '3000'}/api/v1`;
     const webhookUrl = `${apiBase}/deployments/github/webhook`;
-    const webhookSecret = process.env['GITHUB_WEBHOOK_SECRET'];
+    const ghConfig = await getGitHubConfig();
+    const webhookSecret = ghConfig.webhookSecret;
 
     if (!webhookSecret) {
-      throw new Error('GITHUB_WEBHOOK_SECRET not configured');
+      throw new Error('GitHub webhook secret not configured');
     }
 
     const webhook = await githubService.createWebhook(token, owner, repo, webhookUrl, webhookSecret);

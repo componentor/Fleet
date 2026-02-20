@@ -171,7 +171,8 @@
     "updates": "Oppdateringer",
     "emailTemplates": "E-postmaler",
     "stacks": "Stabler",
-    "activity": "Aktivitetslogg"
+    "activity": "Aktivitetslogg",
+    "sharedDomains": "Delte domener"
   },
   "stacks": {
     "title": "Stabler",
@@ -1040,6 +1041,9 @@
       "title": "Plattforminnstillinger",
       "platformName": "Plattformnavn",
       "platformDomain": "Plattformdomene",
+      "rootDomain": "Rotdomene",
+      "rootDomainDesc": "Grunndomenet for plattformen din (f.eks. fleet.example.com). Brukes til SFTP, databasetilkoblinger, webhooks og DNS.",
+      "platformUrl": "Plattform-URL",
       "registrationEnabled": "Registrering aktivert",
       "emailVerificationRequired": "E-postbekreftelse p\u00e5krevd",
       "maintenanceMode": "Vedlikeholdsmodus",
@@ -1067,7 +1071,13 @@
       "tld": "TLD",
       "registerPrice": "Registreringspris",
       "renewPrice": "Fornyelsespris",
-      "transferPrice": "Overføringspris"
+      "transferPrice": "Overføringspris",
+      "githubConfig": "GitHub",
+      "githubConfigDesc": "Konfigurer GitHub OAuth for automatisk deploy fra repositorier.",
+      "githubClientId": "Klient-ID",
+      "githubClientSecret": "Klienthemmelighet",
+      "githubWebhookSecret": "Webhook-hemmelighet",
+      "githubOAuthHint": "Opprett en GitHub OAuth-app på github.com/settings/developers. Sett callback-URL til ditt-domene.com/api/v1/auth/github/callback."
     },
     "billing": {
       "title": "Faktureringskonfigurasjon",
@@ -1246,6 +1256,30 @@
       "down": "Nede",
       "database": "Database",
       "cache": "Hurtigbuffer"
+    },
+    "sharedDomains": {
+      "title": "Delte domener",
+      "add": "Legg til domene",
+      "edit": "Rediger domene",
+      "domain": "Domene",
+      "pricing": "Prissetting",
+      "pricingType": "Pristype",
+      "priceLabel": "Pris (øre)",
+      "priceHint": "Pris i minste valutaenhet (f.eks. øre)",
+      "currency": "Valuta",
+      "limit": "Grense",
+      "claims": "Krav",
+      "enabled": "Aktivert",
+      "maxPerAccount": "Maks per konto",
+      "maxHint": "0 = ubegrenset",
+      "free": "Gratis",
+      "oneTime": "Engangsbetaling",
+      "monthly": "Månedlig",
+      "month": "mnd",
+      "unlimited": "Ubegrenset",
+      "empty": "Ingen delte domener konfigurert. Legg til et domene for å la brukere reservere underdomener.",
+      "confirmDelete": "Slette dette delte domenet? Alle underdomenekrav vil bli fjernet.",
+      "dnsHint": "For hvert delt domene, konfigurer en wildcard DNS-post (*.example.com) som peker til plattformens IP. Traefik vil automatisk håndtere SSL-sertifikater for hvert reservert underdomene."
     }
   },
   "setup": {

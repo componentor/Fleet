@@ -71,6 +71,13 @@
       "when": 1772300000000,
       "tag": "0009_add_security_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1772400000000,
+      "tag": "0010_add_shared_domains",
+      "breakpoints": true
     }
   ]
 }

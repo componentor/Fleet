@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db, services, deployments, oauthProviders, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { githubService } from '../services/github.service.js';
+import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { buildService } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
@@ -80,7 +80,8 @@ async function enqueueOrRunDeployment(data: DeploymentJobData) {
 const webhookRoutes = new Hono();
 
 webhookRoutes.post('/github/webhook', async (c) => {
-  const webhookSecret = process.env['GITHUB_WEBHOOK_SECRET'];
+  const ghConfig = await getGitHubConfig();
+  const webhookSecret = ghConfig.webhookSecret;
   if (!webhookSecret) {
     return c.json({ error: 'Webhook secret not configured' }, 500);
   }

@@ -171,7 +171,8 @@
     "updates": "更新",
     "emailTemplates": "邮件模板",
     "stacks": "应用栈",
-    "activity": "活动日志"
+    "activity": "活动日志",
+    "sharedDomains": "共享域名"
   },
   "stacks": {
     "title": "应用栈",
@@ -1040,6 +1041,9 @@
       "title": "平台设置",
       "platformName": "平台名称",
       "platformDomain": "平台域名",
+      "rootDomain": "根域名",
+      "rootDomainDesc": "平台的基础域名（例如 fleet.example.com）。用于 SFTP、数据库连接、Webhooks 和 DNS。",
+      "platformUrl": "平台 URL",
       "registrationEnabled": "允许注册",
       "emailVerificationRequired": "需要邮箱验证",
       "maintenanceMode": "维护模式",
@@ -1067,7 +1071,13 @@
       "tld": "TLD",
       "registerPrice": "注册价格",
       "renewPrice": "续费价格",
-      "transferPrice": "转让价格"
+      "transferPrice": "转让价格",
+      "githubConfig": "GitHub",
+      "githubConfigDesc": "配置 GitHub OAuth 以从仓库自动部署。",
+      "githubClientId": "客户端 ID",
+      "githubClientSecret": "客户端密钥",
+      "githubWebhookSecret": "Webhook 密钥",
+      "githubOAuthHint": "在 github.com/settings/developers 创建 GitHub OAuth 应用。将回调 URL 设置为 your-domain.com/api/v1/auth/github/callback。"
     },
     "billing": {
       "title": "计费配置",
@@ -1246,6 +1256,30 @@
       "down": "宕机",
       "database": "数据库",
       "cache": "缓存"
+    },
+    "sharedDomains": {
+      "title": "共享域名",
+      "add": "添加域名",
+      "edit": "编辑域名",
+      "domain": "域名",
+      "pricing": "定价",
+      "pricingType": "定价类型",
+      "priceLabel": "价格（分）",
+      "priceHint": "以最小货币单位表示的价格（例如分）",
+      "currency": "货币",
+      "limit": "限制",
+      "claims": "认领",
+      "enabled": "已启用",
+      "maxPerAccount": "每账户最大数量",
+      "maxHint": "0 = 无限制",
+      "free": "免费",
+      "oneTime": "一次性",
+      "monthly": "每月",
+      "month": "月",
+      "unlimited": "无限制",
+      "empty": "未配置共享域名。添加域名以允许用户认领子域名。",
+      "confirmDelete": "删除此共享域名？所有子域名认领将被移除。",
+      "dnsHint": "为每个共享域名配置通配符DNS记录（*.example.com）指向您的平台IP。Traefik将自动为每个认领的子域名处理SSL证书。"
     }
   },
   "setup": {

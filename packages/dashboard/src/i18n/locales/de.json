@@ -171,7 +171,8 @@
     "updates": "Updates",
     "emailTemplates": "E-Mail-Vorlagen",
     "stacks": "Stacks",
-    "activity": "Aktivit\u00e4tsprotokoll"
+    "activity": "Aktivit\u00e4tsprotokoll",
+    "sharedDomains": "Geteilte Domains"
   },
   "stacks": {
     "title": "Stacks",
@@ -1040,6 +1041,9 @@
       "title": "Plattformeinstellungen",
       "platformName": "Plattformname",
       "platformDomain": "Plattform-Domain",
+      "rootDomain": "Stamm-Domain",
+      "rootDomainDesc": "Die Basis-Domain Ihrer Plattform (z.B. fleet.example.com). Wird für SFTP, Datenbankverbindungen, Webhooks und DNS verwendet.",
+      "platformUrl": "Plattform-URL",
       "registrationEnabled": "Registrierung aktiviert",
       "emailVerificationRequired": "E-Mail-Bestätigung erforderlich",
       "maintenanceMode": "Wartungsmodus",
@@ -1067,7 +1071,13 @@
       "tld": "TLD",
       "registerPrice": "Registrierungspreis",
       "renewPrice": "Verlängerungspreis",
-      "transferPrice": "Transferpreis"
+      "transferPrice": "Transferpreis",
+      "githubConfig": "GitHub",
+      "githubConfigDesc": "GitHub OAuth fur Auto-Deploy aus Repositories konfigurieren.",
+      "githubClientId": "Client-ID",
+      "githubClientSecret": "Client-Geheimnis",
+      "githubWebhookSecret": "Webhook-Geheimnis",
+      "githubOAuthHint": "Erstellen Sie eine GitHub OAuth-App unter github.com/settings/developers. Setzen Sie die Callback-URL auf ihre-domain.com/api/v1/auth/github/callback."
     },
     "billing": {
       "title": "Abrechnungskonfiguration",
@@ -1246,6 +1256,30 @@
       "down": "Ausgefallen",
       "database": "Datenbank",
       "cache": "Cache"
+    },
+    "sharedDomains": {
+      "title": "Geteilte Domains",
+      "add": "Domain hinzufügen",
+      "edit": "Domain bearbeiten",
+      "domain": "Domain",
+      "pricing": "Preisgestaltung",
+      "pricingType": "Preistyp",
+      "priceLabel": "Preis (Cent)",
+      "priceHint": "Preis in kleinster Währungseinheit (z.B. Cent)",
+      "currency": "Währung",
+      "limit": "Limit",
+      "claims": "Ansprüche",
+      "enabled": "Aktiviert",
+      "maxPerAccount": "Max pro Konto",
+      "maxHint": "0 = unbegrenzt",
+      "free": "Kostenlos",
+      "oneTime": "Einmalig",
+      "monthly": "Monatlich",
+      "month": "Mo",
+      "unlimited": "Unbegrenzt",
+      "empty": "Keine geteilten Domains konfiguriert. Fügen Sie eine Domain hinzu, damit Benutzer Subdomains beanspruchen können.",
+      "confirmDelete": "Diese geteilte Domain löschen? Alle Subdomain-Ansprüche werden entfernt.",
+      "dnsHint": "Konfigurieren Sie für jede geteilte Domain einen Wildcard-DNS-Eintrag (*.example.com), der auf Ihre Plattform-IP zeigt. Traefik übernimmt automatisch die SSL-Zertifikate für jede beanspruchte Subdomain."
     }
   },
   "setup": {

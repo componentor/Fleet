@@ -1,5 +1,6 @@
 {
   "nav": {
+    "home": "Hjem",
     "features": "Funksjoner",
     "pricing": "Priser",
     "github": "GitHub",
@@ -110,8 +111,104 @@
     "builtWith": "Bygget med Vue, Hono, Docker Swarm",
     "github": "GitHub",
     "docs": "Dokumentasjon",
+    "privacy": "Personvern",
+    "terms": "Vilkår",
     "discord": "Discord",
     "rights": "Fleet. Alle rettigheter reservert."
+  },
+  "privacy": {
+    "title": "Personvernerklæring",
+    "lastUpdated": "Sist oppdatert: 20. februar 2026",
+    "intro": "Denne personvernerklæringen forklarer hvordan {platformName} (\"vi\", \"oss\" eller \"vår\") samler inn, bruker og beskytter informasjonen din når du bruker plattformen vår. Vi er forpliktet til å beskytte personvernet ditt og håndtere dataene dine på en transparent måte.",
+    "infoCollect": {
+      "title": "1. Informasjon vi samler inn",
+      "body": "Kontoinformasjon: Når du oppretter en konto, samler vi inn navn, e-postadresse og passord (lagret som en Argon2-hash — vi lagrer aldri passord i klartekst).\n\nBruksdata: Vi samler inn informasjon om hvordan du bruker plattformen, inkludert tjenester som er distribuert, ressursbruk (CPU, minne, lagring), distribusjonslogger og API-tilgangsmønstre.\n\nBetalingsinformasjon: Hvis du abonnerer på en betalt plan, behandles og lagres betalingsdetaljer av Stripe. Vi lagrer ikke hele kredittkortnummeret ditt på våre servere.\n\nTekniske data: Vi samler automatisk inn IP-adresser, nettlesertype og enhetsinformasjon når du bruker dashbordet. Disse dataene brukes til sikkerhetsovervåking og hastighetsbegrensning.\n\nTjenestedata: Alle data du lagrer i dine distribuerte containere, volumer og sikkerhetskopier er dine data. Vi har kun tilgang til dem for å levere tjenesten (f.eks. kjøre sikkerhetskopier, gjenopprette tjenester) og aldri for andre formål."
+    },
+    "howWeUse": {
+      "title": "2. Hvordan vi bruker informasjonen din",
+      "body": "Vi bruker informasjonen vi samler inn til å:\n\n- Levere, vedlikeholde og forbedre {platformName}-plattformen\n- Behandle transaksjoner og sende faktureringsrelaterte meldinger\n- Overvåke plattformsikkerhet, oppdage misbruk og håndheve hastighetsbegrensninger\n- Sende tjenestemeldinger (distribusjonsstatus, helseadvarsler, fullførte sikkerhetskopier)\n- Svare på støtteforespørsler og kommunisere om kontoen din\n- Generere anonymisert, aggregert analyse for å forbedre tjenesten vår\n\nVi selger ikke din personlige informasjon til tredjeparter. Vi bruker ikke dataene dine til reklameformål."
+    },
+    "dataStorage": {
+      "title": "3. Datalagring og sikkerhet",
+      "body": "Alle sensitive data er kryptert i hvile med AES-256-GCM-kryptering. Sikkerhetskopier krypteres før lagring. Databaselegitimasjon og API-nøkler som er lagret i plattformen, krypteres med en separat krypteringsnøkkel.\n\nDine distribuerte tjenester kjører i isolerte Docker-containere med droppede kapabiliteter (CAP_DROP ALL), skrivebeskyttede filsystemer der det er aktuelt, og nettverksisolasjon via Docker Swarm overlay-nettverk.\n\nVi bruker JWT-token med HS256-algoritmefesting for autentisering, med kortvarige tilgangstokener (15 minutter) og sikre httpOnly-informasjonskapsler for oppdateringstokener.\n\nAll API-kommunikasjon er kryptert under overføring via TLS. Intern node-til-node-kommunikasjon i Swarm-klyngen bruker krypterte overlay-nettverk."
+    },
+    "thirdParty": {
+      "title": "4. Tredjepartstjenester",
+      "body": "Vi bruker følgende tredjepartstjenester som kan behandle dataene dine:\n\n- Stripe: Betalingsbehandling. Underlagt Stripes personvernerklæring.\n- E-postleverandør (SMTP/Resend): Transaksjonelle e-poster (verifisering, tilbakestilling av passord, distribusjonsvarsler). Kun e-postadressen din og meldingsinnholdet deles.\n- Docker Hub / Container-registre: Ved distribusjon fra offentlige bilder. Kun bildereferansen sendes.\n\nVi deler ikke dine personlige data med andre tredjeparter med mindre det kreves av loven."
+    },
+    "dataRetention": {
+      "title": "5. Dataoppbevaring og sletting",
+      "body": "Aktive kontoer: Dataene dine oppbevares så lenge kontoen din er aktiv.\n\nSlettede kontoer: Når du sletter kontoen din, planlegger vi sletting av alle tilknyttede data, inkludert tjenester, volumer, sikkerhetskopier og personlig informasjon. Mykt slettede poster fjernes permanent etter 30 dager.\n\nSikkerhetskopier: Sikkerhetskopier oppbevares i henhold til din konfigurerte oppbevaringspolicy (standard: 30 dager, maks 10 sikkerhetskopier per tidsplan).\n\nRevisjonslogger: Sikkerhetsrevisjonslogger oppbevares i 90 dager for sikkerhetsovervåkingsformål.\n\nDu kan be om umiddelbar sletting av alle dine data ved å kontakte oss."
+    },
+    "yourRights": {
+      "title": "6. Dine rettigheter",
+      "body": "Du har rett til å:\n\n- Tilgang: Be om en kopi av alle personlige data vi har om deg.\n- Retting: Oppdatere eller korrigere din personlige informasjon via dashbordet.\n- Sletting: Slette kontoen din og alle tilknyttede data.\n- Eksport: Eksportere dine tjenestekonfigurasjoner og data.\n- Begrensning: Be om at vi begrenser behandlingen av dine data.\n- Dataportabilitet: Motta dine data i et strukturert, maskinlesbart format.\n\nFor å utøve noen av disse rettighetene, kontakt oss på adressen nedenfor eller bruk kontoinnstillingene i dashbordet."
+    },
+    "cookies": {
+      "title": "7. Informasjonskapsler",
+      "body": "Vi bruker følgende informasjonskapsler:\n\n- fleet_refresh: En httpOnly sikker informasjonskapsel som inneholder oppdateringstokenet ditt. Nødvendig for autentisering.\n- fleet_locale: Lagrer ditt foretrukne språk. Sendes ikke til våre servere.\n- fleet_landing_theme: Lagrer ditt foretrukne tema (lys/mørk/system). Sendes ikke til våre servere.\n\nVi bruker ikke sporings-, analyse- eller reklameinformasjonskapsler."
+    },
+    "changes": {
+      "title": "8. Endringer i denne erklæringen",
+      "body": "Vi kan oppdatere denne personvernerklæringen fra tid til annen. Når vi gjør vesentlige endringer, vil vi varsle deg via e-post eller et tydelig varsel på plattformen. Din fortsatte bruk av {platformName} etter at endringer er publisert, utgjør din aksept av den oppdaterte erklæringen."
+    },
+    "contact": {
+      "title": "9. Kontakt oss",
+      "body": "Hvis du har spørsmål om denne personvernerklæringen eller ønsker å utøve dine datarettigheter, vennligst kontakt oss på:\n\nE-post: {contactEmail}"
+    }
+  },
+  "terms": {
+    "title": "Tjenestevilkår",
+    "lastUpdated": "Sist oppdatert: 20. februar 2026",
+    "intro": "Ved å bruke {platformName} (\"Tjenesten\") godtar du å være bundet av disse tjenestevilkårene (\"Vilkårene\"). Hvis du ikke godtar disse vilkårene, skal du ikke bruke Tjenesten.",
+    "description": {
+      "title": "1. Beskrivelse av tjenesten",
+      "body": "{platformName} er en åpen kildekode, multi-tenant Platform-as-a-Service (PaaS) bygget på Docker Swarm. Tjenesten tilbyr containerorkestrering, automatiserte distribusjoner, domeneadministrasjon, sikkerhetskopiadministrasjon, faktureringsintegrasjon og relaterte infrastrukturstyringsverktøy.\n\n{platformName} kan selvhostes på din egen infrastruktur eller nås gjennom en administrert instans. Disse vilkårene gjelder for din bruk av Tjenesten uavhengig av hvordan den er distribuert."
+    },
+    "account": {
+      "title": "2. Kontoregistrering og sikkerhet",
+      "body": "Du må oppgi nøyaktig og fullstendig informasjon når du oppretter en konto. Du er ansvarlig for å opprettholde konfidensialiteten til kontoinformasjonen din, inkludert passord og API-nøkler.\n\nDu må bruke et sterkt passord med minst 8 tegn med store og små bokstaver og tall. Vi anbefaler sterkt å aktivere tofaktorautentisering (2FA).\n\nDu er ansvarlig for all aktivitet som skjer under kontoen din. Varsle oss umiddelbart hvis du mistenker uautorisert tilgang til kontoen din.\n\nVi forbeholder oss retten til å suspendere eller avslutte kontoer som bryter disse vilkårene eller som vi med rimelighet anser for å brukes til ondsinnede formål."
+    },
+    "acceptableUse": {
+      "title": "3. Retningslinjer for akseptabel bruk",
+      "body": "Du samtykker i å ikke bruke Tjenesten til å:\n\n- Distribuere eller hoste innhold som er ulovlig, skadelig, truende, krenkende, trakasserende, ærekrenkende eller på annen måte støtende\n- Kjøre kryptovalutautvinning, proof-of-work-beregning eller lignende ressurskrevende operasjoner som ikke er legitime applikasjonsarbeidsmengder\n- Sende spam, masseuønskede meldinger eller drive med phishing\n- Distribuere skadelig programvare, virus eller annen skadelig programvare\n- Forsøke å få uautorisert tilgang til andre kontoer, tjenester eller systemer\n- Forstyrre eller avbryte Tjenesten eller servere/nettverk tilkoblet Tjenesten\n- Overskride rimelig ressursbruk på en måte som forringer tjenesten for andre brukere\n- Bryte gjeldende lover eller forskrifter\n\nVi forbeholder oss retten til å suspendere eller avslutte tjenester som bryter denne policyen uten forvarsel."
+    },
+    "availability": {
+      "title": "4. Tjenestetilgjengelighet",
+      "body": "Vi streber etter å opprettholde høy tilgjengelighet av Tjenesten, men garanterer ikke uavbrutt tilgang. Tjenesten kan være midlertidig utilgjengelig på grunn av:\n\n- Planlagt vedlikehold (vi vil gi forhåndsvarsel når det er mulig)\n- Infrastrukturfeil eller nettverksproblemer\n- Sikkerhetshendelser som krever umiddelbar respons\n- Force majeure-hendelser utenfor vår rimelige kontroll\n\nFor selvhostede distribusjoner er tilgjengeligheten avhengig av din infrastruktur og er ditt ansvar."
+    },
+    "billing": {
+      "title": "5. Fakturering og betalinger",
+      "body": "Gratisnivå: {platformName} tilbyr et gratisnivå med begrensede ressurser. Ingen betalingsinformasjon kreves for gratisnivået.\n\nBetalte planer: Betalte abonnementer faktureres månedlig gjennom Stripe. Ved å abonnere på en betalt plan autoriserer du oss til å belaste betalingsmetoden din på gjentakende basis.\n\nOppgraderinger og nedgraderinger: Planendringer trer i kraft ved starten av neste faktureringssyklus.\n\nMislykkede betalinger: Hvis en betaling mislykkes, vil vi forsøke å prøve på nytt. Etter fortsatt betalingssvikt kan kontoen din bli nedgradert til gratisnivået.\n\nRefusjoner: Vi tilbyr ikke refusjoner for delvise måneder av tjenesten. Hvis du kansellerer, beholder du tilgang til betalte funksjoner til slutten av din nåværende faktureringsperiode."
+    },
+    "ip": {
+      "title": "6. Immaterielle rettigheter",
+      "body": "{platformName} er åpen kildekode-programvare lisensiert under sin respektive lisens. Din bruk av {platformName}-plattformen gir deg ingen eierrettigheter til plattformens immaterielle eiendom.\n\nDu beholder fullt eierskap til all kode, data og innhold du distribuerer på Tjenesten. Vi krever ingen immaterielle rettigheter over ditt innhold."
+    },
+    "dataPrivacy": {
+      "title": "7. Data og personvern",
+      "body": "Din bruk av Tjenesten er også regulert av vår personvernerklæring, som beskriver hvordan vi samler inn, bruker og beskytter dataene dine. Ved å bruke Tjenesten samtykker du til datapraksisen beskrevet i vår personvernerklæring.\n\nDu er ansvarlig for dataene du lagrer på Tjenesten og for å sikre at de er i samsvar med gjeldende personvernlover."
+    },
+    "termination": {
+      "title": "8. Oppsigelse",
+      "body": "Du kan si opp kontoen din når som helst gjennom dashbordinnstillingene.\n\nVi kan si opp eller suspendere kontoen din hvis:\n\n- Du bryter disse vilkårene eller retningslinjene for akseptabel bruk\n- Kontoen din brukes til ulovlige eller misbrukende formål\n- Du unnlater å betale for et betalt abonnement etter gjentatte forsøk\n- Vi er pålagt å gjøre det ved lov\n\nVed oppsigelse vil dataene dine bli planlagt for sletting i henhold til vår policy for dataoppbevaring. Du kan be om dataeksport før oppsigelse."
+    },
+    "liability": {
+      "title": "9. Ansvarsbegrensning",
+      "body": "I DEN GRAD DET ER TILLATT VED LOV, SKAL {platformNameUpper} OG DETS OPERATØRER IKKE VÆRE ANSVARLIGE FOR NOEN INDIREKTE, TILFELDIGE, SPESIELLE, FØLGESKADER ELLER STRAFFEERSTATNINGER, INKLUDERT MEN IKKE BEGRENSET TIL TAP AV FORTJENESTE, DATA ELLER FORRETNINGSMULIGHETER.\n\nVÅRT TOTALE ANSVAR FOR EVENTUELLE KRAV SOM OPPSTÅR FRA ELLER I FORBINDELSE MED TJENESTEN SKAL IKKE OVERSTIGE BELØPET DU HAR BETALT OSS I DE 12 MÅNEDENE FØR KRAVET.\n\nTJENESTEN LEVERES \"SOM DEN ER\" OG \"SOM TILGJENGELIG\" UTEN GARANTIER AV NOE SLAG, VERKEN UTTRYKKELIGE ELLER UNDERFORSTÅTTE."
+    },
+    "governingLaw": {
+      "title": "10. Gjeldende lovgivning",
+      "body": "Disse vilkårene skal reguleres av og tolkes i samsvar med gjeldende lover. Eventuelle tvister som oppstår fra disse vilkårene eller din bruk av Tjenesten skal løses gjennom forhandlinger i god tro først, og om nødvendig gjennom bindende voldgift eller i domstolene med riktig jurisdiksjon."
+    },
+    "changes": {
+      "title": "11. Endringer i disse vilkårene",
+      "body": "Vi kan oppdatere disse vilkårene fra tid til annen. Når vi gjør vesentlige endringer, vil vi varsle deg via e-post eller et tydelig varsel på plattformen minst 30 dager før endringene trer i kraft.\n\nDin fortsatte bruk av Tjenesten etter at de oppdaterte vilkårene trer i kraft, utgjør din aksept av endringene. Hvis du ikke godtar de oppdaterte vilkårene, må du slutte å bruke Tjenesten."
+    },
+    "contact": {
+      "title": "12. Kontakt oss",
+      "body": "Hvis du har spørsmål om disse tjenestevilkårene, vennligst kontakt oss på:\n\nE-post: {contactEmail}"
+    }
   },
   "docs": {
     "title": "Dokumentasjon",

@@ -14,6 +14,16 @@ const router = createRouter({
       name: 'docs',
       component: () => import('@/views/DocsView.vue'),
     },
+    {
+      path: '/privacy',
+      name: 'privacy',
+      component: () => import('@/views/PrivacyView.vue'),
+    },
+    {
+      path: '/terms',
+      name: 'terms',
+      component: () => import('@/views/TermsView.vue'),
+    },
   ],
   scrollBehavior(to) {
     if (to.hash) {

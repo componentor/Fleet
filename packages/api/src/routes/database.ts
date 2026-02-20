@@ -10,6 +10,7 @@ import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
+import { getPlatformDomain } from './settings.js';
 
 // Download tokens backed by Valkey (with in-memory fallback for single-instance dev)
 const DOWNLOAD_TOKEN_TTL = 60_000; // 60 seconds
@@ -1018,9 +1019,10 @@ databaseRoutes.get('/:serviceId/credentials', requireMember, requireScope('write
   const defaultPort = engine === 'postgres' ? 5432 : engine === 'mongo' ? 27017 : 3306;
   const publishedPort = ports.find(p => p.target === defaultPort)?.published ?? defaultPort;
 
+  const platformDomain = await getPlatformDomain();
   return c.json({
     engine,
-    host: svc.name,
+    host: platformDomain,
     port: publishedPort,
     user: info.user,
     password: info.password,

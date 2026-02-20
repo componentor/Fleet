@@ -172,6 +172,32 @@ const DEFAULT_TEMPLATES: Record<
 <p><a href="{{renewUrl}}">Renew Now</a></p>`,
     variables: ['domain', 'expiryDate', 'renewUrl'],
   },
+  'domain-renewal-upcoming': {
+    subject: 'Upcoming auto-renewal: {{domain}}',
+    bodyHtml: `<h1>Domain Auto-Renewal Notice</h1>
+<p>Your domain <strong>{{domain}}</strong> will auto-renew on <strong>{{chargeDate}}</strong>.</p>
+<p>You will be charged <strong>{{amount}}</strong> for a 1-year renewal.</p>
+<p>If you do not wish to renew, disable auto-renewal before the charge date.</p>
+<p><a href="{{manageUrl}}">Manage Domain</a></p>`,
+    variables: ['domain', 'chargeDate', 'amount', 'manageUrl'],
+  },
+  'domain-renewal-charged': {
+    subject: 'Domain renewal payment received: {{domain}}',
+    bodyHtml: `<h1>Domain Renewal Confirmed</h1>
+<p>Your domain <strong>{{domain}}</strong> has been renewed successfully.</p>
+<p>Amount charged: <strong>{{amount}}</strong></p>
+<p>New expiry date: <strong>{{newExpiryDate}}</strong></p>
+<p><a href="{{manageUrl}}">View Domain</a></p>`,
+    variables: ['domain', 'amount', 'newExpiryDate', 'manageUrl'],
+  },
+  'domain-renewal-failed': {
+    subject: 'Domain renewal payment failed: {{domain}}',
+    bodyHtml: `<h1>Domain Renewal Payment Failed</h1>
+<p>We were unable to charge your payment method for the renewal of <strong>{{domain}}</strong>.</p>
+<p>Your domain expires on <strong>{{expiryDate}}</strong>. Please update your payment method to avoid losing it.</p>
+<p><a href="{{billingUrl}}">Update Payment Method</a></p>`,
+    variables: ['domain', 'expiryDate', 'billingUrl'],
+  },
   'payment-failed': {
     subject: 'Payment failed for your subscription',
     bodyHtml: `<h1>Payment Failed</h1>

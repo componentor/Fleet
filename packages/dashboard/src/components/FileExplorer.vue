@@ -24,6 +24,7 @@ import {
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
+import { usePlatformDomain } from '@/composables/usePlatformDomain'
 import { useI18n } from 'vue-i18n'
 
 interface FileEntry {
@@ -70,7 +71,7 @@ const accountStore = useAccountStore()
 const showSftpInfo = ref(false)
 const sftpCopied = ref('')
 
-const sftpHost = computed(() => window.location.hostname)
+const { domain: sftpHost, fetchDomain: fetchPlatformDomain } = usePlatformDomain()
 const sftpPort = '2222'
 const sftpUsername = computed(() => {
   const accountId = accountStore.currentAccount?.id
@@ -384,7 +385,10 @@ function getFileIcon(name: string) {
 
 watch(currentPath, () => fetchEntries())
 
-onMounted(() => fetchEntries())
+onMounted(() => {
+  fetchEntries()
+  fetchPlatformDomain()
+})
 </script>
 
 <template>

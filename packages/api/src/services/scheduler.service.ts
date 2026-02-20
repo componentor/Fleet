@@ -113,6 +113,28 @@ class SchedulerService {
       },
     );
 
+    // Domain expiry check — daily at 6 AM UTC
+    // Sends expiry warnings, triggers auto-renewal, marks expired domains
+    await getMaintenanceQueue().add(
+      'domain-expiry-check',
+      { type: 'domain-expiry-check' },
+      {
+        repeat: { pattern: '0 6 * * *' },
+        jobId: 'system:domain-expiry-check',
+      },
+    );
+
+    // Domain price sync — weekly on Mondays at 3:30 AM UTC
+    // Fetches current registrar prices and updates TLD pricing table
+    await getMaintenanceQueue().add(
+      'domain-price-sync',
+      { type: 'domain-price-sync' },
+      {
+        repeat: { pattern: '30 3 * * 1' },
+        jobId: 'system:domain-price-sync',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -123,7 +145,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 10 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 12 system jobs (BullMQ)`,
     );
   }
 

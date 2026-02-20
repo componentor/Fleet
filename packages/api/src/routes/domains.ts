@@ -8,6 +8,7 @@ import { dnsManager } from '../services/dns-provider-manager.js';
 import { requireMember } from '../middleware/rbac.js';
 import { randomUUID } from 'crypto';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { getPlatformDomain } from './settings.js';
 
 const dnsRoutes = new Hono<{
   Variables: {
@@ -83,7 +84,7 @@ dnsRoutes.post('/zones', requireMember, async (c) => {
 
   // Build the CNAME target for BYOD domains
   const account = c.get('account');
-  const platformDomain = process.env['PLATFORM_DOMAIN'] ?? 'fleet.local';
+  const platformDomain = await getPlatformDomain();
   const cnameTarget = `${account?.slug ?? accountId}.${platformDomain}`;
 
   // Sync to DNS providers (best-effort)

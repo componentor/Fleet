@@ -40,6 +40,7 @@ import uploadRoutes from './routes/upload.js';
 import fileRoutes from './routes/files.js';
 import databaseRoutes, { databaseDownloadRoutes } from './routes/database.js';
 import storageAdminRoutes from './routes/storage-admin.js';
+import sharedDomainRoutes from './routes/shared-domains.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -207,6 +208,7 @@ api.route('/files', fileRoutes);
 api.route('/database', databaseRoutes);
 api.route('/dl/database', databaseDownloadRoutes); // public token-gated download (no auth middleware)
 api.route('/admin/storage', storageAdminRoutes);
+api.route('/shared-domains', sharedDomainRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(

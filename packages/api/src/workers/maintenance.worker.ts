@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, subscriptions, eq, and, lt, like, isNull, isNotNull, inArray, safeTransaction } from '@fleet/db';
+import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, eq, and, lt, like, isNull, isNotNull, inArray, safeTransaction, updateReturning } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -56,6 +56,14 @@ interface StorageMigrationData {
   migrationId: string;
 }
 
+interface DomainExpiryCheckData {
+  type: 'domain-expiry-check';
+}
+
+interface DomainPriceSyncData {
+  type: 'domain-price-sync';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -68,7 +76,9 @@ type MaintenanceJobData =
   | ServiceStatusSyncData
   | ContainerPruneData
   | StorageHealthCheckData
-  | StorageMigrationData;
+  | StorageMigrationData
+  | DomainExpiryCheckData
+  | DomainPriceSyncData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -207,6 +217,21 @@ async function cleanupStaleDeployments(): Promise<void> {
   await db.delete(deployments).where(
     and(eq(deployments.status, 'failed'), lt(deployments.createdAt, thirtyDaysAgo)),
   );
+
+  // Clean up abandoned subdomain checkout sessions (pending_payment > 1 hour)
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const staleClaims = await db.query.subdomainClaims.findMany({
+    where: and(
+      eq(subdomainClaims.status, 'pending_payment'),
+      lt(subdomainClaims.createdAt, oneHourAgo),
+    ),
+    columns: { id: true },
+  });
+  if (staleClaims.length > 0) {
+    await db.delete(subdomainClaims)
+      .where(inArray(subdomainClaims.id, staleClaims.map((c) => c.id)));
+    logger.info({ count: staleClaims.length }, 'Cleaned up stale pending subdomain claims');
+  }
 
   logger.info('Stale deployment cleanup complete');
 }
@@ -599,6 +624,312 @@ async function executeStorageMigration(migrationId: string): Promise<void> {
   }
 }
 
+/**
+ * Domain renewal billing timeline (runs daily at 6 AM UTC):
+ *
+ *  45 days before expiry — Notification: "Your domain will auto-renew. You'll be charged $X."
+ *  30 days before expiry — Create Stripe invoice (charges customer's card).
+ *                          This gives 30 days buffer before we need to pay the registrar.
+ *  After invoice paid    — Renew with registrar immediately (via invoice.paid webhook).
+ *  14 days before expiry — Reminder if invoice still unpaid.
+ *   7 days before expiry — Final warning if unpaid; disable auto-renewal.
+ *   3 days before expiry — Mark domain as expired (safety buffer so registrar doesn't
+ *                          auto-charge us for a renewal we haven't been paid for).
+ *
+ * For domains with autoRenew=false: only send expiry warnings at 30/14/7/3/1 days.
+ */
+async function checkDomainExpiry(): Promise<void> {
+  try {
+    const { emailService } = await import('../services/email.service.js');
+    const { getEmailQueue, isQueueAvailable } = await import('../services/queue.service.js');
+    const { stripeService } = await import('../services/stripe.service.js');
+
+    const now = new Date();
+    const fortyFiveDaysFromNow = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+
+    // Find all active domains expiring within 45 days
+    const expiring = await db.query.domainRegistrations.findMany({
+      where: and(
+        eq(domainRegistrations.status, 'active'),
+        isNotNull(domainRegistrations.expiresAt),
+        lt(domainRegistrations.expiresAt, fortyFiveDaysFromNow),
+      ),
+    });
+
+    if (expiring.length === 0) return;
+
+    const appUrl = process.env['APP_URL'] ?? '';
+
+    // Helper to send email (via queue or direct)
+    async function sendEmail(templateSlug: string, to: string, variables: Record<string, string>, accountId: string) {
+      const data = { templateSlug, to, variables, accountId };
+      if (isQueueAvailable()) {
+        await getEmailQueue().add('send-email', data);
+      } else {
+        emailService.sendTemplateEmail(templateSlug, to, variables, accountId)
+          .catch((err: unknown) => logger.error({ err }, `Failed to send ${templateSlug} email`));
+      }
+    }
+
+    // Helper to get account owners
+    async function getOwnerEmails(accountId: string): Promise<{ email: string }[]> {
+      const members = await db.query.userAccounts.findMany({
+        where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+        with: { user: true },
+      });
+      return members.filter((m) => m.user?.email).map((m) => ({ email: m.user!.email! }));
+    }
+
+    // Get renewal pricing for a domain's TLD
+    async function getRenewalPrice(domain: string): Promise<{ amountCents: number; currency: string; displayPrice: string } | null> {
+      const tld = domain.split('.').slice(1).join('.');
+      const pricing = await db.query.domainTldPricing.findFirst({
+        where: eq(domainTldPricing.tld, tld),
+      });
+      if (!pricing) return null;
+      const currency = pricing.currency || 'USD';
+      return {
+        amountCents: pricing.sellRenewalPrice,
+        currency,
+        displayPrice: `${(pricing.sellRenewalPrice / 100).toFixed(2)} ${currency}`,
+      };
+    }
+
+    for (const reg of expiring) {
+      if (!reg.expiresAt) continue;
+      const daysUntilExpiry = Math.ceil((reg.expiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+      const expiryDateStr = reg.expiresAt.toISOString().split('T')[0]!;
+
+      // ── Auto-renew flow (autoRenew=true) ──
+      if (reg.autoRenew) {
+        const price = await getRenewalPrice(reg.domain);
+
+        // 45 days: Send advance notification about upcoming charge
+        if (daysUntilExpiry === 45 && price) {
+          const chargeDate = new Date(reg.expiresAt.getTime() - 30 * 24 * 60 * 60 * 1000);
+          const owners = await getOwnerEmails(reg.accountId);
+          for (const owner of owners) {
+            await sendEmail('domain-renewal-upcoming', owner.email, {
+              domain: reg.domain,
+              chargeDate: chargeDate.toISOString().split('T')[0]!,
+              amount: price.displayPrice,
+              manageUrl: `${appUrl}/panel/domains`,
+            }, reg.accountId);
+          }
+          logger.info({ domain: reg.domain, daysUntilExpiry }, 'Sent domain renewal advance notice');
+        }
+
+        // 30 days: Create Stripe invoice to charge customer
+        if (daysUntilExpiry <= 30 && daysUntilExpiry > 7 && price) {
+          // Look up the account's Stripe customer
+          const account = await db.query.accounts.findFirst({
+            where: and(eq(accounts.id, reg.accountId), isNull(accounts.deletedAt)),
+          });
+
+          if (account?.stripeCustomerId) {
+            // Check if we already created an invoice for this renewal
+            const existingInvoice = await stripeService.findDomainRenewalInvoice(
+              account.stripeCustomerId,
+              reg.id,
+            );
+
+            if (!existingInvoice) {
+              // Create the invoice — Stripe charges the customer's default payment method
+              try {
+                const invoice = await stripeService.createDomainRenewalInvoice(
+                  account.stripeCustomerId,
+                  reg.domain,
+                  price.amountCents,
+                  price.currency,
+                  1, // 1 year renewal
+                  reg.accountId,
+                  reg.id,
+                );
+                logger.info({ domain: reg.domain, invoiceId: invoice.id, amount: price.amountCents, registrationId: reg.id },
+                  'Created Stripe invoice for domain auto-renewal');
+
+                // If invoice was paid immediately, the webhook will handle renewal.
+                // If not, Stripe will retry per dunning settings.
+              } catch (err) {
+                logger.error({ err, domain: reg.domain, registrationId: reg.id }, 'Failed to create Stripe invoice for domain renewal');
+
+                // Notify owners about the failure
+                const owners = await getOwnerEmails(reg.accountId);
+                for (const owner of owners) {
+                  await sendEmail('domain-renewal-failed', owner.email, {
+                    domain: reg.domain,
+                    expiryDate: expiryDateStr,
+                    billingUrl: `${appUrl}/panel/billing`,
+                  }, reg.accountId);
+                }
+              }
+            } else if (existingInvoice.status === 'open') {
+              // Invoice exists but not paid yet — send reminder at 14 days
+              if (daysUntilExpiry === 14) {
+                const owners = await getOwnerEmails(reg.accountId);
+                for (const owner of owners) {
+                  await sendEmail('domain-renewal-failed', owner.email, {
+                    domain: reg.domain,
+                    expiryDate: expiryDateStr,
+                    billingUrl: `${appUrl}/panel/billing`,
+                  }, reg.accountId);
+                }
+                logger.info({ domain: reg.domain, invoiceId: existingInvoice.id }, 'Sent domain renewal payment reminder');
+              }
+            }
+            // If invoice is 'paid', the webhook already handled the registrar renewal
+          } else {
+            // No Stripe customer — send manual renewal notice
+            if (daysUntilExpiry === 30 || daysUntilExpiry === 14) {
+              const owners = await getOwnerEmails(reg.accountId);
+              for (const owner of owners) {
+                await sendEmail('domain-expiry', owner.email, {
+                  domain: reg.domain,
+                  expiryDate: expiryDateStr,
+                  renewUrl: `${appUrl}/panel/domains`,
+                }, reg.accountId);
+              }
+            }
+          }
+        }
+
+        // 7 days: Final warning — if invoice still unpaid, disable auto-renewal
+        if (daysUntilExpiry === 7) {
+          const account = await db.query.accounts.findFirst({
+            where: and(eq(accounts.id, reg.accountId), isNull(accounts.deletedAt)),
+          });
+
+          let invoicePaid = false;
+          if (account?.stripeCustomerId) {
+            const invoice = await stripeService.findDomainRenewalInvoice(account.stripeCustomerId, reg.id);
+            invoicePaid = invoice?.status === 'paid';
+          }
+
+          if (!invoicePaid) {
+            // Disable auto-renewal — we won't renew without payment
+            await db.update(domainRegistrations)
+              .set({ autoRenew: false })
+              .where(eq(domainRegistrations.id, reg.id));
+
+            const owners = await getOwnerEmails(reg.accountId);
+            for (const owner of owners) {
+              await sendEmail('domain-expiry', owner.email, {
+                domain: reg.domain,
+                expiryDate: expiryDateStr,
+                renewUrl: `${appUrl}/panel/domains`,
+              }, reg.accountId);
+            }
+            logger.warn({ domain: reg.domain, registrationId: reg.id },
+              'Disabled auto-renewal — payment not received 7 days before expiry');
+          }
+        }
+
+        continue;
+      }
+
+      // ── Manual renewal flow (autoRenew=false) ──
+      // Send expiry warnings at specific intervals
+      const notifyDays = [30, 14, 7, 3, 1];
+      if (!notifyDays.includes(daysUntilExpiry)) continue;
+
+      const owners = await getOwnerEmails(reg.accountId);
+      for (const owner of owners) {
+        await sendEmail('domain-expiry', owner.email, {
+          domain: reg.domain,
+          expiryDate: expiryDateStr,
+          renewUrl: `${appUrl}/panel/domains`,
+        }, reg.accountId);
+      }
+    }
+
+    // Mark domains as expired 3 days before actual expiry — safety buffer so the
+    // registrar doesn't auto-charge us for a renewal we haven't been paid for.
+    const SAFETY_BUFFER_MS = 3 * 24 * 60 * 60 * 1000;
+    const safetyDate = new Date(now.getTime() + SAFETY_BUFFER_MS);
+    const expired = expiring.filter((r) => r.expiresAt && r.expiresAt < safetyDate);
+    if (expired.length > 0) {
+      await db.update(domainRegistrations)
+        .set({ status: 'expired' })
+        .where(inArray(domainRegistrations.id, expired.map((r) => r.id)));
+      logger.info({ count: expired.length }, 'Marked expired domain registrations (3-day safety buffer)');
+    }
+
+    logger.info({ total: expiring.length, expired: expired.length }, 'Domain expiry check complete');
+  } catch (err) {
+    logger.error({ err }, 'Domain expiry check failed');
+  }
+}
+
+function computeSellPrice(providerPrice: number, markupType: string, markupValue: number): number {
+  switch (markupType) {
+    case 'percentage':
+      return Math.ceil(providerPrice * (1 + markupValue / 100));
+    case 'fixed_amount':
+      return providerPrice + markupValue;
+    case 'fixed_price':
+      return markupValue;
+    default:
+      return providerPrice;
+  }
+}
+
+async function syncDomainPrices(): Promise<void> {
+  try {
+    const { registrarService } = await import('../services/registrar.service.js');
+
+    const provider = await registrarService.getProvider();
+    if (provider.name === 'simulated') {
+      // Don't sync prices from the simulated provider — it has hardcoded values
+      return;
+    }
+
+    const commonTlds = ['com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai', 'no', 'se', 'dk', 'fi'];
+    const results = await provider.searchDomains('test', commonTlds);
+    let synced = 0;
+
+    for (const result of results) {
+      if (!result.price) continue;
+      const tld = result.domain.split('.').slice(1).join('.');
+
+      const existing = await db.query.domainTldPricing.findFirst({
+        where: eq(domainTldPricing.tld, tld),
+      });
+
+      const regPriceCents = Math.round(result.price.registration * 100);
+      const renPriceCents = Math.round(result.price.renewal * 100);
+
+      if (existing) {
+        // Only update if prices actually changed
+        if (existing.providerRegistrationPrice === regPriceCents && existing.providerRenewalPrice === renPriceCents) {
+          continue;
+        }
+
+        const sellReg = computeSellPrice(regPriceCents, existing.markupType, existing.markupValue);
+        const sellRen = computeSellPrice(renPriceCents, existing.markupType, existing.markupValue);
+
+        await updateReturning(domainTldPricing, {
+          providerRegistrationPrice: regPriceCents,
+          providerRenewalPrice: renPriceCents,
+          sellRegistrationPrice: sellReg,
+          sellRenewalPrice: sellRen,
+          updatedAt: new Date(),
+        }, eq(domainTldPricing.id, existing.id));
+
+        logger.info({ tld, oldReg: existing.providerRegistrationPrice, newReg: regPriceCents, oldRen: existing.providerRenewalPrice, newRen: renPriceCents },
+          `Domain price updated for .${tld}`);
+      }
+      // Don't auto-create new TLD pricing entries — that's an admin decision
+      synced++;
+    }
+
+    if (synced > 0) {
+      logger.info({ synced }, 'Domain price sync complete');
+    }
+  } catch (err) {
+    logger.error({ err }, 'Domain price sync failed');
+  }
+}
+
 async function pruneDeadContainers(): Promise<void> {
   try {
     const removed = await dockerService.pruneDeadContainers();
@@ -647,6 +978,12 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'storage-migration':
       await executeStorageMigration((job.data as StorageMigrationData).migrationId);
+      break;
+    case 'domain-expiry-check':
+      await checkDomainExpiry();
+      break;
+    case 'domain-price-sync':
+      await syncDomainPrices();
       break;
   }
 }

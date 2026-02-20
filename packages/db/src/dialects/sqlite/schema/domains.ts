@@ -8,6 +8,7 @@ import {
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { users } from './users';
+import { services } from './services';
 
 export const dnsZones = sqliteTable('dns_zones', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -86,6 +87,41 @@ export const domainTldPricing = sqliteTable('domain_tld_pricing', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+export const sharedDomains = sqliteTable('shared_domains', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  domain: text('domain').notNull().unique(),
+  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  pricingType: text('pricing_type').notNull().default('free'),
+  price: integer('price').notNull().default(0),
+  currency: text('currency').notNull().default('USD'),
+  maxPerAccount: integer('max_per_account').notNull().default(0),
+  createdBy: text('created_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+export const subdomainClaims = sqliteTable('subdomain_claims', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sharedDomainId: text('shared_domain_id')
+    .references(() => sharedDomains.id, { onDelete: 'cascade' })
+    .notNull(),
+  accountId: text('account_id')
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  subdomain: text('subdomain').notNull(),
+  serviceId: text('service_id')
+    .references(() => services.id, { onDelete: 'set null' }),
+  status: text('status').notNull().default('active'),
+  stripePaymentId: text('stripe_payment_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+}, (table) => [
+  index('idx_subdomain_claims_shared_domain_id').on(table.sharedDomainId),
+  index('idx_subdomain_claims_account_id').on(table.accountId),
+]);
+
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({
   account: one(accounts, {
     fields: [dnsZones.accountId],
@@ -122,6 +158,35 @@ export const domainRegistrationsRelations = relations(
     registrar: one(domainRegistrars, {
       fields: [domainRegistrations.registrarId],
       references: [domainRegistrars.id],
+    }),
+  }),
+);
+
+export const sharedDomainsRelations = relations(
+  sharedDomains,
+  ({ one, many }) => ({
+    createdByUser: one(users, {
+      fields: [sharedDomains.createdBy],
+      references: [users.id],
+    }),
+    claims: many(subdomainClaims),
+  }),
+);
+
+export const subdomainClaimsRelations = relations(
+  subdomainClaims,
+  ({ one }) => ({
+    sharedDomain: one(sharedDomains, {
+      fields: [subdomainClaims.sharedDomainId],
+      references: [sharedDomains.id],
+    }),
+    account: one(accounts, {
+      fields: [subdomainClaims.accountId],
+      references: [accounts.id],
+    }),
+    service: one(services, {
+      fields: [subdomainClaims.serviceId],
+      references: [services.id],
     }),
   }),
 );

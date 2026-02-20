@@ -16,6 +16,7 @@ const success = ref('')
 
 const sections = [
   { id: 'general', label: () => t('settings.general') },
+  { id: 'github', label: () => t('super.settings.githubConfig') },
   { id: 'stripe', label: () => t('super.settings.stripeConfig') },
   { id: 'email', label: () => t('super.settings.emailConfig') },
   { id: 'registrar', label: () => t('super.settings.domainRegistrar') },
@@ -24,6 +25,7 @@ const sections = [
 
 // General settings
 const platformName = ref('')
+const platformDomain = ref('')
 const platformUrl = ref('')
 const supportEmail = ref('')
 
@@ -41,6 +43,12 @@ const smtpPass = ref('')
 const smtpFrom = ref('')
 const resendApiKey = ref('')
 const resendFrom = ref('')
+
+// GitHub settings
+const githubClientId = ref('')
+const githubClientSecret = ref('')
+const githubWebhookSecret = ref('')
+const githubConfigured = ref(false)
 
 // Registrar settings
 const registrarProvider = ref('resellerclub')
@@ -63,6 +71,11 @@ async function fetchSettings() {
   try {
     const data = await api.get<Record<string, any>>('/settings')
     platformName.value = data['platform:name'] as string ?? ''
+    // platform:domain may be stored JSON-stringified by setup wizard
+    const rawDomain = data['platform:domain']
+    platformDomain.value = typeof rawDomain === 'string'
+      ? (rawDomain.startsWith('"') ? JSON.parse(rawDomain) : rawDomain)
+      : ''
     platformUrl.value = data['platform:url'] as string ?? ''
     supportEmail.value = data['platform:supportEmail'] as string ?? ''
     emailProvider.value = (data['email:provider'] as string ?? 'smtp') as 'smtp' | 'resend'
@@ -75,6 +88,16 @@ async function fetchSettings() {
     // Settings may not exist yet
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchGitHub() {
+  try {
+    const data = await api.get<any>('/settings/github')
+    githubConfigured.value = data.configured ?? false
+    githubClientId.value = data.clientId ?? ''
+  } catch {
+    // Not configured
   }
 }
 
@@ -112,6 +135,7 @@ async function saveGeneral() {
   try {
     await api.patch('/settings', {
       'platform:name': platformName.value,
+      'platform:domain': platformDomain.value,
       'platform:url': platformUrl.value,
       'platform:supportEmail': supportEmail.value,
     })
@@ -119,6 +143,32 @@ async function saveGeneral() {
     setTimeout(() => { success.value = '' }, 3000)
   } catch (err: any) {
     error.value = err?.body?.error || 'Failed to save settings'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveGitHub() {
+  if (!githubClientId.value || !githubClientSecret.value) {
+    error.value = 'Client ID and Client Secret are required'
+    return
+  }
+  saving.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings/github', {
+      clientId: githubClientId.value,
+      clientSecret: githubClientSecret.value,
+      webhookSecret: githubWebhookSecret.value || undefined,
+    })
+    success.value = 'GitHub configuration saved'
+    githubClientSecret.value = ''
+    githubWebhookSecret.value = ''
+    await fetchGitHub()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save GitHub configuration'
   } finally {
     saving.value = false
   }
@@ -252,6 +302,7 @@ function formatCents(cents: number): string {
 
 onMounted(() => {
   fetchSettings()
+  fetchGitHub()
   fetchRegistrar()
   fetchPricing()
 })
@@ -309,13 +360,52 @@ onMounted(() => {
               <input v-model="platformName" type="text" placeholder="Fleet" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformDomain') }}</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.rootDomain') }}</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ $t('super.settings.rootDomainDesc') }}</p>
+              <input v-model="platformDomain" type="text" placeholder="fleet.example.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformUrl') }}</label>
               <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.email') }}</label>
               <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
+            <div class="pt-2 flex justify-end">
+              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ saving ? $t('common.saving') : $t('common.save') }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- GitHub Configuration -->
+        <div v-if="activeSection === 'github'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.githubConfig') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.githubConfigDesc') }}</p>
+          </div>
+          <form @submit.prevent="saveGitHub" class="p-6 space-y-5">
+            <div v-if="githubConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p class="text-sm text-green-700 dark:text-green-300">GitHub configured (Client ID: <strong class="font-mono">{{ githubClientId }}</strong>)</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientId') }}</label>
+              <input v-model="githubClientId" type="text" placeholder="Ov23li..." required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientSecret') }}</label>
+              <input v-model="githubClientSecret" type="password" placeholder="Enter client secret" required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubWebhookSecret') }} ({{ $t('common.optional') }})</label>
+              <input v-model="githubWebhookSecret" type="password" placeholder="Enter webhook secret" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.githubOAuthHint') }}</p>
             <div class="pt-2 flex justify-end">
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />

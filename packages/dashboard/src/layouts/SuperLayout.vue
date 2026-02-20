@@ -27,6 +27,7 @@ import {
   Mail,
   Layers,
   HardDrive,
+  Globe,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -59,6 +60,7 @@ const navItems = [
   { nameKey: 'nav.storage', path: '/admin/storage', icon: HardDrive },
   { nameKey: 'nav.updates', path: '/admin/updates', icon: Download },
   { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail },
+  { nameKey: 'nav.sharedDomains', path: '/admin/shared-domains', icon: Globe },
 ]
 
 function isActive(path: string) {

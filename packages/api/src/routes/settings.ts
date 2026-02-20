@@ -50,6 +50,36 @@ async function upsertSetting(key: string, value: unknown): Promise<void> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Shared helper: resolve the platform root domain (DB → env → fallback)
+// ────────────────────────────────────────────────────────────────────────────
+export async function getPlatformDomain(): Promise<string> {
+  // Env var takes priority (set at deploy time, cannot be accidentally cleared via UI)
+  if (process.env['PLATFORM_DOMAIN']) return process.env['PLATFORM_DOMAIN'];
+
+  try {
+    const dbVal = await getSetting('platform:domain');
+    if (dbVal != null) {
+      // setup.ts stores it JSON-stringified; handle both formats
+      const parsed = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal;
+      if (typeof parsed === 'string' && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // DB may not be available
+  }
+
+  return 'fleet.local';
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// GET /platform-domain — lightweight endpoint for any authenticated user.
+// Returns the bare root domain for connection guides, SFTP, webhooks, etc.
+// ────────────────────────────────────────────────────────────────────────────
+settings.get('/platform-domain', cache(600), async (c) => {
+  const domain = await getPlatformDomain();
+  return c.json({ domain: domain === 'fleet.local' ? null : domain });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // GET / — get settings
 // Super user with no account context: returns platform-wide settings.
 // Account context: returns account-scoped settings.
@@ -376,6 +406,65 @@ settings.post('/registrar/test', requireAdmin, async (c) => {
   } catch (err) {
     return c.json({ success: false, error: 'Registrar connection test failed' }, 500);
   }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// GET /github — get configured GitHub OAuth credentials
+// ────────────────────────────────────────────────────────────────────────────
+settings.get('/github', requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can view GitHub config' }, 403);
+  }
+
+  const clientId = await getSetting('github:clientId');
+  const clientSecret = await getSetting('github:clientSecret');
+  const webhookSecret = await getSetting('github:webhookSecret');
+
+  return c.json({
+    configured: !!(clientId || process.env['GITHUB_CLIENT_ID']),
+    clientId: (clientId as string) || process.env['GITHUB_CLIENT_ID'] || '',
+    clientSecretSet: !!(clientSecret || process.env['GITHUB_CLIENT_SECRET']),
+    webhookSecretSet: !!(webhookSecret || process.env['GITHUB_WEBHOOK_SECRET']),
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// PATCH /github — configure GitHub OAuth credentials
+// ────────────────────────────────────────────────────────────────────────────
+const githubSettingsSchema = z.object({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  webhookSecret: z.string().min(1).optional(),
+});
+
+settings.patch('/github', settingsRateLimit, requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can configure GitHub' }, 403);
+  }
+
+  const body = await c.req.json();
+  const parsed = githubSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed' }, 400);
+  }
+
+  const data = parsed.data;
+
+  await upsertSetting('github:clientId', data.clientId);
+  await upsertSetting('github:clientSecret', encrypt(data.clientSecret));
+
+  if (data.webhookSecret) {
+    await upsertSetting('github:webhookSecret', encrypt(data.webhookSecret));
+  }
+
+  // Invalidate cached config so the new values take effect immediately
+  const { invalidateGitHubConfigCache } = await import('../services/github.service.js');
+  invalidateGitHubConfigCache();
+
+  logger.info({ changedBy: user.userId }, 'GitHub configuration updated');
+  return c.json({ message: 'GitHub configuration updated' });
 });
 
 export default settings;

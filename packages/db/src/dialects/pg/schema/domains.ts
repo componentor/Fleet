@@ -11,6 +11,7 @@ import {
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { users } from './users';
+import { services } from './services';
 
 export const dnsZones = pgTable('dns_zones', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -89,6 +90,41 @@ export const domainTldPricing = pgTable('domain_tld_pricing', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const sharedDomains = pgTable('shared_domains', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  domain: varchar('domain', { length: 255 }).notNull().unique(),
+  enabled: boolean('enabled').default(true),
+  pricingType: varchar('pricing_type', { length: 20 }).notNull().default('free'),
+  price: integer('price').notNull().default(0),
+  currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+  maxPerAccount: integer('max_per_account').notNull().default(0),
+  createdBy: uuid('created_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const subdomainClaims = pgTable('subdomain_claims', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  sharedDomainId: uuid('shared_domain_id')
+    .references(() => sharedDomains.id, { onDelete: 'cascade' })
+    .notNull(),
+  accountId: uuid('account_id')
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  subdomain: varchar('subdomain', { length: 63 }).notNull(),
+  serviceId: uuid('service_id')
+    .references(() => services.id, { onDelete: 'set null' }),
+  status: varchar('status', { length: 20 }).notNull().default('active'),
+  stripePaymentId: varchar('stripe_payment_id', { length: 255 }),
+  stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_subdomain_claims_shared_domain_id').on(table.sharedDomainId),
+  index('idx_subdomain_claims_account_id').on(table.accountId),
+]);
+
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({
   account: one(accounts, {
     fields: [dnsZones.accountId],
@@ -125,6 +161,35 @@ export const domainRegistrationsRelations = relations(
     registrar: one(domainRegistrars, {
       fields: [domainRegistrations.registrarId],
       references: [domainRegistrars.id],
+    }),
+  }),
+);
+
+export const sharedDomainsRelations = relations(
+  sharedDomains,
+  ({ one, many }) => ({
+    createdByUser: one(users, {
+      fields: [sharedDomains.createdBy],
+      references: [users.id],
+    }),
+    claims: many(subdomainClaims),
+  }),
+);
+
+export const subdomainClaimsRelations = relations(
+  subdomainClaims,
+  ({ one }) => ({
+    sharedDomain: one(sharedDomains, {
+      fields: [subdomainClaims.sharedDomainId],
+      references: [sharedDomains.id],
+    }),
+    account: one(accounts, {
+      fields: [subdomainClaims.accountId],
+      references: [accounts.id],
+    }),
+    service: one(services, {
+      fields: [subdomainClaims.serviceId],
+      references: [services.id],
     }),
   }),
 );

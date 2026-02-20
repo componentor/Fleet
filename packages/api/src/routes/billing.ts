@@ -980,6 +980,56 @@ billing.post('/webhook', async (c) => {
             } catch { /* best-effort */ }
           }
         }
+      } else if (
+        session.metadata?.type === 'subdomain_claim_monthly' ||
+        session.metadata?.type === 'subdomain_claim_onetime'
+      ) {
+        const claimId = session.metadata.claimId;
+        if (claimId) {
+          try {
+            const { subdomainClaims: claimsTable } = await import('@fleet/db');
+            const claim = await db.query.subdomainClaims.findFirst({
+              where: eq(claimsTable.id, claimId),
+              with: { sharedDomain: { columns: { domain: true } } },
+            });
+
+            if (claim && claim.status === 'pending_payment') {
+              const updateData: Record<string, any> = {
+                status: 'active',
+                updatedAt: new Date(),
+              };
+              if (session.metadata.type === 'subdomain_claim_monthly' && session.subscription) {
+                updateData.stripeSubscriptionId = session.subscription;
+              }
+              if (session.payment_intent) {
+                updateData.stripePaymentId = session.payment_intent as string;
+              }
+
+              await db.update(claimsTable)
+                .set(updateData)
+                .where(eq(claimsTable.id, claimId));
+
+              // Assign domain to service if specified
+              const serviceId = session.metadata.serviceId;
+              if (serviceId && claim.sharedDomain) {
+                const fullDomain = `${claim.subdomain}.${claim.sharedDomain.domain}`;
+                try {
+                  await db.update(services)
+                    .set({ domain: fullDomain, sslEnabled: true, updatedAt: new Date() })
+                    .where(eq(services.id, serviceId));
+                } catch (svcErr) {
+                  logger.error({ err: svcErr, serviceId, domain: fullDomain },
+                    'Failed to assign domain to service after subdomain payment');
+                }
+              }
+
+              logger.info({ claimId, type: session.metadata.type },
+                'Subdomain claim activated after payment');
+            }
+          } catch (err) {
+            logger.error({ err, claimId }, 'Failed to activate subdomain claim after payment');
+          }
+        }
       } else if (session.customer && session.subscription) {
         const account = await db.query.accounts.findFirst({
           where: and(eq(accounts.stripeCustomerId, session.customer), isNull(accounts.deletedAt)),
@@ -1028,8 +1078,80 @@ billing.post('/webhook', async (c) => {
         subscription?: string;
         period_start?: number;
         period_end?: number;
+        metadata?: Record<string, string>;
       };
-      if (invoice.subscription) {
+
+      // Handle domain renewal invoice payment
+      if (invoice.metadata?.type === 'domain_renewal' && invoice.metadata.registrationId) {
+        const registrationId = invoice.metadata.registrationId;
+        const domain = invoice.metadata.domain ?? '';
+        const accountId = invoice.metadata.accountId;
+
+        try {
+          const { registrarService } = await import('../services/registrar.service.js');
+          const { domainRegistrations: domRegTable } = await import('@fleet/db');
+
+          const registration = await db.query.domainRegistrations.findFirst({
+            where: eq(domRegTable.id, registrationId),
+          });
+
+          if (!registration || registration.status !== 'active') {
+            logger.warn({ registrationId, domain }, 'Domain renewal invoice paid but registration not found or not active');
+            break;
+          }
+
+          // Renew with the registrar (this is where the registrar charges us)
+          const updated = await registrarService.renewDomain(registrationId, Number(invoice.metadata.years) || 1);
+          logger.info({ domain, registrationId, newExpiresAt: updated.expiresAt }, 'Domain renewed after Stripe payment');
+
+          // Send confirmation email to account owners
+          if (accountId) {
+            const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+            const price = invoice.metadata.years
+              ? `${domain} (${invoice.metadata.years} year${Number(invoice.metadata.years) > 1 ? 's' : ''})`
+              : domain;
+            try {
+              const ownerMemberships = await db.query.userAccounts.findMany({
+                where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+                with: { user: true },
+              });
+              for (const m of ownerMemberships) {
+                if (m.user?.email) {
+                  queueEmail({
+                    templateSlug: 'domain-renewal-charged',
+                    to: m.user.email,
+                    variables: {
+                      domain,
+                      amount: price,
+                      newExpiryDate: updated.expiresAt ? updated.expiresAt.toISOString().split('T')[0]! : 'see account',
+                      manageUrl: `${appUrl}/panel/domains`,
+                    },
+                    accountId,
+                  }).catch(() => {});
+                }
+              }
+            } catch { /* email is best-effort */ }
+          }
+        } catch (err) {
+          logger.error({ err, registrationId, domain }, 'Domain renewal failed after Stripe payment — manual intervention required');
+
+          // Notify account about the failure
+          if (accountId) {
+            try {
+              const { notifications } = await import('@fleet/db');
+              await db.insert(notifications).values({
+                id: crypto.randomUUID(),
+                accountId,
+                type: 'billing',
+                title: 'Domain Renewal Failed',
+                message: `Payment for ${domain} was received, but the renewal with the registrar failed. Our team has been notified and will resolve this manually.`,
+                read: false,
+              });
+            } catch { /* best-effort */ }
+          }
+        }
+      } else if (invoice.subscription) {
+        // Handle subscription invoice payment
         await db
           .update(subscriptions)
           .set({
@@ -1045,6 +1167,54 @@ billing.post('/webhook', async (c) => {
 
     case 'invoice.payment_failed': {
       const invoice = event.data.object as any;
+
+      // Handle domain renewal invoice payment failure
+      if (invoice.metadata?.type === 'domain_renewal' && invoice.metadata?.registrationId) {
+        const domain = invoice.metadata.domain ?? '';
+        const accountId = invoice.metadata.accountId;
+        const registrationId = invoice.metadata.registrationId;
+
+        logger.warn({ domain, registrationId, attempt: invoice.attempt_count },
+          'Domain renewal payment failed');
+
+        if (accountId) {
+          const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+          try {
+            const ownerMemberships = await db.query.userAccounts.findMany({
+              where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+              with: { user: true },
+            });
+            for (const m of ownerMemberships) {
+              if (m.user?.email) {
+                queueEmail({
+                  templateSlug: 'domain-renewal-failed',
+                  to: m.user.email,
+                  variables: {
+                    domain,
+                    expiryDate: invoice.metadata.expiryDate ?? 'soon',
+                    billingUrl: `${appUrl}/panel/billing`,
+                  },
+                  accountId,
+                }).catch(() => {});
+              }
+            }
+          } catch { /* email is best-effort */ }
+
+          try {
+            const { notifications } = await import('@fleet/db');
+            await db.insert(notifications).values({
+              id: crypto.randomUUID(),
+              accountId,
+              type: 'billing',
+              title: 'Domain Renewal Payment Failed',
+              message: `Payment for domain renewal of ${domain} failed. Please update your payment method to avoid losing the domain.`,
+              read: false,
+            });
+          } catch { /* best-effort */ }
+        }
+        break;
+      }
+
       const subId = invoice.subscription as string;
       if (!subId) break;
 
@@ -1154,6 +1324,35 @@ billing.post('/webhook', async (c) => {
         await suspendAccountServices(dbSub.accountId);
         logger.info({ accountId: dbSub.accountId }, 'Subscription cancelled — services suspended');
       }
+
+      // Also check for subdomain claim subscriptions
+      try {
+        const { subdomainClaims: claimsTable } = await import('@fleet/db');
+        const claimWithSub = await db.query.subdomainClaims.findFirst({
+          where: eq(claimsTable.stripeSubscriptionId, sub.id),
+        });
+
+        if (claimWithSub) {
+          // Clear service domain if assigned
+          if (claimWithSub.serviceId) {
+            try {
+              await db.update(services)
+                .set({ domain: null, updatedAt: new Date() })
+                .where(eq(services.id, claimWithSub.serviceId));
+            } catch { /* best-effort */ }
+          }
+
+          await db.update(claimsTable)
+            .set({ status: 'expired', updatedAt: new Date() })
+            .where(eq(claimsTable.id, claimWithSub.id));
+
+          logger.info({ claimId: claimWithSub.id, subdomain: claimWithSub.subdomain },
+            'Subdomain claim expired — subscription cancelled');
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to check subdomain claim subscription cancellation');
+      }
+
       break;
     }
 
@@ -1186,6 +1385,24 @@ billing.post('/webhook', async (c) => {
           read: false,
         });
       } catch { /* best-effort */ }
+      break;
+    }
+
+    case 'checkout.session.expired': {
+      const expiredSession = event.data.object as { metadata?: Record<string, string> };
+      // Clean up pending subdomain claims when checkout expires
+      if (expiredSession.metadata?.type?.startsWith('subdomain_claim_') && expiredSession.metadata.claimId) {
+        try {
+          const { subdomainClaims: claimsTable } = await import('@fleet/db');
+          await db.delete(claimsTable)
+            .where(and(
+              eq(claimsTable.id, expiredSession.metadata.claimId),
+              eq(claimsTable.status, 'pending_payment'),
+            ));
+          logger.info({ claimId: expiredSession.metadata.claimId },
+            'Cleaned up pending subdomain claim after checkout expiry');
+        } catch { /* best-effort cleanup */ }
+      }
       break;
     }
 

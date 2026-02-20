@@ -31,6 +31,18 @@
           >
             {{ $t('footer.docs') }}
           </router-link>
+          <router-link
+            to="/privacy"
+            class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
+          >
+            {{ $t('footer.privacy') }}
+          </router-link>
+          <router-link
+            to="/terms"
+            class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
+          >
+            {{ $t('footer.terms') }}
+          </router-link>
           <a
             href="#"
             class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
