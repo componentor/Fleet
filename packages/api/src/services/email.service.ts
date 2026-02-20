@@ -189,6 +189,26 @@ const DEFAULT_TEMPLATES: Record<
   },
 };
 
+// Per-recipient rate limiting: max emails per time window
+const EMAIL_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const EMAIL_RATE_LIMIT_MAX = 10; // max 10 emails per recipient per hour
+const emailRateMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkEmailRateLimit(to: string): boolean {
+  const now = Date.now();
+  const key = to.toLowerCase();
+  const entry = emailRateMap.get(key);
+  if (!entry || now >= entry.resetAt) {
+    emailRateMap.set(key, { count: 1, resetAt: now + EMAIL_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= EMAIL_RATE_LIMIT_MAX) {
+    return false;
+  }
+  entry.count++;
+  return true;
+}
+
 export class EmailService {
   private provider: EmailProvider | null = null;
 
@@ -283,6 +303,9 @@ export class EmailService {
     html: string,
     accountId?: string | null,
   ): Promise<{ messageId: string }> {
+    if (!checkEmailRateLimit(to)) {
+      throw new Error(`Email rate limit exceeded for recipient ${to}`);
+    }
     const provider = this.getProvider();
     const from =
       process.env['SMTP_FROM'] ??
@@ -335,6 +358,9 @@ export class EmailService {
     variables: Record<string, string>,
     accountId?: string | null,
   ): Promise<{ messageId: string }> {
+    if (!checkEmailRateLimit(to)) {
+      throw new Error(`Email rate limit exceeded for recipient ${to}`);
+    }
     const { subject, html } = await this.renderTemplate(
       slug,
       variables,

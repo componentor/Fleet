@@ -5,6 +5,7 @@ import {
   boolean,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -21,6 +22,8 @@ export const nodes = pgTable('nodes', {
   lastHeartbeat: timestamp('last_heartbeat'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => [
+  index('idx_nodes_last_heartbeat').on(table.lastHeartbeat),
+]);
 
 export const nodesRelations = relations(nodes, () => ({}));

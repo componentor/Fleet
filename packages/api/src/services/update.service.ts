@@ -3,11 +3,15 @@ import { EventEmitter } from 'node:events';
 import { dockerService } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
-import { db, platformSettings, eq } from '@fleet/db';
+import { db, platformSettings, eq, upsert } from '@fleet/db';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 const IMAGE_PREFIX = process.env['FLEET_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const LOCK_KEY = 'system:update_lock';
+const STATE_KEY = 'system:update_state';
+const LOCK_STALE_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_PERSISTED_LOG_LINES = 200;
 
 export type UpdateStatus = 'idle' | 'checking' | 'backing-up' | 'pulling' | 'verifying-images' | 'migrating' | 'updating' | 'seeding' | 'verifying' | 'completed' | 'failed' | 'rolling-back';
 
@@ -37,9 +41,32 @@ export interface UpdateState {
   finishedAt: Date | null;
   previousImageTags: Map<string, string>;
   preUpdateBackupId: string | null;
+  servicesUpdated: string[];
 }
 
-const FLEET_SERVICES = ['fleet_api', 'fleet_dashboard', 'fleet_ssh-gateway', 'fleet_agent'] as const;
+/** JSON-serializable shape stored in platformSettings under STATE_KEY */
+export interface PersistedUpdateState {
+  status: UpdateStatus;
+  currentVersion: string;
+  targetVersion: string | null;
+  log: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  previousImageTags: Record<string, string>;
+  preUpdateBackupId: string | null;
+  servicesUpdated: string[];
+  fencingToken: number;
+}
+
+/** JSON shape stored in platformSettings under LOCK_KEY */
+interface LockValue {
+  lockedAt: string;
+  lockedBy: string;
+  fencingToken: number;
+}
+
+// fleet_api is LAST so the orchestrating process survives to update all other services first
+const FLEET_SERVICES = ['fleet_dashboard', 'fleet_ssh-gateway', 'fleet_agent', 'fleet_api'] as const;
 
 export class UpdateService {
   private state: UpdateState = {
@@ -51,8 +78,10 @@ export class UpdateService {
     finishedAt: null,
     previousImageTags: new Map(),
     preUpdateBackupId: null,
+    servicesUpdated: [],
   };
 
+  private fencingToken = 0;
   private events = new EventEmitter();
   private checkTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -107,6 +136,87 @@ export class UpdateService {
       clearInterval(this.checkTimer);
       this.checkTimer = null;
     }
+  }
+
+  /**
+   * Called once on API startup (after DB is ready).
+   * Detects interrupted updates from a previous crash and attempts recovery.
+   */
+  async recoverFromInterruptedUpdate(): Promise<void> {
+    const persisted = await UpdateService.loadPersistedState();
+    if (!persisted) return;
+
+    const terminalStates: UpdateStatus[] = ['idle', 'completed', 'failed'];
+    if (terminalStates.includes(persisted.status)) {
+      // Previous update reached a terminal state — just clean up
+      await this.clearPersistedState();
+      return;
+    }
+
+    // Check if the lock is still actively held (another instance may be handling it)
+    try {
+      const lockRow = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, LOCK_KEY),
+      });
+      const lockData = lockRow?.value as LockValue | Record<string, never> | null;
+      const isLocked = lockData != null && 'lockedAt' in lockData && lockData.lockedAt != null;
+      const isStale = isLocked && (Date.now() - new Date((lockData as LockValue).lockedAt).getTime() > LOCK_STALE_MS);
+
+      if (isLocked && !isStale) {
+        logger.info('Found active update lock — another instance may be handling the update. Skipping recovery.');
+        return;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Could not check update lock during recovery — proceeding cautiously');
+    }
+
+    logger.warn(
+      { status: persisted.status, target: persisted.targetVersion, servicesUpdated: persisted.servicesUpdated },
+      'Detected interrupted update — starting recovery',
+    );
+
+    // Special case: interrupted during migration — cannot safely auto-recover
+    if (persisted.status === 'migrating') {
+      logger.error(
+        { backupId: persisted.preUpdateBackupId },
+        'CRITICAL: Update was interrupted during database migration. ' +
+        'Manual inspection required. If the database is corrupted, restore from backup: ' +
+        (persisted.preUpdateBackupId ?? 'no backup available'),
+      );
+      await this.clearPersistedState();
+      await this.releaseUpdateLock();
+      return;
+    }
+
+    // Restore in-memory state from persisted data so rollbackServices can work
+    this.state.previousImageTags = new Map(Object.entries(persisted.previousImageTags));
+    this.state.preUpdateBackupId = persisted.preUpdateBackupId;
+    this.state.targetVersion = persisted.targetVersion;
+    this.state.log = persisted.log;
+    this.fencingToken = persisted.fencingToken;
+
+    // Roll back any services that were updated before the crash
+    if (persisted.servicesUpdated.length > 0) {
+      this.state.status = 'rolling-back';
+      this.appendLog(`Recovery: rolling back ${persisted.servicesUpdated.length} service(s) updated before crash...`);
+      try {
+        await this.rollbackServices(persisted.servicesUpdated);
+        this.appendLog('Recovery rollback completed successfully.');
+      } catch (err) {
+        logger.error({ err }, 'Recovery rollback failed — manual intervention may be needed');
+        this.appendLog(`Recovery rollback FAILED: ${String(err)}`);
+      }
+    } else {
+      this.appendLog('Recovery: no services were updated before crash — no rollback needed.');
+    }
+
+    // Reset to idle
+    this.state.status = 'idle';
+    this.state.finishedAt = new Date();
+    this.state.servicesUpdated = [];
+    await this.clearPersistedState();
+    await this.releaseUpdateLock();
+    logger.info('Update recovery completed — system restored to idle state');
   }
 
   // ── Check for new releases ────────────────────────────────────
@@ -167,8 +277,8 @@ export class UpdateService {
     }
 
     // Distributed lock: prevent concurrent updates across API instances
-    const acquired = await this.acquireUpdateLock();
-    if (!acquired) {
+    const fencingToken = await this.acquireUpdateLock();
+    if (fencingToken === null) {
       throw new Error('Another update is already in progress (distributed lock held)');
     }
 
@@ -179,8 +289,10 @@ export class UpdateService {
     this.state.finishedAt = null;
     this.state.previousImageTags.clear();
     this.state.preUpdateBackupId = null;
+    this.state.servicesUpdated = [];
 
     const imageTag = targetVersion.startsWith('v') ? targetVersion.slice(1) : targetVersion;
+    await this.persistState();
 
     try {
       // 0. Pre-update backup (required in production)
@@ -207,6 +319,7 @@ export class UpdateService {
       this.state.status = 'pulling';
       this.appendLog('Snapshotting current service images for rollback...');
       await this.snapshotCurrentImages();
+      await this.persistState();
 
       // Verify all services were snapshotted
       if (this.state.previousImageTags.size < FLEET_SERVICES.length) {
@@ -224,6 +337,7 @@ export class UpdateService {
 
       // 3. Validate checksums are present (required for production)
       this.state.status = 'verifying-images';
+      await this.persistState();
       const hasChecksums = Object.keys(expectedChecksums).length > 0;
       if (!hasChecksums) {
         const skipVerify = process.env['SKIP_UPDATE_DIGEST_VERIFICATION'] === '1';
@@ -242,6 +356,7 @@ export class UpdateService {
 
       // 4. Run database migrations (transactional + advisory-locked)
       this.state.status = 'migrating';
+      await this.persistState();
       this.appendLog('Running database migrations (transactional)...');
       try {
         const result = await runMigrations();
@@ -263,17 +378,36 @@ export class UpdateService {
       // 6. Rolling update each service (one at a time, start-first)
       //    Digest verification happens AFTER each update, when Docker has the new image
       this.state.status = 'updating';
+      this.state.servicesUpdated = [];
+      await this.persistState();
       for (const serviceName of FLEET_SERVICES) {
-        await this.updateSwarmService(serviceName, imageTag);
+        try {
+          await this.updateSwarmService(serviceName, imageTag);
+          this.state.servicesUpdated.push(serviceName);
+          await this.persistState();
 
-        // Verify digest after Docker pulled and applied the new image
-        if (hasChecksums) {
-          await this.verifyServiceDigest(serviceName, imageTag, expectedChecksums);
+          // Verify digest after Docker pulled and applied the new image
+          if (hasChecksums) {
+            await this.verifyServiceDigest(serviceName, imageTag, expectedChecksums);
+          }
+        } catch (updateErr) {
+          // Partial failure — roll back already-updated services
+          this.appendLog(`Service ${serviceName} failed: ${String(updateErr)}`);
+          if (this.state.servicesUpdated.length > 0) {
+            this.appendLog(`Rolling back ${this.state.servicesUpdated.length} already-updated service(s)...`);
+            this.state.status = 'rolling-back';
+            await this.persistState();
+            await this.rollbackServices([...this.state.servicesUpdated]);
+          }
+          throw new Error(
+            `Update failed at ${serviceName} — rolled back ${this.state.servicesUpdated.length} service(s): ${String(updateErr)}`,
+          );
         }
       }
 
       // 7. Run seeders (idempotent, non-fatal)
       this.state.status = 'seeding';
+      await this.persistState();
       this.appendLog('Running seeders...');
       try {
         const result = await runSeeders();
@@ -284,6 +418,7 @@ export class UpdateService {
 
       // 8. Verify all services are healthy — auto-rollback on failure
       this.state.status = 'verifying';
+      await this.persistState();
       this.appendLog('Verifying service health post-update...');
       try {
         await this.verifyServiceHealth();
@@ -291,7 +426,7 @@ export class UpdateService {
         this.appendLog(`Health check FAILED: ${String(healthErr)}`);
         this.appendLog('Initiating automatic rollback due to health check failure...');
         try {
-          await this.rollback();
+          await this.rollback(true); // skipLock — we already hold it from performUpdate
           throw new Error(`Update rolled back automatically — health check failed: ${String(healthErr)}`);
         } catch (rollbackErr) {
           if (String(rollbackErr).includes('rolled back automatically')) {
@@ -312,6 +447,8 @@ export class UpdateService {
       this.state.status = 'completed';
       this.state.finishedAt = new Date();
       this.appendLog(`Update to ${targetVersion} completed successfully.`);
+      await this.persistState();
+      await this.clearPersistedState();
       this.events.emit('update', this.state);
 
       // Refresh the notification cache
@@ -325,6 +462,8 @@ export class UpdateService {
       this.appendLog(`Update failed: ${String(err)}`);
       this.state.status = 'failed';
       this.state.finishedAt = new Date();
+      await this.persistState();
+      await this.clearPersistedState();
       this.events.emit('update', this.state);
       throw err;
     } finally {
@@ -334,38 +473,27 @@ export class UpdateService {
 
   // ── Rollback to previous version ──────────────────────────────
 
-  async rollback(): Promise<void> {
+  /**
+   * @param skipLock — true when called from within performUpdate() where the lock is already held
+   */
+  async rollback(skipLock = false): Promise<void> {
     if (this.state.previousImageTags.size === 0) {
       throw new Error('No previous version to roll back to — no snapshot available');
+    }
+
+    // Acquire distributed lock if this is an external rollback call
+    if (!skipLock) {
+      const fencingToken = await this.acquireUpdateLock();
+      if (fencingToken === null) {
+        throw new Error('Cannot rollback — another update/rollback is in progress (distributed lock held)');
+      }
     }
 
     this.state.status = 'rolling-back';
     this.appendLog('Starting rollback to previous images...');
 
     try {
-      for (const [serviceName, previousImage] of this.state.previousImageTags) {
-        this.appendLog(`Rolling back ${serviceName} to ${previousImage}...`);
-        try {
-          const swarmServices = await dockerService.listServices({
-            name: [serviceName],
-          });
-
-          if (swarmServices.length === 0) {
-            this.appendLog(`  Service ${serviceName} not found, skipping.`);
-            continue;
-          }
-
-          const svc = swarmServices[0]!;
-          const dockerSvcId = svc.ID as string;
-          await dockerService.updateService(dockerSvcId, { image: previousImage });
-          this.appendLog(`  ${serviceName} rolled back successfully.`);
-
-          // Wait for convergence before moving to next service
-          await this.waitForServiceConvergence(dockerSvcId, serviceName);
-        } catch (err) {
-          this.appendLog(`  Failed to roll back ${serviceName}: ${String(err)}`);
-        }
-      }
+      await this.rollbackServices([...this.state.previousImageTags.keys()]);
 
       this.appendLog('Rollback completed. Verifying health...');
       await this.verifyServiceHealth();
@@ -386,62 +514,206 @@ export class UpdateService {
       this.appendLog(`Rollback failed: ${String(err)}`);
       this.events.emit('update', this.state);
       throw err;
+    } finally {
+      if (!skipLock) {
+        await this.releaseUpdateLock();
+      }
+    }
+  }
+
+  /**
+   * Roll back a specific list of services to their previous images.
+   * Used for partial rollback (on mid-loop failure) and startup recovery.
+   */
+  async rollbackServices(serviceNames: string[]): Promise<void> {
+    if (serviceNames.length === 0) return;
+
+    this.appendLog(`Rolling back ${serviceNames.length} service(s): ${serviceNames.join(', ')}...`);
+
+    for (const serviceName of serviceNames) {
+      const previousImage = this.state.previousImageTags.get(serviceName);
+      if (!previousImage) {
+        this.appendLog(`  ${serviceName}: no snapshot available, skipping.`);
+        continue;
+      }
+
+      try {
+        const swarmServices = await dockerService.listServices({
+          name: [serviceName],
+        });
+
+        if (swarmServices.length === 0) {
+          this.appendLog(`  ${serviceName}: not found in swarm, skipping.`);
+          continue;
+        }
+
+        const svc = swarmServices[0]!;
+        const dockerSvcId = svc.ID as string;
+        await dockerService.updateService(dockerSvcId, { image: previousImage });
+        this.appendLog(`  ${serviceName}: rollback initiated to ${previousImage}`);
+        await this.waitForServiceConvergence(dockerSvcId, serviceName);
+        this.appendLog(`  ${serviceName}: rolled back successfully.`);
+      } catch (err) {
+        this.appendLog(`  ${serviceName}: rollback FAILED: ${String(err)}`);
+      }
     }
   }
 
   // ── Private helpers ───────────────────────────────────────────
 
   /**
-   * Acquire a distributed update lock using the platformSettings table.
-   * This prevents multiple API instances from running updates concurrently.
+   * Acquire a distributed update lock using atomic INSERT ... ON CONFLICT.
+   * Returns a fencing token if acquired, or null if the lock is held by another instance.
    */
-  private async acquireUpdateLock(): Promise<boolean> {
-    const LOCK_KEY = 'system:update_lock';
+  private async acquireUpdateLock(): Promise<number | null> {
+    const now = new Date();
+    const hostname = process.env['HOSTNAME'] ?? 'unknown';
+
     try {
+      // Step 1: Read the current lock state
       const existing = await db.query.platformSettings.findFirst({
         where: eq(platformSettings.key, LOCK_KEY),
       });
 
-      if (existing) {
-        const lockData = existing.value as { lockedAt?: string; lockedBy?: string } | null;
-        if (lockData?.lockedAt) {
-          // Check if lock is stale (older than 30 minutes — update should never take that long)
-          const lockedAt = new Date(lockData.lockedAt).getTime();
-          const staleThreshold = 30 * 60 * 1000;
-          if (Date.now() - lockedAt < staleThreshold) {
-            return false; // Lock is still valid
-          }
-          this.appendLog('Found stale update lock — overriding.');
-        }
-        await db.update(platformSettings)
-          .set({ value: { lockedAt: new Date().toISOString(), lockedBy: process.env['HOSTNAME'] ?? 'unknown' }, updatedAt: new Date() })
-          .where(eq(platformSettings.id, existing.id));
-      } else {
-        await db.insert(platformSettings).values({
-          key: LOCK_KEY,
-          value: { lockedAt: new Date().toISOString(), lockedBy: process.env['HOSTNAME'] ?? 'unknown' },
-        });
+      const currentLock = existing?.value as LockValue | Record<string, never> | null;
+      const isLocked = currentLock != null && 'lockedAt' in currentLock && currentLock.lockedAt != null;
+      const isStale = isLocked && (now.getTime() - new Date(currentLock!.lockedAt).getTime() > LOCK_STALE_MS);
+
+      if (isLocked && !isStale) {
+        return null; // Lock is actively held
       }
-      return true;
+
+      if (isStale) {
+        this.appendLog(`Found stale update lock from ${(currentLock as LockValue).lockedBy} — overriding.`);
+      }
+
+      // Step 2: Compute next fencing token
+      const prevToken = isLocked ? (currentLock as LockValue).fencingToken ?? 0 : 0;
+      const nextToken = prevToken + 1;
+
+      const lockValue: LockValue = {
+        lockedAt: now.toISOString(),
+        lockedBy: hostname,
+        fencingToken: nextToken,
+      };
+
+      // Step 3: Atomic upsert — INSERT if no row, UPDATE on conflict.
+      // Serializes concurrent upserts on the unique `key` constraint.
+      await upsert(
+        platformSettings,
+        { key: LOCK_KEY, value: lockValue },
+        platformSettings.key,
+        { value: lockValue, updatedAt: now },
+      );
+
+      // Step 4: Read back to confirm our fencing token won the race
+      const verify = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, LOCK_KEY),
+      });
+      const verifyLock = verify?.value as LockValue | null;
+
+      if (verifyLock?.fencingToken === nextToken && verifyLock?.lockedBy === hostname) {
+        this.fencingToken = nextToken;
+        return nextToken;
+      }
+
+      // Another instance won the race
+      return null;
     } catch (err) {
       logger.error({ err }, 'Failed to acquire update lock');
-      return false;
+      return null;
     }
   }
 
   private async releaseUpdateLock(): Promise<void> {
-    const LOCK_KEY = 'system:update_lock';
     try {
+      // Only release if we still hold the lock (fencing token matches)
       const existing = await db.query.platformSettings.findFirst({
         where: eq(platformSettings.key, LOCK_KEY),
       });
-      if (existing) {
-        await db.update(platformSettings)
-          .set({ value: null, updatedAt: new Date() })
-          .where(eq(platformSettings.id, existing.id));
+      const lockData = existing?.value as LockValue | null;
+
+      if (lockData?.fencingToken && lockData.fencingToken !== this.fencingToken) {
+        logger.warn(
+          { expected: this.fencingToken, actual: lockData.fencingToken },
+          'Lock fencing token mismatch — another instance took over, skipping release',
+        );
+        return;
       }
+
+      // Use empty object instead of null to satisfy NOT NULL constraint
+      await upsert(
+        platformSettings,
+        { key: LOCK_KEY, value: {} },
+        platformSettings.key,
+        { value: {}, updatedAt: new Date() },
+      );
     } catch (err) {
       logger.error({ err }, 'Failed to release update lock');
+    }
+  }
+
+  /**
+   * Persist the current update state to platformSettings for crash recovery.
+   * Called after every phase transition. Truncates log to avoid unbounded growth.
+   */
+  private async persistState(): Promise<void> {
+    try {
+      const logLines = this.state.log.split('\n');
+      const truncatedLog = logLines.length > MAX_PERSISTED_LOG_LINES
+        ? logLines.slice(-MAX_PERSISTED_LOG_LINES).join('\n')
+        : this.state.log;
+
+      const persisted: PersistedUpdateState = {
+        status: this.state.status,
+        currentVersion: this.state.currentVersion,
+        targetVersion: this.state.targetVersion,
+        log: truncatedLog,
+        startedAt: this.state.startedAt?.toISOString() ?? null,
+        finishedAt: this.state.finishedAt?.toISOString() ?? null,
+        previousImageTags: Object.fromEntries(this.state.previousImageTags),
+        preUpdateBackupId: this.state.preUpdateBackupId,
+        servicesUpdated: this.state.servicesUpdated,
+        fencingToken: this.fencingToken,
+      };
+
+      await upsert(
+        platformSettings,
+        { key: STATE_KEY, value: persisted },
+        platformSettings.key,
+        { value: persisted, updatedAt: new Date() },
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to persist update state');
+    }
+  }
+
+  /** Clear persisted state after update completes or recovery finishes. */
+  private async clearPersistedState(): Promise<void> {
+    try {
+      await upsert(
+        platformSettings,
+        { key: STATE_KEY, value: {} },
+        platformSettings.key,
+        { value: {}, updatedAt: new Date() },
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to clear persisted update state');
+    }
+  }
+
+  /** Load persisted update state from DB (returns null if none/empty). */
+  static async loadPersistedState(): Promise<PersistedUpdateState | null> {
+    try {
+      const row = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, STATE_KEY),
+      });
+      if (!row?.value || typeof row.value !== 'object' || !('status' in (row.value as Record<string, unknown>))) {
+        return null;
+      }
+      return row.value as PersistedUpdateState;
+    } catch {
+      return null;
     }
   }
 
@@ -492,13 +764,13 @@ export class UpdateService {
   }
 
   private isNewerVersion(remoteTag: string, currentVersion: string): boolean {
-    // Normalize: strip leading 'v'
-    const remote = remoteTag.replace(/^v/, '');
-    const current = currentVersion.replace(/^v/, '');
+    // Normalize: strip leading 'v' and pre-release suffix (e.g. -rc.1, -beta.2)
+    const remote = remoteTag.replace(/^v/, '').replace(/-.*$/, '');
+    const current = currentVersion.replace(/^v/, '').replace(/-.*$/, '');
 
     if (remote === current) return false;
 
-    // Semantic version comparison
+    // Semantic version comparison (numeric parts only)
     const rParts = remote.split('.').map(Number);
     const cParts = current.split('.').map(Number);
 
@@ -520,6 +792,7 @@ export class UpdateService {
           Accept: 'application/vnd.github+json',
           'User-Agent': 'fleet-update-service',
         },
+        signal: AbortSignal.timeout(15_000),
       },
     );
 
@@ -549,6 +822,7 @@ export class UpdateService {
             Accept: 'application/vnd.github+json',
             'User-Agent': 'fleet-update-service',
           },
+          signal: AbortSignal.timeout(15_000),
         },
       );
       if (!res.ok) return null;

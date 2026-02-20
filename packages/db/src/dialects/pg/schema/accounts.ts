@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -26,7 +27,10 @@ export const accounts = pgTable('accounts', {
   updatedAt: timestamp('updated_at').defaultNow(),
   scheduledDeletionAt: timestamp('scheduled_deletion_at'),
   deletedAt: timestamp('deleted_at'),
-});
+}, (table) => [
+  index('idx_accounts_deleted_at').on(table.deletedAt),
+  index('idx_accounts_scheduled_deletion').on(table.scheduledDeletionAt),
+]);
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
   parent: one(accounts, {

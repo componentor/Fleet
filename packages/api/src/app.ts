@@ -153,7 +153,12 @@ async function verifyWsToken(token: string) {
   if (parts.length !== 3) throw new Error('Invalid token format');
 
   const secret = new TextEncoder().encode(jwtSecret);
-  const { payload } = await jwtVerify(token, secret);
+  const { payload, protectedHeader } = await jwtVerify(token, secret);
+
+  // Reject tokens signed with unexpected algorithms
+  if (protectedHeader.alg !== 'HS256') {
+    throw new Error('Invalid token algorithm');
+  }
 
   // Check token blocklist (revoked/logged-out tokens)
   const valkey = await getValkey();

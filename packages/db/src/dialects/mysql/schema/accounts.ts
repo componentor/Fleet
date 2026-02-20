@@ -7,6 +7,7 @@ import {
   int,
   json,
   timestamp,
+  index,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 
@@ -26,7 +27,10 @@ export const accounts = mysqlTable('accounts', {
   updatedAt: timestamp('updated_at').defaultNow(),
   scheduledDeletionAt: timestamp('scheduled_deletion_at'),
   deletedAt: timestamp('deleted_at'),
-});
+}, (table) => [
+  index('idx_accounts_deleted_at').on(table.deletedAt),
+  index('idx_accounts_scheduled_deletion').on(table.scheduledDeletionAt),
+]);
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
   parent: one(accounts, {

@@ -27,9 +27,11 @@ const JWT_SECRET_KEY = () => {
 
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
+const IMPERSONATION_REFRESH_EXPIRY = '1h'; // Shorter session for impersonation
 
 export async function generateTokens(payload: { userId: string; email: string; isSuper: boolean; impersonatingAccountId?: string }) {
   const secret = JWT_SECRET_KEY();
+  const isImpersonating = !!payload.impersonatingAccountId;
 
   const accessToken = await new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
@@ -45,7 +47,7 @@ export async function generateTokens(payload: { userId: string; email: string; i
   const refreshToken = await new SignJWT(refreshPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime(REFRESH_TOKEN_EXPIRY)
+    .setExpirationTime(isImpersonating ? IMPERSONATION_REFRESH_EXPIRY : REFRESH_TOKEN_EXPIRY)
     .sign(secret);
 
   return { accessToken, refreshToken };
@@ -124,7 +126,10 @@ function userResponse(user: any) {
 const registerSchema = z.object({
   name: z.string().min(1).max(255),
   email: z.string().email().max(255),
-  password: z.string().min(8).max(128),
+  password: z.string().min(8).max(128).refine(
+    (pw) => /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /\d/.test(pw),
+    'Password must contain at least one lowercase letter, one uppercase letter, and one digit',
+  ),
 });
 
 auth.post('/register', authRateLimit, async (c) => {
@@ -163,7 +168,7 @@ auth.post('/register', authRateLimit, async (c) => {
       isSuper: false,
       emailVerified: false,
       emailVerifyToken: verifyToken.hashed,
-      emailVerifyExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+      emailVerifyExpires: new Date(Date.now() + 4 * 60 * 60 * 1000), // 4h
     }).returning();
 
     if (!user) {
@@ -606,6 +611,9 @@ auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
 
   if (password.length < 8 || password.length > 128) {
     return c.json({ error: 'Password must be between 8 and 128 characters' }, 400);
+  }
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+    return c.json({ error: 'Password must contain at least one lowercase letter, one uppercase letter, and one digit' }, 400);
   }
 
   const hashed = hashToken(token);

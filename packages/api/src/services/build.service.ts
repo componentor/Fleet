@@ -132,8 +132,14 @@ export class BuildService {
       info.log += `\n[build] Building image ${imageTag} from ${dockerfile}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
+      const RESERVED_BUILD_ARGS = new Set([
+        'HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'NO_PROXY',
+        'http_proxy', 'https_proxy', 'ftp_proxy', 'no_proxy',
+        'PATH', 'HOME', 'USER', 'HOSTNAME',
+      ]);
       const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
       for (const [key, val] of Object.entries(buildArgs)) {
+        if (RESERVED_BUILD_ARGS.has(key)) continue;
         buildCmdArgs.push('--build-arg', `${key}=${val}`);
       }
       buildCmdArgs.push(workDir);
@@ -356,8 +362,14 @@ export class BuildService {
       info.log += `\n[build] Building image ${imageTag} from ${dockerfile}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
+      const RESERVED_BUILD_ARGS = new Set([
+        'HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'NO_PROXY',
+        'http_proxy', 'https_proxy', 'ftp_proxy', 'no_proxy',
+        'PATH', 'HOME', 'USER', 'HOSTNAME',
+      ]);
       const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
       for (const [key, val] of Object.entries(buildArgs)) {
+        if (RESERVED_BUILD_ARGS.has(key)) continue;
         buildCmdArgs.push('--build-arg', `${key}=${val}`);
       }
       buildCmdArgs.push(workDir);

@@ -138,14 +138,25 @@ function wrapMongoId(value: string): string {
 
 const VALID_MONGO_COLLECTION_NAME = /^[a-zA-Z_][a-zA-Z0-9_.]*$/;
 
-function buildCommand(info: DatabaseInfo, sql: string): string[] {
+interface CommandWithEnv {
+  cmd: string[];
+  env?: string[];
+}
+
+function buildCommand(info: DatabaseInfo, sql: string): CommandWithEnv {
   if (info.engine === 'postgres') {
-    return ['psql', '-U', info.user, '-d', info.database, '-t', '-A', '-F', '\t', '-c', sql];
+    return {
+      cmd: ['psql', '-U', info.user, '-d', info.database, '-t', '-A', '-F', '\t', '-c', sql],
+      env: [`PGPASSWORD=${info.password}`],
+    };
   }
-  // mysql / mariadb
-  const args = ['mysql', '-u', info.user, `-p${info.password}`, '-N', '-B', '-e', sql];
-  if (info.database) args.splice(4, 0, info.database);
-  return args;
+  // mysql / mariadb — pass password via MYSQL_PWD env var (not visible in ps)
+  const args = ['mysql', '-u', info.user, '-N', '-B', '-e', sql];
+  if (info.database) args.splice(3, 0, info.database);
+  return {
+    cmd: args,
+    env: [`MYSQL_PWD=${info.password}`],
+  };
 }
 
 // ---- Query validation ----
@@ -236,8 +247,8 @@ async function getPrimaryKeyColumns(
   } else {
     sql = `SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${escapeValue(engine, tableName)} AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION`;
   }
-  const cmd = buildCommand(info, sql);
-  const result = await dockerService.execCommand(containerId, cmd);
+  const { cmd, env } = buildCommand(info, sql);
+  const result = await dockerService.execCommand(containerId, cmd, 30_000, env);
   return result.stdout.trim().split('\n').filter(s => s.trim()).map(s => s.trim());
 }
 
@@ -315,8 +326,8 @@ databaseRoutes.get('/:serviceId/info', requireMember, async (c) => {
       } else {
         sql = "SHOW DATABASES";
       }
-      const cmd = buildCommand(container.info, sql);
-      const result = await dockerService.execCommand(container.containerId, cmd);
+      const { cmd, env } = buildCommand(container.info, sql);
+      const result = await dockerService.execCommand(container.containerId, cmd, 30_000, env);
       databases = result.stdout.trim().split('\n').filter(s => s.trim().length > 0);
     }
   } catch (err) {
@@ -364,8 +375,8 @@ databaseRoutes.get('/:serviceId/tables', dbExecRateLimit, requireMember, async (
       sql = "SELECT TABLE_NAME AS name, TABLE_TYPE AS type FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY name";
     }
 
-    const cmd = buildCommand(info, sql);
-    const result = await dockerService.execCommand(container.containerId, cmd);
+    const { cmd, env } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, cmd, 30_000, env);
     const tables = result.stdout.trim().split('\n').filter(s => s.trim()).map(line => {
       const parts = line.split('\t');
       return { name: parts[0]?.trim() ?? '', type: (parts[1]?.trim() ?? 'table').toLowerCase().includes('view') ? 'view' : 'table' };
@@ -440,8 +451,8 @@ databaseRoutes.get('/:serviceId/tables/:name/columns', dbExecRateLimit, requireM
       sql = `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${escapeValue(container.engine, tableName)} ORDER BY ORDINAL_POSITION`;
     }
 
-    const cmd = buildCommand(info, sql);
-    const result = await dockerService.execCommand(container.containerId, cmd);
+    const { cmd, env } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, cmd, 30_000, env);
 
     // Fetch primary key columns
     let pkSet = new Set<string>();
@@ -537,8 +548,8 @@ databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMemb
 
     // SQL engines
     const qi = (n: string) => quoteIdentifier(container.engine, n);
-    const countCmd = buildCommand(info, `SELECT COUNT(*) FROM ${qi(tableName)}`);
-    const countResult = await dockerService.execCommand(container.containerId, countCmd);
+    const { cmd: countCmd, env: countEnv } = buildCommand(info, `SELECT COUNT(*) FROM ${qi(tableName)}`);
+    const countResult = await dockerService.execCommand(container.containerId, countCmd, 30_000, countEnv);
     const totalRows = parseInt(countResult.stdout.trim(), 10) || 0;
 
     let colSql: string;
@@ -547,13 +558,14 @@ databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMemb
     } else {
       colSql = `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${escapeValue(container.engine, tableName)} ORDER BY ORDINAL_POSITION`;
     }
-    const colResult = await dockerService.execCommand(container.containerId, buildCommand(info, colSql));
+    const { cmd: colCmd, env: colEnv } = buildCommand(info, colSql);
+    const colResult = await dockerService.execCommand(container.containerId, colCmd, 30_000, colEnv);
     const columns = colResult.stdout.trim().split('\n').filter(s => s.trim()).map(s => s.trim());
 
     const orderClause = orderBy ? ` ORDER BY ${qi(orderBy)} ${orderDir}` : '';
     const dataSql = `SELECT * FROM ${qi(tableName)}${orderClause} LIMIT ${pageSize} OFFSET ${offset}`;
-    const dataCmd = buildCommand(info, dataSql);
-    const dataResult = await dockerService.execCommand(container.containerId, dataCmd);
+    const { cmd: dataCmd, env: dataEnv } = buildCommand(info, dataSql);
+    const dataResult = await dockerService.execCommand(container.containerId, dataCmd, 30_000, dataEnv);
     const rows = dataResult.stdout.trim().split('\n').filter(s => s.length > 0).map(line => line.split('\t'));
 
     return c.json({ columns, rows, totalRows, page, pageSize });
@@ -652,8 +664,8 @@ databaseRoutes.post('/:serviceId/query', dbExecRateLimit, requireMember, async (
 
   try {
     const start = Date.now();
-    const cmd = buildCommand(info, limitedQuery);
-    const result = await dockerService.execCommand(container.containerId, cmd);
+    const { cmd, env } = buildCommand(info, limitedQuery);
+    const result = await dockerService.execCommand(container.containerId, cmd, 30_000, env);
     const executionTimeMs = Date.now() - start;
 
     const lines = result.stdout.trim().split('\n').filter(s => s.length > 0);
@@ -749,7 +761,8 @@ databaseRoutes.post('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMem
   const sql = `INSERT INTO ${qi(tableName)} (${quotedCols}) VALUES (${escapedVals})`;
 
   try {
-    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    const { cmd: insertCmd, env: insertEnv } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, insertCmd, 30_000, insertEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Insert failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -813,7 +826,8 @@ databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMemb
   const sql = `UPDATE ${qi(tableName)} SET ${setClauses} WHERE ${whereClauses}`;
 
   try {
-    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    const { cmd: updateCmd, env: updateEnv } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, updateCmd, 30_000, updateEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Update failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -870,7 +884,8 @@ databaseRoutes.delete('/:serviceId/tables/:name/rows', dbExecRateLimit, requireM
   const sql = `DELETE FROM ${qi(tableName)} WHERE ${whereClauses}`;
 
   try {
-    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    const { cmd: delCmd, env: delEnv } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, delCmd, 30_000, delEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Delete failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -933,7 +948,8 @@ databaseRoutes.post('/:serviceId/tables', dbExecRateLimit, requireMember, requir
   const sql = `CREATE TABLE ${qi(name)} (${columnDefs.join(', ')})`;
 
   try {
-    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    const { cmd: createCmd, env: createEnv } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, createCmd, 30_000, createEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Create table failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -971,7 +987,8 @@ databaseRoutes.delete('/:serviceId/tables/:name', dbExecRateLimit, requireMember
   const sql = `DROP TABLE ${quoteIdentifier(container.engine, tableName)}`;
 
   try {
-    const result = await dockerService.execCommand(container.containerId, buildCommand(info, sql));
+    const { cmd: dropCmd, env: dropEnv } = buildCommand(info, sql);
+    const result = await dockerService.execCommand(container.containerId, dropCmd, 30_000, dropEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Drop table failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -981,7 +998,7 @@ databaseRoutes.delete('/:serviceId/tables/:name', dbExecRateLimit, requireMember
 });
 
 // GET /:serviceId/credentials — connection info & credentials
-databaseRoutes.get('/:serviceId/credentials', requireMember, async (c) => {
+databaseRoutes.get('/:serviceId/credentials', requireMember, requireScope('write'), async (c) => {
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
@@ -1061,19 +1078,22 @@ databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requir
   }
 
   let cmd: string[];
+  let cmdEnv: string[] | undefined;
   if (container.engine === 'mongo') {
     cmd = ['mongorestore', `--uri=${buildMongoUri(info)}`, '--archive'];
   } else if (container.engine === 'postgres') {
     cmd = ['psql', '-U', info.user, '-d', info.database, '-v', 'ON_ERROR_STOP=1'];
+    cmdEnv = [`PGPASSWORD=${info.password}`];
   } else {
-    cmd = ['mysql', '-u', info.user, `-p${info.password}`, info.database];
+    cmd = ['mysql', '-u', info.user, info.database];
+    cmdEnv = [`MYSQL_PWD=${info.password}`];
   }
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     const inputStream = Readable.from(buffer);
 
-    const result = await dockerService.execCommandWithInput(container.containerId, cmd, inputStream);
+    const result = await dockerService.execCommandWithInput(container.containerId, cmd, inputStream, 600_000, cmdEnv);
     if (result.exitCode !== 0) {
       const errMsg = result.stderr?.slice(0, 500) || 'Import failed';
       return c.json({ error: errMsg }, 500);
@@ -1110,6 +1130,7 @@ databaseDownloadRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
   const info = entry.db ? { ...container.info, database: entry.db } : container.info;
 
   let cmd: string[];
+  let cmdEnv: string[] | undefined;
   let filename: string;
   let contentType: string;
   if (container.engine === 'mongo') {
@@ -1118,16 +1139,18 @@ databaseDownloadRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
     contentType = 'application/octet-stream';
   } else if (container.engine === 'postgres') {
     cmd = ['pg_dump', '-U', info.user, '-d', info.database, '--no-owner', '--no-acl'];
+    cmdEnv = [`PGPASSWORD=${info.password}`];
     filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
     contentType = 'application/sql';
   } else {
-    cmd = ['mysqldump', '-u', info.user, `-p${info.password}`, '--single-transaction', '--routines', '--triggers', info.database];
+    cmd = ['mysqldump', '-u', info.user, '--single-transaction', '--routines', '--triggers', info.database];
+    cmdEnv = [`MYSQL_PWD=${info.password}`];
     filename = `${info.database}-${new Date().toISOString().slice(0, 10)}.sql`;
     contentType = 'application/sql';
   }
 
   try {
-    const { stream } = await dockerService.execCommandStream(container.containerId, cmd);
+    const { stream } = await dockerService.execCommandStream(container.containerId, cmd, 300_000, cmdEnv);
     c.header('Content-Type', contentType);
     c.header('Content-Disposition', `attachment; filename="${filename}"`);
     return c.body(stream as any);

@@ -141,7 +141,7 @@ export class DockerService {
           } : {}),
           HealthCheck: opts.healthCheck
             ? {
-                Test: ['CMD-SHELL', opts.healthCheck.cmd],
+                Test: ['CMD', '/bin/sh', '-c', opts.healthCheck.cmd],
                 Interval: opts.healthCheck.interval * 1_000_000_000,
                 Timeout: opts.healthCheck.timeout * 1_000_000_000,
                 Retries: opts.healthCheck.retries,
@@ -150,6 +150,7 @@ export class DockerService {
           // Security hardening (opt-out for database/stateful images via readOnly: false)
           ReadOnly: opts.readOnly !== false,
           ...(opts.user !== undefined ? { User: opts.user } : opts.readOnly !== false ? { User: '1000' } : {}),
+          CapabilityDrop: ['ALL'],
         },
         Resources: {
           Limits: {
@@ -650,6 +651,7 @@ export class DockerService {
     containerId: string,
     cmd: string[],
     timeoutMs: number = 30_000,
+    env?: string[],
   ): Promise<{ stdout: string; exitCode: number }> {
     const container = docker.getContainer(containerId);
     const exec = await container.exec({
@@ -658,6 +660,7 @@ export class DockerService {
       AttachStdout: true,
       AttachStderr: true,
       Tty: false,
+      Env: env,
     });
     const stream = await exec.start({ hijack: true, stdin: false, Tty: false });
 
@@ -704,6 +707,7 @@ export class DockerService {
     containerId: string,
     cmd: string[],
     timeoutMs: number = 300_000,
+    env?: string[],
   ): Promise<{ stream: Readable; exec: Dockerode.Exec }> {
     const container = docker.getContainer(containerId);
     const exec = await container.exec({
@@ -712,6 +716,7 @@ export class DockerService {
       AttachStdout: true,
       AttachStderr: true,
       Tty: false,
+      Env: env,
     });
     const rawStream = await exec.start({ hijack: true, stdin: false, Tty: false });
 
@@ -746,6 +751,7 @@ export class DockerService {
     cmd: string[],
     input: Readable,
     timeoutMs: number = 600_000,
+    env?: string[],
   ): Promise<{ exitCode: number; stderr: string }> {
     const container = docker.getContainer(containerId);
     const exec = await container.exec({
@@ -754,6 +760,7 @@ export class DockerService {
       AttachStdout: true,
       AttachStderr: true,
       Tty: false,
+      Env: env,
     });
     const rawStream = await exec.start({ hijack: true, stdin: true, Tty: false });
 

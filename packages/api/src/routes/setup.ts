@@ -126,7 +126,10 @@ setup.post('/swarm-init', async (c) => {
 const setupSchema = z.object({
   name: z.string().min(1).max(255),
   email: z.string().email().max(255),
-  password: z.string().min(8).max(128),
+  password: z.string().min(8).max(128).refine(
+    (pw) => /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /\d/.test(pw),
+    'Password must contain at least one lowercase letter, one uppercase letter, and one digit',
+  ),
   domain: z.string().max(255).optional(),
   platformName: z.string().max(255).optional(),
 });

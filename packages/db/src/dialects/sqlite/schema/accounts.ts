@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -22,7 +23,10 @@ export const accounts = sqliteTable('accounts', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   scheduledDeletionAt: integer('scheduled_deletion_at', { mode: 'timestamp' }),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
-});
+}, (table) => [
+  index('idx_accounts_deleted_at').on(table.deletedAt),
+  index('idx_accounts_scheduled_deletion').on(table.scheduledDeletionAt),
+]);
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
   parent: one(accounts, {

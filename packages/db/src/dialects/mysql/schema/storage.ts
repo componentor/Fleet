@@ -45,6 +45,7 @@ export const storageNodes = mysqlTable('storage_nodes', {
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
   index('storage_nodes_cluster_idx').on(table.clusterId),
+  index('idx_storage_nodes_last_health_check').on(table.lastHealthCheck),
 ]);
 
 export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
@@ -75,6 +76,7 @@ export const storageVolumes = mysqlTable('storage_volumes', {
   deletedAt: timestamp('deleted_at'),
 }, (table) => [
   index('storage_volumes_account_idx').on(table.accountId),
+  index('idx_storage_volumes_deleted_at').on(table.deletedAt),
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({

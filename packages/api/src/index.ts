@@ -42,6 +42,13 @@ try {
   logger.error({ err }, 'Database migration failed')
 }
 
+// Recover from interrupted auto-updates (must run after DB is ready, before serving traffic)
+try {
+  await updateService.recoverFromInterruptedUpdate()
+} catch (err) {
+  logger.error({ err }, 'Update recovery failed — system may need manual inspection')
+}
+
 // Load JWT secret from DB if not set via env (setup wizard stores it encrypted in platformSettings)
 if (!process.env['JWT_SECRET']) {
   try {
@@ -73,6 +80,21 @@ if (!process.env['JWT_SECRET']) {
   const { randomBytes } = await import('node:crypto')
   process.env['JWT_SECRET'] = randomBytes(32).toString('hex')
   logger.warn('JWT_SECRET not configured — using auto-generated secret (dev mode, tokens will not survive restarts)')
+}
+
+// Validate JWT_SECRET minimum length (256-bit / 32 bytes minimum)
+if (process.env['NODE_ENV'] === 'production' && process.env['JWT_SECRET']!.length < 32) {
+  logger.error('JWT_SECRET is too short — must be at least 32 characters (256-bit) for security')
+  process.exit(1)
+}
+
+// Validate NODE_AUTH_TOKEN if set (used for inter-node communication)
+if (process.env['NODE_AUTH_TOKEN'] && process.env['NODE_AUTH_TOKEN'].length < 32) {
+  if (process.env['NODE_ENV'] === 'production') {
+    logger.error('NODE_AUTH_TOKEN is too short — must be at least 32 characters for security')
+    process.exit(1)
+  }
+  logger.warn('NODE_AUTH_TOKEN is shorter than 32 characters — consider using a longer token')
 }
 
 // Initialize storage manager (loads provider config from DB, defaults to local)

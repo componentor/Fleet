@@ -30,7 +30,12 @@ export const authMiddleware = createMiddleware<{
 
     try {
       const secret = new TextEncoder().encode(jwtSecret);
-      const { payload } = await jwtVerify(token, secret);
+      const { payload, protectedHeader } = await jwtVerify(token, secret);
+
+      // Reject tokens signed with unexpected algorithms (prevents "none" algorithm attacks)
+      if (protectedHeader.alg !== 'HS256') {
+        return c.json({ error: 'Invalid token algorithm' }, 401);
+      }
 
       // Check token blocklist
       const valkey = await getValkey();

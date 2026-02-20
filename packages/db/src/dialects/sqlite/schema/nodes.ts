@@ -3,6 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
+  index,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -19,6 +20,8 @@ export const nodes = sqliteTable('nodes', {
   lastHeartbeat: integer('last_heartbeat', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-});
+}, (table) => [
+  index('idx_nodes_last_heartbeat').on(table.lastHeartbeat),
+]);
 
 export const nodesRelations = relations(nodes, () => ({}));

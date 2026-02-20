@@ -41,6 +41,7 @@ export const storageNodes = sqliteTable('storage_nodes', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('storage_nodes_cluster_idx').on(table.clusterId),
+  index('idx_storage_nodes_last_health_check').on(table.lastHealthCheck),
 ]);
 
 export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
@@ -71,6 +72,7 @@ export const storageVolumes = sqliteTable('storage_volumes', {
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 }, (table) => [
   index('storage_volumes_account_idx').on(table.accountId),
+  index('idx_storage_volumes_deleted_at').on(table.deletedAt),
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({

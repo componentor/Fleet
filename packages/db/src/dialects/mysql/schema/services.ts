@@ -58,6 +58,7 @@ export const services = mysqlTable('services', {
   index('idx_services_status').on(table.status),
   index('idx_services_stack_id').on(table.stackId),
   index('idx_services_github_autodeploy').on(table.githubRepo, table.githubBranch, table.autoDeploy),
+  index('idx_services_deleted_at').on(table.deletedAt),
 ]);
 
 export const deployments = mysqlTable('deployments', {

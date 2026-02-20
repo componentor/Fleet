@@ -55,12 +55,37 @@ storageAdmin.get('/cluster', async (c) => {
 });
 
 // POST /cluster — Initialize or update cluster config
+/** Reject private/loopback IPs to prevent SSRF via storage endpoints. */
+function isPrivateOrLoopback(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+  // RFC 1918 + link-local
+  if (/^10\./.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;
+  if (/^192\.168\./.test(hostname)) return true;
+  if (/^169\.254\./.test(hostname)) return true;
+  if (/^fc00:|^fe80:/i.test(hostname)) return true;
+  return false;
+}
+
+const objectConfigSchema = z.record(z.any()).default({}).refine((config) => {
+  if (config.endpoint) {
+    try {
+      const url = new URL(config.endpoint);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+      if (isPrivateOrLoopback(url.hostname)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}, 'objectConfig.endpoint must be a valid public URL (no private/loopback IPs)');
+
 const clusterSchema = z.object({
   provider: z.enum(['local', 'glusterfs', 'ceph']),
   objectProvider: z.enum(['local', 'minio', 's3', 'gcs']),
   replicationFactor: z.number().int().min(1).max(5).default(3),
   config: z.record(z.any()).default({}),
-  objectConfig: z.record(z.any()).default({}),
+  objectConfig: objectConfigSchema,
 });
 
 storageAdmin.post('/cluster', async (c) => {

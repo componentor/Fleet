@@ -107,6 +107,9 @@ export class UploadService {
       });
     }
 
+    // Security: validate all extracted paths are within the destination (zip-slip protection)
+    await this.validateExtractedPaths(destPath);
+
     // Security: remove symlinks that point outside the dest BEFORE size check
     await this.removeUnsafeSymlinks(destPath);
 
@@ -333,13 +336,23 @@ export class UploadService {
   }
 
   /**
-   * Write content to a file.
+   * Write string content to a file (UTF-8).
    */
   async writeFile(sourcePath: string, relativePath: string, content: string): Promise<void> {
     const filePath = this.resolveSafePath(sourcePath, relativePath);
     const dir = join(filePath, '..');
     await mkdir(dir, { recursive: true });
     await writeFile(filePath, content, 'utf-8');
+  }
+
+  /**
+   * Write raw binary content to a file (preserves binary data).
+   */
+  async writeFileRaw(sourcePath: string, relativePath: string, content: Buffer): Promise<void> {
+    const filePath = this.resolveSafePath(sourcePath, relativePath);
+    const dir = join(filePath, '..');
+    await mkdir(dir, { recursive: true });
+    await writeFile(filePath, content);
   }
 
   /**
@@ -429,6 +442,27 @@ export class UploadService {
     // Remove old files but keep the directory
     await rm(destPath, { recursive: true, force: true });
     return this.extractAndStore(opts);
+  }
+
+  /**
+   * Validate that all extracted files are within the destination directory (zip-slip protection).
+   * Removes any files that escaped the boundary.
+   */
+  private async validateExtractedPaths(destPath: string): Promise<void> {
+    const safeDirPrefix = destPath.endsWith('/') ? destPath : destPath + '/';
+    const entries = await readdir(destPath);
+    for (const entry of entries) {
+      const fullPath = join(destPath, entry);
+      const resolved = resolve(fullPath);
+      if (resolved !== destPath && !resolved.startsWith(safeDirPrefix)) {
+        await rm(fullPath, { recursive: true, force: true });
+        continue;
+      }
+      const st = await lstat(fullPath);
+      if (st.isDirectory()) {
+        await this.validateExtractedPaths(fullPath);
+      }
+    }
   }
 
   /**

@@ -13,6 +13,20 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 
+// Block uploads of server-side executable files that could be exploited if served directly
+const BLOCKED_EXTENSIONS = new Set([
+  '.php', '.php3', '.php4', '.php5', '.phtml',
+  '.exe', '.bat', '.cmd', '.com', '.scr', '.pif',
+  '.jsp', '.jspx', '.asp', '.aspx', '.ashx',
+  '.cgi', '.pl', '.py', '.rb', '.sh', '.bash',
+  '.htaccess', '.htpasswd',
+]);
+
+function hasBlockedExtension(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return BLOCKED_EXTENSIONS.has(lower) || [...BLOCKED_EXTENSIONS].some(ext => lower.endsWith(ext));
+}
+
 const fileRoutes = new Hono<{
   Variables: {
     user: AuthUser;
@@ -244,10 +258,14 @@ fileRoutes.post('/:serviceId/upload', requireMember, requireScope('write'), asyn
     return c.json({ error: 'File is required' }, 400);
   }
 
+  if (hasBlockedExtension(file.name)) {
+    return c.json({ error: 'File type not allowed for security reasons' }, 400);
+  }
+
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     const filePath = targetPath === '/' ? file.name : `${targetPath}/${file.name}`;
-    await uploadService.writeFile(svc!.sourcePath!, filePath, buffer.toString('utf-8'));
+    await uploadService.writeFileRaw(svc!.sourcePath!, filePath, buffer);
     return c.json({ message: 'File uploaded', path: filePath });
   } catch (err: any) {
     if (err.message?.includes('traversal')) {

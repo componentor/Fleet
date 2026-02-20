@@ -64,6 +64,13 @@
       "when": 1772200000000,
       "tag": "0008_add_missing_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1772300000000,
+      "tag": "0009_add_security_indexes",
+      "breakpoints": true
     }
   ]
 }

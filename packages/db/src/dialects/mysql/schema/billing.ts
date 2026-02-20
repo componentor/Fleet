@@ -56,6 +56,7 @@ export const subscriptions = mysqlTable('subscriptions', {
 }, (table) => [
   index('idx_subscriptions_account_id').on(table.accountId),
   index('idx_subscriptions_status').on(table.status),
+  index('idx_subscriptions_past_due_since').on(table.pastDueSince),
 ]);
 
 export const usageRecords = mysqlTable('usage_records', {
