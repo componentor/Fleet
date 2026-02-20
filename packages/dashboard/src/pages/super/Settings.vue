@@ -17,6 +17,7 @@ const success = ref('')
 const sections = [
   { id: 'general', label: () => t('settings.general') },
   { id: 'github', label: () => t('super.settings.githubConfig') },
+  { id: 'google', label: () => t('super.settings.googleConfig') },
   { id: 'stripe', label: () => t('super.settings.stripeConfig') },
   { id: 'email', label: () => t('super.settings.emailConfig') },
   { id: 'registrar', label: () => t('super.settings.domainRegistrar') },
@@ -49,6 +50,11 @@ const githubClientId = ref('')
 const githubClientSecret = ref('')
 const githubWebhookSecret = ref('')
 const githubConfigured = ref(false)
+
+// Google settings
+const googleClientId = ref('')
+const googleClientSecret = ref('')
+const googleConfigured = ref(false)
 
 // Registrar settings
 const registrarProvider = ref('resellerclub')
@@ -169,6 +175,40 @@ async function saveGitHub() {
     setTimeout(() => { success.value = '' }, 3000)
   } catch (err: any) {
     error.value = err?.body?.error || 'Failed to save GitHub configuration'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function fetchGoogle() {
+  try {
+    const data = await api.get<any>('/settings/google')
+    googleConfigured.value = data.configured ?? false
+    googleClientId.value = data.clientId ?? ''
+  } catch {
+    // Not configured
+  }
+}
+
+async function saveGoogle() {
+  if (!googleClientId.value || !googleClientSecret.value) {
+    error.value = 'Client ID and Client Secret are required'
+    return
+  }
+  saving.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings/google', {
+      clientId: googleClientId.value,
+      clientSecret: googleClientSecret.value,
+    })
+    success.value = 'Google configuration saved'
+    googleClientSecret.value = ''
+    await fetchGoogle()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save Google configuration'
   } finally {
     saving.value = false
   }
@@ -303,6 +343,7 @@ function formatCents(cents: number): string {
 onMounted(() => {
   fetchSettings()
   fetchGitHub()
+  fetchGoogle()
   fetchRegistrar()
   fetchPricing()
 })
@@ -406,6 +447,36 @@ onMounted(() => {
               <input v-model="githubWebhookSecret" type="password" placeholder="Enter webhook secret" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.githubOAuthHint') }}</p>
+            <div class="pt-2 flex justify-end">
+              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ saving ? $t('common.saving') : $t('common.save') }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Google Configuration -->
+        <div v-if="activeSection === 'google'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.googleConfig') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.googleConfigDesc') }}</p>
+          </div>
+          <form @submit.prevent="saveGoogle" class="p-6 space-y-5">
+            <div v-if="googleConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p class="text-sm text-green-700 dark:text-green-300">Google configured (Client ID: <strong class="font-mono">{{ googleClientId }}</strong>)</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientId') }}</label>
+              <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientSecret') }}</label>
+              <input v-model="googleClientSecret" type="password" placeholder="Enter client secret" required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.googleOAuthHint') }}</p>
             <div class="pt-2 flex justify-end">
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />

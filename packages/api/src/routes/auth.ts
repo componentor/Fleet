@@ -1164,7 +1164,9 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
 
 // GET /google — redirect to Google OAuth
 auth.get('/google', oauthRateLimit, async (c) => {
-  const clientId = process.env['GOOGLE_CLIENT_ID'];
+  const { getGoogleConfig } = await import('../services/google.service.js');
+  const googleConfig = await getGoogleConfig();
+  const clientId = googleConfig.clientId;
   if (!clientId) {
     return c.json({ error: 'Google OAuth is not configured' }, 500);
   }
@@ -1220,8 +1222,10 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
     return c.redirect('/auth/callback?error=Missing+authorization+code');
   }
 
-  const clientId = process.env['GOOGLE_CLIENT_ID'];
-  const clientSecret = process.env['GOOGLE_CLIENT_SECRET'];
+  const { getGoogleConfig } = await import('../services/google.service.js');
+  const googleConfig = await getGoogleConfig();
+  const clientId = googleConfig.clientId;
+  const clientSecret = googleConfig.clientSecret;
   if (!clientId || !clientSecret) {
     return c.redirect('/auth/callback?error=Google+OAuth+not+configured');
   }

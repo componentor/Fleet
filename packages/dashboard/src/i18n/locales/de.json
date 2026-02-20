@@ -1077,7 +1077,12 @@
       "githubClientId": "Client-ID",
       "githubClientSecret": "Client-Geheimnis",
       "githubWebhookSecret": "Webhook-Geheimnis",
-      "githubOAuthHint": "Erstellen Sie eine GitHub OAuth-App unter github.com/settings/developers. Setzen Sie die Callback-URL auf ihre-domain.com/api/v1/auth/github/callback."
+      "githubOAuthHint": "Erstellen Sie eine GitHub OAuth-App unter github.com/settings/developers. Setzen Sie die Callback-URL auf ihre-domain.com/api/v1/auth/github/callback.",
+      "googleConfig": "Google",
+      "googleConfigDesc": "Konfigurieren Sie Google OAuth, damit sich Benutzer mit ihrem Google-Konto anmelden können.",
+      "googleClientId": "Client-ID",
+      "googleClientSecret": "Client-Geheimnis",
+      "googleOAuthHint": "Erstellen Sie eine OAuth 2.0-Client-ID unter console.cloud.google.com/apis/credentials. Setzen Sie die autorisierte Weiterleitungs-URI auf ihre-domain.com/api/v1/auth/google/callback."
     },
     "billing": {
       "title": "Abrechnungskonfiguration",

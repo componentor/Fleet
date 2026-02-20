@@ -467,4 +467,56 @@ settings.patch('/github', settingsRateLimit, requireAdmin, async (c) => {
   return c.json({ message: 'GitHub configuration updated' });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// GET /google — get configured Google OAuth credentials
+// ────────────────────────────────────────────────────────────────────────────
+settings.get('/google', requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can view Google config' }, 403);
+  }
+
+  const clientId = await getSetting('google:clientId');
+  const clientSecret = await getSetting('google:clientSecret');
+
+  return c.json({
+    configured: !!(clientId || process.env['GOOGLE_CLIENT_ID']),
+    clientId: (clientId as string) || process.env['GOOGLE_CLIENT_ID'] || '',
+    clientSecretSet: !!(clientSecret || process.env['GOOGLE_CLIENT_SECRET']),
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// PATCH /google — configure Google OAuth credentials
+// ────────────────────────────────────────────────────────────────────────────
+const googleSettingsSchema = z.object({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+});
+
+settings.patch('/google', settingsRateLimit, requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can configure Google' }, 403);
+  }
+
+  const body = await c.req.json();
+  const parsed = googleSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed' }, 400);
+  }
+
+  const data = parsed.data;
+
+  await upsertSetting('google:clientId', data.clientId);
+  await upsertSetting('google:clientSecret', encrypt(data.clientSecret));
+
+  // Invalidate cached config so the new values take effect immediately
+  const { invalidateGoogleConfigCache } = await import('../services/google.service.js');
+  invalidateGoogleConfigCache();
+
+  logger.info({ changedBy: user.userId }, 'Google configuration updated');
+  return c.json({ message: 'Google configuration updated' });
+});
+
 export default settings;

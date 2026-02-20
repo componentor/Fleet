@@ -1077,7 +1077,12 @@
       "githubClientId": "客户端 ID",
       "githubClientSecret": "客户端密钥",
       "githubWebhookSecret": "Webhook 密钥",
-      "githubOAuthHint": "在 github.com/settings/developers 创建 GitHub OAuth 应用。将回调 URL 设置为 your-domain.com/api/v1/auth/github/callback。"
+      "githubOAuthHint": "在 github.com/settings/developers 创建 GitHub OAuth 应用。将回调 URL 设置为 your-domain.com/api/v1/auth/github/callback。",
+      "googleConfig": "Google",
+      "googleConfigDesc": "配置 Google OAuth 以允许用户使用 Google 帐户登录。",
+      "googleClientId": "客户端 ID",
+      "googleClientSecret": "客户端密钥",
+      "googleOAuthHint": "在 console.cloud.google.com/apis/credentials 创建 OAuth 2.0 客户端 ID。将授权重定向 URI 设置为 your-domain.com/api/v1/auth/google/callback。"
     },
     "billing": {
       "title": "计费配置",

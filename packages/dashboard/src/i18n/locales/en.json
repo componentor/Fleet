@@ -1077,7 +1077,12 @@
       "githubClientId": "Client ID",
       "githubClientSecret": "Client Secret",
       "githubWebhookSecret": "Webhook Secret",
-      "githubOAuthHint": "Create a GitHub OAuth App at github.com/settings/developers. Set the callback URL to your-domain.com/api/v1/auth/github/callback."
+      "githubOAuthHint": "Create a GitHub OAuth App at github.com/settings/developers. Set the callback URL to your-domain.com/api/v1/auth/github/callback.",
+      "googleConfig": "Google",
+      "googleConfigDesc": "Configure Google OAuth to allow users to sign in with their Google account.",
+      "googleClientId": "Client ID",
+      "googleClientSecret": "Client Secret",
+      "googleOAuthHint": "Create an OAuth 2.0 Client ID at console.cloud.google.com/apis/credentials. Set the authorized redirect URI to your-domain.com/api/v1/auth/google/callback."
     },
     "billing": {
       "title": "Billing Configuration",

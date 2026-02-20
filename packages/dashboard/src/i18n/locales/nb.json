@@ -1077,7 +1077,12 @@
       "githubClientId": "Klient-ID",
       "githubClientSecret": "Klienthemmelighet",
       "githubWebhookSecret": "Webhook-hemmelighet",
-      "githubOAuthHint": "Opprett en GitHub OAuth-app på github.com/settings/developers. Sett callback-URL til ditt-domene.com/api/v1/auth/github/callback."
+      "githubOAuthHint": "Opprett en GitHub OAuth-app på github.com/settings/developers. Sett callback-URL til ditt-domene.com/api/v1/auth/github/callback.",
+      "googleConfig": "Google",
+      "googleConfigDesc": "Konfigurer Google OAuth for å la brukere logge inn med Google-kontoen sin.",
+      "googleClientId": "Klient-ID",
+      "googleClientSecret": "Klienthemmelighet",
+      "googleOAuthHint": "Opprett en OAuth 2.0-klient-ID på console.cloud.google.com/apis/credentials. Sett autorisert omdirigerings-URI til ditt-domene.com/api/v1/auth/google/callback."
     },
     "billing": {
       "title": "Faktureringskonfigurasjon",
