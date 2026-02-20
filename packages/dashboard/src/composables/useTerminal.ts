@@ -122,12 +122,12 @@ export function useTerminal() {
     const token = authStore.token
     const accountId = localStorage.getItem('fleet_account_id')
 
-    let url = `${wsUrl}?token=${token}&accountId=${accountId}`
+    let url = `${wsUrl}?accountId=${accountId}`
     if (currentContainerId) {
       url += `&containerId=${encodeURIComponent(currentContainerId)}`
     }
 
-    ws = new WebSocket(url)
+    ws = new WebSocket(url, [`auth-${token}`])
 
     ws.onopen = () => {
       connectionState.value = 'connected'

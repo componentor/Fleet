@@ -44,10 +44,9 @@ async function impersonate(accountId: string) {
   try {
     const result = await api.post<any>(`/accounts/${accountId}/impersonate`, {})
     if (result.token) {
-      // Save original token and account for "Stop Impersonating"
-      const currentToken = authStore.token
+      // Save original account ID for "Stop Impersonating" (not secret)
+      // Token is NOT stored in sessionStorage — on stop we refresh from httpOnly cookie
       const currentAccountId = localStorage.getItem('fleet_account_id')
-      if (currentToken) sessionStorage.setItem('fleet_original_token', currentToken)
       if (currentAccountId) sessionStorage.setItem('fleet_original_account_id', currentAccountId)
       sessionStorage.setItem('fleet_impersonating', result.accountId)
 

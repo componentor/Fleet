@@ -422,7 +422,7 @@ onMounted(() => {
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const isGithubConnected = hashParams.get('github_connected') || route.query.github_connected
   if (isGithubConnected) {
-    const token = hashParams.get('token') || (route.query.token as string | undefined)
+    const token = hashParams.get('token')
     if (token) {
       authStore.setTokens({ accessToken: token, refreshToken: '' })
     }

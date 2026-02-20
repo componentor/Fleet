@@ -898,7 +898,11 @@
       "viewAll": "查看全部",
       "activeServices": "活跃服务",
       "nodes": "节点",
-      "users": "用户"
+      "users": "用户",
+      "unresolvedIssues": "{count} 个未解决的问题",
+      "fatalCount": "{count} 个致命错误",
+      "last24h": "过去24小时内 {count} 个",
+      "viewErrors": "查看错误"
     },
     "nodes": {
       "title": "节点",

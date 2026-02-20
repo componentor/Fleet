@@ -113,7 +113,7 @@ async function fetchRegistrar() {
     registrarConfigured.value = data.configured ?? false
     if (data.configured) {
       registrarProvider.value = data.provider ?? 'resellerclub'
-      registrarApiKeyMasked.value = data.apiKeyMasked ?? ''
+      registrarApiKeyMasked.value = data.apiKeySet ? '(configured)' : ''
       const config = data.config as Record<string, string> | null
       registrarResellerId.value = config?.resellerId ?? ''
       registrarSandbox.value = config?.sandbox === 'true'

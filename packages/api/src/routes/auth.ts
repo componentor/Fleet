@@ -9,7 +9,7 @@ import QRCode from 'qrcode';
 import { db, users, userAccounts, accounts, oauthProviders, insertReturning, safeTransaction, eq, and, isNull } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { emailService } from '../services/email.service.js';
 import { getValkey } from '../services/valkey.service.js';
@@ -149,7 +149,7 @@ auth.post('/register', authRateLimit, async (c) => {
   });
 
   if (existing) {
-    return c.json({ error: 'An account with this email already exists' }, 409);
+    return c.json({ error: 'Registration failed. If you already have an account, try logging in.' }, 409);
   }
 
   // Hash password
@@ -255,12 +255,33 @@ auth.post('/login', authRateLimit, async (c) => {
     where: and(eq(users.email, email), isNull(users.deletedAt)),
   });
 
+  const loginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip') ?? undefined;
+
   if (!user || !user.passwordHash) {
+    logger.warn({ email, ip: loginIp }, 'Failed login attempt — user not found');
+    logToErrorTable({
+      level: 'warn',
+      message: `Failed login: unknown user`,
+      path: '/auth/login',
+      ip: loginIp ?? null,
+      statusCode: 401,
+      metadata: { reason: 'user_not_found' },
+    });
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
   const valid = await verify(user.passwordHash, password);
   if (!valid) {
+    logger.warn({ userId: user.id, ip: loginIp }, 'Failed login attempt — wrong password');
+    logToErrorTable({
+      level: 'warn',
+      message: `Failed login: wrong password`,
+      path: '/auth/login',
+      userId: user.id,
+      ip: loginIp ?? null,
+      statusCode: 401,
+      metadata: { reason: 'wrong_password' },
+    });
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
@@ -309,8 +330,7 @@ auth.post('/login', authRateLimit, async (c) => {
 
 // POST /refresh
 auth.post('/refresh', refreshRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  const refreshToken = body.refreshToken || getCookie(c, 'fleet_refresh');
+  const refreshToken = getCookie(c, 'fleet_refresh');
   if (!refreshToken) {
     return c.json({ error: 'Refresh token required' }, 400);
   }

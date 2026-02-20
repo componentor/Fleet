@@ -236,6 +236,7 @@ const panelRoutes: RouteRecordRaw[] = [
         path: 'billing',
         name: 'panel-billing',
         component: () => import('@/pages/panel/Billing.vue'),
+        meta: { requireOwner: true },
       },
       {
         path: 'settings',
@@ -349,6 +350,19 @@ router.beforeEach(async (to) => {
   if (to.matched.some((record) => record.meta.requiresSuper)) {
     if (!authStore.isSuper) {
       return { path: '/panel' }
+    }
+  }
+
+  // Check owner access for billing routes (defense-in-depth; backend also enforces)
+  if (to.matched.some((record) => record.meta.requireOwner)) {
+    try {
+      const { useRole } = await import('@/composables/useRole')
+      const { canOwner } = useRole()
+      if (!canOwner.value && !authStore.isSuper) {
+        return { path: '/panel' }
+      }
+    } catch {
+      // Role not yet loaded; allow navigation — backend will enforce
     }
   }
 })

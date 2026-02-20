@@ -898,7 +898,11 @@
       "viewAll": "Alle anzeigen",
       "activeServices": "Aktive Dienste",
       "nodes": "Knoten",
-      "users": "Benutzer"
+      "users": "Benutzer",
+      "unresolvedIssues": "{count} ungelöste Probleme",
+      "fatalCount": "{count} kritisch",
+      "last24h": "{count} in den letzten 24 Stunden",
+      "viewErrors": "Fehler anzeigen"
     },
     "nodes": {
       "title": "Knoten",

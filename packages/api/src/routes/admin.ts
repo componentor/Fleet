@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db, accounts, users, services, nodes, deployments, auditLog, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
+import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';
@@ -49,6 +49,23 @@ adminRoutes.get('/stats', async (c) => {
     .from(services)
     .where(and(eq(services.status, 'running'), isNull(services.deletedAt)));
 
+  // Error/issue counts for dashboard
+  const [unresolvedErrors] = await db
+    .select({ count: countSql() })
+    .from(errorLog)
+    .where(eq(errorLog.resolved, false));
+
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [recentErrors] = await db
+    .select({ count: countSql() })
+    .from(errorLog)
+    .where(gte(errorLog.createdAt, oneDayAgo));
+
+  const [fatalErrors] = await db
+    .select({ count: countSql() })
+    .from(errorLog)
+    .where(and(eq(errorLog.level, 'fatal'), eq(errorLog.resolved, false)));
+
   let swarmInfo = null;
   try {
     swarmInfo = await dockerService.getSwarmInfo();
@@ -62,6 +79,11 @@ adminRoutes.get('/stats', async (c) => {
     services: serviceCount?.count ?? 0,
     runningServices: runningServices?.count ?? 0,
     nodes: nodeCount?.count ?? 0,
+    errors: {
+      unresolved: unresolvedErrors?.count ?? 0,
+      last24h: recentErrors?.count ?? 0,
+      fatal: fatalErrors?.count ?? 0,
+    },
     swarm: swarmInfo
       ? {
           id: swarmInfo.ID,
@@ -122,8 +144,17 @@ adminRoutes.get('/users', async (c) => {
     .from(users)
     .where(isNull(users.deletedAt));
 
-  // Don't expose password hashes
-  const sanitized = allUsers.map(({ passwordHash, ...rest }) => rest);
+  // Only expose safe fields — never return tokens, secrets, or hashes
+  const sanitized = allUsers.map((u) => ({
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    isSuper: u.isSuper,
+    emailVerified: u.emailVerified,
+    twoFactorEnabled: u.twoFactorEnabled,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+  }));
 
   return c.json({
     data: sanitized,

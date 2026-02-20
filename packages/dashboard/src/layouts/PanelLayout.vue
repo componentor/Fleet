@@ -52,18 +52,12 @@ const { canAdmin, canOwner } = useRole()
 const isImpersonating = computed(() => !!sessionStorage.getItem('fleet_impersonating'))
 
 function stopImpersonating() {
-  const originalToken = sessionStorage.getItem('fleet_original_token')
   const originalAccountId = sessionStorage.getItem('fleet_original_account_id')
-  if (originalToken) {
-    // Restore original access token in-memory via auth store
-    const authStore = useAuthStore()
-    authStore.setToken(originalToken)
-  }
   if (originalAccountId) localStorage.setItem('fleet_account_id', originalAccountId)
   else localStorage.removeItem('fleet_account_id')
-  sessionStorage.removeItem('fleet_original_token')
   sessionStorage.removeItem('fleet_original_account_id')
   sessionStorage.removeItem('fleet_impersonating')
+  // Original token is restored via httpOnly cookie refresh on page reload
   window.location.href = '/admin/accounts'
 }
 

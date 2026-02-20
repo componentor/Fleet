@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { getValkey } from '../services/valkey.service.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 
 interface RateLimitEntry {
   count: number;
@@ -78,6 +79,16 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
           const ttl = await valkey.ttl(key);
           const retryAfter = ttl > 0 ? ttl : windowSec;
           c.header('Retry-After', String(retryAfter));
+          const reqPath = new URL(c.req.url).pathname;
+          logger.warn({ ip, path: reqPath, keyPrefix, count, max }, 'Rate limit exceeded');
+          logToErrorTable({
+            level: 'warn',
+            message: `Rate limit exceeded: ${keyPrefix} (${count}/${max})`,
+            path: reqPath,
+            ip,
+            statusCode: 429,
+            metadata: { keyPrefix, count, max },
+          });
           return c.json({ error: 'Too many requests', retryAfter }, 429);
         }
 
@@ -106,6 +117,16 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
     if (entry.count > max) {
       const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
       c.header('Retry-After', String(retryAfter));
+      const reqPath = new URL(c.req.url).pathname;
+      logger.warn({ ip, path: reqPath, keyPrefix, count: entry.count, max }, 'Rate limit exceeded');
+      logToErrorTable({
+        level: 'warn',
+        message: `Rate limit exceeded: ${keyPrefix} (${entry.count}/${max})`,
+        path: reqPath,
+        ip,
+        statusCode: 429,
+        metadata: { keyPrefix, count: entry.count, max },
+      });
       return c.json({ error: 'Too many requests', retryAfter }, 429);
     }
 

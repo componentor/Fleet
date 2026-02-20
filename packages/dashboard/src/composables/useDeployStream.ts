@@ -27,9 +27,9 @@ export function useDeployStream() {
     const authStore = useAuthStore()
     const token = authStore.token
     const accountId = localStorage.getItem('fleet_account_id')
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/deploy/${deploymentId}?token=${token}&accountId=${accountId}`
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/deploy/${deploymentId}?accountId=${accountId}`
 
-    ws = new WebSocket(wsUrl)
+    ws = new WebSocket(wsUrl, [`auth-${token}`])
 
     ws.onopen = () => {
       state.value = 'connected'

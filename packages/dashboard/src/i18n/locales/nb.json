@@ -898,7 +898,11 @@
       "viewAll": "Se alle",
       "activeServices": "Aktive tjenester",
       "nodes": "Noder",
-      "users": "Brukere"
+      "users": "Brukere",
+      "unresolvedIssues": "{count} uløste problemer",
+      "fatalCount": "{count} fatale",
+      "last24h": "{count} siste 24 timer",
+      "viewErrors": "Se feil"
     },
     "nodes": {
       "title": "Noder",

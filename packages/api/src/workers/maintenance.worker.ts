@@ -4,7 +4,7 @@ import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
 import { dockerService } from '../services/docker.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 
 interface HealthCheckData {
   type: 'health-check';
@@ -260,6 +260,12 @@ async function executeBackupSchedule(scheduleId: string): Promise<void> {
       .where(eq(backupSchedules.id, scheduleId));
   } catch (err) {
     logger.error({ err, scheduleId }, `Backup schedule ${scheduleId} failed`);
+    logToErrorTable({
+      level: 'error',
+      message: `Backup schedule ${scheduleId} failed: ${String(err)}`,
+      stack: err instanceof Error ? err.stack : undefined,
+      metadata: { scheduleId, worker: 'maintenance', task: 'backup' },
+    });
 
     try {
       await notificationService.create(schedule.accountId, {
@@ -353,6 +359,12 @@ async function executeScheduledDeletions(): Promise<void> {
       logger.info(`Account ${account.id} (${account.name}) permanently deleted after grace period`);
     } catch (err) {
       logger.error({ err, accountId: account.id }, 'Failed to execute scheduled account deletion');
+      logToErrorTable({
+        level: 'error',
+        message: `Account deletion failed: ${account.id}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        metadata: { accountId: account.id, worker: 'maintenance', task: 'account_deletion' },
+      });
     }
   }
 }
@@ -419,10 +431,10 @@ async function executeDatabaseBackup(): Promise<void> {
   await mkdir(backupDir, { recursive: true });
 
   /** Pipe a command's stdout through gzip into a file without using a shell. */
-  function pipeToGzip(cmd: string, args: string[], outFile: string, timeoutMs: number): Promise<void> {
+  function pipeToGzip(cmd: string, args: string[], outFile: string, timeoutMs: number, env?: Record<string, string>): Promise<void> {
     return new Promise((resolve, reject) => {
       let rejected = false;
-      const dump = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const dump = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: env ? { ...process.env, ...env } : undefined });
       const gzip = spawn('gzip', [], { stdio: ['pipe', 'pipe', 'pipe'] });
       const out = fsCreateWriteStream(outFile);
 
@@ -490,7 +502,7 @@ async function executeDatabaseBackup(): Promise<void> {
 
     const backupFile = `${backupDir}/fleet-pg-${timestamp}.sql.gz`;
     try {
-      await pipeToGzip('pg_dump', [databaseUrl], backupFile, 5 * 60 * 1000);
+      await pipeToGzip('pg_dump', ['--dbname', databaseUrl], backupFile, 5 * 60 * 1000);
 
       // Rotate old backups — keep last 30
       const { readdir, rm: rmFile } = await import('node:fs/promises');
@@ -509,6 +521,12 @@ async function executeDatabaseBackup(): Promise<void> {
       logger.info({ backupFile }, 'PostgreSQL database backup completed');
     } catch (err) {
       logger.error({ err }, 'PostgreSQL database backup failed');
+      logToErrorTable({
+        level: 'error',
+        message: `PostgreSQL database backup failed: ${String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        metadata: { worker: 'maintenance', task: 'db_backup', dialect: 'pg' },
+      });
     }
   } else if (dbDialect === 'mysql') {
     const databaseUrl = process.env['DATABASE_URL'];
@@ -519,21 +537,60 @@ async function executeDatabaseBackup(): Promise<void> {
 
     const backupFile = `${backupDir}/fleet-mysql-${timestamp}.sql.gz`;
     try {
-      await pipeToGzip('mysqldump', ['--single-transaction', databaseUrl], backupFile, 5 * 60 * 1000);
+      // Parse DATABASE_URL to pass credentials via env/flags instead of bare URL in process args
+      const dbUrl = new URL(databaseUrl);
+      const mysqlArgs = [
+        '--single-transaction',
+        '--host', dbUrl.hostname,
+        '--port', dbUrl.port || '3306',
+        '--user', decodeURIComponent(dbUrl.username),
+        dbUrl.pathname.slice(1), // database name
+      ];
+      const mysqlEnv = dbUrl.password ? { MYSQL_PWD: decodeURIComponent(dbUrl.password) } : undefined;
+      await pipeToGzip('mysqldump', mysqlArgs, backupFile, 5 * 60 * 1000, mysqlEnv);
       logger.info({ backupFile }, 'MySQL database backup completed');
     } catch (err) {
       logger.error({ err }, 'MySQL database backup failed');
+      logToErrorTable({
+        level: 'error',
+        message: `MySQL database backup failed: ${String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        metadata: { worker: 'maintenance', task: 'db_backup', dialect: 'mysql' },
+      });
     }
   } else {
-    // SQLite — just copy the file
+    // SQLite — use sqlite3 .backup for consistency (safe during concurrent writes)
     const dbPath = process.env['SQLITE_PATH'] ?? './data/fleet.db';
     const backupFile = `${backupDir}/fleet-sqlite-${timestamp}.db`;
     try {
-      const { copyFile } = await import('node:fs/promises');
-      await copyFile(dbPath, backupFile);
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('sqlite3', [dbPath, `.backup '${backupFile}'`], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stderr = '';
+        proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`sqlite3 backup failed (code ${code}): ${stderr}`));
+        });
+        proc.on('error', reject);
+      });
       logger.info({ backupFile }, 'SQLite database backup completed');
     } catch (err) {
-      logger.error({ err }, 'SQLite database backup failed');
+      // Fallback to file copy if sqlite3 CLI is not available
+      try {
+        const { copyFile } = await import('node:fs/promises');
+        await copyFile(dbPath, backupFile);
+        logger.info({ backupFile }, 'SQLite database backup completed (file copy fallback)');
+      } catch (copyErr) {
+        logger.error({ err: copyErr }, 'SQLite database backup failed');
+        logToErrorTable({
+          level: 'error',
+          message: `SQLite database backup failed: ${String(copyErr)}`,
+          stack: copyErr instanceof Error ? copyErr.stack : undefined,
+          metadata: { worker: 'maintenance', task: 'db_backup', dialect: 'sqlite' },
+        });
+      }
     }
   }
 }
@@ -612,6 +669,12 @@ async function checkStorageHealth(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Storage health check failed');
+    logToErrorTable({
+      level: 'error',
+      message: `Storage health check failed: ${String(err)}`,
+      stack: err instanceof Error ? err.stack : undefined,
+      metadata: { worker: 'maintenance', task: 'storage_health' },
+    });
   }
 }
 

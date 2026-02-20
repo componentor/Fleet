@@ -142,9 +142,20 @@ app.get('/health', (c) => {
   });
 });
 
-// ── Helper: verify JWT from WebSocket query param ──
-// NOTE: WebSocket connections require token in query params due to browser WS API limitations.
-// Tokens are short-lived (15m access tokens) to mitigate query param logging risks.
+// ── Helper: verify JWT from WebSocket subprotocol ──
+// Token is sent via WebSocket subprotocol (auth-<token>) to keep it out of server/proxy logs.
+// Fallback to query param for backwards compatibility.
+function extractWsToken(c: { req: { query: (k: string) => string | undefined; header: (k: string) => string | undefined } }): string | undefined {
+  // Prefer subprotocol: "auth-<jwt>"
+  const protocols = c.req.header('sec-websocket-protocol');
+  if (protocols) {
+    const authProto = protocols.split(',').map(p => p.trim()).find(p => p.startsWith('auth-'));
+    if (authProto) return authProto.slice(5); // strip "auth-" prefix
+  }
+  // Fallback to query param (deprecated)
+  return c.req.query('token');
+}
+
 async function verifyWsToken(token: string) {
   const jwtSecret = process.env['JWT_SECRET'];
   if (!jwtSecret) throw new Error('JWT_SECRET not set');
@@ -215,7 +226,7 @@ api.get(
   '/terminal/logs/:serviceId',
   upgradeWebSocket((c) => {
     const serviceId = c.req.param('serviceId');
-    const token = c.req.query('token');
+    const token = extractWsToken(c);
     const accountId = c.req.query('accountId');
     let logStream: Readable | null = null;
     let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -389,7 +400,7 @@ api.get(
   '/terminal/deploy/:deploymentId',
   upgradeWebSocket((c) => {
     const deploymentId = c.req.param('deploymentId');
-    const token = c.req.query('token');
+    const token = extractWsToken(c);
     const accountId = c.req.query('accountId');
     let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -579,7 +590,7 @@ api.get(
   '/terminal/:serviceId',
   upgradeWebSocket((c) => {
     const serviceId = c.req.param('serviceId');
-    const token = c.req.query('token');
+    const token = extractWsToken(c);
     const accountId = c.req.query('accountId');
     const requestedContainerId = c.req.query('containerId');
     let dockerStream: import('node:stream').Duplex | null = null;

@@ -83,7 +83,7 @@ export class StripeService {
     return getStripe().subscriptionItems.createUsageRecord(subscriptionItemId, {
       quantity,
       timestamp: Math.floor(Date.now() / 1000),
-      action: 'increment',
+      action: 'set',
     });
   }
 

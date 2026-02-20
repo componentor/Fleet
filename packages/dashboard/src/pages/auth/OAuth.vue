@@ -16,7 +16,7 @@ onMounted(async () => {
   // Token is passed in the URL fragment (#token=...) to keep it out of server logs/Referer headers.
   // Errors are still passed as query params since they're not sensitive.
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
-  const token = hashParams.get('token') || (route.query.token as string | undefined)
+  const token = hashParams.get('token')
 
   if (!token) {
     error.value = route.query.error as string || t('auth.noTokenReceived')

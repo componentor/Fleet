@@ -67,7 +67,6 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     localStorage.removeItem('fleet_user')
     sessionStorage.removeItem('fleet_impersonating')
-    sessionStorage.removeItem('fleet_original_token')
     sessionStorage.removeItem('fleet_original_account_id')
   }
 

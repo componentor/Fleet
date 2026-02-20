@@ -898,7 +898,11 @@
       "viewAll": "View all",
       "activeServices": "Active Services",
       "nodes": "Nodes",
-      "users": "Users"
+      "users": "Users",
+      "unresolvedIssues": "{count} unresolved issue(s)",
+      "fatalCount": "{count} fatal",
+      "last24h": "{count} in the last 24 hours",
+      "viewErrors": "View Errors"
     },
     "nodes": {
       "title": "Nodes",

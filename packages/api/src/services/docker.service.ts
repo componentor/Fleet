@@ -814,20 +814,22 @@ export class DockerService {
 }
 
 function parseDelay(delay: string): number {
-  const match = delay.match(/^(\d+)(ms|s|m|h)?$/);
+  const match = delay.match(/^(\d+(?:\.\d+)?)(ns|us|ms|s|m|h)?$/);
   if (!match) return 10_000_000_000; // default 10s in nanoseconds
 
-  const value = parseInt(match[1]!, 10);
+  const value = parseFloat(match[1]!);
   const unit = match[2] ?? 's';
 
   const multipliers: Record<string, number> = {
+    ns: 1,
+    us: 1_000,
     ms: 1_000_000,
     s: 1_000_000_000,
     m: 60_000_000_000,
     h: 3_600_000_000_000,
   };
 
-  return value * (multipliers[unit] ?? 1_000_000_000);
+  return Math.round(value * (multipliers[unit] ?? 1_000_000_000));
 }
 
 export const dockerService = new DockerService();

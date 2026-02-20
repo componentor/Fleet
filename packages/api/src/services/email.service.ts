@@ -240,11 +240,10 @@ async function checkEmailRateLimit(to: string): Promise<boolean> {
   try {
     const valkey = await getValkey();
     if (valkey) {
+      // Use single SET NX EX + INCR to avoid race where crash between INCR and EXPIRE
+      // leaves a key with no TTL, permanently blocking emails to this recipient
+      await valkey.set(key, '0', 'EX', EMAIL_RATE_LIMIT_WINDOW_S, 'NX');
       const count = await valkey.incr(key);
-      if (count === 1) {
-        // First email in window — set TTL
-        await valkey.expire(key, EMAIL_RATE_LIMIT_WINDOW_S);
-      }
       return count <= EMAIL_RATE_LIMIT_MAX;
     }
   } catch {

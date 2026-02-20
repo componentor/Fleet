@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { LayoutDashboard, Users, Server, Activity, Loader2, ArrowRight } from 'lucide-vue-next'
+import { LayoutDashboard, Users, Server, Activity, Loader2, ArrowRight, AlertTriangle, Bug } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -52,6 +52,8 @@ async function fetchStats() {
   }
 }
 
+const errorStats = computed(() => stats.value?.errors ?? { unresolved: 0, last24h: 0, fatal: 0 })
+
 const statCards = computed(() => [
   { label: t('super.dashboard.totalAccounts'), value: String(animatedAccounts.value), icon: Users, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
   { label: t('super.dashboard.activeServices'), value: `${animatedRunning.value} / ${animatedServices.value}`, icon: Activity, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
@@ -98,6 +100,38 @@ onMounted(() => {
               <p class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">{{ stat.value }}</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Error/Issues banner -->
+      <div v-if="errorStats.unresolved > 0" class="bg-white dark:bg-gray-800 rounded-xl border shadow-sm p-5 mb-8 transition-all duration-200 hover:shadow-md"
+        :class="errorStats.fatal > 0
+          ? 'border-red-300 dark:border-red-700'
+          : 'border-yellow-300 dark:border-yellow-700'"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <div :class="[errorStats.fatal > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-yellow-50 dark:bg-yellow-900/20', 'p-3 rounded-lg']">
+              <AlertTriangle :class="[errorStats.fatal > 0 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400', 'w-6 h-6']" />
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                {{ t('super.dashboard.unresolvedIssues', { count: errorStats.unresolved }) }}
+              </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span v-if="errorStats.fatal > 0" class="text-red-600 dark:text-red-400 font-medium mr-2">{{ t('super.dashboard.fatalCount', { count: errorStats.fatal }) }}</span>
+                {{ t('super.dashboard.last24h', { count: errorStats.last24h }) }}
+              </p>
+            </div>
+          </div>
+          <RouterLink to="/admin/errors" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            :class="errorStats.fatal > 0
+              ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40'
+              : 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/40'"
+          >
+            <Bug class="w-4 h-4" />
+            {{ t('super.dashboard.viewErrors') }}
+          </RouterLink>
         </div>
       </div>
 

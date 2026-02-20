@@ -153,6 +153,19 @@ settings.patch('/', settingsRateLimit, requireAdmin, async (c) => {
 
   if (user.isSuper && !accountId) {
     // Platform settings — only super admins
+    // Allowlist for platform setting keys to prevent arbitrary setting injection
+    const ALLOWED_PLATFORM_PREFIXES = [
+      'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
+      'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:',
+    ];
+    const disallowedPlatformKeys = entries
+      .map(([k]) => k)
+      .filter((k) => !ALLOWED_PLATFORM_PREFIXES.some((p) => k.startsWith(p)));
+
+    if (disallowedPlatformKeys.length > 0) {
+      return c.json({ error: 'Disallowed platform setting keys', keys: disallowedPlatformKeys }, 403);
+    }
+
     for (const [key, value] of entries) {
       await upsertSetting(key, value);
     }
@@ -323,7 +336,7 @@ settings.get('/registrar', requireAdmin, async (c) => {
     provider: registrar.provider,
     config: registrar.config,
     // Mask the API key
-    apiKeyMasked: registrar.apiKey ? `${registrar.apiKey.slice(0, 4)}...${registrar.apiKey.slice(-4)}` : null,
+    apiKeySet: !!registrar.apiKey,
   });
 });
 

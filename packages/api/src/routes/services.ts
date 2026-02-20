@@ -9,7 +9,7 @@ import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { buildService } from '../services/build.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { uploadService } from '../services/upload.service.js';
@@ -164,8 +164,16 @@ const createServiceSchema = z.object({
   })).default([]),
   domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
   sslEnabled: z.boolean().default(true),
-  nodeConstraint: z.string().nullable().optional(),
-  placementConstraints: z.array(z.string()).default([]),
+  nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
+  placementConstraints: z.array(
+    z.string().max(200).refine(
+      (s) => {
+        const lower = s.toLowerCase();
+        return !lower.includes('node.role') && !lower.includes('node.id') && !lower.includes('node.hostname');
+      },
+      { message: 'Constraints on node.role, node.id, and node.hostname are not allowed' },
+    ),
+  ).default([]),
   updateParallelism: z.number().int().min(1).default(1),
   updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').default('10s'),
   rollbackOnFailure: z.boolean().default(true),
@@ -500,8 +508,16 @@ const updateServiceSchema = z.object({
   })).optional(),
   domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
   sslEnabled: z.boolean().optional(),
-  placementConstraints: z.array(z.string()).optional(),
-  nodeConstraint: z.string().nullable().optional(),
+  placementConstraints: z.array(
+    z.string().max(200).refine(
+      (s) => {
+        const lower = s.toLowerCase();
+        return !lower.includes('node.role') && !lower.includes('node.id') && !lower.includes('node.hostname');
+      },
+      { message: 'Constraints on node.role, node.id, and node.hostname are not allowed' },
+    ),
+  ).optional(),
+  nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
   updateParallelism: z.number().int().min(1).optional(),
   updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
   rollbackOnFailure: z.boolean().optional(),
@@ -668,6 +684,14 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
       });
     } catch (err) {
       logger.error({ err }, 'Docker service update failed — DB not updated');
+      logToErrorTable({
+        level: 'error',
+        message: `Docker service update failed: ${String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        method: 'PATCH',
+        path: c.req.path,
+        statusCode: 500,
+      });
       return c.json({ error: 'Docker Swarm update failed — no changes applied' }, 500);
     }
   }
@@ -1006,6 +1030,14 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
       .where(eq(services.id, serviceId));
   } catch (err) {
     logger.error({ err }, 'Redeployment failed');
+    logToErrorTable({
+      level: 'error',
+      message: `Redeployment failed: ${String(err)}`,
+      stack: err instanceof Error ? err.stack : undefined,
+      method: 'POST',
+      path: c.req.path,
+      statusCode: 500,
+    });
 
     await db
       .update(deployments)

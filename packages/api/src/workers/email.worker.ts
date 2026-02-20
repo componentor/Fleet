@@ -1,6 +1,6 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
 import { emailService } from '../services/email.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 
 export interface EmailJobData {
   templateSlug: string;
@@ -15,6 +15,12 @@ async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     await emailService.sendTemplateEmail(templateSlug, to, variables, accountId);
   } catch (err) {
     logger.error({ err, jobId: job.id, to, templateSlug }, 'Email job failed');
+    logToErrorTable({
+      level: 'error',
+      message: `Email delivery failed: ${templateSlug} to ${to}`,
+      stack: err instanceof Error ? err.stack : undefined,
+      metadata: { templateSlug, to, jobId: job.id, worker: 'email' },
+    });
     throw err; // Re-throw so BullMQ retries
   }
 }

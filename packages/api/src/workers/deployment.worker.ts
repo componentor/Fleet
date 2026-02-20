@@ -1,11 +1,11 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull } from '@fleet/db';
+import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull, inArray } from '@fleet/db';
 import { buildService, scrubSecrets } from '../services/build.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from './email.worker.js';
@@ -52,35 +52,41 @@ export interface DeploymentJobData {
 }
 
 async function getGitHubTokenForService(accountId: string): Promise<string | null> {
+  // Find a GitHub OAuth token from a user who is a member of this account
+  const accountMembers = await db.query.userAccounts.findMany({
+    where: eq(userAccounts.accountId, accountId),
+    columns: { userId: true },
+  });
+
+  if (accountMembers.length === 0) return null;
+
+  const memberUserIds = accountMembers.map((m) => m.userId);
+
   const result = await db.query.oauthProviders.findFirst({
-    where: eq(oauthProviders.provider, 'github'),
-    with: {
-      user: {
-        with: {
-          userAccounts: true,
-        },
-      },
-    },
+    where: and(
+      eq(oauthProviders.provider, 'github'),
+      inArray(oauthProviders.userId, memberUserIds),
+    ),
   });
 
   if (!result?.accessToken) return null;
 
-  const hasAccess = result.user.userAccounts.some(
-    (ua) => ua.accountId === accountId,
-  );
-
-  return hasAccess ? decrypt(result.accessToken) : null;
+  return decrypt(result.accessToken);
 }
 
 type ProgressStep = 'queued' | 'cloning' | 'building' | 'pushing' | 'deploying' | 'health_check' | 'succeeded' | 'failed';
 
 // Cached Valkey client — resolved once, reused for all publishes.
-// Avoids ~10,000 async getValkey() calls/sec at 1000 concurrent deploys.
+// Re-resolves if connection drops (TTL-based refresh every 60s).
 let cachedValkey: Awaited<ReturnType<typeof getValkey>> = undefined as any;
+let valkeyResolvedAt = 0;
+const VALKEY_CACHE_TTL_MS = 60_000;
 
 async function getValkeyClient() {
-  if (cachedValkey !== undefined) return cachedValkey;
+  const now = Date.now();
+  if (cachedValkey !== undefined && (now - valkeyResolvedAt) < VALKEY_CACHE_TTL_MS) return cachedValkey;
   cachedValkey = await getValkey();
+  valkeyResolvedAt = now;
   return cachedValkey;
 }
 
@@ -389,6 +395,12 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     // Catch-all: ensure deployment is NEVER left stuck at "building" on unexpected errors
     // (e.g. DB connection failure during setup, import errors, etc.)
     logger.error({ err: outerErr, deploymentId }, 'Deployment failed with unhandled error');
+    logToErrorTable({
+      level: 'error',
+      message: `Deployment ${deploymentId} failed: ${String(outerErr)}`,
+      stack: outerErr instanceof Error ? outerErr.stack : undefined,
+      metadata: { deploymentId, worker: 'deployment' },
+    });
     try {
       const current = await db.query.deployments.findFirst({
         where: eq(deployments.id, deploymentId),
@@ -419,6 +431,6 @@ export async function processDeploymentInline(data: DeploymentJobData): Promise<
 export function createDeploymentWorker(connection: ConnectionOptions): Worker {
   return new Worker<DeploymentJobData>('fleet-deployment', processDeployment, {
     connection,
-    concurrency: 50,
+    concurrency: 10,
   });
 }

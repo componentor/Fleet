@@ -46,7 +46,7 @@ export function scrubSecrets(log: string): string {
 }
 
 export class BuildService {
-  private activeBuilds = new Map<string, { aborted: boolean; info: BuildInfo }>();
+  private activeBuilds = new Map<string, { aborted: boolean; info: BuildInfo; processes: Set<import('node:child_process').ChildProcess> }>();
   private events = new EventEmitter();
 
   async buildImage(opts: {
@@ -77,7 +77,7 @@ export class BuildService {
       finishedAt: null,
     };
 
-    this.activeBuilds.set(buildId, { aborted: false, info });
+    this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
 
     // Run the build pipeline asynchronously
     this.runBuildPipeline(buildId, workDir, opts.cloneUrl, opts.branch, dockerfile, fullImageTag, opts.buildArgs ?? {}, info, opts.generatedDockerfile)
@@ -211,6 +211,9 @@ export class BuildService {
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Track process for cancellation
+      const build = this.activeBuilds.get(buildId);
+      if (build) build.processes.add(proc);
       let output = '';
       let lastEmit = 0;
       const THROTTLE_MS = 100;
@@ -272,6 +275,7 @@ export class BuildService {
       }, timeout) : null;
 
       proc.on('close', (code) => {
+        if (build) build.processes.delete(proc);
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
@@ -284,6 +288,7 @@ export class BuildService {
       });
 
       proc.on('error', (err) => {
+        if (build) build.processes.delete(proc);
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
@@ -318,7 +323,7 @@ export class BuildService {
       finishedAt: null,
     };
 
-    this.activeBuilds.set(buildId, { aborted: false, info });
+    this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
 
     // Copy source to temp build dir, then build + push
     this.runDirectoryBuildPipeline(buildId, workDir, opts.sourceDir, dockerfile, fullImageTag, opts.buildArgs ?? {}, info, opts.generatedDockerfile)
@@ -434,7 +439,7 @@ export class BuildService {
       finishedAt: null,
     };
 
-    this.activeBuilds.set(buildId, { aborted: false, info });
+    this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
 
     this.runComposeBuildPipeline(buildId, workDir, opts.sourceDir, composeFile, fullImageTag, info)
       .catch((err) => {
@@ -536,6 +541,13 @@ export class BuildService {
     build.info.status = 'cancelled';
     build.info.log += '\n[cancelled] Build cancelled by user.\n';
     build.info.finishedAt = new Date();
+
+    // Kill all running child processes for this build
+    for (const proc of build.processes) {
+      try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+    }
+    build.processes.clear();
+
     this.activeBuilds.delete(buildId);
     this.events.emit(`build:${buildId}`, build.info);
     return true;
