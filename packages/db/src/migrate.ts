@@ -76,8 +76,8 @@ async function runMysqlMigrations(url: string): Promise<{ applied: number }> {
   const db = drizzle(pool);
 
   try {
-    // Use MySQL named lock for concurrency safety
-    await db.execute(drizzleSql`SELECT GET_LOCK('fleet_migrate', 30)`);
+    // Use MySQL named lock for concurrency safety (5 min timeout for large migrations)
+    await db.execute(drizzleSql`SELECT GET_LOCK('fleet_migrate', 300)`);
 
     try {
       let beforeCount = 0;

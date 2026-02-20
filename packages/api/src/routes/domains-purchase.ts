@@ -6,16 +6,22 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { registrarService } from '../services/registrar.service.js';
 import { stripeService } from '../services/stripe.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
+
+const searchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 20, keyPrefix: 'domain-search' });
 
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
 function validateRedirectUrl(url: string): boolean {
   const appUrl = process.env['APP_URL'];
   if (!appUrl) return process.env['NODE_ENV'] !== 'production'; // Reject in production if APP_URL not set
-  if (url.startsWith('/')) return true; // Relative path
+  // Only allow relative paths starting with / (but not // which is protocol-relative)
+  if (url.startsWith('/') && !url.startsWith('//')) return true;
   try {
     const parsed = new URL(url);
     const app = new URL(appUrl);
+    // Only allow http/https protocols (block javascript:, data:, etc.)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     return parsed.origin === app.origin;
   } catch {
     return false;
@@ -36,7 +42,7 @@ domainPurchase.use('*', tenantMiddleware);
 // ────────────────────────────────────────────────────────────────────────────
 // GET /search — search available domains (with TLD pricing overlay)
 // ────────────────────────────────────────────────────────────────────────────
-domainPurchase.get('/search', async (c) => {
+domainPurchase.get('/search', searchRateLimit, async (c) => {
   const query = c.req.query('q');
 
   if (!query || query.trim().length === 0) {
@@ -209,6 +215,8 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
 
   const { domain, years, contact } = parsed.data;
 
+  logger.info({ domain, years, accountId, initiatedBy: user.userId }, 'Direct domain registration initiated by super admin (bypasses Stripe)');
+
   try {
     const registration = await registrarService.registerDomain(
       domain.toLowerCase(),
@@ -217,9 +225,10 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
       accountId,
     );
 
+    logger.info({ domain, accountId, registrationId: registration.id, initiatedBy: user.userId }, 'Direct domain registration completed');
     return c.json(registration, 201);
   } catch (err) {
-    logger.error({ err }, 'Domain registration failed');
+    logger.error({ err, domain, accountId, initiatedBy: user.userId }, 'Direct domain registration failed');
     return c.json(
       {
         error: 'Domain registration failed',

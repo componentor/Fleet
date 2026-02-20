@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { dockerService } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
+import { db, platformSettings, eq } from '@fleet/db';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 const IMAGE_PREFIX = process.env['FLEET_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
@@ -165,6 +166,12 @@ export class UpdateService {
       throw new Error(`Cannot start update: system is currently ${this.state.status}`);
     }
 
+    // Distributed lock: prevent concurrent updates across API instances
+    const acquired = await this.acquireUpdateLock();
+    if (!acquired) {
+      throw new Error('Another update is already in progress (distributed lock held)');
+    }
+
     this.state.status = 'backing-up';
     this.state.targetVersion = targetVersion;
     this.state.log = '';
@@ -176,15 +183,24 @@ export class UpdateService {
     const imageTag = targetVersion.startsWith('v') ? targetVersion.slice(1) : targetVersion;
 
     try {
-      // 0. Pre-update database backup
+      // 0. Pre-update backup (required in production)
       this.appendLog('Creating pre-update database backup...');
       try {
         const backup = await backupService.createBackup('system', undefined, 'nfs');
         this.state.preUpdateBackupId = backup.id;
-        this.appendLog(`Pre-update backup created: ${backup.id}`);
+        this.appendLog(`Pre-update backup queued: ${backup.id}`);
+
+        // Wait for backup to actually complete before proceeding
+        this.appendLog('Waiting for backup to complete...');
+        await this.waitForBackupCompletion(backup.id);
+        this.appendLog('Pre-update backup verified as completed.');
       } catch (err) {
+        if (process.env['NODE_ENV'] === 'production') {
+          this.appendLog(`FATAL: Pre-update backup failed: ${String(err)}`);
+          throw new Error(`Cannot proceed with update — pre-update backup failed: ${String(err)}`);
+        }
         this.appendLog(`Warning: Could not create pre-update backup: ${String(err)}`);
-        this.appendLog('Proceeding without backup (migrations are transactional).');
+        this.appendLog('Proceeding without backup (non-production, migrations are transactional).');
       }
 
       // 1. Snapshot current image tags (with digests) for rollback
@@ -192,25 +208,27 @@ export class UpdateService {
       this.appendLog('Snapshotting current service images for rollback...');
       await this.snapshotCurrentImages();
 
+      // Verify all services were snapshotted
+      if (this.state.previousImageTags.size < FLEET_SERVICES.length) {
+        const missing = FLEET_SERVICES.filter((s) => !this.state.previousImageTags.has(s));
+        this.appendLog(`Warning: Could not snapshot all services. Missing: ${missing.join(', ')}`);
+        if (process.env['NODE_ENV'] === 'production') {
+          throw new Error(`Cannot proceed — failed to snapshot services for rollback: ${missing.join(', ')}`);
+        }
+      }
+
       // 2. Fetch release checksums from the release body
       this.appendLog('Fetching release checksums...');
       const release = await this.fetchRelease(targetVersion);
       const expectedChecksums = release?.checksums ?? {};
 
-      // 3. Pull new images
-      this.appendLog(`Pulling new images (tag: ${imageTag})...`);
-      await this.pullImages(imageTag);
-
-      // 4. Verify image digests against release checksums
+      // 3. Validate checksums are present (required for production)
       this.state.status = 'verifying-images';
-      if (Object.keys(expectedChecksums).length > 0) {
-        this.appendLog('Verifying image digests against release checksums...');
-        await this.verifyImageDigests(imageTag, expectedChecksums);
-        this.appendLog('Image digest verification passed.');
-      } else {
+      const hasChecksums = Object.keys(expectedChecksums).length > 0;
+      if (!hasChecksums) {
         const skipVerify = process.env['SKIP_UPDATE_DIGEST_VERIFICATION'] === '1';
         if (skipVerify) {
-          this.appendLog('WARNING: No checksums in release notes — digest verification skipped (SKIP_UPDATE_DIGEST_VERIFICATION=1).');
+          this.appendLog('WARNING: No checksums in release notes — digest verification will be skipped.');
           this.appendLog('  This is NOT recommended for production deployments.');
         } else {
           throw new Error(
@@ -218,9 +236,11 @@ export class UpdateService {
             'Add a "## Checksums" section to release notes, or set SKIP_UPDATE_DIGEST_VERIFICATION=1 to bypass (NOT recommended).'
           );
         }
+      } else {
+        this.appendLog(`Found checksums for ${Object.keys(expectedChecksums).length} image(s) — will verify after each service update.`);
       }
 
-      // 5. Run database migrations (transactional + advisory-locked)
+      // 4. Run database migrations (transactional + advisory-locked)
       this.state.status = 'migrating';
       this.appendLog('Running database migrations (transactional)...');
       try {
@@ -231,10 +251,25 @@ export class UpdateService {
         throw new Error(`Migration failed — database was NOT modified: ${String(err)}`);
       }
 
+      // 5. Verify database health after migrations, before updating services
+      this.appendLog('Verifying database health post-migration...');
+      const { verifyDatabase } = await import('@fleet/db/migrate');
+      const dbHealth = await verifyDatabase();
+      if (!dbHealth.ok) {
+        throw new Error(`Database health check failed after migrations: ${dbHealth.error ?? 'unknown error'}. Rolling back is safe — services are still on old version.`);
+      }
+      this.appendLog('Database health verified — schema is accessible.');
+
       // 6. Rolling update each service (one at a time, start-first)
+      //    Digest verification happens AFTER each update, when Docker has the new image
       this.state.status = 'updating';
       for (const serviceName of FLEET_SERVICES) {
         await this.updateSwarmService(serviceName, imageTag);
+
+        // Verify digest after Docker pulled and applied the new image
+        if (hasChecksums) {
+          await this.verifyServiceDigest(serviceName, imageTag, expectedChecksums);
+        }
       }
 
       // 7. Run seeders (idempotent, non-fatal)
@@ -247,10 +282,30 @@ export class UpdateService {
         this.appendLog(`Seeder warning: ${String(err)} (non-fatal)`);
       }
 
-      // 8. Verify all services are healthy
+      // 8. Verify all services are healthy — auto-rollback on failure
       this.state.status = 'verifying';
       this.appendLog('Verifying service health post-update...');
-      await this.verifyServiceHealth();
+      try {
+        await this.verifyServiceHealth();
+      } catch (healthErr) {
+        this.appendLog(`Health check FAILED: ${String(healthErr)}`);
+        this.appendLog('Initiating automatic rollback due to health check failure...');
+        try {
+          await this.rollback();
+          throw new Error(`Update rolled back automatically — health check failed: ${String(healthErr)}`);
+        } catch (rollbackErr) {
+          if (String(rollbackErr).includes('rolled back automatically')) {
+            throw rollbackErr;
+          }
+          this.appendLog(`Automatic rollback also failed: ${String(rollbackErr)}`);
+          throw new Error(
+            `CRITICAL: Health check failed AND rollback failed. Manual intervention required.\n` +
+            `Health error: ${String(healthErr)}\n` +
+            `Rollback error: ${String(rollbackErr)}\n` +
+            (this.state.preUpdateBackupId ? `Pre-update backup: ${this.state.preUpdateBackupId}` : 'No backup available.'),
+          );
+        }
+      }
 
       // 9. Done
       this.state.currentVersion = targetVersion;
@@ -272,6 +327,8 @@ export class UpdateService {
       this.state.finishedAt = new Date();
       this.events.emit('update', this.state);
       throw err;
+    } finally {
+      await this.releaseUpdateLock();
     }
   }
 
@@ -333,6 +390,92 @@ export class UpdateService {
   }
 
   // ── Private helpers ───────────────────────────────────────────
+
+  /**
+   * Acquire a distributed update lock using the platformSettings table.
+   * This prevents multiple API instances from running updates concurrently.
+   */
+  private async acquireUpdateLock(): Promise<boolean> {
+    const LOCK_KEY = 'system:update_lock';
+    try {
+      const existing = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, LOCK_KEY),
+      });
+
+      if (existing) {
+        const lockData = existing.value as { lockedAt?: string; lockedBy?: string } | null;
+        if (lockData?.lockedAt) {
+          // Check if lock is stale (older than 30 minutes — update should never take that long)
+          const lockedAt = new Date(lockData.lockedAt).getTime();
+          const staleThreshold = 30 * 60 * 1000;
+          if (Date.now() - lockedAt < staleThreshold) {
+            return false; // Lock is still valid
+          }
+          this.appendLog('Found stale update lock — overriding.');
+        }
+        await db.update(platformSettings)
+          .set({ value: { lockedAt: new Date().toISOString(), lockedBy: process.env['HOSTNAME'] ?? 'unknown' }, updatedAt: new Date() })
+          .where(eq(platformSettings.id, existing.id));
+      } else {
+        await db.insert(platformSettings).values({
+          key: LOCK_KEY,
+          value: { lockedAt: new Date().toISOString(), lockedBy: process.env['HOSTNAME'] ?? 'unknown' },
+        });
+      }
+      return true;
+    } catch (err) {
+      logger.error({ err }, 'Failed to acquire update lock');
+      return false;
+    }
+  }
+
+  private async releaseUpdateLock(): Promise<void> {
+    const LOCK_KEY = 'system:update_lock';
+    try {
+      const existing = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, LOCK_KEY),
+      });
+      if (existing) {
+        await db.update(platformSettings)
+          .set({ value: null, updatedAt: new Date() })
+          .where(eq(platformSettings.id, existing.id));
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to release update lock');
+    }
+  }
+
+  /**
+   * Poll backup status until it completes or fails.
+   * Timeout after 5 minutes — backups should not take longer.
+   */
+  private async waitForBackupCompletion(backupId: string, timeoutMs = 300_000): Promise<void> {
+    const { backups, eq: eqOp } = await import('@fleet/db');
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeoutMs) {
+      const backup = await db.query.backups.findFirst({
+        where: eqOp(backups.id, backupId),
+      });
+
+      if (!backup) {
+        throw new Error(`Backup ${backupId} not found in database`);
+      }
+
+      if (backup.status === 'completed') {
+        return;
+      }
+
+      if (backup.status === 'failed') {
+        throw new Error(`Pre-update backup ${backupId} failed`);
+      }
+
+      // Still pending or in_progress — wait and retry
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+
+    throw new Error(`Pre-update backup ${backupId} timed out after ${timeoutMs / 1000}s`);
+  }
 
   private appendLog(msg: string) {
     const ts = new Date().toISOString();
@@ -471,83 +614,64 @@ export class UpdateService {
     }
   }
 
-  private async pullImages(imageTag: string): Promise<void> {
-    const images = [
-      `${IMAGE_PREFIX}/fleet-api:${imageTag}`,
-      `${IMAGE_PREFIX}/fleet-dashboard:${imageTag}`,
-      `${IMAGE_PREFIX}/fleet-ssh-gateway:${imageTag}`,
-      `${IMAGE_PREFIX}/fleet-agent:${imageTag}`,
-    ];
-
-    for (const image of images) {
-      this.appendLog(`  Pulling ${image}...`);
-      // Docker Swarm will pull the image when the service is updated.
-      // We log the intent here; the actual pull + digest check happens at update time.
-      this.appendLog(`  ${image} will be pulled during service update.`);
-    }
-  }
+  private static readonly IMAGE_MAP: Record<string, string> = {
+    fleet_api: 'fleet-api',
+    fleet_dashboard: 'fleet-dashboard',
+    'fleet_ssh-gateway': 'fleet-ssh-gateway',
+    fleet_agent: 'fleet-agent',
+  };
 
   /**
-   * Verify that the image digests reported by Docker match what was published
-   * in the GitHub release. This prevents supply-chain attacks where a registry
-   * image is tampered with after publication.
+   * Verify a single service's image digest AFTER Docker has pulled and applied it.
+   * This prevents supply-chain attacks where a registry image is tampered with.
    */
-  private async verifyImageDigests(
+  private async verifyServiceDigest(
+    serviceName: string,
     imageTag: string,
     expectedChecksums: Record<string, string>,
   ): Promise<void> {
-    for (const serviceName of FLEET_SERVICES) {
-      const imageMap: Record<string, string> = {
-        fleet_api: `${IMAGE_PREFIX}/fleet-api:${imageTag}`,
-        fleet_dashboard: `${IMAGE_PREFIX}/fleet-dashboard:${imageTag}`,
-        'fleet_ssh-gateway': `${IMAGE_PREFIX}/fleet-ssh-gateway:${imageTag}`,
-        fleet_agent: `${IMAGE_PREFIX}/fleet-agent:${imageTag}`,
-      };
+    const imageBase = UpdateService.IMAGE_MAP[serviceName];
+    if (!imageBase) return;
 
-      const imageName = imageMap[serviceName];
-      if (!imageName) continue;
+    const imageName = `${IMAGE_PREFIX}/${imageBase}:${imageTag}`;
+    const expectedDigest = expectedChecksums[imageName];
+    if (!expectedDigest) {
+      this.appendLog(`  No checksum for ${imageName} — skipping digest verification.`);
+      return;
+    }
 
-      const expectedDigest = expectedChecksums[imageName];
-      if (!expectedDigest) {
-        this.appendLog(`  No checksum for ${imageName} — skipping verification.`);
-        continue;
-      }
+    try {
+      const swarmServices = await dockerService.listServices({
+        name: [serviceName],
+      });
 
-      // After a service update, Docker stores the image reference as image@sha256:digest
-      // We check the current image reference to extract the digest
-      try {
-        const swarmServices = await dockerService.listServices({
-          name: [serviceName],
-        });
+      if (swarmServices.length === 0) return;
 
-        if (swarmServices.length > 0) {
-          const svc = swarmServices[0]!;
-          const spec = svc.Spec as { TaskTemplate?: { ContainerSpec?: { Image?: string } } };
-          const imageRef = spec?.TaskTemplate?.ContainerSpec?.Image ?? '';
+      const svc = swarmServices[0]!;
+      const spec = svc.Spec as { TaskTemplate?: { ContainerSpec?: { Image?: string } } };
+      const imageRef = spec?.TaskTemplate?.ContainerSpec?.Image ?? '';
 
-          // Image ref format: ghcr.io/componentor/fleet-api:tag@sha256:abc123...
-          const digestMatch = imageRef.match(/@(sha256:[a-f0-9]{64})/);
-          if (digestMatch) {
-            const actualDigest = digestMatch[1]!;
-            if (actualDigest !== expectedDigest) {
-              throw new Error(
-                `Image digest mismatch for ${imageName}!\n` +
-                `  Expected: ${expectedDigest}\n` +
-                `  Actual:   ${actualDigest}\n` +
-                `This could indicate a supply-chain attack. Aborting update.`,
-              );
-            }
-            this.appendLog(`  ${serviceName}: digest verified (${actualDigest.slice(0, 19)}...)`);
-          } else {
-            this.appendLog(`  ${serviceName}: no digest in image reference — will verify post-update.`);
-          }
+      // After update, Docker stores: image:tag@sha256:digest
+      const digestMatch = imageRef.match(/@(sha256:[a-f0-9]{64})/);
+      if (digestMatch) {
+        const actualDigest = digestMatch[1]!;
+        if (actualDigest !== expectedDigest) {
+          throw new Error(
+            `Image digest mismatch for ${imageName}!\n` +
+            `  Expected: ${expectedDigest}\n` +
+            `  Actual:   ${actualDigest}\n` +
+            `This could indicate a supply-chain attack. Initiating rollback.`,
+          );
         }
-      } catch (err) {
-        if (err instanceof Error && err.message.includes('digest mismatch')) {
-          throw err;
-        }
-        this.appendLog(`  Warning: could not verify digest for ${serviceName}: ${String(err)}`);
+        this.appendLog(`  ${serviceName}: digest verified post-update (${actualDigest.slice(0, 19)}...)`);
+      } else {
+        this.appendLog(`  ${serviceName}: no digest in image reference after update — Docker may not have resolved it yet.`);
       }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('digest mismatch')) {
+        throw err; // Re-throw digest mismatches — these are critical
+      }
+      this.appendLog(`  Warning: could not verify digest for ${serviceName}: ${String(err)}`);
     }
   }
 

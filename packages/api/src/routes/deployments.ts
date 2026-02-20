@@ -53,14 +53,21 @@ async function enqueueOrRunDeployment(data: DeploymentJobData) {
     import('../workers/deployment.worker.js').then(({ processDeploymentInline }) =>
       processDeploymentInline(data).catch(async (err) => {
         logger.error({ err, deploymentId: data.deploymentId }, `Build failed for deployment ${data.deploymentId}`);
-        // Ensure deployment & service are marked as failed
+        // Safety net: only mark as failed if the worker didn't already handle it
+        // (the worker's own catch handlers write the detailed build log — don't overwrite)
         try {
-          await db.update(deployments)
-            .set({ status: 'failed', log: `Deployment failed: ${String(err)}` })
-            .where(eq(deployments.id, data.deploymentId));
-          await db.update(services)
-            .set({ status: 'failed', updatedAt: new Date() })
-            .where(eq(services.id, data.serviceId));
+          const current = await db.query.deployments.findFirst({
+            where: eq(deployments.id, data.deploymentId),
+            columns: { status: true },
+          });
+          if (current && current.status !== 'succeeded' && current.status !== 'failed') {
+            await db.update(deployments)
+              .set({ status: 'failed', log: `Deployment failed: ${String(err)}`, completedAt: new Date() })
+              .where(eq(deployments.id, data.deploymentId));
+            await db.update(services)
+              .set({ status: 'failed', updatedAt: new Date() })
+              .where(eq(services.id, data.serviceId));
+          }
         } catch (dbErr) {
           logger.error({ err: dbErr }, 'Failed to mark deployment as failed in DB');
         }

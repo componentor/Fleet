@@ -124,6 +124,9 @@ export class StripeService {
     return getStripe().checkout.sessions.create({
       customer: customerId,
       mode: 'payment',
+      payment_intent_data: {
+        capture_method: 'manual', // Authorize only — capture after registrar confirms
+      },
       line_items: [
         {
           price_data: {
@@ -289,6 +292,21 @@ export class StripeService {
     paymentMethodId: string,
   ): Promise<Stripe.PaymentMethod> {
     return getStripe().paymentMethods.detach(paymentMethodId);
+  }
+
+  /**
+   * Capture a previously authorized payment intent (e.g., after domain registration succeeds).
+   */
+  async capturePaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
+    return getStripe().paymentIntents.capture(paymentIntentId);
+  }
+
+  /**
+   * Cancel a previously authorized payment intent (e.g., when domain registration fails).
+   * Releases the hold on the customer's card — no charge, no refund fees.
+   */
+  async cancelPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
+    return getStripe().paymentIntents.cancel(paymentIntentId);
   }
 
   /**

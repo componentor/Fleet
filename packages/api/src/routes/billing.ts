@@ -792,13 +792,49 @@ billing.post('/webhook', async (c) => {
       };
 
       if (session.metadata?.type === 'domain_registration') {
+        // With manual capture, payment_status is 'unpaid' until we capture.
+        // The authorization (hold) is confirmed by checkout completing.
+        const domain = session.metadata.domain!;
+        const accountId = session.metadata.accountId!;
+        const paymentIntentId = session.payment_intent as string;
+
         try {
           const { registrarService } = await import('../services/registrar.service.js');
           const { domainRegistrations: domRegTable } = await import('@fleet/db');
 
+          // Idempotency: check if this domain is already registered for this account
+          const existingRegistration = await db.query.domainRegistrations.findFirst({
+            where: and(
+              eq(domRegTable.domain, domain),
+              eq(domRegTable.accountId, accountId),
+            ),
+          });
+
+          if (existingRegistration) {
+            logger.warn({ domain, accountId, registrationId: existingRegistration.id }, 'Domain already registered — skipping duplicate registration');
+            if (paymentIntentId && !existingRegistration.stripePaymentId) {
+              // First checkout for this registration — capture it
+              try {
+                await stripeService.capturePaymentIntent(paymentIntentId);
+                await db.update(domRegTable)
+                  .set({ stripePaymentId: paymentIntentId })
+                  .where(eq(domRegTable.id, existingRegistration.id));
+              } catch (captureErr) {
+                logger.error({ err: captureErr, paymentIntent: paymentIntentId, domain }, 'Failed to capture payment for existing registration');
+              }
+            } else if (paymentIntentId) {
+              // Duplicate checkout — another payment already captured; cancel this orphaned hold
+              try {
+                await stripeService.cancelPaymentIntent(paymentIntentId);
+                logger.info({ paymentIntent: paymentIntentId, domain }, 'Cancelled orphaned payment authorization for duplicate domain checkout');
+              } catch (cancelErr) {
+                logger.warn({ err: cancelErr, paymentIntent: paymentIntentId, domain }, 'Failed to cancel orphaned payment authorization (will expire automatically)');
+              }
+            }
+            break;
+          }
+
           // Look up the account owner to use real contact data for WHOIS
-          const domain = session.metadata.domain!;
-          const accountId = session.metadata.accountId!;
           const ownerMembership = await db.query.userAccounts.findFirst({
             where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
             with: { user: true },
@@ -823,25 +859,126 @@ billing.post('/webhook', async (c) => {
             logger.error({ domain }, 'Domain registration after payment is using SIMULATED registrar! Configure a real registrar provider.');
           }
 
+          // Register domain with the registrar
           const registration = await registrarService.registerDomain(
             domain, Number(session.metadata.years) || 1,
             contact, accountId,
           );
 
-          if (registration?.id && session.payment_intent) {
+          // Registration succeeded — capture the authorized payment
+          // This is in a separate try/catch: if capture fails, the domain IS registered
+          // and we must NOT cancel the payment intent (that would give the domain away free)
+          if (paymentIntentId) {
+            try {
+              await stripeService.capturePaymentIntent(paymentIntentId);
+            } catch (captureErr) {
+              // CRITICAL: Domain registered but payment not captured — alert admin for manual resolution
+              logger.error({ err: captureErr, paymentIntent: paymentIntentId, domain, accountId, registrationId: registration?.id },
+                'CRITICAL: Domain registered but payment capture failed — manual capture required in Stripe dashboard');
+            }
+          }
+
+          if (registration?.id && paymentIntentId) {
             await db.update(domRegTable)
-              .set({ stripePaymentId: session.payment_intent as string })
+              .set({ stripePaymentId: paymentIntentId })
               .where(eq(domRegTable.id, registration.id));
           }
+
+          logger.info({ domain, accountId, paymentIntent: paymentIntentId }, 'Domain registered and payment captured');
         } catch (err) {
-          logger.error({ err }, 'Domain registration after payment failed');
+          logger.error({ err, domain, accountId, paymentIntent: paymentIntentId }, 'Domain registration failed — cancelling payment authorization');
+
+          // Cancel the authorization hold — no charge, no fees
+          if (paymentIntentId) {
+            try {
+              await stripeService.cancelPaymentIntent(paymentIntentId);
+              logger.info({ paymentIntent: paymentIntentId, domain }, 'Payment authorization cancelled for failed domain registration');
+            } catch (cancelErr) {
+              logger.error({ err: cancelErr, paymentIntent: paymentIntentId, domain }, 'CRITICAL: Failed to cancel payment authorization — manual cancellation required');
+            }
+          }
+
+          // Create in-app notification for the account
+          try {
+            const { notifications } = await import('@fleet/db');
+            await db.insert(notifications).values({
+              id: crypto.randomUUID(),
+              accountId,
+              type: 'billing',
+              title: 'Domain Registration Failed',
+              message: `Registration of ${domain} failed. Your card was not charged. The domain may no longer be available — please try a different domain or contact support.`,
+              read: false,
+            });
+          } catch { /* notification is best-effort */ }
+
+          // Email account owners about the failure
+          try {
+            const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+            const ownerMemberships = await db.query.userAccounts.findMany({
+              where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+              with: { user: true },
+            });
+            for (const m of ownerMemberships) {
+              if (m.user?.email) {
+                queueEmail({
+                  templateSlug: 'domain-registration-failed',
+                  to: m.user.email,
+                  variables: {
+                    domain,
+                    billingUrl: `${appUrl}/panel/billing`,
+                  },
+                  accountId,
+                }).catch(() => {});
+              }
+            }
+          } catch { /* email is best-effort */ }
         }
       } else if (session.metadata?.type === 'domain_renewal') {
+        const registrationId = session.metadata.registrationId!;
+        const accountId = session.metadata.accountId;
+        const paymentIntentId = session.payment_intent as string;
+
         try {
           const { registrarService } = await import('../services/registrar.service.js');
-          await registrarService.renewDomain(session.metadata.registrationId!, Number(session.metadata.years) || 1);
+          await registrarService.renewDomain(registrationId, Number(session.metadata.years) || 1);
+
+          // Renewal succeeded — capture the authorized payment
+          if (paymentIntentId) {
+            try {
+              await stripeService.capturePaymentIntent(paymentIntentId);
+            } catch (captureErr) {
+              logger.error({ err: captureErr, paymentIntent: paymentIntentId, registrationId },
+                'CRITICAL: Domain renewed but payment capture failed — manual capture required in Stripe dashboard');
+            }
+          }
+          logger.info({ registrationId, paymentIntent: paymentIntentId }, 'Domain renewed and payment captured');
         } catch (err) {
-          logger.error({ err }, 'Domain renewal after payment failed');
+          logger.error({ err, registrationId, paymentIntent: paymentIntentId }, 'Domain renewal failed — cancelling payment authorization');
+
+          // Cancel the authorization hold — no charge, no fees
+          if (paymentIntentId) {
+            try {
+              await stripeService.cancelPaymentIntent(paymentIntentId);
+              logger.info({ paymentIntent: paymentIntentId, registrationId }, 'Payment authorization cancelled for failed domain renewal');
+            } catch (cancelErr) {
+              logger.error({ err: cancelErr, paymentIntent: paymentIntentId, registrationId }, 'CRITICAL: Failed to cancel payment authorization — manual cancellation required');
+            }
+          }
+
+          // Notify account if we know which account
+          if (accountId) {
+            try {
+              const { notifications } = await import('@fleet/db');
+              await db.insert(notifications).values({
+                id: crypto.randomUUID(),
+                accountId,
+                type: 'billing',
+                title: 'Domain Renewal Failed',
+                message: `Domain renewal failed. Your card was not charged. Please try again or contact support.`,
+                read: false,
+              });
+            } catch { /* best-effort */ }
+          }
         }
       } else if (session.customer && session.subscription) {
         const account = await db.query.accounts.findFirst({
