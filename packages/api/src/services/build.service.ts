@@ -136,6 +136,10 @@ export class BuildService {
         'HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'NO_PROXY',
         'http_proxy', 'https_proxy', 'ftp_proxy', 'no_proxy',
         'PATH', 'HOME', 'USER', 'HOSTNAME',
+        'DOCKER_BUILDKIT', 'DOCKER_HOST', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'DOCKER_CONFIG',
+        'BUILDKIT_PROGRESS', 'BUILDKIT_INLINE_CACHE', 'BUILDKIT_MULTI_PLATFORM',
+        'SOURCE_DATE_EPOCH', 'TARGETPLATFORM', 'TARGETOS', 'TARGETARCH', 'TARGETVARIANT',
+        'BUILDPLATFORM', 'BUILDOS', 'BUILDARCH', 'BUILDVARIANT',
       ]);
       const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
       for (const [key, val] of Object.entries(buildArgs)) {
@@ -366,6 +370,10 @@ export class BuildService {
         'HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'NO_PROXY',
         'http_proxy', 'https_proxy', 'ftp_proxy', 'no_proxy',
         'PATH', 'HOME', 'USER', 'HOSTNAME',
+        'DOCKER_BUILDKIT', 'DOCKER_HOST', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'DOCKER_CONFIG',
+        'BUILDKIT_PROGRESS', 'BUILDKIT_INLINE_CACHE', 'BUILDKIT_MULTI_PLATFORM',
+        'SOURCE_DATE_EPOCH', 'TARGETPLATFORM', 'TARGETOS', 'TARGETARCH', 'TARGETVARIANT',
+        'BUILDPLATFORM', 'BUILDOS', 'BUILDARCH', 'BUILDVARIANT',
       ]);
       const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
       for (const [key, val] of Object.entries(buildArgs)) {
