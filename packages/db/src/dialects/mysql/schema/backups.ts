@@ -23,7 +23,7 @@ export const backups = mysqlTable('backups', {
   status: varchar('status', { length: 255 }).default('pending'),
   storagePath: varchar('storage_path', { length: 255 }),
   storageBackend: varchar('storage_backend', { length: 255 }).default('nfs'),
-  sizeBytes: bigint('size_bytes', { mode: 'bigint' }).default(sql`0`),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).default(sql`0`),
   contents: json('contents').$default(() => ([])),
   createdAt: timestamp('created_at').defaultNow(),
   expiresAt: timestamp('expires_at'),

@@ -68,7 +68,7 @@ export const deployments = mysqlTable('deployments', {
     .notNull(),
   commitSha: varchar('commit_sha', { length: 255 }),
   status: varchar('status', { length: 255 }).default('pending'),
-  log: text('log'),
+  log: text('log').default(''),
   imageTag: varchar('image_tag', { length: 255 }),
   notes: text('notes'),
   progressStep: varchar('progress_step', { length: 50 }),

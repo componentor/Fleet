@@ -68,8 +68,8 @@ class UsageService {
         }
 
         // Convert to billing units for this 5-minute interval
-        const cpuSeconds = BigInt(Math.round((totalCpuMillicores / 1000) * COLLECTION_INTERVAL_SECONDS));
-        const memoryMbHours = BigInt(Math.round(totalMemoryMb * (COLLECTION_INTERVAL_SECONDS / 3600)));
+        const cpuSeconds = Math.round((totalCpuMillicores / 1000) * COLLECTION_INTERVAL_SECONDS);
+        const memoryMbHours = Math.round(totalMemoryMb * (COLLECTION_INTERVAL_SECONDS / 3600));
 
         // Collect storage usage
         const storageGb = await this.collectAccountStorageGb(accountId);
@@ -81,7 +81,7 @@ class UsageService {
             totalBandwidthBytes += bandwidthByDockerServiceId.get(svc.dockerServiceId) ?? 0;
           }
         }
-        const bandwidthGb = Math.floor(totalBandwidthBytes / (1024 * 1024 * 1024));
+        const bandwidthGb = Math.round((totalBandwidthBytes / (1024 * 1024 * 1024)) * 1000) / 1000;
 
         await db.insert(usageRecords).values({
           accountId,

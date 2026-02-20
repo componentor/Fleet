@@ -39,6 +39,14 @@ export const useAuthStore = defineStore('auth', () => {
       if (res.ok) {
         const data = await res.json()
         token.value = data.tokens.accessToken
+        // Re-fetch user from server to verify isSuper and other claims
+        try {
+          const me = await api.get<User>('/auth/me')
+          user.value = me
+          localStorage.setItem('fleet_user', JSON.stringify(me))
+        } catch {
+          // Non-critical — keep cached user if /me fails
+        }
       } else {
         token.value = null
         // Cookie expired or invalid — clear cached user
@@ -66,6 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     token.value = null
     localStorage.removeItem('fleet_user')
+    localStorage.removeItem('fleet_account_id')
     sessionStorage.removeItem('fleet_impersonating')
     sessionStorage.removeItem('fleet_original_account_id')
   }

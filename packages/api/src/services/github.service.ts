@@ -107,6 +107,15 @@ export interface GitHubWebhook {
 }
 
 const GITHUB_API = 'https://api.github.com';
+const GITHUB_TIMEOUT_MS = 15_000; // 15s timeout for GitHub API calls
+
+/** Fetch with timeout via AbortController */
+function fetchWithTimeout(url: string, opts: RequestInit & { timeout?: number } = {}): Promise<Response> {
+  const { timeout = GITHUB_TIMEOUT_MS, ...fetchOpts } = opts;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, { ...fetchOpts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 export class GitHubService {
   async getRepositories(accessToken: string): Promise<GitHubRepo[]> {
@@ -115,7 +124,7 @@ export class GitHubService {
     const perPage = 100;
 
     while (true) {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${GITHUB_API}/user/repos?per_page=${perPage}&page=${page}&sort=updated&affiliation=owner,collaborator,organization_member`,
         { headers: this.headers(accessToken) },
       );
@@ -154,7 +163,7 @@ export class GitHubService {
     owner: string,
     repo: string,
   ): Promise<GitHubRepo> {
-    const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}`, {
+    const res = await fetchWithTimeout(`${GITHUB_API}/repos/${owner}/${repo}`, {
       headers: this.headers(accessToken),
     });
 
@@ -182,7 +191,7 @@ export class GitHubService {
     owner: string,
     repo: string,
   ): Promise<GitHubBranch[]> {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${GITHUB_API}/repos/${owner}/${repo}/branches?per_page=100`,
       { headers: this.headers(accessToken) },
     );
@@ -205,7 +214,7 @@ export class GitHubService {
     repo: string,
     sha: string,
   ): Promise<GitHubCommit> {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${GITHUB_API}/repos/${owner}/${repo}/commits/${sha}`,
       { headers: this.headers(accessToken) },
     );
@@ -239,7 +248,7 @@ export class GitHubService {
     webhookUrl: string,
     secret: string,
   ): Promise<GitHubWebhook> {
-    const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/hooks`, {
+    const res = await fetchWithTimeout(`${GITHUB_API}/repos/${owner}/${repo}/hooks`, {
       method: 'POST',
       headers: this.headers(accessToken),
       body: JSON.stringify({
@@ -274,7 +283,7 @@ export class GitHubService {
     repo: string,
     hookId: number,
   ): Promise<void> {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${GITHUB_API}/repos/${owner}/${repo}/hooks/${hookId}`,
       {
         method: 'DELETE',
@@ -310,7 +319,7 @@ export class GitHubService {
       throw new Error('GitHub OAuth not configured');
     }
 
-    const res = await fetch('https://github.com/login/oauth/access_token', {
+    const res = await fetchWithTimeout('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -337,7 +346,7 @@ export class GitHubService {
   }
 
   async getUser(accessToken: string): Promise<{ id: number; login: string; email: string | null; avatarUrl: string; name: string | null }> {
-    const res = await fetch(`${GITHUB_API}/user`, {
+    const res = await fetchWithTimeout(`${GITHUB_API}/user`, {
       headers: this.headers(accessToken),
     });
 

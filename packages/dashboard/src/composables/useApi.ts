@@ -83,7 +83,7 @@ async function request<T>(
       isRefreshing = true
       refreshPromise = attemptRefresh().finally(() => {
         isRefreshing = false
-        refreshPromise = null
+        // Do NOT null refreshPromise — let concurrent awaiters read the resolved result
       })
     }
 
@@ -196,6 +196,30 @@ export function useApi() {
         body: formData,
       })
 
+      // Handle 401 with token refresh
+      if (response.status === 401 && token && !path.includes('/auth/')) {
+        if (!isRefreshing) {
+          isRefreshing = true
+          refreshPromise = attemptRefresh().finally(() => {
+            isRefreshing = false
+          })
+        }
+        const newToken = await refreshPromise
+        if (newToken) {
+          const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` }
+          const retryResponse = await fetch(`${BASE_URL}${path}`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: retryHeaders,
+            body: formData,
+          })
+          if (retryResponse.ok) {
+            if (retryResponse.status === 204) return undefined as T
+            return retryResponse.json() as Promise<T>
+          }
+        }
+      }
+
       if (!response.ok) {
         let errorBody: unknown
         const text = await response.text()
@@ -238,6 +262,28 @@ export function useApi() {
         credentials: 'include',
         headers,
       })
+
+      // Handle 401 with token refresh
+      if (response.status === 401 && token && !path.includes('/auth/')) {
+        if (!isRefreshing) {
+          isRefreshing = true
+          refreshPromise = attemptRefresh().finally(() => {
+            isRefreshing = false
+          })
+        }
+        const newToken = await refreshPromise
+        if (newToken) {
+          const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` }
+          const retryResponse = await fetch(`${BASE_URL}${path}`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: retryHeaders,
+          })
+          if (retryResponse.ok) {
+            return retryResponse.blob()
+          }
+        }
+      }
 
       if (!response.ok) {
         throw new ApiError(response.status, response.statusText, 'Download failed')

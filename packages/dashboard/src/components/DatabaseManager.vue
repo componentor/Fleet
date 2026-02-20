@@ -145,7 +145,7 @@ async function fetchTableData() {
       params.set('orderBy', dataOrderBy.value)
       params.set('orderDir', dataOrderDir.value)
     }
-    const data = await api.get<{ columns: string[]; rows: string[][]; totalRows: number; page: number; pageSize: number }>(`/database/${props.serviceId}/tables/${selectedTable.value}/data?${params}`)
+    const data = await api.get<{ columns: string[]; rows: string[][]; totalRows: number; page: number; pageSize: number }>(`/database/${props.serviceId}/tables/${encodeURIComponent(selectedTable.value)}/data?${params}`)
     dataColumns.value = data.columns ?? []
     dataRows.value = data.rows ?? []
     dataTotalRows.value = data.totalRows ?? 0
@@ -162,7 +162,7 @@ async function fetchTableData() {
       primaryKeyColumns.value = ['_id']
     } else {
       try {
-        const data = await api.get<{ columns: { name: string; isPrimaryKey: boolean }[] }>(`/database/${props.serviceId}/tables/${selectedTable.value}/columns${dbParams.value}`)
+        const data = await api.get<{ columns: { name: string; isPrimaryKey: boolean }[] }>(`/database/${props.serviceId}/tables/${encodeURIComponent(selectedTable.value)}/columns${dbParams.value}`)
         primaryKeyColumns.value = (data.columns ?? []).filter(c => c.isPrimaryKey).map(c => c.name)
       } catch { /* best effort */ }
     }
@@ -173,7 +173,7 @@ async function fetchStructure() {
   if (!selectedTable.value) return
   structureLoading.value = true
   try {
-    const data = await api.get<{ columns: { name: string; type: string; nullable: boolean; defaultValue: string | null; isPrimaryKey: boolean }[] }>(`/database/${props.serviceId}/tables/${selectedTable.value}/columns${dbParams.value}`)
+    const data = await api.get<{ columns: { name: string; type: string; nullable: boolean; defaultValue: string | null; isPrimaryKey: boolean }[] }>(`/database/${props.serviceId}/tables/${encodeURIComponent(selectedTable.value)}/columns${dbParams.value}`)
     structureColumns.value = data.columns ?? []
     primaryKeyColumns.value = (data.columns ?? []).filter(c => c.isPrimaryKey).map(c => c.name)
   } catch {
@@ -273,7 +273,7 @@ async function saveCell(setNull: boolean = false) {
 
   savingCell.value = true
   try {
-    await api.put(`/database/${props.serviceId}/tables/${selectedTable.value}/rows${dbParams.value}`, {
+    await api.put(`/database/${props.serviceId}/tables/${encodeURIComponent(selectedTable.value)}/rows${dbParams.value}`, {
       primaryKey: pkValues,
       updates: { [columnName]: setNull ? null : editingValue.value },
     })
@@ -302,7 +302,7 @@ async function insertRow() {
     for (const [key, val] of Object.entries(newRowValues.value)) {
       values[key] = val === '' ? null : val
     }
-    await api.post(`/database/${props.serviceId}/tables/${selectedTable.value}/rows${dbParams.value}`, { values })
+    await api.post(`/database/${props.serviceId}/tables/${encodeURIComponent(selectedTable.value)}/rows${dbParams.value}`, { values })
     showAddRowForm.value = false
     toast.success('Row inserted')
     await fetchTableData()
@@ -323,7 +323,7 @@ async function deleteRow(rowIndex: number) {
 
   deleteRowLoading.value = rowIndex
   try {
-    await api.del(`/database/${props.serviceId}/tables/${selectedTable.value}/rows${dbParams.value}`, { primaryKey: pkValues })
+    await api.del(`/database/${props.serviceId}/tables/${encodeURIComponent(selectedTable.value)}/rows${dbParams.value}`, { primaryKey: pkValues })
     toast.success('Row deleted')
     await fetchTableData()
   } catch { /* error shown by useApi */ } finally {

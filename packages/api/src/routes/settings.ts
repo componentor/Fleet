@@ -94,9 +94,16 @@ settings.get('/', cache(300), async (c) => {
       orderBy: (s, { asc }) => asc(s.key),
     });
 
+    // Mask sensitive values so encrypted secrets are never sent to the client
+    const SENSITIVE_PATTERNS = ['secret', 'password', 'apikey', 'token', 'private'];
+    const isSensitive = (key: string): boolean => {
+      const lower = key.toLowerCase();
+      return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
+    };
+
     const result: Record<string, unknown> = {};
     for (const row of rows) {
-      result[row.key] = row.value;
+      result[row.key] = isSensitive(row.key) && row.value != null ? '••••••••' : row.value;
     }
 
     return c.json(result);

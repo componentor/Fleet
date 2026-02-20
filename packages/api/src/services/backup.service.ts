@@ -39,7 +39,7 @@ export class BackupService {
     id: string;
     status: string;
     storagePath: string | null;
-    sizeBytes: bigint;
+    sizeBytes: number;
   }> {
     const backupId = randomUUID();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -59,7 +59,7 @@ export class BackupService {
       status: 'pending',
       storagePath: backupPath,
       storageBackend,
-      sizeBytes: BigInt(0),
+      sizeBytes: 0,
       contents: [],
     });
 
@@ -85,7 +85,7 @@ export class BackupService {
       id: backup.id,
       status: 'pending',
       storagePath: backupPath,
-      sizeBytes: BigInt(0),
+      sizeBytes: 0,
     };
   }
 
@@ -115,7 +115,7 @@ export class BackupService {
       status: 'pending',
       storagePath: backupPath,
       storageBackend,
-      sizeBytes: BigInt(0),
+      sizeBytes: 0,
       contents: [],
     });
 
@@ -161,8 +161,14 @@ export class BackupService {
         }
 
         // Backup service volumes
+        const SAFE_VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
         const serviceVolumes = (service.volumes as Array<{ source: string; target: string }>) ?? [];
         for (const vol of serviceVolumes) {
+          // Validate volume source — only allow named volumes, block host paths and special chars
+          if (!SAFE_VOLUME_NAME.test(vol.source) || vol.source.includes(':') || vol.source.includes('..')) {
+            logger.warn({ volume: vol.source, serviceId }, 'Skipping backup: unsafe volume source');
+            continue;
+          }
           const archiveName = `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`;
           const localArchivePath = join(workDir, archiveName);
           try {
@@ -330,7 +336,7 @@ export class BackupService {
         .update(backups)
         .set({
           status: 'completed',
-          sizeBytes: BigInt(sizeBytes),
+          sizeBytes: Number(sizeBytes),
           storageBackend: useObjectStorage ? 'object' : (backupPath.startsWith(NFS_BACKUP_DIR) ? 'nfs' : 'local'),
           storagePath: useObjectStorage ? objectKeyPrefix : backupPath,
           contents,

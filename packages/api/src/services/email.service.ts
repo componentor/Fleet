@@ -324,16 +324,16 @@ export class EmailService {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 
-    const interpolate = (text: string): string => {
+    const interpolate = (text: string, escape: boolean): string => {
       return text.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
         const value = variables[key] ?? '';
-        return escapeHtml(value);
+        return escape ? escapeHtml(value) : value;
       });
     };
 
     return {
-      subject: interpolate(subject),
-      html: interpolate(bodyHtml),
+      subject: interpolate(subject, false), // plain text — no HTML encoding
+      html: interpolate(bodyHtml, true),
     };
   }
 

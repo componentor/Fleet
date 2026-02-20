@@ -18,6 +18,11 @@ onMounted(async () => {
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const token = hashParams.get('token')
 
+  // Clear the URL fragment immediately so the token isn't visible in browser history
+  if (window.location.hash) {
+    history.replaceState(null, '', window.location.pathname + window.location.search)
+  }
+
   if (!token) {
     error.value = route.query.error as string || t('auth.noTokenReceived')
     return

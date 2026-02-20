@@ -23,7 +23,7 @@ export const backups = pgTable('backups', {
   status: varchar('status').default('pending'),
   storagePath: varchar('storage_path'),
   storageBackend: varchar('storage_backend').default('nfs'),
-  sizeBytes: bigint('size_bytes', { mode: 'bigint' }).default(sql`0`),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).default(sql`0`),
   contents: jsonb('contents').default([]),
   createdAt: timestamp('created_at').defaultNow(),
   expiresAt: timestamp('expires_at'),

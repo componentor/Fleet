@@ -594,7 +594,6 @@ accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
 
   return c.json({
     token: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
     accountId: account.id,
     name: account.name,
     slug: account.slug,

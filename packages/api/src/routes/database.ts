@@ -214,15 +214,15 @@ function enforceLimit(sql: string, limit: number): string {
 // ---- Identifier quoting & value escaping ----
 
 function quoteIdentifier(engine: DatabaseEngine, name: string): string {
-  if (engine === 'postgres') return `"${name}"`;
-  return `\`${name}\``;
+  if (engine === 'postgres') return `"${name.replace(/"/g, '""')}"`;
+  return `\`${name.replace(/`/g, '``')}\``;
 }
 
 function escapeValue(engine: DatabaseEngine, value: string | null): string {
   if (value === null) return 'NULL';
   if (engine === 'postgres') {
     const tag = '$fleet$';
-    if (value.includes(tag)) return `'${value.replace(/'/g, "''")}'`;
+    if (value.includes(tag)) return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
     return `${tag}${value}${tag}`;
   }
   // mysql / mariadb
@@ -254,6 +254,7 @@ async function getPrimaryKeyColumns(
 }
 
 const VALID_TABLE_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const VALID_DB_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
 const VALID_COLUMN_TYPE = /^[a-zA-Z][a-zA-Z0-9_ (),.]+$/;
 const SAFE_DEFAULT = /^(\d+(\.\d+)?|'[^']*'|NULL|CURRENT_TIMESTAMP|NOW\(\)|TRUE|FALSE|uuid_generate_v4\(\)|gen_random_uuid\(\))$/i;
 
@@ -350,6 +351,7 @@ databaseRoutes.get('/:serviceId/tables', dbExecRateLimit, requireMember, async (
   const serviceId = c.req.param('serviceId');
   const dbName = c.req.query('db');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
 
   const container = await getDbContainer(accountId, serviceId);
   if (!container) return c.json({ error: 'Database container not available' }, 503);
@@ -396,6 +398,7 @@ databaseRoutes.get('/:serviceId/tables/:name/columns', dbExecRateLimit, requireM
   const serviceId = c.req.param('serviceId');
   const tableName = c.req.param('name');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const container = await getDbContainer(accountId, serviceId);
@@ -487,6 +490,7 @@ databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMemb
   const serviceId = c.req.param('serviceId');
   const tableName = c.req.param('name');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
   const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('pageSize') ?? '50', 10)));
   const orderBy = c.req.query('orderBy');
@@ -586,6 +590,7 @@ databaseRoutes.post('/:serviceId/query', dbExecRateLimit, requireMember, async (
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const body = await c.req.json();
@@ -612,6 +617,10 @@ databaseRoutes.post('/:serviceId/query', dbExecRateLimit, requireMember, async (
     // Block any assignment, function declarations, or control flow that could be used for injection
     if (/\b(var|let|const|function|class|import|export|for|while|do|switch|try|catch|throw|new\s+Function)\b/i.test(trimmedQuery)) {
       return c.json({ error: 'Only MongoDB shell query methods are allowed (find, aggregate, count, etc.)' }, 400);
+    }
+    // Block $where operator which allows arbitrary JS execution inside MongoDB
+    if (/\$where\b/i.test(trimmedQuery)) {
+      return c.json({ error: 'The $where operator is not allowed for security reasons' }, 400);
     }
 
     const wrappedJs = `
@@ -719,6 +728,7 @@ databaseRoutes.post('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMem
   const serviceId = c.req.param('serviceId');
   const tableName = c.req.param('name');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const body = await c.req.json();
@@ -778,6 +788,7 @@ databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMemb
   const serviceId = c.req.param('serviceId');
   const tableName = c.req.param('name');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const body = await c.req.json();
@@ -843,6 +854,7 @@ databaseRoutes.delete('/:serviceId/tables/:name/rows', dbExecRateLimit, requireM
   const serviceId = c.req.param('serviceId');
   const tableName = c.req.param('name');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const body = await c.req.json();
@@ -902,6 +914,7 @@ databaseRoutes.post('/:serviceId/tables', dbExecRateLimit, requireMember, requir
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const body = await c.req.json();
@@ -965,6 +978,7 @@ databaseRoutes.delete('/:serviceId/tables/:name', dbExecRateLimit, requireMember
   const serviceId = c.req.param('serviceId');
   const tableName = c.req.param('name');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const container = await getDbContainer(accountId, serviceId);
@@ -1036,6 +1050,7 @@ databaseRoutes.post('/:serviceId/export', dbExecRateLimit, requireMember, async 
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   // Verify container is reachable before issuing a token
@@ -1060,6 +1075,7 @@ databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requir
   const accountId = c.get('accountId');
   const serviceId = c.req.param('serviceId');
   const dbName = c.req.query('db');
+  if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const container = await getDbContainer(accountId, serviceId);

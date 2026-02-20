@@ -115,8 +115,15 @@ adminRoutes.get('/accounts', async (c) => {
     .from(accounts)
     .where(isNull(accounts.deletedAt));
 
+  // Strip sensitive billing fields from response
+  const sanitizedAccounts = allAccounts.map(({ ...acc }) => {
+    const a = acc as Record<string, unknown>;
+    delete a['stripeCustomerId'];
+    return a;
+  });
+
   return c.json({
-    data: allAccounts,
+    data: sanitizedAccounts,
     pagination: {
       page,
       limit,
@@ -287,8 +294,15 @@ adminRoutes.get('/services', async (c) => {
     .from(services)
     .where(isNull(services.deletedAt));
 
+  // Strip env vars from admin listing to avoid leaking secrets
+  const sanitizedServices = allServices.map(({ ...svc }) => {
+    const s = svc as Record<string, unknown>;
+    delete s['env'];
+    return s;
+  });
+
   return c.json({
-    data: allServices,
+    data: sanitizedServices,
     pagination: {
       page,
       limit,

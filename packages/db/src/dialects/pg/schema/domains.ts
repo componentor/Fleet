@@ -7,6 +7,7 @@ import {
   jsonb,
   timestamp,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -123,6 +124,7 @@ export const subdomainClaims = pgTable('subdomain_claims', {
 }, (table) => [
   index('idx_subdomain_claims_shared_domain_id').on(table.sharedDomainId),
   index('idx_subdomain_claims_account_id').on(table.accountId),
+  uniqueIndex('idx_subdomain_claims_unique').on(table.sharedDomainId, table.subdomain),
 ]);
 
 export const dnsZonesRelations = relations(dnsZones, ({ one, many }) => ({

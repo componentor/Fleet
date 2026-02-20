@@ -422,11 +422,7 @@ onMounted(() => {
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const isGithubConnected = hashParams.get('github_connected') || route.query.github_connected
   if (isGithubConnected) {
-    const token = hashParams.get('token')
-    if (token) {
-      authStore.setTokens({ accessToken: token, refreshToken: '' })
-    }
-    // Clear fragment and query params
+    // Clear fragment and query params — do NOT accept tokens from URL fragments
     window.location.hash = ''
     router.replace({ query: {} })
     githubConnected.value = true

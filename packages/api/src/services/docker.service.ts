@@ -83,7 +83,9 @@ export class DockerService {
 
   private validateVolumeMounts(volumes: CreateSwarmServiceOptions['volumes']): void {
     for (const v of volumes) {
-      const src = v.source.toLowerCase().trim();
+      // Resolve path to prevent traversal via ../ sequences
+      const resolved = require('node:path').resolve(v.source);
+      const src = resolved.toLowerCase().trim();
       // Block docker socket by name anywhere in the path
       if (src.includes('docker.sock')) {
         throw new Error('Mounting Docker socket is not allowed');
@@ -271,6 +273,15 @@ export class DockerService {
         ...(opts.restartCondition !== undefined ? { Condition: opts.restartCondition } : {}),
         ...(opts.restartMaxAttempts !== undefined ? { MaxAttempts: opts.restartMaxAttempts } : {}),
         ...(opts.restartDelay !== undefined ? { Delay: parseDelay(opts.restartDelay) } : {}),
+      };
+    }
+
+    if (opts.cpuLimit !== undefined || opts.memoryLimit !== undefined) {
+      spec.TaskTemplate.Resources = spec.TaskTemplate.Resources ?? {};
+      spec.TaskTemplate.Resources.Limits = {
+        ...spec.TaskTemplate.Resources.Limits,
+        ...(opts.cpuLimit !== undefined ? { NanoCPUs: opts.cpuLimit * 1e9 } : {}),
+        ...(opts.memoryLimit !== undefined ? { MemoryBytes: opts.memoryLimit * 1024 * 1024 } : {}),
       };
     }
 

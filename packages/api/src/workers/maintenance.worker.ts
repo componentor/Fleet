@@ -548,6 +548,20 @@ async function executeDatabaseBackup(): Promise<void> {
       ];
       const mysqlEnv = dbUrl.password ? { MYSQL_PWD: decodeURIComponent(dbUrl.password) } : undefined;
       await pipeToGzip('mysqldump', mysqlArgs, backupFile, 5 * 60 * 1000, mysqlEnv);
+
+      // Rotate old backups — keep last N
+      const { readdir, rm: rmFile } = await import('node:fs/promises');
+      const files = (await readdir(backupDir))
+        .filter(f => f.startsWith('fleet-mysql-') && f.endsWith('.sql.gz'))
+        .sort();
+      const maxBackups = parseInt(process.env['DB_BACKUP_RETENTION'] ?? '30', 10);
+      while (files.length > maxBackups) {
+        const old = files.shift()!;
+        await rmFile(`${backupDir}/${old}`).catch((err) => {
+          logger.error({ err, file: old }, 'Failed to remove old MySQL backup file');
+        });
+      }
+
       logger.info({ backupFile }, 'MySQL database backup completed');
     } catch (err) {
       logger.error({ err }, 'MySQL database backup failed');
@@ -575,6 +589,19 @@ async function executeDatabaseBackup(): Promise<void> {
         });
         proc.on('error', reject);
       });
+      // Rotate old backups — keep last N
+      const { readdir, rm: rmFile } = await import('node:fs/promises');
+      const sqliteFiles = (await readdir(backupDir))
+        .filter(f => f.startsWith('fleet-sqlite-') && f.endsWith('.db'))
+        .sort();
+      const maxBackups = parseInt(process.env['DB_BACKUP_RETENTION'] ?? '30', 10);
+      while (sqliteFiles.length > maxBackups) {
+        const old = sqliteFiles.shift()!;
+        await rmFile(`${backupDir}/${old}`).catch((err) => {
+          logger.error({ err, file: old }, 'Failed to remove old SQLite backup file');
+        });
+      }
+
       logger.info({ backupFile }, 'SQLite database backup completed');
     } catch (err) {
       // Fallback to file copy if sqlite3 CLI is not available

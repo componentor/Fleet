@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db, services, deployments, oauthProviders, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
+import { db, services, deployments, subscriptions, accounts, oauthProviders, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
@@ -151,9 +151,24 @@ webhookRoutes.post('/github/webhook', async (c) => {
     return c.json({ message: 'No matching services for auto-deploy' });
   }
 
+  // Filter out services whose accounts are suspended or have no active subscription
+  const accountIds = [...new Set(matchingServices.map(s => s.accountId))];
+  const suspendedAccounts = new Set<string>();
+  for (const accId of accountIds) {
+    const acc = await db.query.accounts.findFirst({ where: eq(accounts.id, accId), columns: { id: true, status: true } });
+    if (acc?.status === 'suspended' || acc?.status === 'deleted') {
+      suspendedAccounts.add(accId);
+    }
+  }
+  const eligibleServices = matchingServices.filter(s => !suspendedAccounts.has(s.accountId));
+
+  if (eligibleServices.length === 0) {
+    return c.json({ message: 'No eligible services for auto-deploy (accounts suspended or inactive)' });
+  }
+
   const results: Array<{ serviceId: string; deploymentId: string; status: string }> = [];
 
-  for (const svc of matchingServices) {
+  for (const svc of eligibleServices) {
     const [deployment] = await insertReturning(deployments, {
       serviceId: svc.id,
       commitSha,
@@ -173,8 +188,8 @@ webhookRoutes.post('/github/webhook', async (c) => {
   }
 
   // Batch update all matched services to 'deploying' status (N+1 fix)
-  if (matchingServices.length > 0) {
-    const serviceIds = matchingServices.map(s => s.id);
+  if (eligibleServices.length > 0) {
+    const serviceIds = eligibleServices.map(s => s.id);
     await db.update(services)
       .set({ status: 'deploying', updatedAt: new Date() })
       .where(inArray(services.id, serviceIds));
@@ -182,7 +197,7 @@ webhookRoutes.post('/github/webhook', async (c) => {
 
   // Queue build pipelines after DB updates are complete
   for (const result of results) {
-    const svc = matchingServices.find(s => s.id === result.serviceId);
+    const svc = eligibleServices.find(s => s.id === result.serviceId);
     if (svc) {
       await enqueueOrRunDeployment({
         deploymentId: result.deploymentId,
