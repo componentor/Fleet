@@ -981,7 +981,7 @@ billing.post('/webhook', async (c) => {
           }
         }
       } else if (
-        session.metadata?.type === 'subdomain_claim_monthly' ||
+        session.metadata?.type === 'subdomain_claim_recurring' ||
         session.metadata?.type === 'subdomain_claim_onetime'
       ) {
         const claimId = session.metadata.claimId;
@@ -998,7 +998,7 @@ billing.post('/webhook', async (c) => {
                 status: 'active',
                 updatedAt: new Date(),
               };
-              if (session.metadata.type === 'subdomain_claim_monthly' && session.subscription) {
+              if (session.metadata.type === 'subdomain_claim_recurring' && session.subscription) {
                 updateData.stripeSubscriptionId = session.subscription;
               }
               if (session.payment_intent) {

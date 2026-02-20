@@ -98,7 +98,7 @@ const createSchema = z.object({
     .max(255)
     .regex(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i)
     .transform((v) => v.toLowerCase()),
-  pricingType: z.enum(['free', 'one_time', 'monthly']).default('free'),
+  pricingType: z.enum(['free', 'one_time', 'monthly', 'quarterly', 'half_yearly', 'yearly']).default('free'),
   price: z.number().int().min(0).default(0),
   currency: z.string().length(3).default('USD'),
   maxPerAccount: z.number().int().min(0).default(0),
@@ -138,7 +138,7 @@ sharedDomainRoutes.post('/admin', async (c) => {
 // PATCH /admin/:id — Update shared domain config
 const updateSchema = z.object({
   enabled: z.boolean().optional(),
-  pricingType: z.enum(['free', 'one_time', 'monthly']).optional(),
+  pricingType: z.enum(['free', 'one_time', 'monthly', 'quarterly', 'half_yearly', 'yearly']).optional(),
   price: z.number().int().min(0).optional(),
   currency: z.string().length(3).optional(),
   maxPerAccount: z.number().int().min(0).optional(),
@@ -375,7 +375,16 @@ sharedDomainRoutes.post('/claim', async (c) => {
   });
 
   const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
-  const isMonthly = parentDomain.pricingType === 'monthly';
+
+  // Map recurring pricing types to Stripe intervals
+  const RECURRING_INTERVALS: Record<string, { interval: 'month' | 'year'; interval_count?: number; label: string }> = {
+    monthly: { interval: 'month', label: 'Monthly' },
+    quarterly: { interval: 'month', interval_count: 3, label: 'Quarterly' },
+    half_yearly: { interval: 'month', interval_count: 6, label: 'Semi-annual' },
+    yearly: { interval: 'year', label: 'Yearly' },
+  };
+  const recurringConfig = RECURRING_INTERVALS[parentDomain.pricingType];
+  const isRecurring = !!recurringConfig;
 
   try {
     const session = await stripeService.createFlexibleCheckoutSession(
@@ -385,15 +394,22 @@ sharedDomainRoutes.post('/claim', async (c) => {
           currency: (parentDomain.currency || 'USD').toLowerCase(),
           product_data: {
             name: `Subdomain: ${fullDomain}`,
-            description: isMonthly ? 'Monthly subdomain subscription' : 'One-time subdomain claim',
+            description: isRecurring
+              ? `${recurringConfig.label} subdomain subscription`
+              : 'One-time subdomain claim',
           },
           unit_amount: parentDomain.price,
-          ...(isMonthly ? { recurring: { interval: 'month' as const } } : {}),
+          ...(isRecurring ? {
+            recurring: {
+              interval: recurringConfig.interval,
+              ...(recurringConfig.interval_count ? { interval_count: recurringConfig.interval_count } : {}),
+            },
+          } : {}),
         },
         quantity: 1,
       }],
       {
-        type: isMonthly ? 'subdomain_claim_monthly' : 'subdomain_claim_onetime',
+        type: isRecurring ? 'subdomain_claim_recurring' : 'subdomain_claim_onetime',
         claimId: pendingClaim.id,
         accountId,
         subdomain,
@@ -403,7 +419,7 @@ sharedDomainRoutes.post('/claim', async (c) => {
       },
       `${appUrl}/panel/domains?claim=success`,
       `${appUrl}/panel/domains?claim=cancelled`,
-      isMonthly ? 'subscription' : 'payment',
+      isRecurring ? 'subscription' : 'payment',
     );
 
     return c.json({
