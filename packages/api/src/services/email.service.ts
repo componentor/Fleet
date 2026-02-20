@@ -1,5 +1,6 @@
 import { db, emailTemplates, emailLog, insertReturning, eq, and } from '@fleet/db';
 import { createTransport, type Transporter } from 'nodemailer';
+import { getValkey } from './valkey.service.js';
 
 export interface EmailProvider {
   name: string;
@@ -190,23 +191,40 @@ const DEFAULT_TEMPLATES: Record<
 };
 
 // Per-recipient rate limiting: max emails per time window
-const EMAIL_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const EMAIL_RATE_LIMIT_WINDOW_S = 3600; // 1 hour in seconds
 const EMAIL_RATE_LIMIT_MAX = 10; // max 10 emails per recipient per hour
+
+// In-memory fallback when Valkey is unavailable
 const emailRateMap = new Map<string, { count: number; resetAt: number }>();
 
-function checkEmailRateLimit(to: string): boolean {
+function checkEmailRateLimitLocal(key: string): boolean {
   const now = Date.now();
-  const key = to.toLowerCase();
   const entry = emailRateMap.get(key);
   if (!entry || now >= entry.resetAt) {
-    emailRateMap.set(key, { count: 1, resetAt: now + EMAIL_RATE_LIMIT_WINDOW_MS });
+    emailRateMap.set(key, { count: 1, resetAt: now + EMAIL_RATE_LIMIT_WINDOW_S * 1000 });
     return true;
   }
-  if (entry.count >= EMAIL_RATE_LIMIT_MAX) {
-    return false;
-  }
+  if (entry.count >= EMAIL_RATE_LIMIT_MAX) return false;
   entry.count++;
   return true;
+}
+
+async function checkEmailRateLimit(to: string): Promise<boolean> {
+  const key = `fleet:email:rate:${to.toLowerCase()}`;
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const count = await valkey.incr(key);
+      if (count === 1) {
+        // First email in window — set TTL
+        await valkey.expire(key, EMAIL_RATE_LIMIT_WINDOW_S);
+      }
+      return count <= EMAIL_RATE_LIMIT_MAX;
+    }
+  } catch {
+    // Valkey error — fall through to in-memory
+  }
+  return checkEmailRateLimitLocal(to.toLowerCase());
 }
 
 export class EmailService {
@@ -303,7 +321,7 @@ export class EmailService {
     html: string,
     accountId?: string | null,
   ): Promise<{ messageId: string }> {
-    if (!checkEmailRateLimit(to)) {
+    if (!(await checkEmailRateLimit(to))) {
       throw new Error(`Email rate limit exceeded for recipient ${to}`);
     }
     const provider = this.getProvider();
@@ -358,7 +376,7 @@ export class EmailService {
     variables: Record<string, string>,
     accountId?: string | null,
   ): Promise<{ messageId: string }> {
-    if (!checkEmailRateLimit(to)) {
+    if (!(await checkEmailRateLimit(to))) {
       throw new Error(`Email rate limit exceeded for recipient ${to}`);
     }
     const { subject, html } = await this.renderTemplate(

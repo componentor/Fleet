@@ -5,10 +5,36 @@ import { hash } from 'argon2';
 import { SignJWT } from 'jose';
 import { db, users, accounts, userAccounts, platformSettings, insertReturning, upsert, countSql } from '@fleet/db';
 import { dockerService } from '../services/docker.service.js';
+import { getValkey } from '../services/valkey.service.js';
 
 const setup = new Hono();
 
-let setupInProgress = false;
+// In-memory fallback when Valkey is unavailable
+let setupInProgressLocal = false;
+
+const SETUP_LOCK_KEY = 'fleet:setup:lock';
+const SETUP_LOCK_TTL = 120; // seconds
+
+async function acquireSetupLock(): Promise<boolean> {
+  const valkey = await getValkey();
+  if (valkey) {
+    // Atomic SET NX with TTL — only one instance can acquire
+    const result = await valkey.set(SETUP_LOCK_KEY, process.pid.toString(), 'EX', SETUP_LOCK_TTL, 'NX');
+    return result === 'OK';
+  }
+  // Fallback: in-memory (single instance only)
+  if (setupInProgressLocal) return false;
+  setupInProgressLocal = true;
+  return true;
+}
+
+async function releaseSetupLock(): Promise<void> {
+  const valkey = await getValkey();
+  if (valkey) {
+    await valkey.del(SETUP_LOCK_KEY);
+  }
+  setupInProgressLocal = false;
+}
 
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
@@ -81,10 +107,9 @@ setup.post('/swarm-init', async (c) => {
     return c.json({ error: 'Setup has already been completed' }, 403);
   }
 
-  if (setupInProgress) {
+  if (!(await acquireSetupLock())) {
     return c.json({ error: 'Setup is already in progress' }, 409);
   }
-  setupInProgress = true;
 
   try {
     const docker = await detectDocker();
@@ -118,7 +143,7 @@ setup.post('/swarm-init', async (c) => {
       return c.json({ error: 'Failed to initialize Swarm' }, 500);
     }
   } finally {
-    setupInProgress = false;
+    await releaseSetupLock();
   }
 });
 
@@ -140,10 +165,9 @@ setup.post('/', async (c) => {
     return c.json({ error: 'Setup has already been completed' }, 403);
   }
 
-  if (setupInProgress) {
+  if (!(await acquireSetupLock())) {
     return c.json({ error: 'Setup is already in progress' }, 409);
   }
-  setupInProgress = true;
 
   try {
     const body = await c.req.json();
@@ -257,7 +281,7 @@ setup.post('/', async (c) => {
       },
     }, 201);
   } finally {
-    setupInProgress = false;
+    await releaseSetupLock();
   }
 });
 

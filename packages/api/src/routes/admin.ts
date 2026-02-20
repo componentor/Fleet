@@ -190,18 +190,23 @@ adminRoutes.get('/audit-log', async (c) => {
 
   const conditions: any[] = [];
   if (resourceType) conditions.push(eq(auditLog.resourceType, resourceType));
-  if (eventType) conditions.push(like(auditLog.eventType, `${eventType}%`));
+  if (eventType) {
+    const sanitizedType = eventType.replace(/%/g, '\\%').replace(/_/g, '\\_');
+    conditions.push(like(auditLog.eventType, `${sanitizedType}%`));
+  }
   if (userId) conditions.push(eq(auditLog.userId, userId));
   if (accountId) conditions.push(eq(auditLog.accountId, accountId));
   if (dateFrom) conditions.push(gte(auditLog.createdAt, new Date(dateFrom)));
   if (dateTo) conditions.push(lte(auditLog.createdAt, new Date(dateTo)));
   if (search) {
+    // Escape SQL LIKE wildcards to prevent search injection
+    const sanitized = search.replace(/%/g, '\\%').replace(/_/g, '\\_');
     conditions.push(
       or(
-        like(auditLog.description, `%${search}%`),
-        like(auditLog.actorEmail, `%${search}%`),
-        like(auditLog.resourceName, `%${search}%`),
-        like(auditLog.action, `%${search}%`),
+        like(auditLog.description, `%${sanitized}%`),
+        like(auditLog.actorEmail, `%${sanitized}%`),
+        like(auditLog.resourceName, `%${sanitized}%`),
+        like(auditLog.action, `%${sanitized}%`),
       )
     );
   }

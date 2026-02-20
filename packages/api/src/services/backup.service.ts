@@ -1,15 +1,26 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile as fsReadFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
 import { getBackupQueue, isQueueAvailable } from './queue.service.js';
 import { storageManager } from './storage/storage-manager.js';
 import { STORAGE_BUCKETS } from './storage/storage-provider.js';
 import { logger } from './logger.js';
+
+const BACKUP_ENCRYPTION_ALGO = 'aes-256-gcm';
+const BACKUP_IV_LENGTH = 12;
+
+function getEncryptionKey(): Buffer | null {
+  const hex = process.env['ENCRYPTION_KEY'];
+  if (!hex || !/^[0-9a-f]{64}$/i.test(hex)) return null;
+  return Buffer.from(hex, 'hex');
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -133,7 +144,7 @@ export class BackupService {
       const workDir = useObjectStorage ? tempDir : backupPath;
       await mkdir(workDir, { recursive: true });
 
-      const contents: Array<{ type: string; name: string; path: string; objectKey?: string }> = [];
+      const contents: Array<{ type: string; name: string; path: string; objectKey?: string; encrypted?: boolean }> = [];
 
       if (serviceId) {
         // Backup a specific service
@@ -171,6 +182,9 @@ export class BackupService {
               '.',
             ]);
 
+            // Encrypt the archive at rest
+            const wasEncrypted = await this.encryptFile(localArchivePath);
+
             const objectKey = `${objectKeyPrefix}/${archiveName}`;
             if (useObjectStorage) {
               await this.uploadToObjectStorage(localArchivePath, objectKey);
@@ -181,6 +195,7 @@ export class BackupService {
               name: vol.source,
               path: useObjectStorage ? objectKey : localArchivePath,
               objectKey: useObjectStorage ? objectKey : undefined,
+              encrypted: wasEncrypted,
             });
           } catch (err) {
             logger.error({ err, volume: vol.source }, `Failed to backup volume ${vol.source}`);
@@ -245,6 +260,9 @@ export class BackupService {
                 '.',
               ]);
 
+              // Encrypt the archive at rest
+              const wasEncrypted = await this.encryptFile(join(svcDir, archiveName));
+
               const objectKey = `${objectKeyPrefix}/${service.id}/${archiveName}`;
               if (useObjectStorage) {
                 await this.uploadToObjectStorage(join(svcDir, archiveName), objectKey);
@@ -255,6 +273,7 @@ export class BackupService {
                 name: `${service.name}/${vol.source}`,
                 path: useObjectStorage ? objectKey : join(svcDir, archiveName),
                 objectKey: useObjectStorage ? objectKey : undefined,
+                encrypted: wasEncrypted,
               });
             } catch (err) {
               logger.error(
@@ -353,7 +372,7 @@ export class BackupService {
       throw new Error('Backup has no storage path');
     }
 
-    const backupContents = (backup.contents as Array<{ type: string; name: string; path: string; objectKey?: string }>) ?? [];
+    const backupContents = (backup.contents as Array<{ type: string; name: string; path: string; objectKey?: string; encrypted?: boolean }>) ?? [];
     const isObjectBacked = backup.storageBackend === 'object';
     const tempDir = isObjectBacked ? join(tmpdir(), `fleet-restore-${backupId}`) : null;
 
@@ -410,6 +429,11 @@ export class BackupService {
           }
 
           try {
+            // Decrypt if the backup was encrypted
+            if (item.encrypted) {
+              await this.decryptFile(archivePath);
+            }
+
             await this.exec('docker', [
               'run',
               '--rm',
@@ -687,6 +711,70 @@ export class BackupService {
         return 0;
       }
     }
+  }
+
+  /**
+   * Encrypt a backup archive file in-place using AES-256-GCM.
+   * Writes: [12-byte IV][ciphertext][16-byte auth tag]
+   * Returns true if encrypted, false if encryption is unavailable.
+   */
+  private async encryptFile(filePath: string): Promise<boolean> {
+    const key = getEncryptionKey();
+    if (!key) return false;
+
+    const iv = randomBytes(BACKUP_IV_LENGTH);
+    const cipher = createCipheriv(BACKUP_ENCRYPTION_ALGO, key, iv);
+    const encPath = filePath + '.enc';
+
+    const output = createWriteStream(encPath);
+    // Write IV header first
+    output.write(iv);
+
+    await pipeline(
+      createReadStream(filePath),
+      cipher,
+      output,
+    );
+
+    // Append the auth tag (16 bytes) at the end
+    const tag = cipher.getAuthTag();
+    const { appendFile } = await import('node:fs/promises');
+    await appendFile(encPath, tag);
+
+    // Replace the original with the encrypted version
+    await rm(filePath, { force: true });
+    const { rename } = await import('node:fs/promises');
+    await rename(encPath, filePath);
+
+    return true;
+  }
+
+  /**
+   * Decrypt a backup archive file in-place.
+   * Expects format: [12-byte IV][ciphertext][16-byte auth tag]
+   * Returns true if decrypted, false if encryption is unavailable.
+   */
+  private async decryptFile(filePath: string): Promise<boolean> {
+    const key = getEncryptionKey();
+    if (!key) return false;
+
+    const fileData = await fsReadFile(filePath);
+    if (fileData.length < BACKUP_IV_LENGTH + 16) {
+      // Too small to be encrypted — skip
+      return false;
+    }
+
+    const iv = fileData.subarray(0, BACKUP_IV_LENGTH);
+    const tag = fileData.subarray(fileData.length - 16);
+    const ciphertext = fileData.subarray(BACKUP_IV_LENGTH, fileData.length - 16);
+
+    const decipher = createDecipheriv(BACKUP_ENCRYPTION_ALGO, key, iv);
+    decipher.setAuthTag(tag);
+
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    await writeFile(filePath, decrypted);
+
+    return true;
   }
 }
 
