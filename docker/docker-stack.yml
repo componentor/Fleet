@@ -75,7 +75,7 @@ services:
 
   # ─── API Server ──────────────────────────────────────────────────────
   api:
-    image: ghcr.io/componentor/fleet-api:${FLEET_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-api:${FLEET_VERSION:-main}
     env_file:
       - /opt/fleet/config/env
     volumes:
@@ -120,7 +120,7 @@ services:
 
   # ─── Dashboard (SPA) ────────────────────────────────────────────────
   dashboard:
-    image: ghcr.io/componentor/fleet-dashboard:${FLEET_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-dashboard:${FLEET_VERSION:-main}
     networks:
       - fleet_public
     healthcheck:
@@ -199,7 +199,7 @@ services:
 
   # ─── SSH Gateway ────────────────────────────────────────────────────
   ssh-gateway:
-    image: ghcr.io/componentor/fleet-ssh-gateway:${FLEET_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-ssh-gateway:${FLEET_VERSION:-main}
     ports:
       - target: 2222
         published: 2222
@@ -235,7 +235,7 @@ services:
 
   # ─── Node Agent ─────────────────────────────────────────────────────
   agent:
-    image: ghcr.io/componentor/fleet-agent:${FLEET_VERSION:-latest}
+    image: ghcr.io/componentor/fleet-agent:${FLEET_VERSION:-main}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/fleet/nfs-exports:/opt/fleet/nfs-exports
