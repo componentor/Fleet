@@ -8,7 +8,7 @@ import { db, platformSettings, eq, upsert } from '@fleet/db';
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 const GITHUB_TOKEN = process.env['GITHUB_TOKEN'] ?? '';
 const IMAGE_PREFIX = process.env['FLEET_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const LOCK_KEY = 'system:update_lock';
 const STATE_KEY = 'system:update_state';
 const LOCK_STALE_MS = 30 * 60 * 1000; // 30 minutes

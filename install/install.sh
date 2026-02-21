@@ -5,9 +5,18 @@ set -euo pipefail
 # Usage (public repo):  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | bash
 # Usage (private repo): GITHUB_TOKEN=ghp_xxx bash install.sh
 
-FLEET_VERSION="${FLEET_VERSION:-main}"
 FLEET_DIR="/opt/fleet"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+FLEET_REPO="componentor/fleet"
+
+# Auto-detect latest release version unless explicitly set
+if [ -z "${FLEET_VERSION:-}" ]; then
+  FLEET_VERSION=$(curl -fsSL "https://api.github.com/repos/${FLEET_REPO}/releases/latest" 2>/dev/null \
+    | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' | sed 's/^v//')
+  if [ -z "$FLEET_VERSION" ]; then
+    FLEET_VERSION="main"
+  fi
+fi
 
 # Colors
 RED='\033[0;31m'
