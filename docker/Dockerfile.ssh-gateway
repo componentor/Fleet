@@ -22,6 +22,7 @@ ENV NODE_ENV=production
 RUN adduser -D -s /bin/sh sshgateway
 COPY --from=build /app/production ./
 COPY --from=build /app/packages/api/dist ./dist
+COPY --from=build /app/packages/db/src/migrations ./dist/migrations
 RUN mkdir -p /app/data && chown sshgateway:sshgateway /app/data
 EXPOSE 2222
 USER sshgateway

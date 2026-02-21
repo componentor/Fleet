@@ -21,6 +21,8 @@ ENV NODE_ENV=production
 RUN addgroup -S fleet && adduser -S fleet -G fleet
 COPY --from=build /app/production ./
 COPY --from=build /app/packages/api/dist ./dist
+COPY --from=build /app/packages/db/src/migrations ./dist/migrations
+COPY --from=build /app/packages/api/src/templates ./templates
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:3000/health || exit 1
 USER fleet
