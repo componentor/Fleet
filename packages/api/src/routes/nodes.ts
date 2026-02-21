@@ -8,7 +8,7 @@ import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import os from 'node:os';
 
-const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 6, keyPrefix: 'heartbeat' });
+const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 120, keyPrefix: 'heartbeat' });
 
 const heartbeatSchema = z.object({
   hostname: z.string().max(255).optional(),
