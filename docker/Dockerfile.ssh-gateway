@@ -13,7 +13,7 @@ COPY packages/types ./packages/types
 COPY packages/db ./packages/db
 COPY packages/api ./packages/api
 COPY tsconfig.base.json ./
-COPY docker/tsup.docker.ts ./packages/api/tsup.config.ts
+COPY docker/tsup.ssh-gateway.ts ./packages/api/tsup.config.ts
 RUN pnpm --filter @fleet/api exec tsup
 RUN pnpm --filter @fleet/api deploy --legacy --prod /app/production
 
@@ -22,8 +22,9 @@ ENV NODE_ENV=production
 RUN adduser -D -s /bin/sh sshgateway
 COPY --from=build /app/production ./
 COPY --from=build /app/packages/api/dist ./dist
+RUN mkdir -p /app/data && chown sshgateway:sshgateway /app/data
 EXPOSE 2222
 USER sshgateway
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:2222/health || exit 1
+  CMD node -e "const net=require('net');const c=net.connect(2222,'127.0.0.1');c.on('connect',()=>{c.end();process.exit(0)});c.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),3000)"
 CMD ["node", "dist/ssh-gateway.js"]
