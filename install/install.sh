@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage (public repo):  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | bash
 # Usage (private repo): GITHUB_TOKEN=ghp_xxx bash install.sh
 
-FLEET_VERSION="${FLEET_VERSION:-latest}"
+FLEET_VERSION="${FLEET_VERSION:-main}"
 FLEET_DIR="/opt/fleet"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
