@@ -171,6 +171,8 @@ services:
         published: 443
         protocol: tcp
         mode: host
+    environment:
+      DOCKER_API_VERSION: "1.45"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - fleet_certs:/certs
