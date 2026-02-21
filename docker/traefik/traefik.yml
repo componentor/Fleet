@@ -16,8 +16,7 @@ entryPoints:
         certResolver: letsencrypt
 
 providers:
-  docker:
-    swarmMode: true
+  swarm:
     exposedByDefault: false
     network: fleet_fleet_public
 

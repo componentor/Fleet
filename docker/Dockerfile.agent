@@ -12,9 +12,10 @@ COPY packages/types ./packages/types
 COPY packages/agent ./packages/agent
 COPY tsconfig.base.json ./
 RUN pnpm --filter @fleet/agent exec tsup src/index.ts --format esm
+RUN pnpm --filter @fleet/agent deploy --prod /app/production
 
 FROM base AS runner
 ENV NODE_ENV=production
+COPY --from=build /app/production ./
 COPY --from=build /app/packages/agent/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
 CMD ["node", "dist/index.js"]
