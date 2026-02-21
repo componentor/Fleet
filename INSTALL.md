@@ -299,7 +299,6 @@ sudo tee /etc/docker/daemon.json <<'EOF'
     "nproc": { "Name": "nproc", "Hard": 1024, "Soft": 1024 },
     "nofile": { "Name": "nofile", "Hard": 65536, "Soft": 65536 }
   },
-  "live-restore": true,
   "storage-driver": "overlay2"
 }
 EOF
@@ -432,7 +431,6 @@ sudo tee /etc/docker/daemon.json <<'EOF'
     "nproc": { "Name": "nproc", "Hard": 1024, "Soft": 1024 },
     "nofile": { "Name": "nofile", "Hard": 65536, "Soft": 65536 }
   },
-  "live-restore": true,
   "storage-driver": "overlay2"
 }
 EOF
