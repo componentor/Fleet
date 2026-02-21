@@ -42,6 +42,15 @@ try {
   logger.error({ err }, 'Database migration failed')
 }
 
+// Run database seeders on startup (idempotent — safe to re-run)
+try {
+  const { runSeeders } = await import('@fleet/db/seed')
+  const { executed } = await runSeeders()
+  if (executed > 0) logger.info({ executed }, 'Database seeders executed')
+} catch (err) {
+  logger.warn({ err }, 'Database seeder warning (non-fatal)')
+}
+
 // Recover from interrupted auto-updates (must run after DB is ready, before serving traffic)
 try {
   await updateService.recoverFromInterruptedUpdate()

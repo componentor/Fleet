@@ -114,7 +114,7 @@ const seeders: SeederFn[] = [
         { key: 'platform:name', value: 'Fleet' },
         { key: 'platform:version', value: '0.1.0' },
         { key: 'platform:registrationEnabled', value: true },
-        { key: 'platform:defaultPlan', value: false },
+        { key: 'platform:defaultPlan', value: 'none' },
         { key: 'email:provider', value: 'smtp' },
       ];
 
