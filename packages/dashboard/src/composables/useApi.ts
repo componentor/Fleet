@@ -76,6 +76,14 @@ async function request<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 
+  // Handle 429 rate limiting — do NOT cascade into auth/logout logic
+  if (response.status === 429) {
+    let errorBody: unknown
+    const text = await response.text()
+    try { errorBody = JSON.parse(text) } catch { errorBody = text }
+    throw new ApiError(429, 'Too Many Requests', errorBody)
+  }
+
   // Handle 401 with automatic token refresh
   if (response.status === 401 && token && !path.includes('/auth/')) {
     // Deduplicate concurrent refresh attempts
@@ -142,8 +150,12 @@ export function useApi() {
   function withToastError<T>(promise: Promise<T>): Promise<T> {
     return promise.catch((err) => {
       if (err instanceof ApiError && err.status !== 401) {
-        const body = err.body as Record<string, string> | undefined
-        toast.error(body?.error || body?.message || err.statusText)
+        if (err.status === 429) {
+          toast.error('Too many requests — please wait a moment')
+        } else {
+          const body = err.body as Record<string, string> | undefined
+          toast.error(body?.error || body?.message || err.statusText)
+        }
       }
       throw err
     })

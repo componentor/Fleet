@@ -88,8 +88,17 @@ app.get('/health', (c) => {
   });
 });
 
-// Global rate limiter: 120 requests per minute per IP
-app.use('*', rateLimiter({ windowMs: 60_000, max: 120, keyPrefix: 'global' }));
+// Global rate limiter: 300 requests per minute per IP
+// Skips internal node heartbeat requests (they share the Docker overlay IP and
+// have their own per-route rate limiter)
+const globalRateLimit = rateLimiter({ windowMs: 60_000, max: 300, keyPrefix: 'global' });
+app.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.match(/\/api\/v1\/nodes\/[^/]+\/heartbeat$/)) {
+    return next();
+  }
+  return globalRateLimit(c, next);
+});
 
 // Request logging
 app.use('*', requestLogger);

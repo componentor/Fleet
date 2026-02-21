@@ -8,7 +8,8 @@ import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import os from 'node:os';
 
-const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 120, keyPrefix: 'heartbeat' });
+// All node agents share the Docker overlay IP, so this limit is per-cluster not per-node
+const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 300, keyPrefix: 'heartbeat' });
 
 const heartbeatSchema = z.object({
   hostname: z.string().max(255).optional(),
