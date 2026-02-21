@@ -248,6 +248,29 @@ updateRoutes.post('/seed', async (c) => {
   }
 });
 
+// POST /reset — force-reset a stuck update state and release the lock
+updateRoutes.post('/reset', async (c) => {
+  const state = updateService.getState();
+
+  // Only allow reset when in a non-terminal state (stuck) or failed
+  const allowedStates = ['failed', 'checking', 'backing-up', 'pulling', 'verifying-images', 'migrating', 'updating', 'seeding', 'verifying', 'rolling-back'];
+  if (!allowedStates.includes(state.status)) {
+    return c.json({
+      error: `System is currently "${state.status}" — no reset needed. Reset is for stuck or failed states.`,
+      currentStatus: state.status,
+    }, 400);
+  }
+
+  const result = await updateService.forceReset();
+  logger.warn({ previousStatus: result.previousStatus, user: c.get('user').userId }, 'Update state force-reset by admin');
+
+  return c.json({
+    message: `Update state reset successfully. Previous status was "${result.previousStatus}".`,
+    previousStatus: result.previousStatus,
+    currentStatus: 'idle',
+  });
+});
+
 // GET /db-status — verify database connectivity
 updateRoutes.get('/db-status', async (c) => {
   const result = await verifyDatabase();

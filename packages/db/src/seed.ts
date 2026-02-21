@@ -110,11 +110,11 @@ const seeders: SeederFn[] = [
     version: '0.1.0',
     description: 'Default platform settings',
     run: async (db, schema, dialect) => {
-      const defaults = [
+      const defaults: { key: string; value: unknown }[] = [
         { key: 'platform:name', value: 'Fleet' },
         { key: 'platform:version', value: '0.1.0' },
         { key: 'platform:registrationEnabled', value: true },
-        { key: 'platform:defaultPlan', value: '' },
+        { key: 'platform:defaultPlan', value: false },
         { key: 'email:provider', value: 'smtp' },
       ];
 

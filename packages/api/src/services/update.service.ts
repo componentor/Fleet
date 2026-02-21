@@ -92,10 +92,76 @@ export class UpdateService {
       if (persisted && typeof persisted === 'string' && persisted !== '') {
         this.state.currentVersion = persisted;
         this.cachedNotification.current = persisted;
+        return;
       }
     } catch {
-      // DB not ready yet — use env default
+      // DB not ready yet — try Docker fallback
     }
+
+    // Fallback: detect version from running fleet_api image tag
+    try {
+      const swarmServices = await dockerService.listServices({ name: ['fleet_api'] });
+      if (swarmServices.length > 0) {
+        const spec = swarmServices[0]!.Spec as { TaskTemplate?: { ContainerSpec?: { Image?: string } } };
+        const image = spec?.TaskTemplate?.ContainerSpec?.Image ?? '';
+        // Image format: ghcr.io/componentor/fleet-api:0.1.1@sha256:...
+        const tagMatch = image.match(/:([0-9]+\.[0-9]+\.[0-9]+[^@]*)/);
+        if (tagMatch) {
+          const detected = tagMatch[1]!;
+          this.state.currentVersion = detected;
+          this.cachedNotification.current = detected;
+          logger.info({ detected }, 'Detected version from running Docker image');
+        }
+      }
+    } catch {
+      // Non-critical — keep env default
+    }
+  }
+
+  /**
+   * Force-reset the update state and release any stuck lock.
+   * Used by admins to recover from stuck updates without restarting.
+   */
+  async forceReset(): Promise<{ previousStatus: string }> {
+    const previousStatus = this.state.status;
+
+    // Release the distributed lock regardless of ownership
+    try {
+      await upsert(
+        platformSettings,
+        { key: LOCK_KEY, value: {} },
+        platformSettings.key,
+        { value: {}, updatedAt: new Date() },
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to clear update lock during force reset');
+    }
+
+    // Clear persisted state
+    try {
+      await upsert(
+        platformSettings,
+        { key: STATE_KEY, value: {} },
+        platformSettings.key,
+        { value: {}, updatedAt: new Date() },
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to clear persisted state during force reset');
+    }
+
+    // Reset in-memory state
+    this.state.status = 'idle';
+    this.state.log = `[${new Date().toISOString()}] State force-reset by admin (was: ${previousStatus})\n`;
+    this.state.finishedAt = new Date();
+    this.state.previousImageTags.clear();
+    this.state.preUpdateBackupId = null;
+    this.state.servicesUpdated = [];
+    this.fencingToken = 0;
+
+    this.events.emit('update', this.state);
+    logger.warn({ previousStatus }, 'Update state force-reset by admin');
+
+    return { previousStatus };
   }
 
   private fencingToken = 0;
@@ -289,21 +355,36 @@ export class UpdateService {
     runMigrations: () => Promise<{ applied: number }>,
     runSeeders: () => Promise<{ executed: number }>,
   ): Promise<void> {
-    if (this.state.status !== 'idle') {
+    // Reset state so UI can see what's happening immediately
+    this.state.log = '';
+    this.state.targetVersion = targetVersion;
+    this.state.startedAt = new Date();
+    this.state.finishedAt = null;
+
+    if (this.state.status !== 'idle' && this.state.status !== 'completed' && this.state.status !== 'failed') {
+      this.state.status = 'failed';
+      this.appendLog(`Cannot start update: system is currently ${this.state.status}`);
+      this.state.finishedAt = new Date();
+      this.events.emit('update', this.state);
       throw new Error(`Cannot start update: system is currently ${this.state.status}`);
     }
 
     // Distributed lock: prevent concurrent updates across API instances
+    this.state.status = 'checking';
+    this.appendLog('Acquiring update lock...');
+    this.events.emit('update', this.state);
+
     const fencingToken = await this.acquireUpdateLock();
     if (fencingToken === null) {
+      this.state.status = 'failed';
+      this.appendLog('Another update is already in progress (distributed lock held)');
+      this.state.finishedAt = new Date();
+      this.events.emit('update', this.state);
       throw new Error('Another update is already in progress (distributed lock held)');
     }
 
+    this.appendLog('Lock acquired.');
     this.state.status = 'backing-up';
-    this.state.targetVersion = targetVersion;
-    this.state.log = '';
-    this.state.startedAt = new Date();
-    this.state.finishedAt = null;
     this.state.previousImageTags.clear();
     this.state.preUpdateBackupId = null;
     this.state.servicesUpdated = [];

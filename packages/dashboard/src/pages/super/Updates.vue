@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal } from 'lucide-vue-next'
+import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal, XCircle } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -14,6 +14,7 @@ const updating = ref(false)
 const rollingBack = ref(false)
 const migrating = ref(false)
 const seeding = ref(false)
+const resetting = ref(false)
 const error = ref('')
 const success = ref('')
 
@@ -173,6 +174,22 @@ async function runSeeders() {
   }
 }
 
+async function resetUpdateState() {
+  if (!confirm('Force-reset the update state? This clears any stuck lock and returns the system to idle. Only use if an update is truly stuck.')) return
+  resetting.value = true
+  error.value = ''
+  try {
+    const result = await api.post<any>('/updates/reset', {})
+    success.value = result.message
+    setTimeout(() => { success.value = '' }, 5000)
+    await fetchAll()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to reset update state'
+  } finally {
+    resetting.value = false
+  }
+}
+
 async function saveSettings() {
   try {
     await api.patch('/updates/settings', {
@@ -256,6 +273,19 @@ onUnmounted(() => {
               {{ updateState.currentVersion }} &rarr; {{ updateState.targetVersion }}
             </p>
           </div>
+          <button
+            v-if="updateState.status === 'failed' || isActiveState(updateState.status)"
+            @click="resetUpdateState"
+            :disabled="resetting"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors shrink-0"
+            :class="updateState.status === 'failed'
+              ? 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30'
+              : 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'"
+          >
+            <Loader2 v-if="resetting" class="w-3.5 h-3.5 animate-spin" />
+            <XCircle v-else class="w-3.5 h-3.5" />
+            Reset
+          </button>
         </div>
 
         <!-- Live log viewer -->
