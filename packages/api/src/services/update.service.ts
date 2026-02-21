@@ -82,6 +82,22 @@ export class UpdateService {
     servicesUpdated: [],
   };
 
+  /** Read persisted version from DB — call once after DB is ready. */
+  async initVersion(): Promise<void> {
+    try {
+      const row = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, 'platform:currentVersion'),
+      });
+      const persisted = row?.value as string | null;
+      if (persisted && typeof persisted === 'string' && persisted !== '') {
+        this.state.currentVersion = persisted;
+        this.cachedNotification.current = persisted;
+      }
+    } catch {
+      // DB not ready yet — use env default
+    }
+  }
+
   private fencingToken = 0;
   private events = new EventEmitter();
   private checkTimer: ReturnType<typeof setInterval> | null = null;
@@ -449,11 +465,25 @@ export class UpdateService {
         }
       }
 
-      // 9. Done
-      this.state.currentVersion = targetVersion;
+      // 9. Done — persist the new version so it survives container restarts
+      const cleanVersion = targetVersion.replace(/^v/, '');
+      this.state.currentVersion = cleanVersion;
       this.state.status = 'completed';
       this.state.finishedAt = new Date();
       this.appendLog(`Update to ${targetVersion} completed successfully.`);
+
+      // Persist version to DB so new containers pick it up
+      try {
+        await upsert(
+          platformSettings,
+          { key: 'platform:currentVersion', value: cleanVersion },
+          platformSettings.key,
+          { value: cleanVersion, updatedAt: new Date() },
+        );
+      } catch (err) {
+        this.appendLog(`Warning: Could not persist version to DB: ${String(err)}`);
+      }
+
       await this.persistState();
       await this.clearPersistedState();
       this.events.emit('update', this.state);

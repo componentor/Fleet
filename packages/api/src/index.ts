@@ -49,6 +49,11 @@ try {
   logger.error({ err }, 'Update recovery failed — system may need manual inspection')
 }
 
+// Load persisted version from DB (survives container restarts after updates)
+try {
+  await updateService.initVersion()
+} catch { /* non-critical */ }
+
 // Load JWT secret from DB if not set via env (setup wizard stores it encrypted in platformSettings)
 if (!process.env['JWT_SECRET']) {
   try {
