@@ -79,6 +79,15 @@ app.use('*', async (c, next) => {
   return bodyLimit({ maxSize: 2 * 1024 * 1024 })(c, next);
 });
 
+// Health check — BEFORE rate limiter so Swarm healthchecks are never blocked
+app.get('/health', (c) => {
+  return c.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+  });
+});
+
 // Global rate limiter: 120 requests per minute per IP
 app.use('*', rateLimiter({ windowMs: 60_000, max: 120, keyPrefix: 'global' }));
 
@@ -132,15 +141,6 @@ app.onError(async (err, c) => {
 // 404 handler
 app.notFound((c) => {
   return c.json({ error: 'Not found' }, 404);
-});
-
-// Health check (enhanced with uptime)
-app.get('/health', (c) => {
-  return c.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptimeSeconds: Math.floor(process.uptime()),
-  });
 });
 
 // ── Helper: verify JWT from WebSocket subprotocol ──
