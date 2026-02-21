@@ -1,10 +1,29 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { Sun, Moon } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const { theme, toggle } = useTheme()
+
+// Check if we're on a reseller's custom domain
+const resellerBranding = ref<{ found: boolean; brandName?: string; brandLogoUrl?: string; brandPrimaryColor?: string; slug?: string }>({ found: false })
+
+onMounted(async () => {
+  try {
+    const host = window.location.hostname
+    const appHost = new URL(import.meta.env.VITE_API_URL || window.location.origin).hostname
+    if (host !== appHost && host !== 'localhost') {
+      const res = await fetch(`/api/v1/reseller/branding/${encodeURIComponent(host)}`)
+      if (res.ok) {
+        resellerBranding.value = await res.json()
+      }
+    }
+  } catch {
+    // Not a reseller domain
+  }
+})
 </script>
 
 <template>
@@ -32,15 +51,25 @@ const { theme, toggle } = useTheme()
 
     <!-- Logo -->
     <div class="mb-8 text-center relative z-10 animate-fade-in-up">
-      <div class="flex items-center justify-center gap-2 mb-2">
-        <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700">
-          <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+      <template v-if="resellerBranding.found">
+        <div class="flex items-center justify-center gap-2 mb-2">
+          <img v-if="resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" class="h-10 w-auto max-w-[200px] object-contain" />
+          <h1 v-else class="text-3xl font-bold" :style="resellerBranding.brandPrimaryColor ? { color: resellerBranding.brandPrimaryColor } : {}">
+            {{ resellerBranding.brandName }}
+          </h1>
         </div>
-        <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">Fleet</h1>
-      </div>
-      <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('authLayout.tagline') }}</p>
+      </template>
+      <template v-else>
+        <div class="flex items-center justify-center gap-2 mb-2">
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700">
+            <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">Fleet</h1>
+        </div>
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('authLayout.tagline') }}</p>
+      </template>
     </div>
 
     <!-- Card -->

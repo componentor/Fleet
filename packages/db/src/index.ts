@@ -129,6 +129,13 @@ export const errorLog = _schema.errorLog as typeof PgSchema.errorLog;
 // webhook_events (from billing.ts)
 export const webhookEvents = _schema.webhookEvents as typeof PgSchema.webhookEvents;
 
+// reseller tables (from billing.ts)
+export const resellerConfig = _schema.resellerConfig as typeof PgSchema.resellerConfig;
+export const resellerAccounts = _schema.resellerAccounts as typeof PgSchema.resellerAccounts;
+export const resellerApplications = _schema.resellerApplications as typeof PgSchema.resellerApplications;
+export const resellerAccountsRelations = _schema.resellerAccountsRelations;
+export const resellerApplicationsRelations = _schema.resellerApplicationsRelations;
+
 // storage.ts
 export const storageClusters = _schema.storageClusters as typeof PgSchema.storageClusters;
 export const storageNodes = _schema.storageNodes as typeof PgSchema.storageNodes;

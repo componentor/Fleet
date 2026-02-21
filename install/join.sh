@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Fleet — Node join installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | bash
+# Usage (public repo):  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | bash
+# Usage (private repo): Copy this script to the server and run: bash join.sh
 
 # Colors
 RED='\033[0;31m'

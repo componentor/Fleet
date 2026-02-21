@@ -47,6 +47,12 @@ const authRoutes: RouteRecordRaw[] = [
     component: () => import('@/pages/auth/VerifyEmail.vue'),
     meta: { public: true },
   },
+  {
+    path: '/r/:slug',
+    name: 'reseller-signup',
+    component: () => import('@/pages/auth/ResellerSignup.vue'),
+    meta: { public: true },
+  },
 ]
 
 const superRoutes: RouteRecordRaw[] = [
@@ -129,6 +135,11 @@ const superRoutes: RouteRecordRaw[] = [
         path: 'shared-domains',
         name: 'super-shared-domains',
         component: () => import('@/pages/super/SharedDomains.vue'),
+      },
+      {
+        path: 'resellers',
+        name: 'super-resellers',
+        component: () => import('@/pages/super/Resellers.vue'),
       },
     ],
   },
@@ -247,6 +258,12 @@ const panelRoutes: RouteRecordRaw[] = [
         path: 'profile',
         name: 'panel-profile',
         component: () => import('@/pages/panel/Profile.vue'),
+      },
+      {
+        path: 'reseller',
+        name: 'panel-reseller',
+        component: () => import('@/pages/panel/Reseller.vue'),
+        meta: { requireOwner: true },
       },
     ],
   },

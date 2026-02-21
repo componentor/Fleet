@@ -393,7 +393,7 @@ onUnmounted(() => {
               <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">{{ $t('docs.storage.quickInstallTitle') }}</h3>
               <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">{{ $t('docs.storage.quickInstallDesc') }}</p>
               <div class="mt-3">
-                <CodeBlock code="curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/storage-node.sh | sudo bash" />
+                <CodeBlock code="sudo bash storage-node.sh --provider glusterfs" />
               </div>
               <p class="mt-3 text-sm text-surface-500 dark:text-surface-400">{{ $t('docs.storage.interactiveInstallerNote') }}</p>
 

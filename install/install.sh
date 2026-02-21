@@ -2,10 +2,12 @@
 set -euo pipefail
 
 # Fleet — Single-line installer for the first node
-# Usage: curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | bash
+# Usage (public repo):  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | bash
+# Usage (private repo): GITHUB_TOKEN=ghp_xxx bash install.sh
 
 FLEET_VERSION="${FLEET_VERSION:-latest}"
 FLEET_DIR="/opt/fleet"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -256,6 +258,7 @@ STRIPE_SECRET_KEY=${STRIPE_KEY}
 NODE_ENV=production
 PORT=3000
 API_URL=http://api:3000
+GITHUB_TOKEN=${GITHUB_TOKEN}
 EOF
 
   # Create registry htpasswd file (apache2-utils/httpd-tools installed in install_dependencies)
@@ -767,13 +770,20 @@ deploy_stack() {
 
   mkdir -p "$TRAEFIK_DIR"
 
+  # Build curl auth header for private repos
+  local AUTH_HEADER=()
+  if [ -n "$GITHUB_TOKEN" ]; then
+    AUTH_HEADER=(-H "Authorization: token $GITHUB_TOKEN")
+    log "Using GITHUB_TOKEN for authenticated downloads"
+  fi
+
   # Download production stack files
   log "Downloading stack files..."
-  if ! curl -fsSL "$STACK_URL" -o "$STACK_DIR/docker-stack.yml"; then
-    err "Failed to download docker-stack.yml from $STACK_URL"
+  if ! curl -fsSL "${AUTH_HEADER[@]}" "$STACK_URL" -o "$STACK_DIR/docker-stack.yml"; then
+    err "Failed to download docker-stack.yml from $STACK_URL (is GITHUB_TOKEN set for private repos?)"
   fi
-  if ! curl -fsSL "$TRAEFIK_URL" -o "$TRAEFIK_DIR/traefik.yml"; then
-    err "Failed to download traefik.yml from $TRAEFIK_URL"
+  if ! curl -fsSL "${AUTH_HEADER[@]}" "$TRAEFIK_URL" -o "$TRAEFIK_DIR/traefik.yml"; then
+    err "Failed to download traefik.yml from $TRAEFIK_URL (is GITHUB_TOKEN set for private repos?)"
   fi
 
   # Source the env file to get variables for substitution
@@ -875,8 +885,8 @@ main() {
   echo "  Platform:    https://${PLATFORM_DOMAIN}"
   echo "  Admin email: ${ADMIN_EMAIL}"
   echo ""
-  echo "  To add more nodes, run on each new server:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/join.sh | bash"
+  echo "  To add more nodes, copy join.sh to the server and run:"
+  echo "  GITHUB_TOKEN=<token> bash join.sh"
   echo ""
   echo "  Join token:"
   docker swarm join-token worker -q 2>/dev/null || echo "  (run 'docker swarm join-token worker' to get the token)"

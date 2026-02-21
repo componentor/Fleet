@@ -30,6 +30,7 @@ import { stripeSyncService } from '../services/stripe-sync.service.js';
 import { usageService } from '../services/usage.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireOwner } from '../middleware/rbac.js';
+import { calculateResellerPricing } from './reseller.js';
 import { logger } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
@@ -645,6 +646,18 @@ authed.get('/price-preview', async (c) => {
     }
   }
 
+  // Apply reseller pricing (discount/markup) after all other discounts
+  let resellerDiscount = 0;
+  let resellerMarkup = 0;
+  let finalPrice = cyclePriceCents;
+
+  if (accountId) {
+    const resellerPricing = await calculateResellerPricing(accountId, cyclePriceCents);
+    resellerDiscount = resellerPricing.discountAmount;
+    resellerMarkup = resellerPricing.markupAmount;
+    finalPrice = resellerPricing.finalPrice;
+  }
+
   return c.json({
     planId: plan.id,
     planName: plan.name,
@@ -653,6 +666,9 @@ authed.get('/price-preview', async (c) => {
     cyclePriceCents,
     discountAmount,
     discount: discount ?? null,
+    resellerDiscount,
+    resellerMarkup,
+    finalPrice,
   });
 });
 

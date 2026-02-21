@@ -40,7 +40,8 @@ function getClientIp(c: Parameters<Parameters<typeof createMiddleware>[0]>[0]): 
 export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimiterOptions) {
   const windowSec = Math.ceil(windowMs / 1000);
 
-  // Per-instance in-memory fallback store
+  // Per-instance in-memory fallback store (bounded to prevent DoS memory growth)
+  const MAX_FALLBACK_ENTRIES = 10_000;
   const fallbackStore = new Map<string, RateLimitEntry>();
   let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -107,6 +108,11 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
     const entry = fallbackStore.get(memKey);
 
     if (!entry || now > entry.resetAt) {
+      // Evict oldest entries if store is full to prevent unbounded memory growth
+      if (fallbackStore.size >= MAX_FALLBACK_ENTRIES) {
+        const firstKey = fallbackStore.keys().next().value;
+        if (firstKey) fallbackStore.delete(firstKey);
+      }
       fallbackStore.set(memKey, { count: 1, resetAt: now + windowMs });
       await next();
       return;

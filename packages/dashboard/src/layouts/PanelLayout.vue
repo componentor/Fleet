@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterView, RouterLink, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
@@ -23,6 +23,7 @@ import {
   Users,
   UserPlus,
   CreditCard,
+  Handshake,
   Settings,
   LogOut,
   Menu,
@@ -38,8 +39,10 @@ import {
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
+import { useApi } from '@/composables/useApi'
 
 const commandPalette = useCommandPalette()
+const api = useApi()
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -61,6 +64,17 @@ function stopImpersonating() {
   window.location.href = '/admin/accounts'
 }
 
+// Reseller branding for sub-accounts
+const resellerBranding = ref<{ found: boolean; brandName?: string; brandLogoUrl?: string; brandPrimaryColor?: string }>({ found: false })
+
+onMounted(async () => {
+  try {
+    resellerBranding.value = await api.get('/reseller/parent-branding')
+  } catch {
+    // Not a sub-account of a reseller, or reseller program not active
+  }
+})
+
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
 const accountMenuOpen = ref(false)
@@ -81,6 +95,7 @@ const navItems = [
   { nameKey: 'nav.users', path: '/panel/users', icon: Users },
   { nameKey: 'nav.activity', path: '/panel/activity', icon: ScrollText },
   { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
+  { nameKey: 'nav.reseller', path: '/panel/reseller', icon: Handshake, requireOwner: true },
   { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
 ]
 
@@ -124,8 +139,11 @@ function changeLocale(newLocale: string) {
       ]"
     >
       <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink to="/panel" class="text-xl font-bold text-primary-600 dark:text-primary-400">
-          Fleet
+        <RouterLink to="/panel" class="flex items-center gap-2">
+          <img v-if="resellerBranding.found && resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" class="h-8 w-auto max-w-[140px] object-contain" />
+          <span v-else class="text-xl font-bold text-primary-600 dark:text-primary-400">
+            {{ resellerBranding.found && resellerBranding.brandName ? resellerBranding.brandName : 'Fleet' }}
+          </span>
         </RouterLink>
       </div>
 

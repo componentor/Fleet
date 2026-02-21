@@ -5,8 +5,8 @@ set -euo pipefail
 # Prepares a node to participate in the Fleet distributed storage cluster.
 # Supports GlusterFS, Ceph, and MinIO installation.
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/storage-node.sh | bash
+# Usage (public repo):  curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/storage-node.sh | bash
+# Usage (private repo): Copy this script to the server and run:
 #   bash storage-node.sh --provider glusterfs --data-path /srv/fleet-storage
 #   bash storage-node.sh --provider ceph --monitors 10.0.1.10,10.0.1.11,10.0.1.12
 #   bash storage-node.sh --provider minio --data-path /srv/fleet-objects

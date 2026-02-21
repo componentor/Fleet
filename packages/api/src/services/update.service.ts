@@ -6,6 +6,7 @@ import { logger } from './logger.js';
 import { db, platformSettings, eq, upsert } from '@fleet/db';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
+const GITHUB_TOKEN = process.env['GITHUB_TOKEN'] ?? '';
 const IMAGE_PREFIX = process.env['FLEET_IMAGE_PREFIX'] ?? 'ghcr.io/componentor';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const LOCK_KEY = 'system:update_lock';
@@ -785,13 +786,18 @@ export class UpdateService {
   }
 
   private async fetchGitHubReleases(limit = 10): Promise<ReleaseInfo[]> {
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'fleet-update-service',
+    };
+    if (GITHUB_TOKEN) {
+      headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
+    }
+
     const res = await fetch(
       `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=${limit}`,
       {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'fleet-update-service',
-        },
+        headers,
         signal: AbortSignal.timeout(15_000),
       },
     );
@@ -815,13 +821,18 @@ export class UpdateService {
   private async fetchRelease(version: string): Promise<ReleaseInfo | null> {
     const tag = version.startsWith('v') ? version : `v${version}`;
     try {
+      const headers: Record<string, string> = {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'fleet-update-service',
+      };
+      if (GITHUB_TOKEN) {
+        headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
+      }
+
       const res = await fetch(
         `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${tag}`,
         {
-          headers: {
-            Accept: 'application/vnd.github+json',
-            'User-Agent': 'fleet-update-service',
-          },
+          headers,
           signal: AbortSignal.timeout(15_000),
         },
       );

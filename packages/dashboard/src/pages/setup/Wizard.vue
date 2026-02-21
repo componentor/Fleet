@@ -332,7 +332,7 @@ async function goToDashboard() {
                     </p>
                     <div v-if="!dockerState.available" class="mt-2">
                       <p class="text-xs text-red-600 dark:text-red-400 mb-1">{{ $t('setup.installDockerAutoHint') }}</p>
-                      <code class="text-xs bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-700 dark:text-red-300">curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | sudo bash</code>
+                      <code class="text-xs bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-700 dark:text-red-300">sudo bash install.sh</code>
                     </div>
                   </div>
                 </div>

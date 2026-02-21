@@ -4,6 +4,7 @@ import {
   text,
   integer,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -182,6 +183,79 @@ export const resourceLimitsRelations = relations(resourceLimits, ({ one }) => ({
 export const accountBillingOverridesRelations = relations(accountBillingOverrides, ({ one }) => ({
   account: one(accounts, {
     fields: [accountBillingOverrides.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+// ── Reseller tables ──────────────────────────────────────────────────────────
+
+export const resellerConfig = sqliteTable('reseller_config', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  enabled: integer('enabled', { mode: 'boolean' }).default(false),
+  approvalMode: text('approval_mode').default('manual'),
+  allowSubAccountReselling: integer('allow_sub_account_reselling', { mode: 'boolean' }).default(false),
+  defaultDiscountType: text('default_discount_type').default('percentage'),
+  defaultDiscountPercent: integer('default_discount_percent').default(0),
+  defaultDiscountFixed: integer('default_discount_fixed').default(0),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+});
+
+export const resellerAccounts = sqliteTable('reseller_accounts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  accountId: text('account_id')
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull()
+    .unique(),
+  status: text('status').default('pending'),
+  stripeConnectId: text('stripe_connect_id'),
+  connectOnboarded: integer('connect_onboarded', { mode: 'boolean' }).default(false),
+  discountType: text('discount_type'),
+  discountPercent: integer('discount_percent'),
+  discountFixed: integer('discount_fixed'),
+  markupType: text('markup_type').default('percentage'),
+  markupPercent: integer('markup_percent').default(0),
+  markupFixed: integer('markup_fixed').default(0),
+  canSubAccountResell: integer('can_sub_account_resell', { mode: 'boolean' }).default(false),
+  signupSlug: text('signup_slug').unique(),
+  customDomain: text('custom_domain'),
+  brandName: text('brand_name'),
+  brandLogoUrl: text('brand_logo_url'),
+  brandPrimaryColor: text('brand_primary_color'),
+  brandDescription: text('brand_description'),
+  approvedAt: integer('approved_at', { mode: 'timestamp' }),
+  approvedBy: text('approved_by'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+}, (table) => [
+  index('idx_reseller_accounts_status').on(table.status),
+]);
+
+export const resellerApplications = sqliteTable('reseller_applications', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  accountId: text('account_id')
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  message: text('message'),
+  status: text('status').default('pending'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),
+  reviewNote: text('review_note'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+}, (table) => [
+  index('idx_reseller_applications_account_id').on(table.accountId),
+  index('idx_reseller_applications_status').on(table.status),
+]);
+
+export const resellerAccountsRelations = relations(resellerAccounts, ({ one }) => ({
+  account: one(accounts, {
+    fields: [resellerAccounts.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+export const resellerApplicationsRelations = relations(resellerApplications, ({ one }) => ({
+  account: one(accounts, {
+    fields: [resellerApplications.accountId],
     references: [accounts.id],
   }),
 }));

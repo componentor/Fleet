@@ -386,6 +386,79 @@ export class StripeService {
     return null;
   }
 
+  // ── Stripe Connect methods ──────────────────────────────────────────────────
+
+  /**
+   * Create a Stripe Express connected account for a reseller.
+   */
+  async createConnectAccount(
+    email: string,
+    metadata: Record<string, string>,
+  ): Promise<Stripe.Account> {
+    return getStripe().accounts.create({
+      type: 'express',
+      email,
+      metadata,
+      capabilities: {
+        transfers: { requested: true },
+      },
+    });
+  }
+
+  /**
+   * Create an Account Link for Stripe Connect onboarding.
+   */
+  async createAccountLink(
+    connectAccountId: string,
+    refreshUrl: string,
+    returnUrl: string,
+  ): Promise<Stripe.AccountLink> {
+    return getStripe().accountLinks.create({
+      account: connectAccountId,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+      type: 'account_onboarding',
+    });
+  }
+
+  /**
+   * Retrieve a connected Stripe account to check onboarding status.
+   */
+  async getConnectAccount(
+    connectAccountId: string,
+  ): Promise<Stripe.Account> {
+    return getStripe().accounts.retrieve(connectAccountId);
+  }
+
+  /**
+   * Create a one-time payment checkout with destination charge for reseller markup.
+   * Used for domain purchases where reseller markup applies.
+   */
+  async createPaymentWithConnect(params: {
+    customerId: string;
+    lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
+    metadata: Record<string, string>;
+    successUrl: string;
+    cancelUrl: string;
+    connectAccountId: string;
+    applicationFeeAmount: number;
+  }): Promise<Stripe.Checkout.Session> {
+    return getStripe().checkout.sessions.create({
+      customer: params.customerId,
+      mode: 'payment',
+      line_items: params.lineItems,
+      metadata: params.metadata,
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+      payment_intent_data: {
+        application_fee_amount: params.applicationFeeAmount,
+        transfer_data: {
+          destination: params.connectAccountId,
+        },
+      },
+    });
+  }
+
   /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */

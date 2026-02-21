@@ -10,6 +10,7 @@ import { insertReturning, upsert } from '@fleet/db';
 import type { BillingModel, BillingCycle, CreateCheckoutInput } from '@fleet/types';
 import { stripeService } from './stripe.service.js';
 import { logger } from './logger.js';
+import { calculateResellerPricing } from '../routes/reseller.js';
 
 /** Cycle → Stripe recurring interval mapping */
 const CYCLE_TO_STRIPE: Record<BillingCycle, { interval: 'day' | 'week' | 'month' | 'year'; interval_count: number }> = {
@@ -185,6 +186,7 @@ class StripeSyncService {
 
   /**
    * Create a Stripe Checkout session based on the billing model.
+   * Automatically applies reseller discount + markup for reseller/sub-accounts.
    */
   async createCheckoutSession(input: CreateCheckoutInput & { stripeCustomerId: string }): Promise<{ url: string }> {
     const { billingModel, billingCycle, planId, stripeCustomerId, successUrl, cancelUrl, accountId } = input;
@@ -203,6 +205,81 @@ class StripeSyncService {
       });
       if (!plan) throw new Error('Plan not found');
 
+      // Calculate base price with cycle multiplier + cycle discount
+      const config = await db.query.billingConfig.findFirst();
+      const cycleDiscounts = (config?.cycleDiscounts ?? {}) as Record<string, { type: string; value: number }>;
+      let baseAmount = Math.round(plan.priceCents * CYCLE_MONTHS[billingCycle]);
+      const cycleDiscount = cycleDiscounts[billingCycle];
+      if (cycleDiscount) {
+        if (cycleDiscount.type === 'percentage') {
+          baseAmount = Math.round(baseAmount * (1 - cycleDiscount.value / 100));
+        } else if (cycleDiscount.type === 'fixed') {
+          baseAmount = Math.max(0, baseAmount - cycleDiscount.value);
+        }
+      }
+
+      // Apply reseller pricing (discount for reseller, markup for sub-accounts)
+      const resellerPricing = await calculateResellerPricing(accountId, baseAmount);
+
+      if (resellerPricing.resellerConnectId && resellerPricing.markupAmount > 0) {
+        // Sub-account with reseller markup → use Stripe Connect destination charge
+        metadata['resellerDiscount'] = String(resellerPricing.discountAmount);
+        metadata['resellerMarkup'] = String(resellerPricing.markupAmount);
+        metadata['planId'] = planId;
+
+        const session = await stripeService.createPaymentWithConnect({
+          customerId: stripeCustomerId,
+          lineItems: [{
+            price_data: {
+              currency: 'usd',
+              product_data: { name: plan.name, description: `${billingCycle} subscription` },
+              unit_amount: resellerPricing.finalPrice,
+              recurring: CYCLE_TO_STRIPE[billingCycle],
+            },
+            quantity: 1,
+          }],
+          metadata,
+          successUrl,
+          cancelUrl,
+          connectAccountId: resellerPricing.resellerConnectId,
+          applicationFeeAmount: resellerPricing.finalPrice - resellerPricing.markupAmount,
+        });
+        return { url: session.url! };
+      }
+
+      if (resellerPricing.discountAmount > 0) {
+        // Reseller themselves (discount but no markup) → use price_data with adjusted amount
+        metadata['resellerDiscount'] = String(resellerPricing.discountAmount);
+        metadata['planId'] = planId;
+
+        const lineItems: import('stripe').Stripe.Checkout.SessionCreateParams.LineItem[] = [{
+          price_data: {
+            currency: 'usd',
+            product_data: { name: plan.name, description: `${billingCycle} subscription (reseller rate)` },
+            unit_amount: resellerPricing.finalPrice,
+            recurring: CYCLE_TO_STRIPE[billingCycle],
+          },
+          quantity: 1,
+        }];
+
+        if (billingModel === 'hybrid') {
+          const meteredIds = await this.getMeteredPriceIds();
+          for (const [, meterPriceId] of Object.entries(meteredIds)) {
+            lineItems.push({ price: meterPriceId });
+          }
+        }
+
+        const session = await stripeService.createFlexibleCheckoutSession(
+          stripeCustomerId,
+          lineItems,
+          metadata,
+          successUrl,
+          cancelUrl,
+        );
+        return { url: session.url! };
+      }
+
+      // No reseller pricing — use existing Stripe Price IDs
       const priceIds = (plan.stripePriceIds ?? {}) as Record<string, string>;
       const priceId = priceIds[billingCycle];
       if (!priceId) throw new Error(`No Stripe price for cycle "${billingCycle}" on plan "${plan.name}"`);

@@ -163,7 +163,7 @@ settings.patch('/', settingsRateLimit, requireAdmin, async (c) => {
     // Allowlist for platform setting keys to prevent arbitrary setting injection
     const ALLOWED_PLATFORM_PREFIXES = [
       'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
-      'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:',
+      'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
     ];
     const disallowedPlatformKeys = entries
       .map(([k]) => k)

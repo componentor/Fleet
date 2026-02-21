@@ -208,9 +208,25 @@ gcloud compute ssh fleet-mgr-1 --zone=$GCP_ZONE_A
 
 ### 2.1 Run the Fleet Installer
 
+**If the repo is public:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/componentor/fleet/main/install/install.sh | sudo bash
 ```
+
+**If the repo is private:**
+
+Copy the install script to the server and run it with a [GitHub Personal Access Token](https://github.com/settings/tokens) (needs `repo` and `read:packages` scopes):
+
+```bash
+# From your local machine
+scp install/install.sh root@<NODE1_EXTERNAL_IP>:/tmp/
+
+# On the server
+sudo GITHUB_TOKEN=ghp_your_token_here bash /tmp/install.sh
+```
+
+> **Note:** The `GITHUB_TOKEN` is saved to `/opt/fleet/config/env` so the auto-updater can check for new releases and pull updates from the private repo. You can also set it later in the config file.
 
 The installer will:
 1. Install Docker, NFS server, and system dependencies

@@ -9,6 +9,7 @@ import {
   json,
   timestamp,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/mysql-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -185,6 +186,79 @@ export const resourceLimitsRelations = relations(resourceLimits, ({ one }) => ({
 export const accountBillingOverridesRelations = relations(accountBillingOverrides, ({ one }) => ({
   account: one(accounts, {
     fields: [accountBillingOverrides.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+// ── Reseller tables ──────────────────────────────────────────────────────────
+
+export const resellerConfig = mysqlTable('reseller_config', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  enabled: boolean('enabled').default(false),
+  approvalMode: varchar('approval_mode', { length: 255 }).default('manual'),
+  allowSubAccountReselling: boolean('allow_sub_account_reselling').default(false),
+  defaultDiscountType: varchar('default_discount_type', { length: 255 }).default('percentage'),
+  defaultDiscountPercent: int('default_discount_percent').default(0),
+  defaultDiscountFixed: int('default_discount_fixed').default(0),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const resellerAccounts = mysqlTable('reseller_accounts', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  accountId: varchar('account_id', { length: 36 })
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull()
+    .unique(),
+  status: varchar('status', { length: 255 }).default('pending'),
+  stripeConnectId: varchar('stripe_connect_id', { length: 255 }),
+  connectOnboarded: boolean('connect_onboarded').default(false),
+  discountType: varchar('discount_type', { length: 255 }),
+  discountPercent: int('discount_percent'),
+  discountFixed: int('discount_fixed'),
+  markupType: varchar('markup_type', { length: 255 }).default('percentage'),
+  markupPercent: int('markup_percent').default(0),
+  markupFixed: int('markup_fixed').default(0),
+  canSubAccountResell: boolean('can_sub_account_resell').default(false),
+  signupSlug: varchar('signup_slug', { length: 255 }).unique(),
+  customDomain: varchar('custom_domain', { length: 255 }),
+  brandName: varchar('brand_name', { length: 255 }),
+  brandLogoUrl: varchar('brand_logo_url', { length: 1024 }),
+  brandPrimaryColor: varchar('brand_primary_color', { length: 20 }),
+  brandDescription: text('brand_description'),
+  approvedAt: timestamp('approved_at'),
+  approvedBy: varchar('approved_by', { length: 36 }),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_reseller_accounts_status').on(table.status),
+]);
+
+export const resellerApplications = mysqlTable('reseller_applications', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  accountId: varchar('account_id', { length: 36 })
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  message: text('message'),
+  status: varchar('status', { length: 255 }).default('pending'),
+  reviewedBy: varchar('reviewed_by', { length: 36 }),
+  reviewedAt: timestamp('reviewed_at'),
+  reviewNote: text('review_note'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  index('idx_reseller_applications_account_id').on(table.accountId),
+  index('idx_reseller_applications_status').on(table.status),
+]);
+
+export const resellerAccountsRelations = relations(resellerAccounts, ({ one }) => ({
+  account: one(accounts, {
+    fields: [resellerAccounts.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+export const resellerApplicationsRelations = relations(resellerApplications, ({ one }) => ({
+  account: one(accounts, {
+    fields: [resellerApplications.accountId],
     references: [accounts.id],
   }),
 }));

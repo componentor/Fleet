@@ -28,6 +28,7 @@ import {
   Layers,
   HardDrive,
   Globe,
+  Handshake,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -61,6 +62,7 @@ const navItems = [
   { nameKey: 'nav.updates', path: '/admin/updates', icon: Download },
   { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail },
   { nameKey: 'nav.sharedDomains', path: '/admin/shared-domains', icon: Globe },
+  { nameKey: 'nav.resellers', path: '/admin/resellers', icon: Handshake },
 ]
 
 function isActive(path: string) {

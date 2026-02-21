@@ -19,7 +19,8 @@ function connectWebSocket(serviceId: string) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const token = authStore.token
   const accountId = localStorage.getItem('fleet_account_id')
-  ws = new WebSocket(`${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?token=${token}&accountId=${accountId}`)
+  const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?accountId=${accountId}`
+  ws = new WebSocket(wsUrl, [`auth-${token}`])
 
   ws.onopen = () => {
     if (terminal && fitAddon) {

@@ -9,6 +9,7 @@ import {
   jsonb,
   timestamp,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
@@ -185,6 +186,79 @@ export const resourceLimitsRelations = relations(resourceLimits, ({ one }) => ({
 export const accountBillingOverridesRelations = relations(accountBillingOverrides, ({ one }) => ({
   account: one(accounts, {
     fields: [accountBillingOverrides.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+// ── Reseller tables ──────────────────────────────────────────────────────────
+
+export const resellerConfig = pgTable('reseller_config', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  enabled: boolean('enabled').default(false),
+  approvalMode: varchar('approval_mode').default('manual'),
+  allowSubAccountReselling: boolean('allow_sub_account_reselling').default(false),
+  defaultDiscountType: varchar('default_discount_type').default('percentage'),
+  defaultDiscountPercent: integer('default_discount_percent').default(0),
+  defaultDiscountFixed: integer('default_discount_fixed').default(0),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const resellerAccounts = pgTable('reseller_accounts', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  accountId: uuid('account_id')
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull()
+    .unique(),
+  status: varchar('status').default('pending'),
+  stripeConnectId: varchar('stripe_connect_id'),
+  connectOnboarded: boolean('connect_onboarded').default(false),
+  discountType: varchar('discount_type'),
+  discountPercent: integer('discount_percent'),
+  discountFixed: integer('discount_fixed'),
+  markupType: varchar('markup_type').default('percentage'),
+  markupPercent: integer('markup_percent').default(0),
+  markupFixed: integer('markup_fixed').default(0),
+  canSubAccountResell: boolean('can_sub_account_resell').default(false),
+  signupSlug: varchar('signup_slug').unique(),
+  customDomain: varchar('custom_domain'),
+  brandName: varchar('brand_name'),
+  brandLogoUrl: varchar('brand_logo_url'),
+  brandPrimaryColor: varchar('brand_primary_color'),
+  brandDescription: text('brand_description'),
+  approvedAt: timestamp('approved_at'),
+  approvedBy: uuid('approved_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_reseller_accounts_status').on(table.status),
+]);
+
+export const resellerApplications = pgTable('reseller_applications', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  accountId: uuid('account_id')
+    .references(() => accounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  message: text('message'),
+  status: varchar('status').default('pending'),
+  reviewedBy: uuid('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  reviewNote: text('review_note'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  index('idx_reseller_applications_account_id').on(table.accountId),
+  index('idx_reseller_applications_status').on(table.status),
+]);
+
+export const resellerAccountsRelations = relations(resellerAccounts, ({ one }) => ({
+  account: one(accounts, {
+    fields: [resellerAccounts.accountId],
+    references: [accounts.id],
+  }),
+}));
+
+export const resellerApplicationsRelations = relations(resellerApplications, ({ one }) => ({
+  account: one(accounts, {
+    fields: [resellerApplications.accountId],
     references: [accounts.id],
   }),
 }));
