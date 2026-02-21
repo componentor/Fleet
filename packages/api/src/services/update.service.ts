@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { dockerService } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
-import { db, platformSettings, eq, upsert } from '@fleet/db';
+import { db, platformSettings, accounts, eq, upsert } from '@fleet/db';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 const GITHUB_TOKEN = process.env['GITHUB_TOKEN'] ?? '';
@@ -299,12 +299,17 @@ export class UpdateService {
       // 0. Pre-update backup (best-effort — try local fallback if NFS unavailable)
       this.appendLog('Creating pre-update database backup...');
       try {
+        // Backups require a valid accountId (FK constraint) — use the first account
+        const firstAccount = await db.query.accounts.findFirst();
+        if (!firstAccount) throw new Error('No accounts found — cannot create backup');
+        const backupAccountId = firstAccount.id;
+
         let backup: { id: string; status: string; storagePath: string | null; sizeBytes: number };
         try {
-          backup = await backupService.createBackup('system', undefined, 'nfs');
+          backup = await backupService.createBackup(backupAccountId, undefined, 'nfs');
         } catch {
           this.appendLog('NFS backup unavailable — falling back to local backup...');
-          backup = await backupService.createBackup('system', undefined, 'local');
+          backup = await backupService.createBackup(backupAccountId, undefined, 'local');
         }
         this.state.preUpdateBackupId = backup.id;
         this.appendLog(`Pre-update backup queued: ${backup.id}`);
