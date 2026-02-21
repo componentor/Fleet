@@ -11,7 +11,8 @@ RUN pnpm install --frozen-lockfile
 COPY packages/types ./packages/types
 COPY packages/agent ./packages/agent
 COPY tsconfig.base.json ./
-RUN pnpm --filter @fleet/agent exec tsup src/index.ts --format esm
+COPY docker/tsup.agent.ts ./packages/agent/tsup.config.ts
+RUN pnpm --filter @fleet/agent exec tsup
 RUN pnpm --filter @fleet/agent deploy --legacy --prod /app/production
 
 FROM base AS runner

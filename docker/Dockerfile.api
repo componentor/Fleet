@@ -12,7 +12,8 @@ COPY packages/types ./packages/types
 COPY packages/db ./packages/db
 COPY packages/api ./packages/api
 COPY tsconfig.base.json ./
-RUN pnpm --filter @fleet/api exec tsup src/index.ts --format esm --noExternal @fleet/db --noExternal @fleet/types --external @aws-sdk/client-s3 --external @google-cloud/storage
+COPY docker/tsup.docker.ts ./packages/api/tsup.config.ts
+RUN pnpm --filter @fleet/api exec tsup
 RUN pnpm --filter @fleet/api deploy --legacy --prod /app/production
 
 FROM base AS runner
