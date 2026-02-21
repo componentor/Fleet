@@ -805,12 +805,14 @@ deploy_stack() {
   # Add additional env vars to config file for services
   if ! grep -q "^POSTGRES_PASSWORD=" "$FLEET_DIR/config/env"; then
     DB_PASSWORD=$(echo "$DATABASE_URL" | sed -n 's|postgresql://fleet:\([^@]*\)@.*|\1|p')
+    NODE_AUTH_TOKEN=$(openssl rand -hex 32)
     cat >> "$FLEET_DIR/config/env" <<EOF
 POSTGRES_USER=fleet
 POSTGRES_PASSWORD=${DB_PASSWORD}
 POSTGRES_DB=fleet
 VALKEY_PASSWORD=${VALKEY_PASSWORD}
 FLEET_VERSION=${FLEET_VERSION}
+NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN}
 EOF
   fi
 
