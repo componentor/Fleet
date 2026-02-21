@@ -23,6 +23,7 @@ COPY --from=build /app/production ./
 COPY --from=build /app/packages/api/dist ./dist
 COPY --from=build /app/packages/db/src/migrations ./dist/migrations
 COPY --from=build /app/packages/api/src/templates ./templates
+RUN mkdir -p /app/data /srv/fleet-objects && chown fleet:fleet /app/data /srv/fleet-objects
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:3000/health || exit 1
 USER fleet

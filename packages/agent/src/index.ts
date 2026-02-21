@@ -1,11 +1,23 @@
 import { createServer } from 'node:http'
+import { execSync } from 'node:child_process'
 import { NodeMonitor } from './monitor.js'
 import { NfsManager } from './nfs.js'
 import { logger } from './logger.js'
 
+function detectNodeId(): string {
+  if (process.env.NODE_ID) return process.env.NODE_ID
+  // Auto-detect Docker Swarm node ID via docker info
+  try {
+    const swarmNodeId = execSync("docker info --format '{{.Swarm.NodeID}}'", { timeout: 5000 })
+      .toString().trim().replace(/'/g, '')
+    if (swarmNodeId && swarmNodeId !== '') return swarmNodeId
+  } catch { /* docker not available or not in swarm */ }
+  return 'unknown'
+}
+
 const HEARTBEAT_INTERVAL = 30_000 // 30 seconds
 const API_URL = process.env.API_URL || 'http://localhost:3000'
-const NODE_ID = process.env.NODE_ID || 'unknown'
+const NODE_ID = detectNodeId()
 const NODE_AUTH_TOKEN = process.env.NODE_AUTH_TOKEN
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '3001', 10)
 

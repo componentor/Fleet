@@ -58,28 +58,46 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
 
   const hb = parsed.data;
 
-  let node = await db.query.nodes.findFirst({
-    where: eq(nodes.id, nodeId),
-  });
+  // Agents may send a Docker Swarm node ID or 'unknown' — look up by dockerNodeId or id
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let node: typeof nodes.$inferSelect | undefined;
 
-  // In dev mode, auto-register the node on first heartbeat (reuse existing by hostname to prevent duplicates)
-  if (!node && process.env.NODE_ENV !== 'production') {
-    const devHostname = hb.hostname ?? os.hostname();
+  if (UUID_RE.test(nodeId)) {
+    node = await db.query.nodes.findFirst({
+      where: eq(nodes.id, nodeId),
+    });
+  }
+
+  // If not found by UUID, try matching by dockerNodeId (Docker Swarm node ID)
+  if (!node && nodeId !== 'unknown') {
+    node = await db.query.nodes.findFirst({
+      where: eq(nodes.dockerNodeId, nodeId),
+    });
+  }
+
+  // Auto-register the node on first heartbeat (reuse existing by hostname to prevent duplicates)
+  if (!node) {
+    const reportedHostname = hb.hostname ?? os.hostname();
     const existing = await db.query.nodes.findFirst({
-      where: eq(nodes.hostname, devHostname),
+      where: eq(nodes.hostname, reportedHostname),
     });
     if (existing) {
       node = existing;
+      // Update dockerNodeId if agent now provides one
+      if (nodeId !== 'unknown' && !existing.dockerNodeId) {
+        await db.update(nodes).set({ dockerNodeId: nodeId }).where(eq(nodes.id, existing.id));
+      }
     } else {
       const [created] = await insertReturning(nodes, {
-        hostname: devHostname,
-        ipAddress: '127.0.0.1',
+        hostname: reportedHostname,
+        dockerNodeId: nodeId !== 'unknown' ? nodeId : null,
+        ipAddress: '0.0.0.0',
         role: 'manager',
         status: 'active',
       });
       node = created;
       if (node) {
-        logger.info(`Auto-registered dev node: ${node.id} (${node.hostname})`);
+        logger.info(`Auto-registered node: ${node.id} (${node.hostname}, swarm: ${nodeId})`);
       }
     }
   }
