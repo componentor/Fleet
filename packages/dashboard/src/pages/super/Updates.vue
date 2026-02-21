@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout } from 'lucide-vue-next'
+import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
 const api = useApi()
+const logContainer = ref<HTMLElement | null>(null)
 
 const loading = ref(true)
 const checking = ref(false)
@@ -35,6 +36,34 @@ const updateState = ref<any>({ status: 'idle' })
 
 // DB status
 const dbStatus = ref<any>(null)
+
+const statusLabels: Record<string, string> = {
+  'checking': 'Checking for updates...',
+  'backing-up': 'Creating pre-update backup...',
+  'pulling': 'Snapshotting current images...',
+  'verifying-images': 'Verifying image checksums...',
+  'migrating': 'Running database migrations...',
+  'updating': 'Updating services (rolling)...',
+  'seeding': 'Running database seeders...',
+  'verifying': 'Verifying service health...',
+  'rolling-back': 'Rolling back to previous version...',
+  'completed': 'Update completed successfully',
+  'failed': 'Update failed',
+}
+
+const activeStates = ['checking', 'backing-up', 'pulling', 'verifying-images', 'migrating', 'updating', 'seeding', 'verifying', 'rolling-back']
+
+function isActiveState(status: string) {
+  return activeStates.includes(status)
+}
+
+// Auto-scroll log viewer when new content arrives
+watch(() => updateState.value?.log, async () => {
+  await nextTick()
+  if (logContainer.value) {
+    logContainer.value.scrollTop = logContainer.value.scrollHeight
+  }
+})
 
 let statusPollInterval: ReturnType<typeof setInterval> | null = null
 
@@ -214,17 +243,29 @@ onUnmounted(() => {
       </div>
 
       <!-- Update Status Banner -->
-      <div v-if="updateState.status !== 'idle'" class="p-4 border rounded-lg" :class="updateState.status === 'failed' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'">
-        <div class="flex items-center gap-3">
-          <Loader2 v-if="updateState.status === 'updating' || updateState.status === 'rolling-back'" class="w-5 h-5 animate-spin text-blue-600" />
-          <AlertTriangle v-else-if="updateState.status === 'failed'" class="w-5 h-5 text-red-600" />
-          <Check v-else-if="updateState.status === 'completed'" class="w-5 h-5 text-green-600" />
-          <div>
-            <p class="text-sm font-medium" :class="updateState.status === 'failed' ? 'text-red-700 dark:text-red-300' : 'text-blue-700 dark:text-blue-300'">
-              {{ updateState.status === 'updating' ? 'Updating...' : updateState.status === 'rolling-back' ? 'Rolling back...' : updateState.status === 'failed' ? 'Update failed' : 'Update completed' }}
+      <div v-if="updateState.status !== 'idle'" class="border rounded-lg overflow-hidden" :class="updateState.status === 'failed' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : updateState.status === 'completed' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'">
+        <div class="flex items-center gap-3 p-4">
+          <Loader2 v-if="isActiveState(updateState.status)" class="w-5 h-5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+          <AlertTriangle v-else-if="updateState.status === 'failed'" class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+          <Check v-else-if="updateState.status === 'completed'" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium" :class="updateState.status === 'failed' ? 'text-red-700 dark:text-red-300' : updateState.status === 'completed' ? 'text-green-700 dark:text-green-300' : 'text-blue-700 dark:text-blue-300'">
+              {{ statusLabels[updateState.status] ?? updateState.status }}
             </p>
-            <p v-if="updateState.step" class="text-xs mt-0.5 text-gray-600 dark:text-gray-400">Step: {{ updateState.step }}</p>
-            <p v-if="updateState.error" class="text-xs mt-0.5 text-red-600 dark:text-red-400">{{ updateState.error }}</p>
+            <p v-if="updateState.targetVersion" class="text-xs mt-0.5 text-gray-600 dark:text-gray-400">
+              {{ updateState.currentVersion }} &rarr; {{ updateState.targetVersion }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Live log viewer -->
+        <div v-if="updateState.log" class="border-t" :class="updateState.status === 'failed' ? 'border-red-200 dark:border-red-800' : updateState.status === 'completed' ? 'border-green-200 dark:border-green-800' : 'border-blue-200 dark:border-blue-800'">
+          <div class="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-gray-950 text-gray-400 text-xs">
+            <Terminal class="w-3.5 h-3.5" />
+            Update Log
+          </div>
+          <div ref="logContainer" class="bg-gray-900 dark:bg-gray-950 px-4 py-3 max-h-64 overflow-y-auto">
+            <pre class="text-xs text-gray-300 dark:text-gray-400 font-mono whitespace-pre-wrap break-words leading-relaxed">{{ updateState.log }}</pre>
           </div>
         </div>
       </div>

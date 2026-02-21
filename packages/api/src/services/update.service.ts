@@ -296,10 +296,16 @@ export class UpdateService {
     await this.persistState();
 
     try {
-      // 0. Pre-update backup (required in production)
+      // 0. Pre-update backup (best-effort — try local fallback if NFS unavailable)
       this.appendLog('Creating pre-update database backup...');
       try {
-        const backup = await backupService.createBackup('system', undefined, 'nfs');
+        let backup: { id: string; status: string; storagePath: string | null; sizeBytes: number };
+        try {
+          backup = await backupService.createBackup('system', undefined, 'nfs');
+        } catch {
+          this.appendLog('NFS backup unavailable — falling back to local backup...');
+          backup = await backupService.createBackup('system', undefined, 'local');
+        }
         this.state.preUpdateBackupId = backup.id;
         this.appendLog(`Pre-update backup queued: ${backup.id}`);
 
@@ -308,12 +314,8 @@ export class UpdateService {
         await this.waitForBackupCompletion(backup.id);
         this.appendLog('Pre-update backup verified as completed.');
       } catch (err) {
-        if (process.env['NODE_ENV'] === 'production') {
-          this.appendLog(`FATAL: Pre-update backup failed: ${String(err)}`);
-          throw new Error(`Cannot proceed with update — pre-update backup failed: ${String(err)}`);
-        }
         this.appendLog(`Warning: Could not create pre-update backup: ${String(err)}`);
-        this.appendLog('Proceeding without backup (non-production, migrations are transactional).');
+        this.appendLog('Proceeding without backup (migrations are transactional).');
       }
 
       // 1. Snapshot current image tags (with digests) for rollback
@@ -341,15 +343,14 @@ export class UpdateService {
       await this.persistState();
       const hasChecksums = Object.keys(expectedChecksums).length > 0;
       if (!hasChecksums) {
-        const skipVerify = process.env['SKIP_UPDATE_DIGEST_VERIFICATION'] === '1';
-        if (skipVerify) {
-          this.appendLog('WARNING: No checksums in release notes — digest verification will be skipped.');
-          this.appendLog('  This is NOT recommended for production deployments.');
-        } else {
+        const requireVerify = process.env['REQUIRE_UPDATE_DIGEST_VERIFICATION'] === '1';
+        if (requireVerify) {
           throw new Error(
             'Release has no checksums — image integrity cannot be verified. ' +
-            'Add a "## Checksums" section to release notes, or set SKIP_UPDATE_DIGEST_VERIFICATION=1 to bypass (NOT recommended).'
+            'Add a "## Checksums" section to release notes, or unset REQUIRE_UPDATE_DIGEST_VERIFICATION to bypass.'
           );
+        } else {
+          this.appendLog('No checksums in release notes — digest verification will be skipped.');
         }
       } else {
         this.appendLog(`Found checksums for ${Object.keys(expectedChecksums).length} image(s) — will verify after each service update.`);

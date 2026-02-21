@@ -91,9 +91,12 @@ adminRoutes.get('/stats', async (c) => {
           version: swarmInfo.Version,
         }
       : null,
-    updateAvailable: updateService.getNotification().available
-      ? `Fleet ${updateService.getNotification().latest?.tag ?? 'update'} is available`
-      : null,
+    version: {
+      current: updateService.getNotification().current,
+      latest: updateService.getNotification().latest?.tag ?? null,
+      updateAvailable: updateService.getNotification().available,
+      checkedAt: updateService.getNotification().checkedAt,
+    },
   });
 });
 

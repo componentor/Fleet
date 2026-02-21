@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { LayoutDashboard, Users, Server, Activity, Loader2, ArrowRight, AlertTriangle, Bug } from 'lucide-vue-next'
+import { LayoutDashboard, Users, Server, Activity, Loader2, ArrowRight, AlertTriangle, Bug, Download, ArrowUpCircle } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -9,6 +9,7 @@ const api = useApi()
 const loading = ref(true)
 const stats = ref<any>(null)
 const recentLogs = ref<any[]>([])
+const versionInfo = ref<{ current: string; latest: string | null; updateAvailable: boolean; checkedAt: string | null } | null>(null)
 
 // Animated count-up values
 const animatedAccounts = ref(0)
@@ -38,6 +39,7 @@ async function fetchStats() {
     ])
     stats.value = statsData
     recentLogs.value = logData?.data ?? []
+    versionInfo.value = statsData?.version ?? null
     // Trigger count-up animations
     await nextTick()
     animateValue(animatedAccounts, statsData?.accounts ?? 0)
@@ -100,6 +102,45 @@ onMounted(() => {
               <p class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">{{ stat.value }}</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Version / Update card -->
+      <div v-if="versionInfo" class="bg-white dark:bg-gray-800 rounded-xl border shadow-sm p-5 mb-8 transition-all duration-200 hover:shadow-md"
+        :class="versionInfo.updateAvailable
+          ? 'border-primary-300 dark:border-primary-700'
+          : 'border-gray-200 dark:border-gray-700'"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <div :class="[versionInfo.updateAvailable ? 'bg-primary-50 dark:bg-primary-900/20' : 'bg-gray-50 dark:bg-gray-700', 'p-3 rounded-lg']">
+              <ArrowUpCircle v-if="versionInfo.updateAvailable" class="w-6 h-6 text-primary-600 dark:text-primary-400" />
+              <Download v-else class="w-6 h-6 text-gray-500 dark:text-gray-400" />
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                Fleet v{{ versionInfo.current }}
+              </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <template v-if="versionInfo.updateAvailable">
+                  <span class="text-primary-600 dark:text-primary-400 font-medium">{{ versionInfo.latest }} available</span>
+                </template>
+                <template v-else>
+                  Up to date
+                </template>
+              </p>
+            </div>
+          </div>
+          <RouterLink
+            to="/admin/updates"
+            class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            :class="versionInfo.updateAvailable
+              ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 hover:bg-primary-100 dark:hover:bg-primary-900/40'
+              : 'bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'"
+          >
+            <Download class="w-4 h-4" />
+            {{ versionInfo.updateAvailable ? 'Update Now' : 'Updates' }}
+          </RouterLink>
         </div>
       </div>
 
@@ -206,10 +247,6 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Update notification -->
-      <div v-if="stats?.updateAvailable" class="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-        <p class="text-sm text-blue-700 dark:text-blue-300">{{ stats.updateAvailable }}</p>
-      </div>
     </template>
   </div>
 </template>

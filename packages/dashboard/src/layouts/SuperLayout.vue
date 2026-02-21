@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useAuth } from '@/composables/useAuth'
+import { useApi } from '@/composables/useApi'
 import {
   LayoutDashboard,
   Server,
@@ -29,12 +30,14 @@ import {
   HardDrive,
   Globe,
   Handshake,
+  ArrowUpCircle,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 
 const commandPalette = useCommandPalette()
+const api = useApi()
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -45,6 +48,20 @@ const { user, logout } = useAuth()
 
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
+const versionInfo = ref<{ current: string; latest: string | null; updateAvailable: boolean } | null>(null)
+
+onMounted(async () => {
+  try {
+    const notif = await api.get<any>('/updates/notification')
+    versionInfo.value = {
+      current: notif.current ?? '',
+      latest: notif.latest?.tag ?? null,
+      updateAvailable: notif.available ?? false,
+    }
+  } catch {
+    // Non-critical — version display is best-effort
+  }
+})
 
 const navItems = [
   { nameKey: 'nav.dashboard', path: '/admin', icon: LayoutDashboard },
@@ -129,6 +146,21 @@ function changeLocale(newLocale: string) {
           {{ $t(item.nameKey) }}
         </RouterLink>
       </nav>
+
+      <!-- Version badge -->
+      <div v-if="versionInfo" class="px-4 py-2 border-t border-gray-200 dark:border-gray-700 shrink-0">
+        <RouterLink
+          to="/admin/updates"
+          class="flex items-center gap-2 text-xs transition-colors rounded-md px-2 py-1.5 -mx-1"
+          :class="versionInfo.updateAvailable
+            ? 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+        >
+          <ArrowUpCircle v-if="versionInfo.updateAvailable" class="w-3.5 h-3.5 shrink-0" />
+          <span class="font-mono">v{{ versionInfo.current }}</span>
+          <span v-if="versionInfo.updateAvailable" class="font-medium ml-auto">{{ versionInfo.latest }} available</span>
+        </RouterLink>
+      </div>
 
       <!-- Switch to panel -->
       <div class="p-3 border-t border-gray-200 dark:border-gray-700 shrink-0">
