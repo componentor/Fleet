@@ -3,7 +3,7 @@ import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
 
-const docker = new Dockerode({ socketPath: '/var/run/docker.sock' });
+const docker = new Dockerode({ socketPath: '/var/run/docker.sock', version: 'v1.45' });
 
 export interface CreateSwarmServiceOptions {
   name: string;

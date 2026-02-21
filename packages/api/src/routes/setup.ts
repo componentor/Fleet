@@ -123,7 +123,7 @@ setup.post('/swarm-init', async (c) => {
     try {
       // Dynamically import dockerode to call swarmInit directly
       const Dockerode = (await import('dockerode')).default;
-      const dockerClient = new Dockerode({ socketPath: '/var/run/docker.sock' });
+      const dockerClient = new Dockerode({ socketPath: '/var/run/docker.sock', version: 'v1.45' });
       await dockerClient.swarmInit({
         ListenAddr: '0.0.0.0:2377',
         AdvertiseAddr: '0.0.0.0:2377',
