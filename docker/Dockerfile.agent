@@ -12,7 +12,7 @@ COPY packages/types ./packages/types
 COPY packages/agent ./packages/agent
 COPY tsconfig.base.json ./
 RUN pnpm --filter @fleet/agent exec tsup src/index.ts --format esm
-RUN pnpm --filter @fleet/agent deploy --prod /app/production
+RUN pnpm --filter @fleet/agent deploy --legacy --prod /app/production
 
 FROM base AS runner
 ENV NODE_ENV=production

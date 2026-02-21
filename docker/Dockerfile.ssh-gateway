@@ -14,7 +14,7 @@ COPY packages/db ./packages/db
 COPY packages/api ./packages/api
 COPY tsconfig.base.json ./
 RUN pnpm --filter @fleet/api exec tsup src/index.ts --format esm --external @aws-sdk/client-s3 --external @google-cloud/storage
-RUN pnpm --filter @fleet/api deploy --prod /app/production
+RUN pnpm --filter @fleet/api deploy --legacy --prod /app/production
 
 FROM base AS runner
 ENV NODE_ENV=production
