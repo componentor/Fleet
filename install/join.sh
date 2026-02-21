@@ -148,7 +148,6 @@ configure_docker() {
     "nproc": { "Name": "nproc", "Hard": 1024, "Soft": 1024 },
     "nofile": { "Name": "nofile", "Hard": 65536, "Soft": 65536 }
   },
-  "live-restore": true,
   "storage-driver": "overlay2"
 }
 DAEMONJSON
