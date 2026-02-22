@@ -479,12 +479,14 @@ export class UpdateService {
       }
       this.appendLog('Database health verified — schema is accessible.');
 
-      // 6. Rolling update each service (one at a time, start-first)
-      //    Digest verification happens AFTER each update, when Docker has the new image
+      // 6. Rolling update non-API services first (one at a time, start-first)
+      //    fleet_api is updated LAST in a separate step because updating it kills
+      //    the container that's orchestrating this update.
       this.state.status = 'updating';
       this.state.servicesUpdated = [];
       await this.persistState();
-      for (const serviceName of FLEET_SERVICES) {
+      const nonApiServices = FLEET_SERVICES.filter((s) => s !== 'fleet_api');
+      for (const serviceName of nonApiServices) {
         try {
           await this.updateSwarmService(serviceName, imageTag);
           this.state.servicesUpdated.push(serviceName);
@@ -520,12 +522,12 @@ export class UpdateService {
         this.appendLog(`Seeder warning: ${String(err)} (non-fatal)`);
       }
 
-      // 8. Verify all services are healthy — auto-rollback on failure
+      // 8. Verify non-API services are healthy — auto-rollback on failure
       this.state.status = 'verifying';
       await this.persistState();
       this.appendLog('Verifying service health post-update...');
       try {
-        await this.verifyServiceHealth();
+        await this.verifyServiceHealth(nonApiServices);
       } catch (healthErr) {
         this.appendLog(`Health check FAILED: ${String(healthErr)}`);
         this.appendLog('Initiating automatic rollback due to health check failure...');
@@ -546,12 +548,15 @@ export class UpdateService {
         }
       }
 
-      // 9. Done — persist the new version so it survives container restarts
+      // 9. Mark completed and persist version BEFORE updating fleet_api.
+      //    This is critical: updating fleet_api kills this container, so we must
+      //    persist the success state first. The new container will see 'completed'
+      //    and just clean up.
       const cleanVersion = targetVersion.replace(/^v/, '');
       this.state.currentVersion = cleanVersion;
       this.state.status = 'completed';
       this.state.finishedAt = new Date();
-      this.appendLog(`Update to ${targetVersion} completed successfully.`);
+      this.appendLog(`Non-API services updated and verified. Persisting version...`);
 
       // Persist version to DB so new containers pick it up
       try {
@@ -576,6 +581,25 @@ export class UpdateService {
         latest: this.cachedNotification.latest,
         checkedAt: new Date().toISOString(),
       };
+
+      // 10. Update fleet_api LAST. This will trigger a rolling restart that kills
+      //     this container. We do NOT wait for convergence — Docker handles it.
+      //     The new container starts with 'completed' state already persisted.
+      this.appendLog(`Updating fleet_api to ${imageTag} — API will restart...`);
+      try {
+        const swarmServices = await dockerService.listServices({ name: ['fleet_api'] });
+        if (swarmServices.length > 0) {
+          const svc = swarmServices[0]!;
+          const newImage = `${IMAGE_PREFIX}/fleet-api:${imageTag}`;
+          await dockerService.updateService(svc.ID as string, { image: newImage });
+          this.appendLog('fleet_api update initiated. Container will restart momentarily.');
+        }
+      } catch (err) {
+        // Non-fatal: all other services are already on the new version and the
+        // update is persisted as completed. Admin can manually redeploy fleet_api.
+        this.appendLog(`Warning: Could not update fleet_api automatically: ${String(err)}`);
+        this.appendLog('All other services are updated. Redeploy fleet_api manually via SSH if needed.');
+      }
     } catch (err) {
       this.appendLog(`Update failed: ${String(err)}`);
       this.state.status = 'failed';
@@ -1155,8 +1179,8 @@ export class UpdateService {
     throw new Error(`${serviceName} did not converge within ${timeoutMs / 1000}s — possible deployment issue`);
   }
 
-  private async verifyServiceHealth(): Promise<void> {
-    for (const serviceName of FLEET_SERVICES) {
+  private async verifyServiceHealth(serviceNames: readonly string[] = FLEET_SERVICES): Promise<void> {
+    for (const serviceName of serviceNames) {
       try {
         const swarmServices = await dockerService.listServices({
           name: [serviceName],
