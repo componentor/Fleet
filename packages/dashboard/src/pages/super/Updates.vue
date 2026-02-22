@@ -130,7 +130,11 @@ async function performUpdate(version: string) {
 }
 
 async function rollback() {
-  if (!confirm('Are you sure you want to rollback to the previous version?')) return
+  const target = updateState.value?.rollbackTarget
+  const msg = target
+    ? `Are you sure you want to rollback to version ${target}? This will revert all Docker services to their previous images.`
+    : 'Are you sure you want to rollback to the previous version?'
+  if (!confirm(msg)) return
   rollingBack.value = true
   error.value = ''
   try {
@@ -319,14 +323,15 @@ onUnmounted(() => {
           </div>
           <div class="flex items-center gap-3">
             <button
-              v-if="updateState.status === 'failed' || updateState.status === 'completed'"
+              v-if="updateState.canRollback"
               @click="rollback"
               :disabled="rollingBack"
               class="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-600 text-amber-700 dark:text-amber-300 text-sm font-medium transition-colors hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
+              :title="updateState.rollbackTarget ? `Rollback to ${updateState.rollbackTarget}` : 'Rollback to previous version'"
             >
               <Loader2 v-if="rollingBack" class="w-4 h-4 animate-spin" />
               <RotateCcw v-else class="w-4 h-4" />
-              Rollback
+              Rollback{{ updateState.rollbackTarget ? ` to ${updateState.rollbackTarget}` : '' }}
             </button>
             <button
               @click="checkForUpdates"

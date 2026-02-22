@@ -186,10 +186,26 @@ export class UpdateService {
 
   // ── Public API ─────────────────────────────────────────────────
 
-  getState(): Omit<UpdateState, 'previousImageTags'> & { previousImageTags: Record<string, string> } {
+  getState(): Omit<UpdateState, 'previousImageTags'> & {
+    previousImageTags: Record<string, string>;
+    canRollback: boolean;
+    rollbackTarget: string | null;
+  } {
+    const tags = Object.fromEntries(this.state.previousImageTags);
+    const hasSnapshot = this.state.previousImageTags.size > 0;
+    const allowedForRollback = ['idle', 'completed', 'failed'].includes(this.state.status);
+    // Extract the version from the first snapshot image tag (e.g. "ghcr.io/x/fleet-api:0.1.7@sha256:...")
+    let rollbackTarget: string | null = null;
+    if (hasSnapshot) {
+      const firstImage = [...this.state.previousImageTags.values()][0] ?? '';
+      const tagMatch = firstImage.match(/:([^@]+)/);
+      if (tagMatch) rollbackTarget = tagMatch[1]!;
+    }
     return {
       ...this.state,
-      previousImageTags: Object.fromEntries(this.state.previousImageTags),
+      previousImageTags: tags,
+      canRollback: hasSnapshot && allowedForRollback,
+      rollbackTarget,
     };
   }
 
@@ -253,9 +269,15 @@ export class UpdateService {
       this.state.startedAt = persisted.startedAt ? new Date(persisted.startedAt) : null;
       this.state.finishedAt = persisted.finishedAt ? new Date(persisted.finishedAt) : null;
       this.state.servicesUpdated = persisted.servicesUpdated;
+      this.state.preUpdateBackupId = persisted.preUpdateBackupId;
+      // Restore previous image tags so rollback button works after container restart
+      this.state.previousImageTags = new Map(Object.entries(persisted.previousImageTags ?? {}));
       this.cachedNotification.current = persisted.currentVersion;
       this.events.emit('update', this.state);
-      await this.clearPersistedState();
+      // Don't clear persisted state yet — keep it until the next update starts
+      // so rollback remains available across multiple container restarts.
+      // Only clear the lock so the system can accept new updates.
+      await this.releaseUpdateLock();
       return;
     }
 

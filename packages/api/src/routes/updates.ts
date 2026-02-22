@@ -161,6 +161,14 @@ updateRoutes.get('/status', async (c) => {
     const { UpdateService } = await import('../services/update.service.js');
     const persisted = await UpdateService.loadPersistedState();
     if (persisted && persisted.status !== 'idle') {
+      const hasSnapshot = Object.keys(persisted.previousImageTags ?? {}).length > 0;
+      const allowedForRollback = ['idle', 'completed', 'failed'].includes(persisted.status);
+      let rollbackTarget: string | null = null;
+      if (hasSnapshot) {
+        const firstImage = Object.values(persisted.previousImageTags)[0] ?? '';
+        const tagMatch = (firstImage as string).match(/:([^@]+)/);
+        if (tagMatch) rollbackTarget = tagMatch[1]!;
+      }
       return c.json({
         status: persisted.status,
         currentVersion: persisted.currentVersion,
@@ -171,6 +179,8 @@ updateRoutes.get('/status', async (c) => {
         previousImageTags: persisted.previousImageTags,
         preUpdateBackupId: persisted.preUpdateBackupId,
         servicesUpdated: persisted.servicesUpdated,
+        canRollback: hasSnapshot && allowedForRollback,
+        rollbackTarget,
       });
     }
   } catch {
