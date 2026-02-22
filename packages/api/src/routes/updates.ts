@@ -146,8 +146,38 @@ updateRoutes.get('/settings', async (c) => {
 });
 
 // GET /status — current update/rollback state
-updateRoutes.get('/status', (c) => {
-  return c.json(updateService.getState());
+// With multiple API replicas, the update runs on only one instance.
+// If this replica's local state is idle, check the DB-persisted state
+// in case another replica is actively running an update.
+updateRoutes.get('/status', async (c) => {
+  const localState = updateService.getState();
+
+  if (localState.status !== 'idle') {
+    return c.json(localState);
+  }
+
+  // Check if another replica is running an update (persisted state in DB)
+  try {
+    const { UpdateService } = await import('../services/update.service.js');
+    const persisted = await UpdateService.loadPersistedState();
+    if (persisted && persisted.status !== 'idle') {
+      return c.json({
+        status: persisted.status,
+        currentVersion: persisted.currentVersion,
+        targetVersion: persisted.targetVersion,
+        log: persisted.log,
+        startedAt: persisted.startedAt,
+        finishedAt: persisted.finishedAt,
+        previousImageTags: persisted.previousImageTags,
+        preUpdateBackupId: persisted.preUpdateBackupId,
+        servicesUpdated: persisted.servicesUpdated,
+      });
+    }
+  } catch {
+    // DB read failed — return local state
+  }
+
+  return c.json(localState);
 });
 
 // POST /perform — start a platform update (zero-downtime rolling update)

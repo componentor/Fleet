@@ -207,16 +207,26 @@ async function saveSettings() {
   }
 }
 
+// Grace period: after triggering an update, don't stop polling on 'idle' for 15s.
+// With multiple API replicas, polls may hit a replica that isn't running the update
+// and would see 'idle' even though the update is actively running on another replica.
+let pollStartedAt = 0
+
 function startPolling() {
   if (statusPollInterval) clearInterval(statusPollInterval)
+  pollStartedAt = Date.now()
   statusPollInterval = setInterval(async () => {
     try {
-      updateState.value = await api.get<any>('/updates/status')
-      if (updateState.value.status === 'idle' || updateState.value.status === 'completed' || updateState.value.status === 'failed') {
+      const state = await api.get<any>('/updates/status')
+      // Only update local state if we got a non-idle response, OR the grace period expired
+      if (state.status !== 'idle' || Date.now() - pollStartedAt > 15000) {
+        updateState.value = state
+      }
+      if (state.status === 'completed' || state.status === 'failed') {
         stopPolling()
         await fetchAll()
       }
-    } catch { /* ignore */ }
+    } catch { /* ignore — API may be restarting */ }
   }, 2000)
 }
 
