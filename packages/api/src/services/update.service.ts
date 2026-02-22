@@ -229,9 +229,24 @@ export class UpdateService {
     const persisted = await UpdateService.loadPersistedState();
     if (!persisted) return;
 
-    const terminalStates: UpdateStatus[] = ['idle', 'completed', 'failed'];
-    if (terminalStates.includes(persisted.status)) {
-      // Previous update reached a terminal state — just clean up
+    if (persisted.status === 'idle') {
+      await this.clearPersistedState();
+      return;
+    }
+
+    // Load completed/failed state into memory so the dashboard can display the
+    // full log after the API container restarts (fleet_api update kills the old
+    // container, new one starts fresh). This preserves the update log for the UI.
+    if (persisted.status === 'completed' || persisted.status === 'failed') {
+      this.state.status = persisted.status;
+      this.state.currentVersion = persisted.currentVersion;
+      this.state.targetVersion = persisted.targetVersion;
+      this.state.log = persisted.log;
+      this.state.startedAt = persisted.startedAt ? new Date(persisted.startedAt) : null;
+      this.state.finishedAt = persisted.finishedAt ? new Date(persisted.finishedAt) : null;
+      this.state.servicesUpdated = persisted.servicesUpdated;
+      this.cachedNotification.current = persisted.currentVersion;
+      this.events.emit('update', this.state);
       await this.clearPersistedState();
       return;
     }
@@ -571,7 +586,9 @@ export class UpdateService {
       }
 
       await this.persistState();
-      await this.clearPersistedState();
+      // Do NOT clear persisted state here — the new container after fleet_api
+      // restart needs to load the completed state (with log) into memory.
+      // It gets cleared in recoverFromInterruptedUpdate().
       this.events.emit('update', this.state);
 
       // Refresh the notification cache
