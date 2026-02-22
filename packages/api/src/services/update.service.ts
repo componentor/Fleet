@@ -150,6 +150,12 @@ export class UpdateService {
       logger.error({ err }, 'Failed to clear persisted state during force reset');
     }
 
+    // Abort any running performUpdate() so it stops processing
+    if (this.updateAbort) {
+      this.updateAbort.abort();
+      this.updateAbort = null;
+    }
+
     // Reset in-memory state
     this.state.status = 'idle';
     this.state.log = `[${new Date().toISOString()}] State force-reset by admin (was: ${previousStatus})\n`;
@@ -168,6 +174,7 @@ export class UpdateService {
   private fencingToken = 0;
   private events = new EventEmitter();
   private checkTimer: ReturnType<typeof setInterval> | null = null;
+  private updateAbort: AbortController | null = null;
 
   /** Cached notification for the dashboard to poll without hitting GitHub */
   private cachedNotification: UpdateNotification = {
@@ -385,6 +392,10 @@ export class UpdateService {
       throw new Error(`Cannot start update: system is currently ${this.state.status}`);
     }
 
+    // Create abort controller so forceReset() can cancel this update
+    this.updateAbort = new AbortController();
+    const { signal } = this.updateAbort;
+
     // Distributed lock: prevent concurrent updates across API instances
     this.state.status = 'checking';
     this.appendLog('Acquiring update lock...');
@@ -409,10 +420,15 @@ export class UpdateService {
     await this.persistState();
 
     try {
-      // 0. Pre-update backup (best-effort, 90s hard timeout)
-      // The backup step must never block the update indefinitely.
-      this.appendLog('Creating pre-update database backup...');
-      try {
+      // 0. Pre-update backup (required, 90s hard timeout)
+      // If the backup fails or times out, the update STOPS. The admin can use
+      // Reset to abort and retry, or set SKIP_UPDATE_BACKUP=1 to bypass.
+      if (signal.aborted) throw new Error('Update aborted by admin');
+      const skipBackup = process.env['SKIP_UPDATE_BACKUP'] === '1';
+      if (skipBackup) {
+        this.appendLog('SKIP_UPDATE_BACKUP=1 — skipping pre-update backup.');
+      } else {
+        this.appendLog('Creating pre-update database backup...');
         await Promise.race([
           (async () => {
             const firstAccount = await db.query.accounts.findFirst();
@@ -434,15 +450,16 @@ export class UpdateService {
             this.appendLog('Pre-update backup verified as completed.');
           })(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Backup timed out after 90s')), 90_000),
+            setTimeout(() => reject(new Error('Backup timed out after 90s — backup worker may be unresponsive. Use Reset and check backup system.')), 90_000),
           ),
+          new Promise<never>((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('Update aborted by admin')), { once: true });
+          }),
         ]);
-      } catch (err) {
-        this.appendLog(`Warning: Could not create pre-update backup: ${String(err)}`);
-        this.appendLog('Proceeding without backup (migrations are transactional).');
       }
 
       // 1. Snapshot current image tags (with digests) for rollback
+      if (signal.aborted) throw new Error('Update aborted by admin');
       this.state.status = 'pulling';
       this.appendLog('Snapshotting current service images for rollback...');
       await this.snapshotCurrentImages();
@@ -481,6 +498,7 @@ export class UpdateService {
       }
 
       // 4. Run database migrations (transactional + advisory-locked)
+      if (signal.aborted) throw new Error('Update aborted by admin');
       this.state.status = 'migrating';
       await this.persistState();
       this.appendLog('Running database migrations (transactional)...');
@@ -504,6 +522,7 @@ export class UpdateService {
       // 6. Rolling update non-API services first (one at a time, start-first)
       //    fleet_api is updated LAST in a separate step because updating it kills
       //    the container that's orchestrating this update.
+      if (signal.aborted) throw new Error('Update aborted by admin');
       this.state.status = 'updating';
       this.state.servicesUpdated = [];
       await this.persistState();
@@ -625,6 +644,11 @@ export class UpdateService {
         this.appendLog('All other services are updated. Redeploy fleet_api manually via SSH if needed.');
       }
     } catch (err) {
+      // If aborted by forceReset(), don't overwrite the reset state
+      if (signal.aborted) {
+        logger.info('Update aborted by admin reset — stopping gracefully');
+        return;
+      }
       this.appendLog(`Update failed: ${String(err)}`);
       this.state.status = 'failed';
       this.state.finishedAt = new Date();
@@ -633,6 +657,7 @@ export class UpdateService {
       this.events.emit('update', this.state);
       throw err;
     } finally {
+      this.updateAbort = null;
       await this.releaseUpdateLock();
     }
   }
