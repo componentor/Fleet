@@ -306,6 +306,27 @@ export const router = createRouter({
   routes,
 })
 
+// Handle chunk load failures during rolling deployments.
+// When the dashboard is updated, old JS chunks are replaced with new ones.
+// If a browser has the old index.html cached or hits a stale replica,
+// dynamic imports will 404. Detect this and force a reload (once).
+router.onError((error, to) => {
+  const chunkFailure =
+    error.message.includes('Failed to fetch dynamically imported module') ||
+    error.message.includes('Loading chunk') ||
+    error.message.includes('Loading CSS chunk')
+
+  if (chunkFailure) {
+    const reloadKey = 'fleet_chunk_reload'
+    const lastReload = sessionStorage.getItem(reloadKey)
+    // Prevent infinite reload loops — only retry once per path
+    if (lastReload !== to.fullPath) {
+      sessionStorage.setItem(reloadKey, to.fullPath)
+      window.location.assign(to.fullPath)
+    }
+  }
+})
+
 let appInitialized = false
 
 router.beforeEach(async (to) => {
