@@ -6,6 +6,8 @@ export interface CreateBackupJobData {
   accountId: string;
   serviceId?: string;
   storageBackend: string;
+  backupId?: string;
+  backupPath?: string;
 }
 
 export interface RestoreBackupJobData {
@@ -23,6 +25,8 @@ async function processBackupJob(job: Job<BackupJobData>): Promise<void> {
         data.accountId,
         data.serviceId ?? null,
         data.storageBackend,
+        data.backupId,
+        data.backupPath,
       );
     } else if (job.name === 'restore-backup') {
       const data = job.data as RestoreBackupJobData;

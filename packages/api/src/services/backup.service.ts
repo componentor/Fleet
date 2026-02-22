@@ -69,7 +69,10 @@ export class BackupService {
 
     if (isQueueAvailable()) {
       // Queue backup job via BullMQ for distributed execution
+      // Pass backupId so the worker updates THIS record instead of creating a new one
       await getBackupQueue().add('create-backup', {
+        backupId,
+        backupPath,
         accountId,
         serviceId,
         storageBackend,
@@ -91,33 +94,46 @@ export class BackupService {
 
   /**
    * Run a backup directly (called by the BullMQ worker).
-   * Creates the DB record and executes the backup synchronously.
+   * If backupId/backupPath are provided, uses the existing DB record
+   * (created by createBackup). Otherwise creates a new record.
    */
   async runBackupDirect(
     accountId: string,
     serviceId: string | null,
     storageBackend: string = 'nfs',
+    existingBackupId?: string,
+    existingBackupPath?: string,
   ): Promise<void> {
-    const backupId = randomUUID();
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupName = serviceId
-      ? `${accountId}-${serviceId}-${timestamp}`
-      : `${accountId}-full-${timestamp}`;
+    let backupId: string;
+    let backupPath: string;
 
-    const baseDir = storageBackend === 'nfs' ? NFS_BACKUP_DIR : BACKUP_DIR;
-    const backupPath = join(baseDir, accountId, backupName);
+    if (existingBackupId && existingBackupPath) {
+      // Reuse the record already created by createBackup()
+      backupId = existingBackupId;
+      backupPath = existingBackupPath;
+    } else {
+      // Standalone call — create a new record
+      backupId = randomUUID();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupName = serviceId
+        ? `${accountId}-${serviceId}-${timestamp}`
+        : `${accountId}-full-${timestamp}`;
 
-    await insertReturning(backups, {
-      id: backupId,
-      accountId,
-      serviceId,
-      type: 'manual',
-      status: 'pending',
-      storagePath: backupPath,
-      storageBackend,
-      sizeBytes: 0,
-      contents: [],
-    });
+      const baseDir = storageBackend === 'nfs' ? NFS_BACKUP_DIR : BACKUP_DIR;
+      backupPath = join(baseDir, accountId, backupName);
+
+      await insertReturning(backups, {
+        id: backupId,
+        accountId,
+        serviceId,
+        type: 'manual',
+        status: 'pending',
+        storagePath: backupPath,
+        storageBackend,
+        sizeBytes: 0,
+        contents: [],
+      });
+    }
 
     await this.runBackup(backupId, accountId, serviceId, backupPath);
   }
