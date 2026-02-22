@@ -10,6 +10,7 @@ import { join, resolve, dirname } from 'node:path';
 import { verify } from 'argon2';
 import { db, apiKeys, eq } from '@fleet/db';
 import { logger } from './logger.js';
+import { getValkey } from './valkey.service.js';
 
 const SFTP_PORT = Number(process.env['SFTP_PORT'] ?? 2222);
 const HOST_KEY_PATH = process.env['SFTP_HOST_KEY_PATH'] ?? './data/sftp_host_ed25519_key';
@@ -23,11 +24,48 @@ const flagsToString = ssh2Utils.sftp.flagsToString;
 
 // ── Connection tracking ──────────────────────────────────────────────
 
+// Local counters for fast-path checks + cleanup on disconnect
 let totalConnections = 0;
 const accountConnections = new Map<string, number>();
 const authFailures = new Map<string, { count: number; firstFailAt: number }>();
 
-function trackConnect(accountId: string): boolean {
+/**
+ * Track a new SFTP connection. Uses Valkey for global limits across replicas,
+ * with local Maps for fast pre-checks and cleanup on disconnect.
+ */
+async function trackConnect(accountId: string): Promise<boolean> {
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      // Global limit across all replicas
+      const globalKey = 'fleet:sftp:total';
+      const globalCount = await valkey.incr(globalKey);
+      if (globalCount === 1) await valkey.expire(globalKey, 7200);
+
+      if (globalCount > MAX_CONNECTIONS) {
+        await valkey.decr(globalKey);
+        return false;
+      }
+
+      // Per-account limit across all replicas
+      const accountKey = `fleet:sftp:account:${accountId}`;
+      const accountCount = await valkey.incr(accountKey);
+      if (accountCount === 1) await valkey.expire(accountKey, 7200);
+
+      if (accountCount > MAX_CONNECTIONS_PER_ACCOUNT) {
+        await valkey.decr(accountKey);
+        await valkey.decr(globalKey);
+        return false;
+      }
+
+      // Track locally for cleanup
+      totalConnections++;
+      accountConnections.set(accountId, (accountConnections.get(accountId) ?? 0) + 1);
+      return true;
+    }
+  } catch { /* Valkey error — fall through to local-only */ }
+
+  // Local fallback
   if (totalConnections >= MAX_CONNECTIONS) return false;
   const current = accountConnections.get(accountId) ?? 0;
   if (current >= MAX_CONNECTIONS_PER_ACCOUNT) return false;
@@ -36,13 +74,27 @@ function trackConnect(accountId: string): boolean {
   return true;
 }
 
-function trackDisconnect(accountId: string | null): void {
+async function trackDisconnect(accountId: string | null): Promise<void> {
   totalConnections = Math.max(0, totalConnections - 1);
   if (accountId) {
     const current = accountConnections.get(accountId) ?? 1;
     if (current <= 1) accountConnections.delete(accountId);
     else accountConnections.set(accountId, current - 1);
   }
+
+  // Decrement Valkey counters
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const globalCount = await valkey.decr('fleet:sftp:total');
+      if (globalCount <= 0) await valkey.del('fleet:sftp:total');
+      if (accountId) {
+        const accountKey = `fleet:sftp:account:${accountId}`;
+        const accountCount = await valkey.decr(accountKey);
+        if (accountCount <= 0) await valkey.del(accountKey);
+      }
+    }
+  } catch { /* ignore */ }
 }
 
 function isAuthRateLimited(ip: string): boolean {
@@ -176,8 +228,8 @@ export function startSftpServer(): InstanceType<typeof SshServer> {
           const valid = await verify(candidate.keyHash, password);
           if (!valid) continue;
 
-          // Enforce per-account connection limit
-          if (!trackConnect(accountId)) {
+          // Enforce per-account connection limit (global via Valkey)
+          if (!(await trackConnect(accountId))) {
             logger.warn({ accountId }, 'SFTP connection rejected: per-account limit reached');
             return ctx.reject(['password']);
           }

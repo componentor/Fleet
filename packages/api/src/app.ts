@@ -327,9 +327,58 @@ api.get(
   }),
 );
 
-// ── Per-account deploy WS connection limiter ──
+// ── Per-account WS connection limiter (Valkey-backed for multi-replica) ──
 const MAX_DEPLOY_STREAMS_PER_ACCOUNT = 20;
 const activeDeployStreams = new Map<string, number>();
+
+/**
+ * Acquire a WS connection slot using Valkey for global counting across replicas.
+ * Falls back to local-only counting if Valkey is unavailable.
+ */
+async function acquireWsSlot(
+  prefix: string,
+  accountId: string,
+  max: number,
+  localMap: Map<string, number>,
+): Promise<boolean> {
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const key = `fleet:ws:${prefix}:${accountId}`;
+      const count = await valkey.incr(key);
+      if (count === 1) await valkey.expire(key, 7200); // 2-hour safety TTL
+      if (count > max) {
+        await valkey.decr(key);
+        return false;
+      }
+      localMap.set(accountId, (localMap.get(accountId) ?? 0) + 1);
+      return true;
+    }
+  } catch { /* Valkey error — fall through to local-only */ }
+  const current = localMap.get(accountId) ?? 0;
+  if (current >= max) return false;
+  localMap.set(accountId, current + 1);
+  return true;
+}
+
+async function releaseWsSlot(
+  prefix: string,
+  accountId: string | null,
+  localMap: Map<string, number>,
+): Promise<void> {
+  if (!accountId) return;
+  const count = localMap.get(accountId) ?? 0;
+  if (count <= 1) localMap.delete(accountId);
+  else localMap.set(accountId, count - 1);
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const key = `fleet:ws:${prefix}:${accountId}`;
+      const newCount = await valkey.decr(key);
+      if (newCount <= 0) await valkey.del(key);
+    }
+  } catch { /* ignore */ }
+}
 
 // ── Shared Valkey subscriber for deploy log fan-out ──
 // Uses a single Redis connection for ALL deploy WS clients instead of one per client.
@@ -444,13 +493,12 @@ api.get(
             return;
           }
 
-          // Per-account connection limit
-          const currentStreams = activeDeployStreams.get(accountId) ?? 0;
-          if (currentStreams >= MAX_DEPLOY_STREAMS_PER_ACCOUNT) {
+          // Per-account connection limit (global across replicas via Valkey)
+          const slotAcquired = await acquireWsSlot('deploy', accountId, MAX_DEPLOY_STREAMS_PER_ACCOUNT, activeDeployStreams);
+          if (!slotAcquired) {
             ws.close(4003, 'Too many concurrent deploy streams');
             return;
           }
-          activeDeployStreams.set(accountId, currentStreams + 1);
           trackedAccountId = accountId;
 
           // Verify deployment belongs to this account
@@ -577,14 +625,9 @@ api.get(
           removeDeployListener(deploymentId, activeListener);
           activeListener = null;
         }
-        // Decrement per-account stream counter
+        // Decrement per-account stream counter (global via Valkey)
         if (trackedAccountId) {
-          const count = activeDeployStreams.get(trackedAccountId) ?? 0;
-          if (count <= 1) {
-            activeDeployStreams.delete(trackedAccountId);
-          } else {
-            activeDeployStreams.set(trackedAccountId, count - 1);
-          }
+          releaseWsSlot('deploy', trackedAccountId, activeDeployStreams);
           trackedAccountId = null;
         }
       },
@@ -638,13 +681,12 @@ api.get(
             return;
           }
 
-          // Enforce per-account concurrent terminal session limit
-          const currentSessions = activeTerminalSessions.get(accountId) ?? 0;
-          if (currentSessions >= MAX_TERMINAL_SESSIONS_PER_ACCOUNT) {
+          // Enforce per-account concurrent terminal session limit (global via Valkey)
+          const termSlotAcquired = await acquireWsSlot('terminal', accountId, MAX_TERMINAL_SESSIONS_PER_ACCOUNT, activeTerminalSessions);
+          if (!termSlotAcquired) {
             ws.close(4029, `Too many terminal sessions (max ${MAX_TERMINAL_SESSIONS_PER_ACCOUNT})`);
             return;
           }
-          activeTerminalSessions.set(accountId, currentSessions + 1);
           sessionAccountId = accountId;
 
           const svc = await db.query.services.findFirst({
@@ -736,11 +778,9 @@ api.get(
           dockerStream = null;
         }
         execId = null;
-        // Release terminal session slot
+        // Release terminal session slot (global via Valkey)
         if (sessionAccountId) {
-          const count = activeTerminalSessions.get(sessionAccountId) ?? 1;
-          if (count <= 1) activeTerminalSessions.delete(sessionAccountId);
-          else activeTerminalSessions.set(sessionAccountId, count - 1);
+          releaseWsSlot('terminal', sessionAccountId, activeTerminalSessions);
           sessionAccountId = null;
         }
       },

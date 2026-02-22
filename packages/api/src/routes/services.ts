@@ -1143,7 +1143,7 @@ serviceRoutes.post('/:id/cancel-deploy', requireMember, requireScope('write'), a
   });
 
   if (activeDeployment) {
-    buildService.cancelBuild(activeDeployment.id);
+    await buildService.cancelBuild(activeDeployment.id);
     await db
       .update(deployments)
       .set({ status: 'failed', log: (activeDeployment.log ?? '') + 'Deployment cancelled by user.\n' })

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { dockerService } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
+import { getValkey } from './valkey.service.js';
 import { db, platformSettings, accounts, eq, upsert } from '@fleet/db';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
@@ -408,28 +409,34 @@ export class UpdateService {
     await this.persistState();
 
     try {
-      // 0. Pre-update backup (best-effort — try local fallback if NFS unavailable)
+      // 0. Pre-update backup (best-effort, 90s hard timeout)
+      // The backup step must never block the update indefinitely.
       this.appendLog('Creating pre-update database backup...');
       try {
-        // Backups require a valid accountId (FK constraint) — use the first account
-        const firstAccount = await db.query.accounts.findFirst();
-        if (!firstAccount) throw new Error('No accounts found — cannot create backup');
-        const backupAccountId = firstAccount.id;
+        await Promise.race([
+          (async () => {
+            const firstAccount = await db.query.accounts.findFirst();
+            if (!firstAccount) throw new Error('No accounts found — cannot create backup');
+            const backupAccountId = firstAccount.id;
 
-        let backup: { id: string; status: string; storagePath: string | null; sizeBytes: number };
-        try {
-          backup = await backupService.createBackup(backupAccountId, undefined, 'nfs');
-        } catch {
-          this.appendLog('NFS backup unavailable — falling back to local backup...');
-          backup = await backupService.createBackup(backupAccountId, undefined, 'local');
-        }
-        this.state.preUpdateBackupId = backup.id;
-        this.appendLog(`Pre-update backup queued: ${backup.id}`);
+            let backup: { id: string; status: string; storagePath: string | null; sizeBytes: number };
+            try {
+              backup = await backupService.createBackup(backupAccountId, undefined, 'nfs');
+            } catch {
+              this.appendLog('NFS backup unavailable — falling back to local backup...');
+              backup = await backupService.createBackup(backupAccountId, undefined, 'local');
+            }
+            this.state.preUpdateBackupId = backup.id;
+            this.appendLog(`Pre-update backup queued: ${backup.id}`);
 
-        // Wait for backup to actually complete before proceeding
-        this.appendLog('Waiting for backup to complete...');
-        await this.waitForBackupCompletion(backup.id);
-        this.appendLog('Pre-update backup verified as completed.');
+            this.appendLog('Waiting for backup to complete...');
+            await this.waitForBackupCompletion(backup.id, 60_000);
+            this.appendLog('Pre-update backup verified as completed.');
+          })(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Backup timed out after 90s')), 90_000),
+          ),
+        ]);
       } catch (err) {
         this.appendLog(`Warning: Could not create pre-update backup: ${String(err)}`);
         this.appendLog('Proceeding without backup (migrations are transactional).');
@@ -916,7 +923,39 @@ export class UpdateService {
 
   private async refreshNotification(): Promise<void> {
     try {
+      // Only one replica should check GitHub per interval.
+      // Use a Valkey lock so the other replicas skip and read the cached result.
+      const valkey = await getValkey();
+      if (valkey) {
+        const lockTtl = Math.ceil(CHECK_INTERVAL_MS / 1000);
+        const acquired = await valkey.set(
+          'fleet:update-check-lock',
+          process.env['HOSTNAME'] ?? '1',
+          'EX', lockTtl,
+          'NX',
+        );
+        if (!acquired) {
+          // Another replica is handling or recently handled the check
+          const cached = await valkey.get('fleet:update-notification');
+          if (cached) {
+            try { this.cachedNotification = JSON.parse(cached); } catch { /* ignore */ }
+          }
+          return;
+        }
+      }
+
       await this.checkForUpdates();
+
+      // Cache result in Valkey for other replicas
+      if (valkey) {
+        try {
+          await valkey.setex(
+            'fleet:update-notification',
+            Math.ceil(CHECK_INTERVAL_MS / 1000) * 2,
+            JSON.stringify(this.cachedNotification),
+          );
+        } catch { /* ignore */ }
+      }
     } catch {
       // Silently fail — will retry next interval
     }

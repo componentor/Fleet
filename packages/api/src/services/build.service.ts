@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { EventEmitter } from 'node:events';
+import { getValkey } from './valkey.service.js';
+import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -533,7 +535,28 @@ export class BuildService {
     }
   }
 
-  cancelBuild(buildId: string): boolean {
+  /**
+   * Initialize Valkey subscription for cross-replica build cancellation.
+   * Call once on startup after Valkey is available.
+   */
+  async initCancelSubscription(): Promise<void> {
+    try {
+      const valkey = await getValkey();
+      if (!valkey) return;
+
+      const sub = valkey.duplicate();
+      await sub.subscribe('fleet:build:cancel');
+      sub.on('message', (_channel: string, buildId: string) => {
+        if (this.activeBuilds.has(buildId)) {
+          this.cancelBuildLocal(buildId);
+        }
+      });
+    } catch (err) {
+      logger.warn({ err }, 'Build cancel subscription failed — cross-replica cancellation disabled');
+    }
+  }
+
+  private cancelBuildLocal(buildId: string): boolean {
     const build = this.activeBuilds.get(buildId);
     if (!build) return false;
 
@@ -542,7 +565,6 @@ export class BuildService {
     build.info.log += '\n[cancelled] Build cancelled by user.\n';
     build.info.finishedAt = new Date();
 
-    // Kill all running child processes for this build
     for (const proc of build.processes) {
       try { proc.kill('SIGKILL'); } catch { /* already exited */ }
     }
@@ -551,6 +573,26 @@ export class BuildService {
     this.activeBuilds.delete(buildId);
     this.events.emit(`build:${buildId}`, build.info);
     return true;
+  }
+
+  /**
+   * Cancel a build — tries locally first, then publishes to Valkey
+   * for cross-replica cancellation if the build isn't on this instance.
+   */
+  async cancelBuild(buildId: string): Promise<boolean> {
+    // Try local first
+    if (this.cancelBuildLocal(buildId)) return true;
+
+    // Not on this replica — publish to Valkey for other replicas
+    try {
+      const valkey = await getValkey();
+      if (valkey) {
+        const subs = await valkey.publish('fleet:build:cancel', buildId);
+        return subs > 0;
+      }
+    } catch { /* ignore */ }
+
+    return false;
   }
 
   getBuildStatus(buildId: string): BuildInfo | null {

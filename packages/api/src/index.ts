@@ -127,6 +127,12 @@ try { await initWorkers() } catch (err) {
   logger.error({ err }, 'Worker initialization failed')
 }
 
+// Initialize cross-replica build cancellation via Valkey pub/sub
+try {
+  const { buildService } = await import('./services/build.service.js')
+  await buildService.initCancelSubscription()
+} catch { /* non-critical */ }
+
 // Initialize background job scheduler (registers repeatable BullMQ jobs)
 try { await schedulerService.initialize() } catch (err) {
   logger.error({ err }, 'Scheduler initialization failed')
