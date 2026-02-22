@@ -281,7 +281,13 @@
     "removeDomain": "Fjern domene",
     "confirmRemove": "Er du sikker p\u00e5 at du vil fjerne dette domenet?",
     "purchase": "Kj\u00f8p domene",
-    "searchDomains": "S\u00f8k tilgjengelige domener..."
+    "searchDomains": "S\u00f8k tilgjengelige domener...",
+    "nameservers": "Navneservere",
+    "editNameservers": "Rediger",
+    "saveNameservers": "Lagre navneservere",
+    "addNameserver": "Legg til navneserver",
+    "customNsWarning": "Bruk av egne navneservere betyr at DNS-poster administrert i Fleet ikke vil fungere for dette domenet.",
+    "registeredThroughFleet": "Registrert gjennom Fleet"
   },
   "storage": {
     "title": "Lagring",
@@ -1088,7 +1094,19 @@
       "googleConfigDesc": "Konfigurer Google OAuth for å la brukere logge inn med Google-kontoen sin.",
       "googleClientId": "Klient-ID",
       "googleClientSecret": "Klienthemmelighet",
-      "googleOAuthHint": "Opprett en OAuth 2.0-klient-ID på console.cloud.google.com/apis/credentials. Sett autorisert omdirigerings-URI til ditt-domene.com/api/v1/auth/google/callback."
+      "googleOAuthHint": "Opprett en OAuth 2.0-klient-ID på console.cloud.google.com/apis/credentials. Sett autorisert omdirigerings-URI til ditt-domene.com/api/v1/auth/google/callback.",
+      "branding": "Merkevare",
+      "brandingDesc": "Tilpass plattformens logo, favicon og navn.",
+      "brandTitle": "Plattformtittel",
+      "brandLogo": "Logo",
+      "brandFavicon": "Favicon",
+      "uploadLogo": "Last opp logo",
+      "uploadFavicon": "Last opp favicon",
+      "removeLogo": "Fjern logo",
+      "removeFavicon": "Fjern favicon",
+      "brandingSaved": "Merkevare lagret",
+      "logoHint": "Anbefalt: PNG eller SVG, maks 2 MB",
+      "faviconHint": "Anbefalt: ICO eller PNG 32x32, maks 500 KB"
     },
     "billing": {
       "title": "Faktureringskonfigurasjon",
@@ -1446,7 +1464,16 @@
   "impersonation": {
     "youAreImpersonating": "Du utgir deg for",
     "anAccount": "en konto",
-    "stopImpersonating": "Slutt å utgi deg"
+    "stopImpersonating": "Slutt \u00e5 utgi deg",
+    "adminOverrides": "Admintilpasninger",
+    "resourceLimits": "Ressursgrenser",
+    "billingOverrides": "Fakturatilpasninger",
+    "globalDefault": "Global",
+    "accountOverride": "Tilpasning",
+    "effective": "Effektiv",
+    "resetToGlobal": "Tilbakestill til global",
+    "overridesSaved": "Kontotilpasninger lagret",
+    "overridesReset": "Kontotilpasninger tilbakestilt til globale standarder"
   },
   "commandPalette": {
     "placeholder": "Søk tjenester, sider, handlinger...",

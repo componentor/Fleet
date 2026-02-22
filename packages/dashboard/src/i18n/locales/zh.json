@@ -281,7 +281,13 @@
     "removeDomain": "移除域名",
     "confirmRemove": "确定要移除此域名吗？",
     "purchase": "购买域名",
-    "searchDomains": "搜索可用域名..."
+    "searchDomains": "搜索可用域名...",
+    "nameservers": "域名服务器",
+    "editNameservers": "编辑",
+    "saveNameservers": "保存域名服务器",
+    "addNameserver": "添加域名服务器",
+    "customNsWarning": "使用自定义域名服务器意味着在 Fleet 中管理的 DNS 记录将不会解析此域名。",
+    "registeredThroughFleet": "通过 Fleet 注册"
   },
   "storage": {
     "title": "存储",
@@ -1088,7 +1094,19 @@
       "googleConfigDesc": "配置 Google OAuth 以允许用户使用 Google 帐户登录。",
       "googleClientId": "客户端 ID",
       "googleClientSecret": "客户端密钥",
-      "googleOAuthHint": "在 console.cloud.google.com/apis/credentials 创建 OAuth 2.0 客户端 ID。将授权重定向 URI 设置为 your-domain.com/api/v1/auth/google/callback。"
+      "googleOAuthHint": "在 console.cloud.google.com/apis/credentials 创建 OAuth 2.0 客户端 ID。将授权重定向 URI 设置为 your-domain.com/api/v1/auth/google/callback。",
+      "branding": "品牌",
+      "brandingDesc": "自定义平台的标志、图标和名称。",
+      "brandTitle": "平台名称",
+      "brandLogo": "标志",
+      "brandFavicon": "网站图标",
+      "uploadLogo": "上传标志",
+      "uploadFavicon": "上传图标",
+      "removeLogo": "移除标志",
+      "removeFavicon": "移除图标",
+      "brandingSaved": "品牌已保存",
+      "logoHint": "推荐：PNG 或 SVG，最大 2 MB",
+      "faviconHint": "推荐：ICO 或 PNG 32x32，最大 500 KB"
     },
     "billing": {
       "title": "计费配置",
@@ -1446,7 +1464,16 @@
   "impersonation": {
     "youAreImpersonating": "您正在模拟",
     "anAccount": "一个账户",
-    "stopImpersonating": "停止模拟"
+    "stopImpersonating": "停止模拟",
+    "adminOverrides": "管理员覆盖",
+    "resourceLimits": "资源限制",
+    "billingOverrides": "计费覆盖",
+    "globalDefault": "全局",
+    "accountOverride": "覆盖",
+    "effective": "生效值",
+    "resetToGlobal": "重置为全局默认",
+    "overridesSaved": "账户覆盖已保存",
+    "overridesReset": "账户覆盖已重置为全局默认"
   },
   "commandPalette": {
     "placeholder": "搜索服务、页面、操作...",

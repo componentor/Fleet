@@ -281,7 +281,13 @@
     "removeDomain": "Domain entfernen",
     "confirmRemove": "Sind Sie sicher, dass Sie diese Domain entfernen möchten?",
     "purchase": "Domain kaufen",
-    "searchDomains": "Verfügbare Domains suchen..."
+    "searchDomains": "Verfügbare Domains suchen...",
+    "nameservers": "Nameserver",
+    "editNameservers": "Bearbeiten",
+    "saveNameservers": "Nameserver speichern",
+    "addNameserver": "Nameserver hinzufügen",
+    "customNsWarning": "Die Verwendung eigener Nameserver bedeutet, dass in Fleet verwaltete DNS-Einträge für diese Domain nicht aufgelöst werden.",
+    "registeredThroughFleet": "Über Fleet registriert"
   },
   "storage": {
     "title": "Speicher",
@@ -1088,7 +1094,19 @@
       "googleConfigDesc": "Konfigurieren Sie Google OAuth, damit sich Benutzer mit ihrem Google-Konto anmelden können.",
       "googleClientId": "Client-ID",
       "googleClientSecret": "Client-Geheimnis",
-      "googleOAuthHint": "Erstellen Sie eine OAuth 2.0-Client-ID unter console.cloud.google.com/apis/credentials. Setzen Sie die autorisierte Weiterleitungs-URI auf ihre-domain.com/api/v1/auth/google/callback."
+      "googleOAuthHint": "Erstellen Sie eine OAuth 2.0-Client-ID unter console.cloud.google.com/apis/credentials. Setzen Sie die autorisierte Weiterleitungs-URI auf ihre-domain.com/api/v1/auth/google/callback.",
+      "branding": "Branding",
+      "brandingDesc": "Passen Sie Logo, Favicon und Namen Ihrer Plattform an.",
+      "brandTitle": "Plattformtitel",
+      "brandLogo": "Logo",
+      "brandFavicon": "Favicon",
+      "uploadLogo": "Logo hochladen",
+      "uploadFavicon": "Favicon hochladen",
+      "removeLogo": "Logo entfernen",
+      "removeFavicon": "Favicon entfernen",
+      "brandingSaved": "Branding gespeichert",
+      "logoHint": "Empfohlen: PNG oder SVG, max. 2 MB",
+      "faviconHint": "Empfohlen: ICO oder PNG 32x32, max. 500 KB"
     },
     "billing": {
       "title": "Abrechnungskonfiguration",
@@ -1446,7 +1464,16 @@
   "impersonation": {
     "youAreImpersonating": "Sie imitieren",
     "anAccount": "ein Konto",
-    "stopImpersonating": "Imitation beenden"
+    "stopImpersonating": "Imitation beenden",
+    "adminOverrides": "Admin-Überschreibungen",
+    "resourceLimits": "Ressourcenlimits",
+    "billingOverrides": "Abrechnungsüberschreibungen",
+    "globalDefault": "Global",
+    "accountOverride": "Überschreibung",
+    "effective": "Effektiv",
+    "resetToGlobal": "Auf Global zurücksetzen",
+    "overridesSaved": "Kontoüberschreibungen gespeichert",
+    "overridesReset": "Kontoüberschreibungen auf globale Standards zurückgesetzt"
   },
   "commandPalette": {
     "placeholder": "Dienste, Seiten, Aktionen suchen...",

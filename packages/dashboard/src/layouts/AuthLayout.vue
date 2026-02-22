@@ -3,9 +3,11 @@ import { ref, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { Sun, Moon } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
 const { theme, toggle } = useTheme()
+const { brandTitle, logoSrc } = useBranding()
 
 // Check if we're on a reseller's custom domain
 const resellerBranding = ref<{ found: boolean; brandName?: string; brandLogoUrl?: string; brandPrimaryColor?: string; slug?: string }>({ found: false })
@@ -61,12 +63,17 @@ onMounted(async () => {
       </template>
       <template v-else>
         <div class="flex items-center justify-center gap-2 mb-2">
-          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700">
-            <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">Fleet</h1>
+          <template v-if="logoSrc()">
+            <img :src="logoSrc()!" :alt="brandTitle" class="h-10 w-auto max-w-[200px] object-contain" />
+          </template>
+          <template v-else>
+            <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-700">
+              <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+          </template>
+          <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</h1>
         </div>
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('authLayout.tagline') }}</p>
       </template>

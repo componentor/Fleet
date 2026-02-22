@@ -1,13 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { resolve as dnsResolve } from 'node:dns/promises';
-import { db, dnsZones, dnsRecords, insertReturning, updateReturning, safeTransaction, eq, and } from '@fleet/db';
+import { db, dnsZones, dnsRecords, domainRegistrations, insertReturning, updateReturning, safeTransaction, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dnsManager } from '../services/dns-provider-manager.js';
 import { requireMember } from '../middleware/rbac.js';
 import { randomUUID } from 'crypto';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { logger } from '../services/logger.js';
 import { getPlatformDomain } from './settings.js';
 
 const dnsRoutes = new Hono<{
@@ -515,6 +516,66 @@ dnsRoutes.delete('/records/:id', requireMember, async (c) => {
   });
 
   return c.json({ message: 'Record deleted' });
+});
+
+// ── Update nameservers ──────────────────────────────────────────────────────
+const nameserverSchema = z.object({
+  nameservers: z.array(
+    z.string().min(1).max(253).regex(/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/, 'Invalid nameserver hostname')
+  ).min(2).max(13),
+});
+
+dnsRoutes.patch('/zones/:id/nameservers', requireMember, async (c) => {
+  const zoneId = c.req.param('id');
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = nameserverSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
+  }
+
+  // Verify zone belongs to this account
+  const zone = await db.query.dnsZones.findFirst({
+    where: and(eq(dnsZones.id, zoneId), eq(dnsZones.accountId, accountId)),
+  });
+
+  if (!zone) {
+    return c.json({ error: 'Zone not found' }, 404);
+  }
+
+  // Update in DB
+  await db.update(dnsZones)
+    .set({ nameservers: parsed.data.nameservers, updatedAt: new Date() })
+    .where(eq(dnsZones.id, zoneId));
+
+  // If domain was purchased through Fleet, also update at registrar
+  let registrarUpdated = false;
+  try {
+    const registration = await db.query.domainRegistrations.findFirst({
+      where: and(
+        eq(domainRegistrations.domain, zone.domain),
+        eq(domainRegistrations.accountId, accountId),
+      ),
+    });
+
+    if (registration) {
+      const { registrarService } = await import('../services/registrar.service.js');
+      await registrarService.setNameservers(zone.domain, parsed.data.nameservers);
+      registrarUpdated = true;
+    }
+  } catch (err) {
+    logger.warn({ err, domain: zone.domain }, 'Failed to update nameservers at registrar (DB update succeeded)');
+  }
+
+  return c.json({
+    nameservers: parsed.data.nameservers,
+    registrarUpdated,
+  });
 });
 
 export default dnsRoutes;

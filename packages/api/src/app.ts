@@ -788,6 +788,83 @@ api.get(
   }),
 );
 
+// ── Public branding endpoints (no auth) ──
+const brandingRateLimit = rateLimiter({ windowMs: 60_000, max: 60, keyPrefix: 'branding' });
+
+app.get('/api/v1/branding/info', brandingRateLimit, async (c) => {
+  const { db: dbImport, platformSettings, eq: eqOp } = await import('@fleet/db');
+
+  const rows = await dbImport.query.platformSettings.findMany({
+    where: (s, { like }) => like(s.key, 'branding:%'),
+  });
+
+  const settings: Record<string, unknown> = {};
+  for (const row of rows) {
+    settings[row.key] = row.value;
+  }
+
+  const logoFilename = settings['branding:logoFilename'] as string | undefined;
+  const faviconFilename = settings['branding:faviconFilename'] as string | undefined;
+  const title = settings['branding:title'] as string | undefined;
+
+  c.header('Cache-Control', 'public, max-age=300');
+  return c.json({
+    title: title ?? null,
+    logoUrl: logoFilename ? '/api/v1/branding/logo' : null,
+    faviconUrl: faviconFilename ? '/api/v1/branding/favicon' : null,
+  });
+});
+
+app.get('/api/v1/branding/:type', brandingRateLimit, async (c) => {
+  const type = c.req.param('type');
+  if (type !== 'logo' && type !== 'favicon') {
+    return c.json({ error: 'Invalid type' }, 400);
+  }
+
+  const { db: dbImport, platformSettings, eq: eqOp } = await import('@fleet/db');
+  const settingKey = type === 'logo' ? 'branding:logoFilename' : 'branding:faviconFilename';
+
+  const row = await dbImport.query.platformSettings.findFirst({
+    where: eqOp(platformSettings.key, settingKey),
+  });
+
+  if (!row?.value) {
+    return c.json({ error: 'Not configured' }, 404);
+  }
+
+  const filename = row.value as string;
+  const { join } = await import('node:path');
+  const { readFile, stat } = await import('node:fs/promises');
+
+  const UPLOAD_BASE = process.env['UPLOAD_BASE_PATH']
+    ?? (process.env['NODE_ENV'] === 'production' ? '/srv/nfs/uploads' : join(process.cwd(), 'data', 'uploads'));
+  const filePath = join(UPLOAD_BASE, 'platform', 'branding', filename);
+
+  try {
+    await stat(filePath);
+  } catch {
+    return c.json({ error: 'File not found' }, 404);
+  }
+
+  const data = await readFile(filePath);
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const contentTypes: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    svg: 'image/svg+xml',
+    webp: 'image/webp',
+    ico: 'image/x-icon',
+  };
+
+  return new Response(data, {
+    headers: {
+      'Content-Type': contentTypes[ext ?? ''] ?? 'application/octet-stream',
+      'Cache-Control': 'public, max-age=3600',
+    },
+  });
+});
+
 app.route('/api/v1', api);
 
 export type AppType = typeof app;

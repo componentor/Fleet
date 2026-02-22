@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
 
 const api = useApi()
+const branding = useBranding()
 
 const activeSection = ref('general')
 const loading = ref(true)
@@ -22,6 +24,7 @@ const sections = [
   { id: 'email', label: () => t('super.settings.emailConfig') },
   { id: 'registrar', label: () => t('super.settings.domainRegistrar') },
   { id: 'pricing', label: () => t('super.settings.domainPricing') },
+  { id: 'branding', label: () => t('super.settings.branding') },
 ]
 
 // General settings
@@ -71,6 +74,16 @@ const testResult = ref<{ success: boolean; message: string } | null>(null)
 const pricingEntries = ref<any[]>([])
 const pricingLoading = ref(false)
 const syncing = ref(false)
+
+// Branding
+const brandTitleInput = ref('')
+const brandLogoPreview = ref<string | null>(null)
+const brandFaviconPreview = ref<string | null>(null)
+const brandLogoSet = ref(false)
+const brandFaviconSet = ref(false)
+const brandLogoFile = ref<File | null>(null)
+const brandFaviconFile = ref<File | null>(null)
+const savingBranding = ref(false)
 
 async function fetchSettings() {
   loading.value = true
@@ -336,6 +349,78 @@ async function updatePricingEntry(entry: any) {
   }
 }
 
+async function fetchBranding() {
+  try {
+    const data = await api.get<any>('/settings/branding')
+    brandTitleInput.value = data.title ?? ''
+    brandLogoSet.value = data.logoSet ?? false
+    brandFaviconSet.value = data.faviconSet ?? false
+    brandLogoPreview.value = data.logoUrl ?? null
+    brandFaviconPreview.value = data.faviconUrl ?? null
+  } catch {
+    // Not configured
+  }
+}
+
+function onLogoFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  brandLogoFile.value = file
+  brandLogoPreview.value = URL.createObjectURL(file)
+}
+
+function onFaviconFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  brandFaviconFile.value = file
+  brandFaviconPreview.value = URL.createObjectURL(file)
+}
+
+async function saveBranding() {
+  savingBranding.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const formData = new FormData()
+    formData.append('title', brandTitleInput.value)
+    if (brandLogoFile.value) formData.append('logo', brandLogoFile.value)
+    if (brandFaviconFile.value) formData.append('favicon', brandFaviconFile.value)
+    await api.upload('/settings/branding', formData)
+    brandLogoFile.value = null
+    brandFaviconFile.value = null
+    success.value = t('super.settings.brandingSaved')
+    await branding.refresh()
+    await fetchBranding()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save branding'
+  } finally {
+    savingBranding.value = false
+  }
+}
+
+async function removeBrandingAsset(type: 'logo' | 'favicon') {
+  try {
+    await api.del(`/settings/branding/${type}`)
+    if (type === 'logo') {
+      brandLogoPreview.value = null
+      brandLogoSet.value = false
+      brandLogoFile.value = null
+    } else {
+      brandFaviconPreview.value = null
+      brandFaviconSet.value = false
+      brandFaviconFile.value = null
+    }
+    success.value = `${type === 'logo' ? 'Logo' : 'Favicon'} removed`
+    await branding.refresh()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || `Failed to remove ${type}`
+  }
+}
+
 function formatCents(cents: number): string {
   return (cents / 100).toFixed(2)
 }
@@ -346,6 +431,7 @@ onMounted(() => {
   fetchGoogle()
   fetchRegistrar()
   fetchPricing()
+  fetchBranding()
 })
 </script>
 
@@ -738,6 +824,79 @@ onMounted(() => {
               </tbody>
             </table>
           </div>
+        </div>
+
+        <!-- Branding -->
+        <div v-if="activeSection === 'branding'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.branding') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.brandingDesc') }}</p>
+          </div>
+          <form @submit.prevent="saveBranding" class="p-6 space-y-6">
+            <!-- Title -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.brandTitle') }}</label>
+              <input v-model="brandTitleInput" type="text" placeholder="Fleet" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+
+            <!-- Logo -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.brandLogo') }}</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ $t('super.settings.logoHint') }}</p>
+              <div class="flex items-center gap-4">
+                <div v-if="brandLogoPreview" class="h-12 px-3 py-1 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 flex items-center">
+                  <img :src="brandLogoPreview" alt="Logo preview" class="h-10 w-auto max-w-[200px] object-contain" />
+                </div>
+                <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  <Upload class="w-4 h-4" />
+                  {{ $t('super.settings.uploadLogo') }}
+                  <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" class="hidden" @change="onLogoFileChange" />
+                </label>
+                <button
+                  v-if="brandLogoSet"
+                  type="button"
+                  @click="removeBrandingAsset('logo')"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  <Trash2 class="w-4 h-4" />
+                  {{ $t('super.settings.removeLogo') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Favicon -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.brandFavicon') }}</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ $t('super.settings.faviconHint') }}</p>
+              <div class="flex items-center gap-4">
+                <div v-if="brandFaviconPreview" class="h-10 w-10 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 flex items-center justify-center">
+                  <img :src="brandFaviconPreview" alt="Favicon preview" class="h-8 w-8 object-contain" />
+                </div>
+                <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  <Upload class="w-4 h-4" />
+                  {{ $t('super.settings.uploadFavicon') }}
+                  <input type="file" accept="image/x-icon,image/png,image/svg+xml" class="hidden" @change="onFaviconFileChange" />
+                </label>
+                <button
+                  v-if="brandFaviconSet"
+                  type="button"
+                  @click="removeBrandingAsset('favicon')"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  <Trash2 class="w-4 h-4" />
+                  {{ $t('super.settings.removeFavicon') }}
+                </button>
+              </div>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+              <button type="submit" :disabled="savingBranding" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                <Loader2 v-if="savingBranding" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ savingBranding ? $t('common.saving') : $t('common.save') }}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>

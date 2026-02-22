@@ -35,13 +35,17 @@ import {
   ShieldAlert,
   Languages,
   Search,
+  SlidersHorizontal,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
+import AdminOverridesPanel from '@/components/AdminOverridesPanel.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useApi } from '@/composables/useApi'
+import { useBranding } from '@/composables/useBranding'
 
 const commandPalette = useCommandPalette()
+const { brandTitle, logoSrc } = useBranding()
 const api = useApi()
 
 const { t, locale } = useI18n()
@@ -78,6 +82,7 @@ onMounted(async () => {
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
 const accountMenuOpen = ref(false)
+const overridesPanelOpen = ref(false)
 
 const navItems = [
   { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
@@ -141,8 +146,12 @@ function changeLocale(newLocale: string) {
       <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
         <RouterLink to="/panel" class="flex items-center gap-2">
           <img v-if="resellerBranding.found && resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" class="h-8 w-auto max-w-[140px] object-contain" />
-          <span v-else class="text-xl font-bold text-primary-600 dark:text-primary-400">
-            {{ resellerBranding.found && resellerBranding.brandName ? resellerBranding.brandName : 'Fleet' }}
+          <img v-else-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" class="h-8 w-auto max-w-[140px] object-contain" />
+          <span v-if="resellerBranding.found && resellerBranding.brandName && !resellerBranding.brandLogoUrl" class="text-xl font-bold text-primary-600 dark:text-primary-400">
+            {{ resellerBranding.brandName }}
+          </span>
+          <span v-else-if="!resellerBranding.found && !logoSrc()" class="text-xl font-bold text-primary-600 dark:text-primary-400">
+            {{ brandTitle }}
           </span>
         </RouterLink>
       </div>
@@ -319,13 +328,28 @@ function changeLocale(newLocale: string) {
           <ShieldAlert class="w-4 h-4" />
           <span>{{ $t('impersonation.youAreImpersonating') }} <strong>{{ currentAccount?.name ?? $t('impersonation.anAccount') }}</strong></span>
         </div>
-        <button
-          @click="stopImpersonating"
-          class="px-3 py-1 rounded bg-white/20 hover:bg-white/30 font-medium transition-colors"
-        >
-          {{ $t('impersonation.stopImpersonating') }}
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            @click="overridesPanelOpen = !overridesPanelOpen"
+            :class="[
+              'flex items-center gap-1.5 px-3 py-1 rounded font-medium transition-colors',
+              overridesPanelOpen ? 'bg-white/30' : 'bg-white/20 hover:bg-white/30',
+            ]"
+          >
+            <SlidersHorizontal class="w-3.5 h-3.5" />
+            {{ $t('impersonation.adminOverrides') }}
+          </button>
+          <button
+            @click="stopImpersonating"
+            class="px-3 py-1 rounded bg-white/20 hover:bg-white/30 font-medium transition-colors"
+          >
+            {{ $t('impersonation.stopImpersonating') }}
+          </button>
+        </div>
       </div>
+
+      <!-- Admin overrides panel (when impersonating) -->
+      <AdminOverridesPanel v-if="isImpersonating && overridesPanelOpen && currentAccount?.id" :account-id="currentAccount.id" />
 
       <!-- Page content -->
       <main class="p-6">

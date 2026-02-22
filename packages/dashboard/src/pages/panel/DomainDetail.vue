@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Loader2, Shield } from 'lucide-vue-next'
+import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Loader2, Shield, Edit2, X as XIcon, AlertTriangle } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const route = useRoute()
@@ -29,6 +29,12 @@ const newRecord = ref({
 // Verify
 const verifying = ref(false)
 const verifyToken = ref('')
+
+// Nameserver editing
+const editingNameservers = ref(false)
+const savingNameservers = ref(false)
+const editedNameservers = ref<string[]>([])
+const registration = ref<any>(null)
 
 const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']
 const showPriority = computed(() => ['MX', 'SRV'].includes(newRecord.value.type))
@@ -95,6 +101,57 @@ async function verifyDomain() {
   }
 }
 
+async function fetchRegistration() {
+  if (!zone.value) return
+  try {
+    const registrations = await api.get<any[]>('/domains/registrations')
+    registration.value = registrations.find((r: any) => r.domain === zone.value.domain) ?? null
+  } catch {
+    // Not accessible or no registrations
+  }
+}
+
+function startEditingNameservers() {
+  editedNameservers.value = [...(zone.value?.nameservers?.length ? zone.value.nameservers : ['ns1.fleet.local', 'ns2.fleet.local'])]
+  editingNameservers.value = true
+}
+
+function cancelEditingNameservers() {
+  editingNameservers.value = false
+  editedNameservers.value = []
+}
+
+function addNameserver() {
+  if (editedNameservers.value.length < 13) {
+    editedNameservers.value.push('')
+  }
+}
+
+function removeNameserver(index: number) {
+  if (editedNameservers.value.length > 2) {
+    editedNameservers.value.splice(index, 1)
+  }
+}
+
+async function saveNameservers() {
+  const valid = editedNameservers.value.filter(ns => ns.trim().length > 0)
+  if (valid.length < 2) {
+    error.value = 'At least 2 nameservers are required'
+    return
+  }
+  savingNameservers.value = true
+  error.value = ''
+  try {
+    await api.patch(`/dns/zones/${zoneId.value}/nameservers`, { nameservers: valid })
+    editingNameservers.value = false
+    await fetchZone()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to update nameservers'
+  } finally {
+    savingNameservers.value = false
+  }
+}
+
 function formatDate(ts: any) {
   if (!ts) return '--'
   const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
@@ -102,7 +159,7 @@ function formatDate(ts: any) {
 }
 
 onMounted(() => {
-  fetchZone()
+  fetchZone().then(() => fetchRegistration())
 })
 </script>
 
@@ -182,16 +239,82 @@ onMounted(() => {
       </div>
 
       <!-- Nameservers -->
-      <div v-if="zone.nameservers?.length" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-        <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Nameservers</h3>
-        <div class="flex flex-wrap gap-2">
+      <div class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Nameservers</h3>
+          <button
+            v-if="!editingNameservers"
+            @click="startEditingNameservers"
+            class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+          >
+            <Edit2 class="w-3.5 h-3.5" />
+            Edit
+          </button>
+        </div>
+
+        <!-- Display mode -->
+        <div v-if="!editingNameservers" class="flex flex-wrap gap-2">
           <span
-            v-for="ns in zone.nameservers"
+            v-for="ns in (zone.nameservers?.length ? zone.nameservers : ['ns1.fleet.local', 'ns2.fleet.local'])"
             :key="ns"
             class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm font-mono text-gray-700 dark:text-gray-300"
           >
             {{ ns }}
           </span>
+          <span v-if="registration" class="ml-2 inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded text-xs">
+            Registered through Fleet
+          </span>
+        </div>
+
+        <!-- Edit mode -->
+        <div v-else class="space-y-3">
+          <div class="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2">
+            <AlertTriangle class="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <p class="text-xs text-amber-700 dark:text-amber-300">
+              If you use custom nameservers, DNS records managed in Fleet will no longer resolve for this domain. You will need to configure records at your new DNS provider.
+            </p>
+          </div>
+
+          <div v-for="(ns, index) in editedNameservers" :key="index" class="flex items-center gap-2">
+            <input
+              v-model="editedNameservers[index]"
+              type="text"
+              :placeholder="`ns${index + 1}.example.com`"
+              class="flex-1 max-w-md px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+            />
+            <button
+              v-if="editedNameservers.length > 2"
+              @click="removeNameserver(index)"
+              class="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            >
+              <XIcon class="w-4 h-4" />
+            </button>
+          </div>
+
+          <button
+            v-if="editedNameservers.length < 13"
+            @click="addNameserver"
+            class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            Add Nameserver
+          </button>
+
+          <div class="flex items-center gap-3 pt-2">
+            <button
+              @click="saveNameservers"
+              :disabled="savingNameservers"
+              class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              {{ savingNameservers ? 'Saving...' : 'Save Nameservers' }}
+            </button>
+            <button
+              @click="cancelEditingNameservers"
+              class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
 

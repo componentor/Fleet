@@ -35,8 +35,10 @@ import {
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
+import { useBranding } from '@/composables/useBranding'
 
 const commandPalette = useCommandPalette()
+const { brandTitle, logoSrc } = useBranding()
 const api = useApi()
 
 const { t, locale } = useI18n()
@@ -121,8 +123,9 @@ function changeLocale(newLocale: string) {
       ]"
     >
       <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink to="/admin" class="text-xl font-bold text-primary-600 dark:text-primary-400">
-          Fleet
+        <RouterLink to="/admin" class="flex items-center gap-2">
+          <img v-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" class="h-8 w-auto max-w-[140px] object-contain" />
+          <span class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</span>
         </RouterLink>
         <span class="text-xs font-medium bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">
           {{ $t('nav.admin') }}

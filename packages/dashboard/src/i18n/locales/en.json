@@ -281,7 +281,13 @@
     "removeDomain": "Remove Domain",
     "confirmRemove": "Are you sure you want to remove this domain?",
     "purchase": "Purchase Domain",
-    "searchDomains": "Search available domains..."
+    "searchDomains": "Search available domains...",
+    "nameservers": "Nameservers",
+    "editNameservers": "Edit",
+    "saveNameservers": "Save Nameservers",
+    "addNameserver": "Add Nameserver",
+    "customNsWarning": "Using custom nameservers means DNS records managed in Fleet won't resolve for this domain.",
+    "registeredThroughFleet": "Registered through Fleet"
   },
   "storage": {
     "title": "Storage",
@@ -1088,7 +1094,19 @@
       "googleConfigDesc": "Configure Google OAuth to allow users to sign in with their Google account.",
       "googleClientId": "Client ID",
       "googleClientSecret": "Client Secret",
-      "googleOAuthHint": "Create an OAuth 2.0 Client ID at console.cloud.google.com/apis/credentials. Set the authorized redirect URI to your-domain.com/api/v1/auth/google/callback."
+      "googleOAuthHint": "Create an OAuth 2.0 Client ID at console.cloud.google.com/apis/credentials. Set the authorized redirect URI to your-domain.com/api/v1/auth/google/callback.",
+      "branding": "Branding",
+      "brandingDesc": "Customize your platform's logo, favicon, and name.",
+      "brandTitle": "Platform Title",
+      "brandLogo": "Logo",
+      "brandFavicon": "Favicon",
+      "uploadLogo": "Upload Logo",
+      "uploadFavicon": "Upload Favicon",
+      "removeLogo": "Remove Logo",
+      "removeFavicon": "Remove Favicon",
+      "brandingSaved": "Branding saved",
+      "logoHint": "Recommended: PNG or SVG, max 2 MB",
+      "faviconHint": "Recommended: ICO or PNG 32x32, max 500 KB"
     },
     "billing": {
       "title": "Billing Configuration",
@@ -1446,7 +1464,16 @@
   "impersonation": {
     "youAreImpersonating": "You are impersonating",
     "anAccount": "an account",
-    "stopImpersonating": "Stop Impersonating"
+    "stopImpersonating": "Stop Impersonating",
+    "adminOverrides": "Admin Overrides",
+    "resourceLimits": "Resource Limits",
+    "billingOverrides": "Billing Overrides",
+    "globalDefault": "Global",
+    "accountOverride": "Override",
+    "effective": "Effective",
+    "resetToGlobal": "Reset to Global",
+    "overridesSaved": "Account overrides saved",
+    "overridesReset": "Account overrides reset to global defaults"
   },
   "commandPalette": {
     "placeholder": "Search services, pages, actions...",

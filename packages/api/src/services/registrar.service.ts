@@ -56,6 +56,7 @@ export interface RegistrarProvider {
     registrarDomainId: string,
     years: number,
   ): Promise<{ expiresAt: Date }>;
+  setNameservers(domain: string, nameservers: string[]): Promise<void>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -199,6 +200,10 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
     const expiresAt = new Date();
     expiresAt.setFullYear(expiresAt.getFullYear() + years);
     return { expiresAt };
+  }
+
+  async setNameservers(domain: string, nameservers: string[]): Promise<void> {
+    logger.info({ domain, nameservers }, 'Simulated: setNameservers');
   }
 }
 
@@ -375,6 +380,15 @@ export class RegistrarService {
     );
 
     return updated!;
+  }
+
+  /**
+   * Update nameservers for a domain at the registrar.
+   */
+  async setNameservers(domain: string, nameservers: string[]): Promise<void> {
+    const provider = await this.getProvider();
+    await provider.setNameservers(domain, nameservers);
+    logger.info({ domain, nameservers, provider: provider.name }, 'Nameservers updated at registrar');
   }
 
   /**

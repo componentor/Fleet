@@ -9,6 +9,12 @@ import { cache, invalidateCache } from '../middleware/cache.js';
 import { encrypt } from '../services/crypto.service.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
+import { join } from 'node:path';
+import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
+
+const UPLOAD_BASE = process.env['UPLOAD_BASE_PATH']
+  ?? (process.env['NODE_ENV'] === 'production' ? '/srv/nfs/uploads' : join(process.cwd(), 'data', 'uploads'));
+const BRANDING_DIR = join(UPLOAD_BASE, 'platform', 'branding');
 
 const settingsRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'settings' });
 
@@ -537,6 +543,138 @@ settings.patch('/google', settingsRateLimit, requireAdmin, async (c) => {
 
   logger.info({ changedBy: user.userId }, 'Google configuration updated');
   return c.json({ message: 'Google configuration updated' });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /branding — upload logo, favicon, or set title (super admin only)
+// ────────────────────────────────────────────────────────────────────────────
+settings.post('/branding', settingsRateLimit, requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can configure branding' }, 403);
+  }
+
+  const body = await c.req.parseBody({ all: true });
+
+  const logo = body['logo'] as File | undefined;
+  const favicon = body['favicon'] as File | undefined;
+  const title = body['title'] as string | undefined;
+
+  if (!logo && !favicon && !title) {
+    return c.json({ error: 'No branding fields provided' }, 400);
+  }
+
+  const saved: string[] = [];
+
+  // Process logo
+  if (logo && logo instanceof File) {
+    const ext = logo.name.split('.').pop()?.toLowerCase();
+    if (!ext || !['png', 'jpg', 'jpeg', 'svg', 'webp'].includes(ext)) {
+      return c.json({ error: 'Invalid logo file type. Allowed: png, jpg, jpeg, svg, webp' }, 400);
+    }
+    if (logo.size > 2 * 1024 * 1024) {
+      return c.json({ error: 'Logo file too large. Max 2MB' }, 400);
+    }
+
+    await mkdir(BRANDING_DIR, { recursive: true });
+
+    // Remove previous logo if extension differs
+    const prevFilename = await getSetting('branding:logoFilename') as string | null;
+    if (prevFilename) {
+      const prevPath = join(BRANDING_DIR, prevFilename);
+      try { await unlink(prevPath); } catch { /* file may not exist */ }
+    }
+
+    const filename = `logo.${ext}`;
+    const buffer = Buffer.from(await logo.arrayBuffer());
+    await writeFile(join(BRANDING_DIR, filename), buffer);
+    await upsertSetting('branding:logoFilename', filename);
+    saved.push('logo');
+  }
+
+  // Process favicon
+  if (favicon && favicon instanceof File) {
+    const ext = favicon.name.split('.').pop()?.toLowerCase();
+    if (!ext || !['ico', 'png', 'svg'].includes(ext)) {
+      return c.json({ error: 'Invalid favicon file type. Allowed: ico, png, svg' }, 400);
+    }
+    if (favicon.size > 500 * 1024) {
+      return c.json({ error: 'Favicon file too large. Max 500KB' }, 400);
+    }
+
+    await mkdir(BRANDING_DIR, { recursive: true });
+
+    // Remove previous favicon if extension differs
+    const prevFilename = await getSetting('branding:faviconFilename') as string | null;
+    if (prevFilename) {
+      const prevPath = join(BRANDING_DIR, prevFilename);
+      try { await unlink(prevPath); } catch { /* file may not exist */ }
+    }
+
+    const filename = `favicon.${ext}`;
+    const buffer = Buffer.from(await favicon.arrayBuffer());
+    await writeFile(join(BRANDING_DIR, filename), buffer);
+    await upsertSetting('branding:faviconFilename', filename);
+    saved.push('favicon');
+  }
+
+  // Process title
+  if (title !== undefined) {
+    await upsertSetting('branding:title', title);
+    saved.push('title');
+  }
+
+  logger.info({ saved, changedBy: user.userId }, 'Branding updated');
+  return c.json({ message: 'Branding updated', saved });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// GET /branding — get current branding settings (super admin only)
+// ────────────────────────────────────────────────────────────────────────────
+settings.get('/branding', requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can view branding config' }, 403);
+  }
+
+  const logoFilename = await getSetting('branding:logoFilename') as string | null;
+  const faviconFilename = await getSetting('branding:faviconFilename') as string | null;
+  const title = await getSetting('branding:title') as string | null;
+
+  return c.json({
+    title: title ?? null,
+    logoUrl: logoFilename ? '/api/v1/branding/logo' : null,
+    faviconUrl: faviconFilename ? '/api/v1/branding/favicon' : null,
+    logoSet: !!logoFilename,
+    faviconSet: !!faviconFilename,
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// DELETE /branding/:type — remove a branding asset (super admin only)
+// ────────────────────────────────────────────────────────────────────────────
+settings.delete('/branding/:type', settingsRateLimit, requireAdmin, async (c) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can configure branding' }, 403);
+  }
+
+  const type = c.req.param('type');
+  if (type !== 'logo' && type !== 'favicon') {
+    return c.json({ error: 'Invalid type. Must be "logo" or "favicon"' }, 400);
+  }
+
+  const settingKey = type === 'logo' ? 'branding:logoFilename' : 'branding:faviconFilename';
+  const filename = await getSetting(settingKey) as string | null;
+
+  if (filename) {
+    const filePath = join(BRANDING_DIR, filename);
+    try { await unlink(filePath); } catch { /* file may not exist */ }
+    await upsertSetting(settingKey, null);
+  }
+
+  logger.info({ type, changedBy: user.userId }, 'Branding asset removed');
+  return c.json({ message: `Branding ${type} removed` });
 });
 
 export default settings;

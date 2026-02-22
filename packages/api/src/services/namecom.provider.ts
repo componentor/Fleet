@@ -228,6 +228,23 @@ export class NamecomProvider implements RegistrarProvider {
     };
   }
 
+  async setNameservers(domain: string, nameservers: string[]): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/domains/${domain}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${this.username}:${this.apiToken}`).toString('base64')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nameservers }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Name.com setNameservers failed (${res.status}): ${body}`);
+    }
+  }
+
   async renewDomain(
     registrarDomainId: string,
     years: number,

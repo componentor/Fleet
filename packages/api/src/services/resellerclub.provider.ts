@@ -222,6 +222,48 @@ export class ResellerClubProvider implements RegistrarProvider {
     };
   }
 
+  async setNameservers(domain: string, nameservers: string[]): Promise<void> {
+    // First, get the order ID for this domain
+    const detailsUrl = new URL(`${this.baseUrl}/domains/details-by-name.json`);
+    detailsUrl.searchParams.set('auth-userid', this.resellerId);
+    detailsUrl.searchParams.set('api-key', this.apiKey);
+    detailsUrl.searchParams.set('domain-name', domain);
+
+    const detailsRes = await fetch(detailsUrl.toString(), {
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!detailsRes.ok) {
+      const body = await detailsRes.text();
+      throw new Error(`ResellerClub domain details lookup failed (${detailsRes.status}): ${body}`);
+    }
+
+    const details = await detailsRes.json() as any;
+    const orderId = details.orderid ?? details['entityid'];
+    if (!orderId) {
+      throw new Error('Could not find order ID for domain');
+    }
+
+    // Now modify nameservers
+    const modifyUrl = new URL(`${this.baseUrl}/domains/modify-ns.json`);
+    modifyUrl.searchParams.set('auth-userid', this.resellerId);
+    modifyUrl.searchParams.set('api-key', this.apiKey);
+    modifyUrl.searchParams.set('order-id', String(orderId));
+    for (const ns of nameservers) {
+      modifyUrl.searchParams.append('ns', ns);
+    }
+
+    const modifyRes = await fetch(modifyUrl.toString(), {
+      method: 'POST',
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!modifyRes.ok) {
+      const body = await modifyRes.text();
+      throw new Error(`ResellerClub setNameservers failed (${modifyRes.status}): ${body}`);
+    }
+  }
+
   async renewDomain(
     registrarDomainId: string,
     years: number,
