@@ -510,8 +510,8 @@ settings.openapi(updateEmailRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
-  if (user.isSuper && !accountId) {
-    // Platform-level email config
+  if (user.isSuper) {
+    // Platform-level email config (super admin always configures platform email, even with account selected)
     if (data.provider) {
       await upsertSetting('email:provider', data.provider);
     }

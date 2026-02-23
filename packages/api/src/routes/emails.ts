@@ -181,8 +181,8 @@ emails.openapi(patchTemplateRoute, (async (c: any) => {
       })
     : null;
 
-  if (!existing && user.isSuper && !accountId) {
-    // Super admin editing global template
+  if (!existing && user.isSuper) {
+    // Super admin editing global template (even when an account is selected in sidebar)
     existing = await db.query.emailTemplates.findFirst({
       where: and(
         eq(emailTemplates.slug, slug),
