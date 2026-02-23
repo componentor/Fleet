@@ -12,6 +12,8 @@ interface RateLimiterOptions {
   windowMs: number;
   max: number;
   keyPrefix?: string;
+  /** Custom key function — overrides IP-based keying. Receives the Hono context. */
+  keyFn?: (c: Parameters<Parameters<typeof createMiddleware>[0]>[0]) => string;
 }
 
 /**
@@ -37,7 +39,7 @@ function getClientIp(c: Parameters<Parameters<typeof createMiddleware>[0]>[0]): 
   return 'unknown';
 }
 
-export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimiterOptions) {
+export function rateLimiter({ windowMs, max, keyPrefix = 'default', keyFn }: RateLimiterOptions) {
   const windowSec = Math.ceil(windowMs / 1000);
 
   // Per-instance in-memory fallback store (bounded to prevent DoS memory growth)
@@ -62,31 +64,32 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
   }
 
   return createMiddleware(async (c, next) => {
-    const ip = getClientIp(c);
+    const identifier = keyFn ? keyFn(c) : getClientIp(c);
 
     const valkey = await getValkey();
 
     if (valkey) {
-      const key = `rl:${keyPrefix}:${ip}:${windowSec}`;
+      const key = `rl:${keyPrefix}:${identifier}:${windowSec}`;
       try {
-        const results = await valkey.multi()
-          .incr(key)
-          .expire(key, windowSec)
-          .exec();
-
-        const count = (results?.[0]?.[1] as number) ?? 1;
+        const count = await valkey.incr(key);
+        // Only set TTL when the key is first created (count=1) so the
+        // window boundary stays fixed — otherwise EXPIRE resets the TTL
+        // on every request and the counter never resets.
+        if (count === 1) {
+          await valkey.expire(key, windowSec);
+        }
 
         if (count > max) {
           const ttl = await valkey.ttl(key);
           const retryAfter = ttl > 0 ? ttl : windowSec;
           c.header('Retry-After', String(retryAfter));
           const reqPath = new URL(c.req.url).pathname;
-          logger.warn({ ip, path: reqPath, keyPrefix, count, max }, 'Rate limit exceeded');
+          logger.warn({ ip: identifier, path: reqPath, keyPrefix, count, max }, 'Rate limit exceeded');
           logToErrorTable({
             level: 'warn',
             message: `Rate limit exceeded: ${keyPrefix} (${count}/${max})`,
             path: reqPath,
-            ip,
+            ip: identifier,
             statusCode: 429,
             metadata: { keyPrefix, count, max },
           });
@@ -104,7 +107,7 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
     ensureCleanup();
 
     const now = Date.now();
-    const memKey = `${keyPrefix}:${ip}`;
+    const memKey = `${keyPrefix}:${identifier}`;
     const entry = fallbackStore.get(memKey);
 
     if (!entry || now > entry.resetAt) {
@@ -124,12 +127,12 @@ export function rateLimiter({ windowMs, max, keyPrefix = 'default' }: RateLimite
       const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
       c.header('Retry-After', String(retryAfter));
       const reqPath = new URL(c.req.url).pathname;
-      logger.warn({ ip, path: reqPath, keyPrefix, count: entry.count, max }, 'Rate limit exceeded');
+      logger.warn({ ip: identifier, path: reqPath, keyPrefix, count: entry.count, max }, 'Rate limit exceeded');
       logToErrorTable({
         level: 'warn',
         message: `Rate limit exceeded: ${keyPrefix} (${entry.count}/${max})`,
         path: reqPath,
-        ip,
+        ip: identifier,
         statusCode: 429,
         metadata: { keyPrefix, count: entry.count, max },
       });
