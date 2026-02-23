@@ -221,10 +221,10 @@ onMounted(() => {
               <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.dashboard.noRecentActivity') }}</p>
             </div>
             <div v-else class="space-y-3">
-              <div v-for="log in recentLogs" :key="log.id" class="flex items-start gap-3 text-sm">
+              <div v-for="log in recentLogs" :key="log.id" class="flex items-center gap-3 text-sm">
                 <span
                   :class="[
-                    'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium shrink-0 mt-0.5',
+                    'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium shrink-0',
                     log.eventType?.startsWith('service.') || log.eventType?.startsWith('deployment.') ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
                     log.eventType?.startsWith('user.') || log.eventType?.startsWith('account.') ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
                     log.eventType?.startsWith('dns.') || log.eventType?.startsWith('backup.') ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
@@ -234,13 +234,11 @@ onMounted(() => {
                 >
                   {{ log.eventType?.split('.').pop() ?? log.action }}
                 </span>
-                <div class="min-w-0 flex-1">
-                  <p class="text-gray-900 dark:text-white truncate">{{ log.description ?? `${log.resourceType} ${log.resourceId?.slice(0, 8) ?? ''}` }}</p>
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    <span v-if="log.actorEmail" class="mr-2">{{ log.actorEmail }}</span>
-                    {{ formatDate(log.createdAt) }}
-                  </p>
-                </div>
+                <p class="text-gray-900 dark:text-white truncate min-w-0" style="max-width: 50%">{{ log.description ?? `${log.resourceType} ${log.resourceId?.slice(0, 8) ?? ''}` }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate min-w-0 ml-auto shrink-0 text-right" style="max-width: 40%">
+                  <span v-if="log.actorEmail" class="mr-2">{{ log.actorEmail }}</span>
+                  {{ formatDate(log.createdAt) }}
+                </p>
               </div>
             </div>
           </div>
