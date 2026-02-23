@@ -474,13 +474,26 @@ export class UpdateService {
             const backupAccountId = firstAccount.id;
 
             // Run backup directly (synchronous) — avoids queue/poll race conditions
-            // Pre-update backups always use forceLocal to avoid dependency on external storage (MinIO/S3)
+            // Pre-update backups use forceLocal to avoid dependency on external storage (MinIO/S3)
+            // Try NFS first (survives container restarts), fall back to local
             let result: { id: string };
+            let backupBackend = 'local';
+            const nfsDir = process.env['NFS_BACKUP_DIR'] ?? '/srv/nfs/backups';
             try {
-              result = await backupService.runBackupDirect(backupAccountId, null, 'nfs', undefined, undefined, { forceLocal: true });
+              await import('node:fs/promises').then(fs => fs.access(nfsDir));
+              backupBackend = 'nfs';
             } catch {
-              this.appendLog('NFS backup failed — falling back to local backup...');
-              result = await backupService.runBackupDirect(backupAccountId, null, 'local', undefined, undefined, { forceLocal: true });
+              // NFS not mounted or not accessible — use local
+            }
+            try {
+              result = await backupService.runBackupDirect(backupAccountId, null, backupBackend, undefined, undefined, { forceLocal: true });
+            } catch (backupErr) {
+              if (backupBackend === 'nfs') {
+                this.appendLog('NFS backup failed — falling back to local backup...');
+                result = await backupService.runBackupDirect(backupAccountId, null, 'local', undefined, undefined, { forceLocal: true });
+              } else {
+                throw backupErr;
+              }
             }
             this.state.preUpdateBackupId = result.id;
             this.appendLog(`Pre-update backup completed: ${result.id}`);
