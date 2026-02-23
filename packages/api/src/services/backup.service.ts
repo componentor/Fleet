@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile as fsReadFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -189,21 +189,19 @@ export class BackupService {
           const archiveName = `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`;
           const localArchivePath = join(workDir, archiveName);
           try {
-            await this.exec('docker', [
+            await this.execToFile('docker', [
               'run',
               '--rm',
               '-v',
               `${vol.source}:/source:ro`,
-              '-v',
-              `${workDir}:/backup`,
               'alpine',
               'tar',
               'czf',
-              `/backup/${archiveName}`,
+              '-',
               '-C',
               '/source',
               '.',
-            ]);
+            ], localArchivePath);
 
             // Encrypt the archive at rest
             const wasEncrypted = await this.encryptFile(localArchivePath);
@@ -267,21 +265,19 @@ export class BackupService {
           for (const vol of serviceVolumes) {
             const archiveName = `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`;
             try {
-              await this.exec('docker', [
+              await this.execToFile('docker', [
                 'run',
                 '--rm',
                 '-v',
                 `${vol.source}:/source:ro`,
-                '-v',
-                `${svcDir}:/backup`,
                 'alpine',
                 'tar',
                 'czf',
-                `/backup/${archiveName}`,
+                '-',
                 '-C',
                 '/source',
                 '.',
-              ]);
+              ], join(svcDir, archiveName));
 
               // Encrypt the archive at rest
               const wasEncrypted = await this.encryptFile(join(svcDir, archiveName));
@@ -458,18 +454,17 @@ export class BackupService {
               await this.decryptFile(archivePath);
             }
 
-            await this.exec('docker', [
+            await this.execFromFile('docker', [
               'run',
               '--rm',
+              '-i',
               '-v',
               `${volumeName}:/target`,
-              '-v',
-              `${archivePath}:/backup/archive.tar.gz:ro`,
               'alpine',
               'sh',
               '-c',
-              'cd /target && tar xzf /backup/archive.tar.gz',
-            ]);
+              'cd /target && tar xzf -',
+            ], archivePath);
           } catch (err) {
             logger.error({ err, volume: volumeName }, `Failed to restore volume ${volumeName}`);
           }
@@ -669,6 +664,84 @@ export class BackupService {
       schedule.serviceId ?? undefined,
       schedule.storageBackend ?? 'nfs',
     );
+  }
+
+  /**
+   * Execute a command and stream its stdout to a file.
+   * Avoids host-path volume mounts so backups work when the API runs inside a container.
+   */
+  private execToFile(cmd: string, args: string[], outputPath: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn(cmd, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        signal: AbortSignal.timeout(300_000),
+      });
+      const output = createWriteStream(outputPath);
+      let stderr = '';
+      let rejected = false;
+
+      child.stderr!.on('data', (chunk: Buffer) => {
+        if (stderr.length < 10_000) stderr += chunk.toString();
+      });
+      child.stdout!.pipe(output);
+
+      child.on('error', (err) => {
+        if (!rejected) { rejected = true; output.destroy(); reject(err); }
+      });
+      output.on('error', (err) => {
+        if (!rejected) { rejected = true; child.kill(); reject(err); }
+      });
+
+      child.on('close', (code) => {
+        if (rejected) return;
+        if (code !== 0) {
+          rejected = true;
+          reject(new Error(`Command "${cmd}" failed with code ${code}\n${stderr}`));
+        } else {
+          const done = () => { if (!rejected) resolve(); };
+          if (output.writableFinished) done();
+          else output.on('finish', done);
+        }
+      });
+    });
+  }
+
+  /**
+   * Execute a command and pipe a file to its stdin.
+   * Avoids host-path volume mounts so restores work when the API runs inside a container.
+   */
+  private execFromFile(cmd: string, args: string[], inputPath: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn(cmd, args, {
+        stdio: ['pipe', 'ignore', 'pipe'],
+        signal: AbortSignal.timeout(300_000),
+      });
+      const input = createReadStream(inputPath);
+      let stderr = '';
+      let rejected = false;
+
+      child.stderr!.on('data', (chunk: Buffer) => {
+        if (stderr.length < 10_000) stderr += chunk.toString();
+      });
+      input.pipe(child.stdin!);
+
+      child.on('error', (err) => {
+        if (!rejected) { rejected = true; input.destroy(); reject(err); }
+      });
+      input.on('error', (err) => {
+        if (!rejected) { rejected = true; child.kill(); reject(err); }
+      });
+
+      child.on('close', (code) => {
+        if (rejected) return;
+        if (code !== 0) {
+          rejected = true;
+          reject(new Error(`Command "${cmd}" failed with code ${code}\n${stderr}`));
+        } else {
+          resolve();
+        }
+      });
+    });
   }
 
   /**
