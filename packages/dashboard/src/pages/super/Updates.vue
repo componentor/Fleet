@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal, XCircle } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { updateVersion } from '@/composables/useVersionInfo'
 
 const { t } = useI18n()
 const api = useApi()
@@ -94,6 +95,10 @@ async function fetchAll() {
     const statusVersion = statusData?.currentVersion?.replace(/^v/, '') ?? ''
     const notifVersion = notif.current?.replace(/^v/, '') ?? ''
     currentVersion.value = statusVersion || notifVersion || currentVersion.value
+    // Sync to shared store so SuperLayout sidebar stays in sync
+    if (currentVersion.value) {
+      updateVersion(currentVersion.value, latestVersion.value, updateAvailable.value)
+    }
   } catch {
     // partial failure ok
   } finally {
@@ -110,6 +115,7 @@ async function checkForUpdates() {
     currentVersion.value = result.current ?? currentVersion.value
     latestVersion.value = result.latest?.tag ?? latestVersion.value
     changelog.value = result.latest?.body ?? ''
+    updateVersion(currentVersion.value, latestVersion.value, updateAvailable.value)
     if (!result.available) {
       success.value = 'Already on the latest version'
       setTimeout(() => { success.value = '' }, 3000)
@@ -245,6 +251,8 @@ function startPolling() {
           if (latestVersion.value && latestVersion.value.replace(/^v/, '') === ver) {
             updateAvailable.value = false
           }
+          // Push to shared store so SuperLayout sidebar updates immediately
+          updateVersion(ver, latestVersion.value, false)
         }
         // Retry fetchAll with backoff to handle API restart window
         const retryFetch = async (delay: number, retries: number) => {

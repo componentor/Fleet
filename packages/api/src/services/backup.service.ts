@@ -103,7 +103,7 @@ export class BackupService {
     storageBackend: string = 'nfs',
     existingBackupId?: string,
     existingBackupPath?: string,
-  ): Promise<void> {
+  ): Promise<{ id: string }> {
     let backupId: string;
     let backupPath: string;
 
@@ -136,6 +136,7 @@ export class BackupService {
     }
 
     await this.runBackup(backupId, accountId, serviceId, backupPath);
+    return { id: backupId };
   }
 
   private async runBackup(
@@ -364,6 +365,7 @@ export class BackupService {
         .update(backups)
         .set({ status: 'failed' })
         .where(eq(backups.id, backupId));
+      throw err;
     } finally {
       // Always clean up temp dir (safety net for both success and failure paths)
       if (useObjectStorage && tempDir) {

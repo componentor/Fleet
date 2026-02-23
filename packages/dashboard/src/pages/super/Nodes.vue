@@ -253,13 +253,13 @@ onMounted(() => {
                 </span>
               </td>
               <td class="px-6 py-4 text-sm">
-                <div v-if="nodeMetrics[node.id]" class="space-y-1.5 min-w-[140px]">
-                  <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">{{ t('super.nodes.cpu') }}</span>
+                <div v-if="nodeMetrics[node.id]" class="space-y-1.5 min-w-[160px]">
+                  <div class="flex items-center gap-3">
+                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-12 shrink-0">{{ t('super.nodes.cpu') }}</span>
                     <span class="text-xs text-gray-700 dark:text-gray-300">{{ nodeMetrics[node.id]!.cpuCount }} {{ nodeMetrics[node.id]!.cpuCount === 1 ? 'core' : 'cores' }}</span>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-8">{{ t('super.nodes.memory') }}</span>
+                  <div class="flex items-center gap-3">
+                    <span class="text-[10px] font-medium text-gray-500 dark:text-gray-400 w-12 shrink-0">{{ t('super.nodes.memory') }}</span>
                     <div class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                       <div
                         class="h-full rounded-full transition-all"

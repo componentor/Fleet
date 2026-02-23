@@ -64,23 +64,31 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   }
 
   async initialize(): Promise<void> {
-    // Verify gluster CLI is available
+    // Verify gluster CLI is available (may not be if running in Docker container)
+    let hasGlusterCli = false;
     try {
       await execFile('gluster', ['--version']);
+      hasGlusterCli = true;
     } catch {
-      throw new Error('GlusterFS CLI (gluster) is not installed or not in PATH');
+      logger.warn('GlusterFS CLI not available locally — peer probing will be handled via SSH during volume operations');
     }
 
-    // Validate and probe all configured peers
+    // Validate configured peers
     for (const node of this.config.nodes) {
       validateIp(node.ip);
       validateBrickPath(node.brickPath);
-      try {
-        await execFile('gluster', ['peer', 'probe', node.ip]);
-        logger.info({ ip: node.ip, hostname: node.hostname }, 'GlusterFS peer probed');
-      } catch (err) {
-        // Peer may already be probed or is the local node
-        logger.debug({ err, ip: node.ip }, 'GlusterFS peer probe skipped');
+    }
+
+    // Probe peers if gluster CLI is available (e.g. running on a storage node itself)
+    if (hasGlusterCli) {
+      for (const node of this.config.nodes) {
+        try {
+          await execFile('gluster', ['peer', 'probe', node.ip]);
+          logger.info({ ip: node.ip, hostname: node.hostname }, 'GlusterFS peer probed');
+        } catch (err) {
+          // Peer may already be probed or is the local node
+          logger.debug({ err, ip: node.ip }, 'GlusterFS peer probe skipped');
+        }
       }
     }
   }

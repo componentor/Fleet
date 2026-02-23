@@ -203,8 +203,9 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       }).where(eq(storageClusters.id, cluster.id));
     }
 
+    const detail = err instanceof Error ? err.message : String(err);
     logger.error({ err }, 'Failed to initialize storage cluster');
-    return c.json({ error: 'Failed to initialize storage cluster', status: 'error' }, 500);
+    return c.json({ error: `Failed to initialize storage cluster: ${detail}`, status: 'error' }, 500);
   }
 }) as any);
 

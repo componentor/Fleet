@@ -55,6 +55,12 @@ export class MinIOObjectProvider implements ObjectStorageProvider {
   }
 
   async initialize(): Promise<void> {
+    // If no credentials are set, MinIO is pending auto-configuration — skip connectivity check
+    if (!this.config.accessKey && !this.config.secretKey) {
+      logger.info({ endpoint: this.config.endpoint }, 'MinIO pending auto-configuration — skipping connectivity check');
+      return;
+    }
+
     // Verify connectivity by listing buckets
     try {
       const { ListBucketsCommand } = await import('@aws-sdk/client-s3');

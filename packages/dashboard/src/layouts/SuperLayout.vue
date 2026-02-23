@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
@@ -37,6 +37,7 @@ import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useBranding } from '@/composables/useBranding'
+import { versionInfo, updateVersion } from '@/composables/useVersionInfo'
 
 const commandPalette = useCommandPalette()
 const { brandTitle, logoSrc } = useBranding()
@@ -51,16 +52,15 @@ const { user, logout } = useAuth()
 
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
-const versionInfo = ref<{ current: string; latest: string | null; updateAvailable: boolean } | null>(null)
 
 onMounted(async () => {
   try {
     const notif = await api.get<any>('/updates/notification')
-    versionInfo.value = {
-      current: notif.current ?? '',
-      latest: notif.latest?.tag ?? null,
-      updateAvailable: notif.available ?? false,
-    }
+    updateVersion(
+      notif.current ?? '',
+      notif.latest?.tag ?? null,
+      notif.available ?? false,
+    )
   } catch {
     // Non-critical — version display is best-effort
   }
@@ -129,7 +129,7 @@ function changeLocale(newLocale: string) {
           <img v-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" class="h-8 w-auto max-w-[140px] object-contain" />
           <span class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</span>
         </RouterLink>
-        <span class="text-xs font-medium bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">
+        <span class="text-xs font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">
           {{ $t('nav.admin') }}
         </span>
       </div>

@@ -354,17 +354,17 @@ const probeNodeRoute = createRoute({
 
 // ── Port probe helpers ──
 
-const PORT_SERVICES: Record<number, string> = {
-  22: 'SSH',
-  111: 'RPCBind',
-  2049: 'NFS',
-  24007: 'GlusterFS daemon',
-  24008: 'GlusterFS management',
-  9000: 'MinIO S3 API',
-  9001: 'MinIO Console',
-  6789: 'Ceph MON (v1)',
-  3300: 'Ceph MON (v2)',
-  6800: 'Ceph OSD',
+const PORT_SERVICES: Record<number, { name: string; required: boolean }> = {
+  22:    { name: 'SSH', required: true },
+  111:   { name: 'RPCBind', required: true },
+  2049:  { name: 'NFS', required: true },
+  24007: { name: 'GlusterFS daemon', required: true },
+  24008: { name: 'GlusterFS management', required: false },  // activates when volumes are created
+  9000:  { name: 'MinIO S3 API', required: false },            // deployed by Fleet during init
+  9001:  { name: 'MinIO Console', required: false },            // deployed by Fleet during init
+  6789:  { name: 'Ceph MON (v1)', required: false },            // only if using Ceph
+  3300:  { name: 'Ceph MON (v2)', required: false },            // only if using Ceph
+  6800:  { name: 'Ceph OSD', required: false },                 // only if using Ceph
 };
 
 /**
@@ -656,18 +656,22 @@ adminNodeRoutes.openapi(probeNodeRoute, (async (c: any) => {
 
   const portReport = portResults.map((result, idx) => {
     if (result.status === 'fulfilled') {
+      const info = PORT_SERVICES[result.value.port];
       return {
         port: result.value.port,
-        service: PORT_SERVICES[result.value.port] ?? 'Unknown',
+        service: info?.name ?? 'Unknown',
+        required: info?.required ?? false,
         open: result.value.open,
         latencyMs: result.value.latencyMs,
       };
     }
     // Should not happen with checkPort's error handling, but handle defensively
     const fallbackPort = ports[idx] ?? 0;
+    const info = PORT_SERVICES[fallbackPort];
     return {
       port: fallbackPort,
-      service: PORT_SERVICES[fallbackPort] ?? 'Unknown',
+      service: info?.name ?? 'Unknown',
+      required: info?.required ?? false,
       open: false,
       latencyMs: null,
     };
@@ -697,7 +701,7 @@ adminNodeRoutes.openapi(probeNodeRoute, (async (c: any) => {
   const diskFree = metricsReport.diskFree as number | null;
   const diskSpaceAdequate = diskFree != null ? diskFree > FIFTY_GB : false;
   const nfsPorts = openPorts.has(2049) && openPorts.has(111);
-  const glusterfsPorts = openPorts.has(24007) && openPorts.has(24008);
+  const glusterfsPorts = openPorts.has(24007); // 24008 activates after volume creation
   const suitableForStorage = diskSpaceAdequate;
   const containerCount = metricsReport.containerCount as number | null;
   const suggestedRole = (containerCount != null && containerCount > 0) ? 'storage+compute' : 'storage';

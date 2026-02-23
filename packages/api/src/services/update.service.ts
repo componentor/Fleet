@@ -458,22 +458,19 @@ export class UpdateService {
             if (!firstAccount) throw new Error('No accounts found — cannot create backup');
             const backupAccountId = firstAccount.id;
 
-            let backup: { id: string; status: string; storagePath: string | null; sizeBytes: number };
+            // Run backup directly (synchronous) — avoids queue/poll race conditions
+            let result: { id: string };
             try {
-              backup = await backupService.createBackup(backupAccountId, undefined, 'nfs');
+              result = await backupService.runBackupDirect(backupAccountId, null, 'nfs');
             } catch {
-              this.appendLog('NFS backup unavailable — falling back to local backup...');
-              backup = await backupService.createBackup(backupAccountId, undefined, 'local');
+              this.appendLog('NFS backup failed — falling back to local backup...');
+              result = await backupService.runBackupDirect(backupAccountId, null, 'local');
             }
-            this.state.preUpdateBackupId = backup.id;
-            this.appendLog(`Pre-update backup queued: ${backup.id}`);
-
-            this.appendLog('Waiting for backup to complete...');
-            await this.waitForBackupCompletion(backup.id, 60_000);
-            this.appendLog('Pre-update backup verified as completed.');
+            this.state.preUpdateBackupId = result.id;
+            this.appendLog(`Pre-update backup completed: ${result.id}`);
           })(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Backup timed out after 90s — backup worker may be unresponsive. Use Reset and check backup system.')), 90_000),
+            setTimeout(() => reject(new Error('Backup timed out after 90s — backup may be stuck. Use Reset and check backup system.')), 90_000),
           ),
           new Promise<never>((_, reject) => {
             signal.addEventListener('abort', () => reject(new Error('Update aborted by admin')), { once: true });

@@ -296,13 +296,15 @@ async function testNode(index: number) {
 
   try {
     const result = await api.post(`/nodes/${swarmNode.id}/probe`, {}) as any
-    const openPorts = (result.ports ?? []).filter((p: any) => p.open)
-    const closedPorts = (result.ports ?? []).filter((p: any) => !p.open)
+    const allPorts = result.ports ?? []
+    const openPorts = allPorts.filter((p: any) => p.open)
+    const closedRequired = allPorts.filter((p: any) => !p.open && p.required)
+    const closedOptional = allPorts.filter((p: any) => !p.open && !p.required)
 
     // Update probe results cache
     probeResults.value[swarmNode.id] = {
       loading: false,
-      ports: result.ports ?? [],
+      ports: allPorts,
       metrics: result.metrics ?? {},
       recommendations: result.recommendations ?? {},
       error: '',
@@ -313,12 +315,14 @@ async function testNode(index: number) {
       node.capacityGb = Math.round(result.metrics.diskTotal / (1024 * 1024 * 1024))
     }
 
-    if (closedPorts.length === 0) {
+    if (closedRequired.length === 0) {
       node.testStatus = 'ok'
-      node.testMessage = t('storageSetup.allPortsOpen', { count: openPorts.length })
+      node.testMessage = closedOptional.length > 0
+        ? t('storageSetup.readyAutoConfigPending', { auto: closedOptional.length })
+        : t('storageSetup.allPortsOpen', { count: openPorts.length })
     } else {
-      node.testStatus = closedPorts.length > openPorts.length ? 'error' : 'ok'
-      node.testMessage = t('storageSetup.portsStatus', { open: openPorts.length, closed: closedPorts.length })
+      node.testStatus = 'error'
+      node.testMessage = t('storageSetup.requiredPortsClosed', { count: closedRequired.length, ports: closedRequired.map((p: any) => `${p.port} ${p.service}`).join(', ') })
     }
   } catch (err: any) {
     node.testStatus = 'error'
@@ -1091,35 +1095,29 @@ async function rollbackActiveMigration() {
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    <!-- YOU must install these -->
+                    <tr>
+                      <td colspan="3" class="pt-3 pb-1">
+                        <span class="text-[10px] font-semibold uppercase tracking-wider text-green-600 dark:text-green-400">You install before proceeding</span>
+                      </td>
+                    </tr>
                     <tr>
                       <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">22</td>
                       <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
                       <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.sshServiceDesc') }}</td>
                     </tr>
-                    <!-- GlusterFS ports -->
                     <template v-if="selectedVolumeProvider === 'glusterfs'">
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">24007</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsDaemon') }}</td>
-                      </tr>
-                      <tr>
-                        <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">24008</td>
-                        <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsManagement') }}</td>
-                      </tr>
-                      <tr>
-                        <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">49152–49251</td>
-                        <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsBricks') }}</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.glusterfsDaemon') }} — <code class="text-[10px] bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">apt install glusterfs-server</code></td>
                       </tr>
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">111</td>
                         <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP/UDP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.rpcbind') }}</td>
+                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.rpcbind') }} — comes with glusterfs-server</td>
                       </tr>
                     </template>
-                    <!-- Ceph ports -->
                     <template v-if="selectedVolumeProvider === 'ceph'">
                       <tr>
                         <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">6789</td>
@@ -1137,17 +1135,34 @@ async function rollbackActiveMigration() {
                         <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.cephOsd') }}</td>
                       </tr>
                     </template>
-                    <!-- MinIO ports -->
-                    <template v-if="selectedObjectProvider === 'minio'">
-                      <tr>
-                        <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">9000</td>
-                        <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.minioS3Api') }}</td>
+                    <!-- Fleet auto-configures these -->
+                    <tr>
+                      <td colspan="3" class="pt-4 pb-1">
+                        <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Auto-configured by Fleet during initialization</span>
+                      </td>
+                    </tr>
+                    <template v-if="selectedVolumeProvider === 'glusterfs'">
+                      <tr class="text-gray-400 dark:text-gray-500">
+                        <td class="py-2 pr-4 font-mono text-xs">24008</td>
+                        <td class="py-2 pr-4">TCP</td>
+                        <td class="py-2">{{ t('storageSetup.glusterfsManagement') }} — activates when volumes are created</td>
                       </tr>
-                      <tr>
-                        <td class="py-2 pr-4 font-mono text-xs text-gray-900 dark:text-white">9001</td>
-                        <td class="py-2 pr-4 text-gray-500 dark:text-gray-400">TCP</td>
-                        <td class="py-2 text-gray-600 dark:text-gray-300">{{ t('storageSetup.minioConsole') }}</td>
+                      <tr class="text-gray-400 dark:text-gray-500">
+                        <td class="py-2 pr-4 font-mono text-xs">49152–49251</td>
+                        <td class="py-2 pr-4">TCP</td>
+                        <td class="py-2">{{ t('storageSetup.glusterfsBricks') }} — activates when volumes are created</td>
+                      </tr>
+                    </template>
+                    <template v-if="selectedObjectProvider === 'minio'">
+                      <tr class="text-gray-400 dark:text-gray-500">
+                        <td class="py-2 pr-4 font-mono text-xs">9000</td>
+                        <td class="py-2 pr-4">TCP</td>
+                        <td class="py-2">{{ t('storageSetup.minioS3Api') }} — deployed by Fleet</td>
+                      </tr>
+                      <tr class="text-gray-400 dark:text-gray-500">
+                        <td class="py-2 pr-4 font-mono text-xs">9001</td>
+                        <td class="py-2 pr-4">TCP</td>
+                        <td class="py-2">{{ t('storageSetup.minioConsole') }} — deployed by Fleet</td>
                       </tr>
                     </template>
                   </tbody>
@@ -1368,7 +1383,12 @@ async function rollbackActiveMigration() {
                         v-for="p in probeResults[sn.id]!.ports"
                         :key="p.port"
                         class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
-                        :class="p.open ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'"
+                        :class="p.open
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                          : (p as any).required
+                            ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'"
+                        :title="p.open ? '' : (p as any).required ? t('storageSetup.requiredNotRunning') : t('storageSetup.autoConfigured')"
                       >
                         <component :is="p.open ? Wifi : WifiOff" class="w-2.5 h-2.5" />
                         {{ p.port }} {{ p.service }}
