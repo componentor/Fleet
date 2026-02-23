@@ -198,7 +198,7 @@ const probeSchema = z.object({
   timeout: z.number().int().min(500).max(10000).default(3000),
 });
 
-const probeRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'node-probe' });
+const probeRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 'node-probe' });
 
 // ── Route definitions ──
 

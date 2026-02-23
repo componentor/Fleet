@@ -137,28 +137,72 @@ function formatDuration(ms: number | null | undefined) {
 async function fetchQueues() {
   try {
     const data = await api.get<any>('/admin/jobs/queues')
-    queues.value = data?.queues ?? data ?? []
+    const incoming = data?.queues ?? data ?? []
+    // Merge: update existing queue cards in-place, avoiding full re-render
+    if (queues.value.length === 0) {
+      queues.value = incoming
+    } else {
+      for (const q of incoming) {
+        const existing = queues.value.find((e: any) => e.name === q.name)
+        if (existing) {
+          Object.assign(existing, q)
+        } else {
+          queues.value.push(q)
+        }
+      }
+      // Remove queues that no longer exist
+      queues.value = queues.value.filter((e: any) => incoming.some((q: any) => q.name === e.name))
+    }
   } catch {
-    queues.value = []
+    // Don't wipe on poll failure
+    if (queues.value.length === 0) queues.value = []
   } finally {
     queuesLoading.value = false
   }
 }
 
 // --- Fetch jobs ---
-async function fetchJobs() {
-  jobsLoading.value = true
+async function fetchJobs(silent = false) {
+  if (!silent) jobsLoading.value = true
   try {
     const params = new URLSearchParams({ page: page.value.toString(), limit: '25' })
     if (filters.queue) params.set('queue', filters.queue)
     if (filters.status) params.set('status', filters.status)
 
     const data = await api.get<any>(`/admin/jobs?${params}`)
-    jobs.value = data?.data ?? data?.jobs ?? []
+    const incoming: any[] = data?.data ?? data?.jobs ?? []
     totalPages.value = data?.pagination?.totalPages ?? 1
     total.value = data?.pagination?.total ?? 0
+
+    if (!silent || jobs.value.length === 0) {
+      // Full replace on initial load or filter change
+      jobs.value = incoming
+    } else {
+      // Graceful merge: update existing, add new, remove stale
+      const incomingKeys = new Set(incoming.map((j: any) => `${j.queue}-${j.id}`))
+      const existingKeys = new Set(jobs.value.map((j: any) => `${j.queue}-${j.id}`))
+
+      // Update existing jobs in-place
+      for (const job of incoming) {
+        const key = `${job.queue}-${job.id}`
+        if (existingKeys.has(key)) {
+          const idx = jobs.value.findIndex((j: any) => `${j.queue}-${j.id}` === key)
+          if (idx !== -1) Object.assign(jobs.value[idx], job)
+        }
+      }
+
+      // Prepend new jobs that weren't in the previous list
+      const newJobs = incoming.filter((j: any) => !existingKeys.has(`${j.queue}-${j.id}`))
+      if (newJobs.length > 0) {
+        jobs.value.unshift(...newJobs)
+      }
+
+      // Remove jobs no longer in the response
+      jobs.value = jobs.value.filter((j: any) => incomingKeys.has(`${j.queue}-${j.id}`))
+    }
   } catch {
-    jobs.value = []
+    // Don't wipe on poll failure
+    if (jobs.value.length === 0) jobs.value = []
   } finally {
     jobsLoading.value = false
   }
@@ -233,7 +277,7 @@ onMounted(() => {
   fetchJobs()
   refreshInterval = setInterval(() => {
     fetchQueues()
-    fetchJobs()
+    fetchJobs(true)
   }, 5000)
 })
 
@@ -363,8 +407,8 @@ onUnmounted(() => {
 
       <!-- Jobs table -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <!-- Loading overlay for jobs -->
-        <div v-if="jobsLoading" class="flex items-center justify-center py-12">
+        <!-- Loading spinner only on initial load (no data yet) -->
+        <div v-if="jobsLoading && jobs.length === 0" class="flex items-center justify-center py-12">
           <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
         </div>
 
