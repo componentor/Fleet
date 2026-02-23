@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS `reseller_config` (
   `default_discount_fixed` integer DEFAULT 0,
   `updated_at` integer DEFAULT (unixepoch())
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `reseller_accounts` (
   `id` text PRIMARY KEY,
   `account_id` text NOT NULL REFERENCES `accounts`(`id`) ON DELETE CASCADE,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS `reseller_accounts` (
   `updated_at` integer DEFAULT (unixepoch()),
   CONSTRAINT `reseller_accounts_account_id_unique` UNIQUE(`account_id`)
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `reseller_applications` (
   `id` text PRIMARY KEY,
   `account_id` text NOT NULL REFERENCES `accounts`(`id`) ON DELETE CASCADE,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS `reseller_applications` (
   `review_note` text,
   `created_at` integer DEFAULT (unixepoch())
 );
-
-CREATE INDEX IF NOT EXISTS `idx_reseller_accounts_status` ON `reseller_accounts` (`status`);
-CREATE INDEX IF NOT EXISTS `idx_reseller_applications_account_id` ON `reseller_applications` (`account_id`);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_reseller_accounts_status` ON `reseller_accounts` (`status`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_reseller_applications_account_id` ON `reseller_applications` (`account_id`);--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_reseller_applications_status` ON `reseller_applications` (`status`);

@@ -88,9 +88,12 @@ async function fetchAll() {
     releases.value = releasesData.releases ?? []
     rcEnabled.value = releasesData.rcEnabled ?? false
     updateAvailable.value = notif.available ?? false
-    currentVersion.value = notif.current ?? ''
     latestVersion.value = notif.latest?.tag ?? ''
     dbStatus.value = dbResult
+    // Use the most recent version source: status response (persisted in DB) or notification cache
+    const statusVersion = statusData?.currentVersion?.replace(/^v/, '') ?? ''
+    const notifVersion = notif.current?.replace(/^v/, '') ?? ''
+    currentVersion.value = statusVersion || notifVersion || currentVersion.value
   } catch {
     // partial failure ok
   } finally {
@@ -236,10 +239,23 @@ function startPolling() {
         stopPolling()
         // Use version from the completed status directly (more reliable than notification during API restart)
         if (state.status === 'completed' && state.currentVersion) {
-          currentVersion.value = state.currentVersion.replace(/^v/, '')
+          const ver = state.currentVersion.replace(/^v/, '')
+          currentVersion.value = ver
+          // Also update latestVersion so rollback target doesn't match current
+          if (latestVersion.value && latestVersion.value.replace(/^v/, '') === ver) {
+            updateAvailable.value = false
+          }
         }
-        // Delay fetchAll to let the API settle after fleet_api rolling restart
-        setTimeout(() => fetchAll(), 3000)
+        // Retry fetchAll with backoff to handle API restart window
+        const retryFetch = async (delay: number, retries: number) => {
+          await new Promise(r => setTimeout(r, delay))
+          try {
+            await fetchAll()
+          } catch {
+            if (retries > 0) await retryFetch(delay * 2, retries - 1)
+          }
+        }
+        retryFetch(3000, 2)
       }
     } catch { /* ignore — API may be restarting */ }
   }, 2000)
@@ -298,6 +314,14 @@ onUnmounted(() => {
               {{ updateState.currentVersion }} &rarr; {{ updateState.targetVersion }}
             </p>
           </div>
+          <button
+            v-if="updateState.status === 'completed'"
+            @click="updateState = { status: 'idle' }"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors shrink-0 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/30"
+          >
+            <XCircle class="w-3.5 h-3.5" />
+            Dismiss
+          </button>
           <button
             v-if="updateState.status === 'failed' || isActiveState(updateState.status)"
             @click="resetUpdateState"

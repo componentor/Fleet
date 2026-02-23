@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { Readable } from 'node:stream';
 import { createHmac, randomBytes } from 'node:crypto';
 import { db, services, eq, and, isNull } from '@fleet/db';
@@ -11,6 +11,7 @@ import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
 import { getPlatformDomain } from './settings.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 
 // Download tokens backed by Valkey (with in-memory fallback for single-instance dev)
 const DOWNLOAD_TOKEN_TTL = 60_000; // 60 seconds
@@ -279,9 +280,61 @@ async function getDbContainer(accountId: string, serviceId: string) {
   return { svc, engine, containerId, info };
 }
 
+// ── Schemas ──
+
+const serviceIdParamSchema = z.object({
+  serviceId: z.string().openapi({ description: 'Service ID' }),
+});
+
+const serviceIdAndNameParamSchema = z.object({
+  serviceId: z.string().openapi({ description: 'Service ID' }),
+  name: z.string().openapi({ description: 'Table/collection name' }),
+});
+
+const dbQueryParamSchema = z.object({
+  db: z.string().optional().openapi({ description: 'Database name override' }),
+});
+
+const tableDataQuerySchema = z.object({
+  db: z.string().optional(),
+  page: z.string().optional(),
+  pageSize: z.string().optional(),
+  orderBy: z.string().optional(),
+  orderDir: z.string().optional(),
+});
+
+const querySchema = z.object({
+  query: z.string().min(1).max(10_000),
+  readOnly: z.boolean().default(true),
+}).openapi('DatabaseQueryRequest');
+
+const insertRowSchema = z.object({
+  values: z.record(z.string(), z.union([z.string(), z.null()])),
+}).openapi('InsertRowRequest');
+
+const updateRowSchema = z.object({
+  primaryKey: z.record(z.string(), z.string()),
+  updates: z.record(z.string(), z.union([z.string(), z.null()])),
+}).openapi('UpdateRowRequest');
+
+const deleteRowSchema = z.object({
+  primaryKey: z.record(z.string(), z.string()),
+}).openapi('DeleteRowRequest');
+
+const createTableSchema = z.object({
+  name: z.string().min(1).max(100),
+  columns: z.array(z.object({
+    name: z.string().min(1),
+    type: z.string().min(1).max(100),
+    nullable: z.boolean().default(true),
+    defaultValue: z.string().optional(),
+    primaryKey: z.boolean().default(false),
+  })).max(100).default([]),
+}).openapi('CreateTableRequest');
+
 // ---- Route definitions ----
 
-const databaseRoutes = new Hono<{
+const databaseRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -292,10 +345,27 @@ const databaseRoutes = new Hono<{
 databaseRoutes.use('*', authMiddleware);
 databaseRoutes.use('*', tenantMiddleware);
 
-// GET /:serviceId/info
-databaseRoutes.get('/:serviceId/info', requireMember, async (c) => {
+// ── Route: GET /:serviceId/info ──
+
+const getDbInfoRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/info',
+  tags: ['Database'],
+  summary: 'Get database info for a service',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Database info'),
+    ...standardErrors,
+  },
+  middleware: [requireMember] as const,
+});
+
+databaseRoutes.openapi(getDbInfoRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const svc = await db.query.services.findFirst({
@@ -343,13 +413,31 @@ databaseRoutes.get('/:serviceId/info', requireMember, async (c) => {
     database: container.info.database,
     status: 'available',
   });
+}) as any);
+
+// ── Route: GET /:serviceId/tables ──
+
+const getTablesRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/tables',
+  tags: ['Database'],
+  summary: 'List tables/collections in a database',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+    query: dbQueryParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'List of tables'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember] as const,
 });
 
-// GET /:serviceId/tables
-databaseRoutes.get('/:serviceId/tables', dbExecRateLimit, requireMember, async (c) => {
+databaseRoutes.openapi(getTablesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const dbName = c.req.query('db');
+  const { serviceId } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
 
@@ -390,14 +478,31 @@ databaseRoutes.get('/:serviceId/tables', dbExecRateLimit, requireMember, async (
     logger.error({ err }, 'Failed to list tables');
     return c.json({ error: 'Failed to list tables' }, 500);
   }
+}) as any);
+
+// ── Route: GET /:serviceId/tables/:name/columns ──
+
+const getColumnsRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/tables/{name}/columns',
+  tags: ['Database'],
+  summary: 'Get columns/fields for a table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdAndNameParamSchema,
+    query: dbQueryParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Column definitions'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember] as const,
 });
 
-// GET /:serviceId/tables/:name/columns
-databaseRoutes.get('/:serviceId/tables/:name/columns', dbExecRateLimit, requireMember, async (c) => {
+databaseRoutes.openapi(getColumnsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const tableName = c.req.param('name');
-  const dbName = c.req.query('db');
+  const { serviceId, name: tableName } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -482,19 +587,35 @@ databaseRoutes.get('/:serviceId/tables/:name/columns', dbExecRateLimit, requireM
     logger.error({ err }, 'Failed to describe table');
     return c.json({ error: 'Failed to describe table' }, 500);
   }
+}) as any);
+
+// ── Route: GET /:serviceId/tables/:name/data ──
+
+const getTableDataRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/tables/{name}/data',
+  tags: ['Database'],
+  summary: 'Get paginated data from a table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdAndNameParamSchema,
+    query: tableDataQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Paginated table data'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember] as const,
 });
 
-// GET /:serviceId/tables/:name/data
-databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMember, async (c) => {
+databaseRoutes.openapi(getTableDataRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const tableName = c.req.param('name');
-  const dbName = c.req.query('db');
+  const { serviceId, name: tableName } = c.req.valid('param');
+  const { db: dbName, page: pageStr, pageSize: pageSizeStr, orderBy, orderDir: orderDirStr } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
-  const pageSize = Math.min(100, Math.max(1, parseInt(c.req.query('pageSize') ?? '50', 10)));
-  const orderBy = c.req.query('orderBy');
-  const orderDir = c.req.query('orderDir') === 'desc' ? 'DESC' : 'ASC';
+  const page = Math.max(1, parseInt(pageStr ?? '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(pageSizeStr ?? '50', 10)));
+  const orderDir = orderDirStr === 'desc' ? 'DESC' : 'ASC';
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const container = await getDbContainer(accountId, serviceId);
@@ -578,26 +699,36 @@ databaseRoutes.get('/:serviceId/tables/:name/data', dbExecRateLimit, requireMemb
     logger.error({ err }, 'Failed to fetch table data');
     return c.json({ error: 'Failed to fetch table data' }, 500);
   }
+}) as any);
+
+// ── Route: POST /:serviceId/query ──
+
+const executeQueryRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/query',
+  tags: ['Database'],
+  summary: 'Execute a database query',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+    query: dbQueryParamSchema,
+    body: jsonBody(querySchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Query result'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember] as const,
 });
 
-// POST /:serviceId/query
-const querySchema = z.object({
-  query: z.string().min(1).max(10_000),
-  readOnly: z.boolean().default(true),
-});
-
-databaseRoutes.post('/:serviceId/query', dbExecRateLimit, requireMember, async (c) => {
+databaseRoutes.openapi(executeQueryRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const dbName = c.req.query('db');
+  const { serviceId } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json();
-  const parsed = querySchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid query' }, 400);
-
-  const { query, readOnly } = parsed.data;
+  const { query, readOnly } = c.req.valid('json');
 
   const container = await getDbContainer(accountId, serviceId);
   if (!container) return c.json({ error: 'Database container not available' }, 503);
@@ -694,48 +825,36 @@ databaseRoutes.post('/:serviceId/query', dbExecRateLimit, requireMember, async (
     logger.error({ err }, 'Database query failed');
     return c.json({ error: message }, 500);
   }
+}) as any);
+
+// ── Route: POST /:serviceId/tables/:name/rows — insert a row ──
+
+const insertRowRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/tables/{name}/rows',
+  tags: ['Database'],
+  summary: 'Insert a row into a table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdAndNameParamSchema,
+    query: dbQueryParamSchema,
+    body: jsonBody(insertRowSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Row inserted'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember, requireScope('write')] as const,
 });
 
-// ---- CRUD: Row operations ----
-
-const insertRowSchema = z.object({
-  values: z.record(z.string(), z.union([z.string(), z.null()])),
-});
-
-const updateRowSchema = z.object({
-  primaryKey: z.record(z.string(), z.string()),
-  updates: z.record(z.string(), z.union([z.string(), z.null()])),
-});
-
-const deleteRowSchema = z.object({
-  primaryKey: z.record(z.string(), z.string()),
-});
-
-const createTableSchema = z.object({
-  name: z.string().min(1).max(100),
-  columns: z.array(z.object({
-    name: z.string().min(1),
-    type: z.string().min(1).max(100),
-    nullable: z.boolean().default(true),
-    defaultValue: z.string().optional(),
-    primaryKey: z.boolean().default(false),
-  })).max(100).default([]),
-});
-
-// POST /:serviceId/tables/:name/rows — insert a row
-databaseRoutes.post('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(insertRowRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const tableName = c.req.param('name');
-  const dbName = c.req.query('db');
+  const { serviceId, name: tableName } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json();
-  const parsed = insertRowSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
-
-  const { values } = parsed.data;
+  const { values } = c.req.valid('json');
   const columnNames = Object.keys(values);
   if (columnNames.length === 0) return c.json({ error: 'No values provided' }, 400);
 
@@ -780,22 +899,36 @@ databaseRoutes.post('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMem
     logger.error({ err }, 'Database insert failed');
     return c.json({ error: err instanceof Error ? err.message : 'Insert failed' }, 500);
   }
+}) as any);
+
+// ── Route: PUT /:serviceId/tables/:name/rows — update a row ──
+
+const updateRowRoute = createRoute({
+  method: 'put',
+  path: '/{serviceId}/tables/{name}/rows',
+  tags: ['Database'],
+  summary: 'Update a row in a table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdAndNameParamSchema,
+    query: dbQueryParamSchema,
+    body: jsonBody(updateRowSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Row updated'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember, requireScope('write')] as const,
 });
 
-// PUT /:serviceId/tables/:name/rows — update a row
-databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(updateRowRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const tableName = c.req.param('name');
-  const dbName = c.req.query('db');
+  const { serviceId, name: tableName } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json();
-  const parsed = updateRowSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
-
-  const { primaryKey, updates } = parsed.data;
+  const { primaryKey, updates } = c.req.valid('json');
   if (Object.keys(updates).length === 0) return c.json({ error: 'No updates provided' }, 400);
   if (Object.keys(primaryKey).length === 0) return c.json({ error: 'No primary key provided' }, 400);
 
@@ -809,7 +942,7 @@ databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMemb
     if (!idValue) return c.json({ error: 'MongoDB updates require _id in primaryKey' }, 400);
     const filter = `{_id:${wrapMongoId(idValue)}}`;
     const setFields = Object.entries(updates)
-      .map(([k, v]) => `"${escapeMongoString(k)}":${v === null ? 'null' : `"${escapeMongoString(v)}"`}`)
+      .map(([k, v]) => `"${escapeMongoString(k)}":${v === null ? 'null' : `"${escapeMongoString(v as string)}"`}`)
       .join(',');
     const js = `JSON.stringify(db.getCollection("${escapeMongoString(tableName)}").updateOne(${filter},{$set:{${setFields}}}))`;
     try {
@@ -830,10 +963,10 @@ databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMemb
   const qi = (n: string) => quoteIdentifier(container.engine, n);
 
   const setClauses = Object.entries(updates)
-    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val)}`)
+    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val as string | null)}`)
     .join(', ');
   const whereClauses = Object.entries(primaryKey)
-    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val)}`)
+    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val as string)}`)
     .join(' AND ');
   const sql = `UPDATE ${qi(tableName)} SET ${setClauses} WHERE ${whereClauses}`;
 
@@ -846,22 +979,36 @@ databaseRoutes.put('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMemb
     logger.error({ err }, 'Database update failed');
     return c.json({ error: err instanceof Error ? err.message : 'Update failed' }, 500);
   }
+}) as any);
+
+// ── Route: DELETE /:serviceId/tables/:name/rows — delete a row ──
+
+const deleteRowRoute = createRoute({
+  method: 'delete',
+  path: '/{serviceId}/tables/{name}/rows',
+  tags: ['Database'],
+  summary: 'Delete a row from a table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdAndNameParamSchema,
+    query: dbQueryParamSchema,
+    body: jsonBody(deleteRowSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Row deleted'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember, requireScope('write')] as const,
 });
 
-// DELETE /:serviceId/tables/:name/rows — delete a row
-databaseRoutes.delete('/:serviceId/tables/:name/rows', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(deleteRowRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const tableName = c.req.param('name');
-  const dbName = c.req.query('db');
+  const { serviceId, name: tableName } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json();
-  const parsed = deleteRowSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
-
-  const { primaryKey } = parsed.data;
+  const { primaryKey } = c.req.valid('json');
   if (Object.keys(primaryKey).length === 0) return c.json({ error: 'No primary key provided' }, 400);
 
   const container = await getDbContainer(accountId, serviceId);
@@ -892,7 +1039,7 @@ databaseRoutes.delete('/:serviceId/tables/:name/rows', dbExecRateLimit, requireM
   const qi = (n: string) => quoteIdentifier(container.engine, n);
 
   const whereClauses = Object.entries(primaryKey)
-    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val)}`)
+    .map(([col, val]) => `${qi(col)} = ${escapeValue(container.engine, val as string)}`)
     .join(' AND ');
   const sql = `DELETE FROM ${qi(tableName)} WHERE ${whereClauses}`;
 
@@ -905,23 +1052,36 @@ databaseRoutes.delete('/:serviceId/tables/:name/rows', dbExecRateLimit, requireM
     logger.error({ err }, 'Database row delete failed');
     return c.json({ error: err instanceof Error ? err.message : 'Delete failed' }, 500);
   }
+}) as any);
+
+// ── Route: POST /:serviceId/tables — create a table ──
+
+const createTableRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/tables',
+  tags: ['Database'],
+  summary: 'Create a new table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+    query: dbQueryParamSchema,
+    body: jsonBody(createTableSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Table created'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember, requireScope('write')] as const,
 });
 
-// ---- CRUD: Table operations ----
-
-// POST /:serviceId/tables — create a table
-databaseRoutes.post('/:serviceId/tables', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(createTableRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const dbName = c.req.query('db');
+  const { serviceId } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json();
-  const parsed = createTableSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid request body' }, 400);
-
-  const { name, columns } = parsed.data;
+  const { name, columns } = c.req.valid('json');
 
   const container = await getDbContainer(accountId, serviceId);
   if (!container) return c.json({ error: 'Database container not available' }, 503);
@@ -948,11 +1108,11 @@ databaseRoutes.post('/:serviceId/tables', dbExecRateLimit, requireMember, requir
     if (!VALID_COLUMN_TYPE.test(col.type)) return c.json({ error: `Invalid column type: ${col.type}` }, 400);
     if (col.defaultValue && !SAFE_DEFAULT.test(col.defaultValue)) return c.json({ error: `Unsafe default value: ${col.defaultValue}` }, 400);
   }
-  if (!columns.some(col => col.primaryKey)) return c.json({ error: 'At least one primary key column is required' }, 400);
+  if (!columns.some((col: any) => col.primaryKey)) return c.json({ error: 'At least one primary key column is required' }, 400);
 
   const qi = (n: string) => quoteIdentifier(container.engine, n);
-  const pkColumns = columns.filter(col => col.primaryKey).map(col => qi(col.name));
-  const columnDefs = columns.map(col => {
+  const pkColumns = columns.filter((col: any) => col.primaryKey).map((col: any) => qi(col.name));
+  const columnDefs = columns.map((col: any) => {
     let def = `${qi(col.name)} ${col.type}`;
     if (!col.nullable) def += ' NOT NULL';
     if (col.defaultValue) def += ` DEFAULT ${col.defaultValue}`;
@@ -970,14 +1130,31 @@ databaseRoutes.post('/:serviceId/tables', dbExecRateLimit, requireMember, requir
     logger.error({ err }, 'Database create table failed');
     return c.json({ error: err instanceof Error ? err.message : 'Create table failed' }, 500);
   }
+}) as any);
+
+// ── Route: DELETE /:serviceId/tables/:name — drop a table ──
+
+const dropTableRoute = createRoute({
+  method: 'delete',
+  path: '/{serviceId}/tables/{name}',
+  tags: ['Database'],
+  summary: 'Drop a table or collection',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdAndNameParamSchema,
+    query: dbQueryParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Table dropped'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember, requireScope('write')] as const,
 });
 
-// DELETE /:serviceId/tables/:name — drop a table
-databaseRoutes.delete('/:serviceId/tables/:name', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(dropTableRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const tableName = c.req.param('name');
-  const dbName = c.req.query('db');
+  const { serviceId, name: tableName } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -1010,12 +1187,29 @@ databaseRoutes.delete('/:serviceId/tables/:name', dbExecRateLimit, requireMember
     logger.error({ err }, 'Database drop table failed');
     return c.json({ error: err instanceof Error ? err.message : 'Drop table failed' }, 500);
   }
+}) as any);
+
+// ── Route: GET /:serviceId/credentials ──
+
+const getCredentialsRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/credentials',
+  tags: ['Database'],
+  summary: 'Get connection credentials for a database service',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Database credentials'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireScope('write')] as const,
 });
 
-// GET /:serviceId/credentials — connection info & credentials
-databaseRoutes.get('/:serviceId/credentials', requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(getCredentialsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const svc = await db.query.services.findFirst({
@@ -1042,14 +1236,31 @@ databaseRoutes.get('/:serviceId/credentials', requireMember, requireScope('write
     password: info.password,
     database: info.database,
   });
+}) as any);
+
+// ── Route: POST /:serviceId/export — create download token ──
+
+const createExportTokenRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/export',
+  tags: ['Database'],
+  summary: 'Create a short-lived download token for database export',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+    query: dbQueryParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ token: z.string(), expiresIn: z.number() }), 'Download token'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember] as const,
 });
 
-// POST /:serviceId/export — create a short-lived download token so the browser
-// can stream the dump directly (no blob buffering).
-databaseRoutes.post('/:serviceId/export', dbExecRateLimit, requireMember, async (c) => {
+databaseRoutes.openapi(createExportTokenRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const dbName = c.req.query('db');
+  const { serviceId } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -1065,16 +1276,31 @@ databaseRoutes.post('/:serviceId/export', dbExecRateLimit, requireMember, async 
   });
 
   return c.json({ token, expiresIn: DOWNLOAD_TOKEN_TTL / 1000 });
+}) as any);
+
+// ── Route: POST /:serviceId/import — restore database from dump ──
+
+const importDatabaseRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/import',
+  tags: ['Database'],
+  summary: 'Import/restore a database from a SQL dump file',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+    query: dbQueryParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean(), message: z.string() }), 'Import completed'),
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit, requireMember, requireScope('write')] as const,
 });
 
-// The actual streaming GET is on databaseDownloadRoutes (no auth middleware)
-// so the browser can fetch it directly via anchor click with a token query param.
-
-// POST /:serviceId/import — restore a database from SQL dump
-databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requireScope('write'), async (c) => {
+databaseRoutes.openapi(importDatabaseRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
-  const dbName = c.req.query('db');
+  const { serviceId } = c.req.valid('param');
+  const { db: dbName } = c.req.valid('query');
   if (dbName && !VALID_DB_NAME.test(dbName)) return c.json({ error: 'Invalid database name' }, 400);
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -1121,17 +1347,42 @@ databaseRoutes.post('/:serviceId/import', dbExecRateLimit, requireMember, requir
     logger.error({ err }, 'Database import failed');
     return c.json({ error: err instanceof Error ? err.message : 'Import failed' }, 500);
   }
-});
+}) as any);
 
 // ---- Public (unauthenticated) download route — token-gated ----
 // Mounted separately in app.ts without auth/tenant middleware so the browser
 // can stream the file directly via an anchor click.
 
-export const databaseDownloadRoutes = new Hono();
+const downloadServiceIdParamSchema = z.object({
+  serviceId: z.string().openapi({ description: 'Service ID' }),
+});
 
-databaseDownloadRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
-  const serviceId = c.req.param('serviceId');
-  const tokenParam = c.req.query('token');
+const downloadQuerySchema = z.object({
+  token: z.string().optional().openapi({ description: 'One-time download token' }),
+});
+
+export const databaseDownloadRoutes = new OpenAPIHono();
+
+const exportDownloadRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/export',
+  tags: ['Database'],
+  summary: 'Stream database export (token-gated, no auth)',
+  security: noSecurity,
+  request: {
+    params: downloadServiceIdParamSchema,
+    query: downloadQuerySchema,
+  },
+  responses: {
+    200: { content: { 'application/octet-stream': { schema: z.any() } }, description: 'Database dump stream' },
+    ...standardErrors,
+  },
+  middleware: [dbExecRateLimit] as const,
+});
+
+databaseDownloadRoutes.openapi(exportDownloadRoute, (async (c: any) => {
+  const { serviceId } = c.req.valid('param');
+  const { token: tokenParam } = c.req.valid('query');
 
   if (!tokenParam) {
     return c.json({ error: 'Download token required' }, 401);
@@ -1176,6 +1427,6 @@ databaseDownloadRoutes.get('/:serviceId/export', dbExecRateLimit, async (c) => {
     logger.error({ err }, 'Database export failed');
     return c.json({ error: 'Export failed' }, 500);
   }
-});
+}) as any);
 
 export default databaseRoutes;

@@ -1,5 +1,6 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 import { db, emailTemplates, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -7,7 +8,7 @@ import { emailService } from '../services/email.service.js';
 import { requireMember, requireAdmin } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 
-const emails = new Hono<{
+const emails = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -20,22 +21,34 @@ emails.use('*', tenantMiddleware);
 
 // GET /templates — list email templates
 // Returns DB templates merged with built-in defaults.
-emails.get('/templates', async (c) => {
+const listTemplatesRoute = createRoute({
+  method: 'get',
+  path: '/templates',
+  tags: ['Emails'],
+  summary: 'List email templates',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of email templates'),
+    ...standardErrors,
+  },
+});
+
+emails.openapi(listTemplatesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   // Fetch all templates from DB, then filter in-memory
   const dbTemplates = await db.query.emailTemplates.findMany({
-    orderBy: (t, { asc }) => asc(t.slug),
+    orderBy: (t: any, { asc }: any) => asc(t.slug),
   });
 
   // Filter: show account-specific templates + global ones (accountId = null)
   const filtered = dbTemplates.filter(
-    (t) => t.accountId === accountId || t.accountId === null,
+    (t: any) => t.accountId === accountId || t.accountId === null,
   );
 
   // Merge with built-in defaults
   const defaults = emailService.getDefaultTemplates();
-  const slugsInDb = new Set(filtered.map((t) => t.slug));
+  const slugsInDb = new Set(filtered.map((t: any) => t.slug));
 
   const defaultList = Object.entries(defaults)
     .filter(([slug]) => !slugsInDb.has(slug))
@@ -52,17 +65,32 @@ emails.get('/templates', async (c) => {
     }));
 
   const result = [
-    ...filtered.map((t) => ({ ...t, isDefault: false })),
+    ...filtered.map((t: any) => ({ ...t, isDefault: false })),
     ...defaultList,
   ];
 
   return c.json(result);
-});
+}) as any);
 
 // GET /templates/:slug — get a specific template
-emails.get('/templates/:slug', async (c) => {
+const getTemplateRoute = createRoute({
+  method: 'get',
+  path: '/templates/{slug}',
+  tags: ['Emails'],
+  summary: 'Get a specific email template',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ slug: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Email template'),
+    ...standardErrors,
+  },
+});
+
+emails.openapi(getTemplateRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const slug = c.req.param('slug');
+  const { slug } = c.req.valid('param');
 
   // Look for account override first
   let template = accountId
@@ -107,7 +135,7 @@ emails.get('/templates/:slug', async (c) => {
     updatedAt: null,
     isDefault: true,
   });
-});
+}) as any);
 
 // PATCH /templates/:slug — update a template
 // Creates an account-specific override if the template only exists as default.
@@ -118,19 +146,30 @@ const updateTemplateSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-emails.patch('/templates/:slug', requireAdmin, async (c) => {
+const patchTemplateRoute = createRoute({
+  method: 'patch',
+  path: '/templates/{slug}',
+  tags: ['Emails'],
+  summary: 'Update an email template',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: jsonBody(updateTemplateSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Updated template'),
+    201: jsonContent(z.any(), 'Created template override'),
+  },
+  middleware: [requireAdmin],
+});
+
+emails.openapi(patchTemplateRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
-  const slug = c.req.param('slug');
+  const { slug } = c.req.valid('param');
 
-  const body = await c.req.json();
-  const parsed = updateTemplateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   // Try to find existing template — prefer account-specific
   let existing = accountId
@@ -181,26 +220,37 @@ emails.patch('/templates/:slug', requireAdmin, async (c) => {
   });
 
   return c.json(created, 201);
-});
+}) as any);
 
 // POST /templates/:slug/test — send a test email
 const testEmailSchema = z.object({
   to: z.string().email(),
-  variables: z.record(z.string()).optional(),
+  variables: z.record(z.string(), z.string()).optional(),
 });
 
-emails.post('/templates/:slug/test', requireAdmin, async (c) => {
+const testEmailRoute = createRoute({
+  method: 'post',
+  path: '/templates/{slug}/test',
+  tags: ['Emails'],
+  summary: 'Send a test email',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: jsonBody(testEmailSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Test email sent'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
+});
+
+emails.openapi(testEmailRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const slug = c.req.param('slug');
+  const { slug } = c.req.valid('param');
 
-  const body = await c.req.json();
-  const parsed = testEmailSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { to, variables } = parsed.data;
+  const data = c.req.valid('json');
+  const { to, variables } = data;
 
   // Build sample variables by merging defaults with provided overrides
   const defaults = emailService.getDefaultTemplates();
@@ -241,14 +291,30 @@ emails.post('/templates/:slug/test', requireAdmin, async (c) => {
       500,
     );
   }
-});
+}) as any);
 
 // POST /templates/:slug/reset — reset template to default
 // Deletes the account-specific override so the default is used again.
-emails.post('/templates/:slug/reset', requireAdmin, async (c) => {
+const resetTemplateRoute = createRoute({
+  method: 'post',
+  path: '/templates/{slug}/reset',
+  tags: ['Emails'],
+  summary: 'Reset email template to default',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ slug: z.string() }),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Template reset'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
+});
+
+emails.openapi(resetTemplateRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
-  const slug = c.req.param('slug');
+  const { slug } = c.req.valid('param');
 
   const defaults = emailService.getDefaultTemplates();
 
@@ -291,6 +357,6 @@ emails.post('/templates/:slug/reset', requireAdmin, async (c) => {
   }
 
   return c.json({ error: 'Cannot reset without account context' }, 400);
-});
+}) as any);
 
 export default emails;

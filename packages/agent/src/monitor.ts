@@ -1,5 +1,6 @@
 import Docker from 'dockerode'
-import { cpus, freemem, totalmem, hostname as osHostname } from 'node:os'
+import { cpus, freemem, totalmem, hostname as osHostname, platform } from 'node:os'
+import { statfsSync, readFileSync, readdirSync } from 'node:fs'
 import { logger } from './logger.js'
 
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || '/var/run/docker.sock'
@@ -21,6 +22,44 @@ async function getNodeHostname(): Promise<string> {
   } catch { /* Docker not available */ }
   resolvedHostname = osHostname()
   return resolvedHostname
+}
+
+/**
+ * Detect disk type by reading /sys/block/{device}/queue/rotational on Linux.
+ * Returns 'ssd' (0), 'hdd' (1), or 'unknown' on failure / non-Linux.
+ */
+function detectDiskType(): 'ssd' | 'hdd' | 'unknown' {
+  if (platform() !== 'linux') return 'unknown'
+  try {
+    const blocks = readdirSync('/sys/block')
+    // Check common block device prefixes (sd*, nvme*, vd*, xvd*)
+    for (const dev of blocks) {
+      if (/^(sd|nvme|vd|xvd)/.test(dev)) {
+        const rotational = readFileSync(`/sys/block/${dev}/queue/rotational`, 'utf-8').trim()
+        if (rotational === '0') return 'ssd'
+        if (rotational === '1') return 'hdd'
+      }
+    }
+  } catch {
+    // Not available — fall through
+  }
+  return 'unknown'
+}
+
+/**
+ * Collect disk usage stats for the root partition using Node.js built-in statfsSync.
+ */
+function collectDiskStats(): { diskTotal: number; diskUsed: number; diskFree: number; diskType: 'ssd' | 'hdd' | 'unknown' } {
+  try {
+    const stats = statfsSync('/')
+    const diskTotal = stats.blocks * stats.bsize
+    const diskFree = stats.bavail * stats.bsize
+    const diskUsed = diskTotal - diskFree
+    const diskType = detectDiskType()
+    return { diskTotal, diskUsed, diskFree, diskType }
+  } catch {
+    return { diskTotal: 0, diskUsed: 0, diskFree: 0, diskType: 'unknown' }
+  }
 }
 
 export class NodeMonitor {
@@ -92,6 +131,9 @@ export class NodeMonitor {
       // Docker socket not available
     }
 
+    // Collect disk metrics
+    const { diskTotal, diskUsed, diskFree, diskType } = collectDiskStats()
+
     return {
       hostname: await getNodeHostname(),
       cpuCount,
@@ -99,6 +141,10 @@ export class NodeMonitor {
       memUsed,
       memFree,
       containerCount,
+      diskTotal,
+      diskUsed,
+      diskFree,
+      diskType,
       timestamp: new Date().toISOString(),
     }
   }

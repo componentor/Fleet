@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
@@ -7,10 +8,19 @@ import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import {
+  jsonContent,
+  errorResponseSchema,
+  messageResponseSchema,
+  standardErrors,
+  bearerSecurity,
+} from './_schemas.js';
 
-const adminRoutes = new Hono<{
+type Env = {
   Variables: { user: AuthUser };
-}>();
+};
+
+const adminRoutes = new OpenAPIHono<Env>();
 
 adminRoutes.use('*', authMiddleware);
 
@@ -23,8 +33,52 @@ adminRoutes.use('*', async (c, next) => {
   await next();
 });
 
+// ── Schemas ──
+
+const idParamSchema = z.object({
+  id: z.string().openapi({ description: 'Resource ID' }),
+});
+
+const paginationQuerySchema = z.object({
+  page: z.string().optional().openapi({ description: 'Page number (default 1)' }),
+  limit: z.string().optional().openapi({ description: 'Items per page (default 50, max 100)' }),
+});
+
+const auditLogQuerySchema = z.object({
+  page: z.string().optional().openapi({ description: 'Page number (default 1)' }),
+  limit: z.string().optional().openapi({ description: 'Items per page (default 50, max 100)' }),
+  resourceType: z.string().optional().openapi({ description: 'Filter by resource type' }),
+  eventType: z.string().optional().openapi({ description: 'Filter by event type prefix' }),
+  userId: z.string().optional().openapi({ description: 'Filter by user ID' }),
+  accountId: z.string().optional().openapi({ description: 'Filter by account ID' }),
+  dateFrom: z.string().optional().openapi({ description: 'Filter from date (ISO string)' }),
+  dateTo: z.string().optional().openapi({ description: 'Filter to date (ISO string)' }),
+  search: z.string().optional().openapi({ description: 'Search in description, email, resource name, action' }),
+});
+
+const statusQuerySchema = z.object({
+  nodesPage: z.string().optional().openapi({ description: 'Page for nodes (default 1)' }),
+  nodesLimit: z.string().optional().openapi({ description: 'Nodes per page (default 100, max 100)' }),
+  servicesPage: z.string().optional().openapi({ description: 'Page for services (default 1)' }),
+  servicesLimit: z.string().optional().openapi({ description: 'Services per page (default 100, max 100)' }),
+});
+
+// ── Routes ──
+
 // GET /stats — platform-wide statistics
-adminRoutes.get('/stats', async (c) => {
+const statsRoute = createRoute({
+  method: 'get',
+  path: '/stats',
+  tags: ['Admin'],
+  summary: 'Get platform-wide statistics',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Platform statistics'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(statsRoute, (async (c: any) => {
   const [accountCount] = await db
     .select({ count: countSql() })
     .from(accounts)
@@ -98,17 +152,33 @@ adminRoutes.get('/stats', async (c) => {
       checkedAt: updateService.getNotification().checkedAt,
     },
   });
-});
+}) as any);
 
 // GET /accounts — list all accounts (paginated)
-adminRoutes.get('/accounts', async (c) => {
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
+const listAccountsRoute = createRoute({
+  method: 'get',
+  path: '/accounts',
+  tags: ['Admin'],
+  summary: 'List all accounts (paginated)',
+  security: bearerSecurity,
+  request: {
+    query: paginationQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Paginated accounts list'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(listAccountsRoute, (async (c: any) => {
+  const query = c.req.valid('query');
+  const page = Math.max(1, parseInt(query.page ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const allAccounts = await db.query.accounts.findMany({
     where: isNull(accounts.deletedAt),
-    orderBy: (a, { asc }) => asc(a.path),
+    orderBy: (a: any, { asc }: any) => asc(a.path),
     limit,
     offset,
   });
@@ -119,7 +189,7 @@ adminRoutes.get('/accounts', async (c) => {
     .where(isNull(accounts.deletedAt));
 
   // Strip sensitive billing fields from response
-  const sanitizedAccounts = allAccounts.map(({ ...acc }) => {
+  const sanitizedAccounts = allAccounts.map(({ ...acc }: any) => {
     const a = acc as Record<string, unknown>;
     delete a['stripeCustomerId'];
     return a;
@@ -134,17 +204,33 @@ adminRoutes.get('/accounts', async (c) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
-});
+}) as any);
 
 // GET /users — list all users
-adminRoutes.get('/users', async (c) => {
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
+const listUsersRoute = createRoute({
+  method: 'get',
+  path: '/users',
+  tags: ['Admin'],
+  summary: 'List all users (paginated)',
+  security: bearerSecurity,
+  request: {
+    query: paginationQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Paginated users list'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(listUsersRoute, (async (c: any) => {
+  const query = c.req.valid('query');
+  const page = Math.max(1, parseInt(query.page ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const allUsers = await db.query.users.findMany({
     where: isNull(users.deletedAt),
-    orderBy: (u, { desc: d }) => d(u.createdAt),
+    orderBy: (u: any, { desc: d }: any) => d(u.createdAt),
     limit,
     offset,
   });
@@ -155,7 +241,7 @@ adminRoutes.get('/users', async (c) => {
     .where(isNull(users.deletedAt));
 
   // Only expose safe fields — never return tokens, secrets, or hashes
-  const sanitized = allUsers.map((u) => ({
+  const sanitized = allUsers.map((u: any) => ({
     id: u.id,
     email: u.email,
     name: u.name,
@@ -175,11 +261,26 @@ adminRoutes.get('/users', async (c) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
-});
+}) as any);
 
 // PATCH /users/:id/super — toggle super user status
-adminRoutes.patch('/users/:id/super', async (c) => {
-  const targetUserId = c.req.param('id');
+const toggleSuperRoute = createRoute({
+  method: 'patch',
+  path: '/users/{id}/super',
+  tags: ['Admin'],
+  summary: 'Toggle super user status',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated user with new super status'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(toggleSuperRoute, (async (c: any) => {
+  const { id: targetUserId } = c.req.valid('param');
   const authUser = c.get('user');
 
   if (targetUserId === authUser.userId) {
@@ -213,21 +314,37 @@ adminRoutes.patch('/users/:id/super', async (c) => {
     name: updated!.name,
     isSuper: updated!.isSuper,
   });
-});
+}) as any);
 
 // GET /audit-log — platform-wide audit log with filtering
-adminRoutes.get('/audit-log', async (c) => {
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
+const auditLogRoute = createRoute({
+  method: 'get',
+  path: '/audit-log',
+  tags: ['Admin'],
+  summary: 'List platform-wide audit log with filtering',
+  security: bearerSecurity,
+  request: {
+    query: auditLogQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Paginated audit log entries'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(auditLogRoute, (async (c: any) => {
+  const query = c.req.valid('query');
+  const page = Math.max(1, parseInt(query.page ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit ?? '50', 10)));
   const offset = (page - 1) * limit;
 
-  const resourceType = c.req.query('resourceType');
-  const eventType = c.req.query('eventType');
-  const userId = c.req.query('userId');
-  const accountId = c.req.query('accountId');
-  const dateFrom = c.req.query('dateFrom');
-  const dateTo = c.req.query('dateTo');
-  const search = c.req.query('search');
+  const resourceType = query.resourceType;
+  const eventType = query.eventType;
+  const userId = query.userId;
+  const accountId = query.accountId;
+  const dateFrom = query.dateFrom;
+  const dateTo = query.dateTo;
+  const search = query.search;
 
   const conditions: any[] = [];
   if (resourceType) conditions.push(eq(auditLog.resourceType, resourceType));
@@ -276,18 +393,34 @@ adminRoutes.get('/audit-log', async (c) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
-});
+}) as any);
 
 // GET /services — list all services across all accounts
-adminRoutes.get('/services', async (c) => {
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
+const listServicesRoute = createRoute({
+  method: 'get',
+  path: '/services',
+  tags: ['Admin'],
+  summary: 'List all services across all accounts (paginated)',
+  security: bearerSecurity,
+  request: {
+    query: paginationQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Paginated services list'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(listServicesRoute, (async (c: any) => {
+  const query = c.req.valid('query');
+  const page = Math.max(1, parseInt(query.page ?? '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit ?? '50', 10)));
   const offset = (page - 1) * limit;
 
   const allServices = await db.query.services.findMany({
     where: isNull(services.deletedAt),
     with: { account: true },
-    orderBy: (s, { desc: d }) => d(s.createdAt),
+    orderBy: (s: any, { desc: d }: any) => d(s.createdAt),
     limit,
     offset,
   });
@@ -298,7 +431,7 @@ adminRoutes.get('/services', async (c) => {
     .where(isNull(services.deletedAt));
 
   // Strip env vars from admin listing to avoid leaking secrets
-  const sanitizedServices = allServices.map(({ ...svc }) => {
+  const sanitizedServices = allServices.map(({ ...svc }: any) => {
     const s = svc as Record<string, unknown>;
     delete s['env'];
     return s;
@@ -313,10 +446,26 @@ adminRoutes.get('/services', async (c) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
-});
+}) as any);
 
 // GET /status — system health & status overview
-adminRoutes.get('/status', async (c) => {
+const statusRoute = createRoute({
+  method: 'get',
+  path: '/status',
+  tags: ['Admin'],
+  summary: 'Get system health and status overview',
+  security: bearerSecurity,
+  request: {
+    query: statusQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'System health and status overview'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(statusRoute, (async (c: any) => {
+  const query = c.req.valid('query');
   const startTime = Date.now();
 
   // --- Valkey ---
@@ -385,12 +534,12 @@ adminRoutes.get('/status', async (c) => {
   );
 
   // --- Nodes from DB (paginated) ---
-  const nodesPage = Math.max(1, parseInt(c.req.query('nodesPage') ?? '1', 10));
-  const nodesLimit = Math.min(100, Math.max(1, parseInt(c.req.query('nodesLimit') ?? '100', 10)));
+  const nodesPage = Math.max(1, parseInt(query.nodesPage ?? '1', 10));
+  const nodesLimit = Math.min(100, Math.max(1, parseInt(query.nodesLimit ?? '100', 10)));
   const nodesOffset = (nodesPage - 1) * nodesLimit;
   const allNodes = await db.query.nodes.findMany({ limit: nodesLimit, offset: nodesOffset });
   const fiveMinAgo = new Date(Date.now() - 5 * 60_000);
-  const nodeStatuses = allNodes.map((n) => {
+  const nodeStatuses = allNodes.map((n: any) => {
     const dockerNode = n.dockerNodeId ? dockerNodeMap.get(n.dockerNodeId) ?? null : null;
     const dockerState = dockerNode?.Status?.State as string | undefined; // "ready" | "down" | "disconnected"
     const heartbeatHealthy = !!n.lastHeartbeat && new Date(n.lastHeartbeat) > fiveMinAgo;
@@ -415,24 +564,24 @@ adminRoutes.get('/status', async (c) => {
   });
 
   // --- Services breakdown (use counts instead of loading all records) ---
-  const statusPage = Math.max(1, parseInt(c.req.query('servicesPage') ?? '1', 10));
-  const statusLimit = Math.min(100, Math.max(1, parseInt(c.req.query('servicesLimit') ?? '100', 10)));
+  const statusPage = Math.max(1, parseInt(query.servicesPage ?? '1', 10));
+  const statusLimit = Math.min(100, Math.max(1, parseInt(query.servicesLimit ?? '100', 10)));
   const statusOffset = (statusPage - 1) * statusLimit;
   const allServices = await db.query.services.findMany({ where: isNull(services.deletedAt), limit: statusLimit, offset: statusOffset });
   const servicesByStatus: Record<string, number> = {};
   for (const s of allServices) {
-    const st = s.status ?? 'unknown';
+    const st = (s as any).status ?? 'unknown';
     servicesByStatus[st] = (servicesByStatus[st] ?? 0) + 1;
   }
 
   // --- Recent deployments ---
   const recentDeploys = await db.query.deployments.findMany({
-    orderBy: (d, { desc: descOrder }) => descOrder(d.createdAt),
+    orderBy: (d: any, { desc: descOrder }: any) => descOrder(d.createdAt),
     limit: 10,
     with: { service: true },
   });
 
-  const recentDeployments = recentDeploys.map((d) => ({
+  const recentDeployments = recentDeploys.map((d: any) => ({
     id: d.id,
     serviceName: d.service?.name ?? 'unknown',
     status: d.status,
@@ -469,6 +618,6 @@ adminRoutes.get('/status', async (c) => {
     },
     recentDeployments,
   });
-});
+}) as any);
 
 export default adminRoutes;

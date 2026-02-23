@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, domainRegistrations, domainTldPricing, accounts, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -8,6 +8,7 @@ import { stripeService } from '../services/stripe.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
+import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const searchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 20, keyPrefix: 'domain-search' });
 
@@ -28,7 +29,7 @@ function validateRedirectUrl(url: string): boolean {
   }
 }
 
-const domainPurchase = new Hono<{
+const domainPurchase = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -39,19 +40,89 @@ const domainPurchase = new Hono<{
 domainPurchase.use('*', authMiddleware);
 domainPurchase.use('*', tenantMiddleware);
 
+// ── Schemas ──
+
+const searchQuerySchema = z.object({
+  q: z.string().min(1).openapi({ description: 'Domain search query' }),
+  tlds: z.string().optional().openapi({ description: 'Comma-separated list of TLDs to filter' }),
+});
+
+const checkoutSchema = z.object({
+  domain: z.string().min(3).max(253).regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/),
+  years: z.number().int().min(1).max(10).default(1),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+}).openapi('DomainCheckoutRequest');
+
+const registerDomainSchema = z.object({
+  domain: z.string().min(3).max(253),
+  years: z.number().int().min(1).max(10).default(1),
+  contact: z.object({
+    firstName: z.string().min(1),
+    lastName: z.string().min(1),
+    email: z.string().email(),
+    phone: z.string().min(1),
+    address1: z.string().min(1),
+    address2: z.string().optional(),
+    city: z.string().min(1),
+    state: z.string().min(1),
+    postalCode: z.string().min(1),
+    country: z.string().length(2),
+    organization: z.string().optional(),
+  }),
+}).openapi('RegisterDomainRequest');
+
+const renewCheckoutSchema = z.object({
+  years: z.number().int().min(1).max(10).default(1),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+}).openapi('RenewCheckoutRequest');
+
+const renewSchema = z.object({
+  years: z.number().int().min(1).max(10).default(1),
+}).openapi('RenewDomainRequest');
+
+const idParamSchema = z.object({
+  id: z.string().openapi({ description: 'Domain registration ID' }),
+});
+
+const searchResultSchema = z.object({
+  query: z.string(),
+  results: z.array(z.any()),
+}).openapi('DomainSearchResponse');
+
+const checkoutResponseSchema = z.object({
+  url: z.string().nullable(),
+}).openapi('CheckoutResponse');
+
+const execOutputSchema = z.object({
+  output: z.string(),
+}).openapi('ExecOutput');
+
 // ────────────────────────────────────────────────────────────────────────────
 // GET /search — search available domains (with TLD pricing overlay)
 // ────────────────────────────────────────────────────────────────────────────
-domainPurchase.get('/search', searchRateLimit, async (c) => {
-  const query = c.req.query('q');
+const searchRoute = createRoute({
+  method: 'get',
+  path: '/search',
+  tags: ['Domain Purchase'],
+  summary: 'Search available domains',
+  security: bearerSecurity,
+  request: {
+    query: searchQuerySchema,
+  },
+  responses: {
+    200: jsonContent(searchResultSchema, 'Domain search results'),
+    ...standardErrors,
+  },
+  middleware: [searchRateLimit],
+});
 
-  if (!query || query.trim().length === 0) {
-    return c.json({ error: 'Query parameter "q" is required' }, 400);
-  }
+domainPurchase.openapi(searchRoute, (async (c: any) => {
+  const { q: query, tlds: tldsParam } = c.req.valid('query');
 
-  const tldsParam = c.req.query('tlds');
   const tlds = tldsParam
-    ? tldsParam.split(',').map((t) => t.trim().toLowerCase())
+    ? tldsParam.split(',').map((t: string) => t.trim().toLowerCase())
     : [];
 
   try {
@@ -59,10 +130,10 @@ domainPurchase.get('/search', searchRateLimit, async (c) => {
 
     // Overlay with sell prices from domainTldPricing
     const pricingEntries = await db.query.domainTldPricing.findMany();
-    const pricingMap = new Map(pricingEntries.map((p) => [p.tld, p]));
+    const pricingMap = new Map(pricingEntries.map((p: any) => [p.tld, p]));
 
     const enriched = results
-      .map((r) => {
+      .map((r: any) => {
         const tld = r.domain.split('.').slice(1).join('.');
         const pricing = pricingMap.get(tld);
 
@@ -96,31 +167,34 @@ domainPurchase.get('/search', searchRateLimit, async (c) => {
       500,
     );
   }
-});
+}) as any);
 
 // ────────────────────────────────────────────────────────────────────────────
 // POST /checkout — create Stripe checkout session for domain purchase
 // ────────────────────────────────────────────────────────────────────────────
-const checkoutSchema = z.object({
-  domain: z.string().min(3).max(253).regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/),
-  years: z.number().int().min(1).max(10).default(1),
-  successUrl: z.string().url(),
-  cancelUrl: z.string().url(),
+const checkoutRoute = createRoute({
+  method: 'post',
+  path: '/checkout',
+  tags: ['Domain Purchase'],
+  summary: 'Create Stripe checkout session for domain purchase',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(checkoutSchema),
+  },
+  responses: {
+    200: jsonContent(checkoutResponseSchema, 'Checkout session URL'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
 });
 
-domainPurchase.post('/checkout', requireAdmin, async (c) => {
+domainPurchase.openapi(checkoutRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = checkoutSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { domain, years, successUrl, cancelUrl } = parsed.data;
+  const { domain, years, successUrl, cancelUrl } = c.req.valid('json');
 
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
@@ -170,30 +244,28 @@ domainPurchase.post('/checkout', requireAdmin, async (c) => {
   );
 
   return c.json({ url: session.url });
-});
+}) as any);
 
 // ────────────────────────────────────────────────────────────────────────────
 // POST /register — direct register (for non-Stripe flows or after webhook)
 // ────────────────────────────────────────────────────────────────────────────
-const registerDomainSchema = z.object({
-  domain: z.string().min(3).max(253),
-  years: z.number().int().min(1).max(10).default(1),
-  contact: z.object({
-    firstName: z.string().min(1),
-    lastName: z.string().min(1),
-    email: z.string().email(),
-    phone: z.string().min(1),
-    address1: z.string().min(1),
-    address2: z.string().optional(),
-    city: z.string().min(1),
-    state: z.string().min(1),
-    postalCode: z.string().min(1),
-    country: z.string().length(2),
-    organization: z.string().optional(),
-  }),
+const registerRoute = createRoute({
+  method: 'post',
+  path: '/register',
+  tags: ['Domain Purchase'],
+  summary: 'Register a domain directly (super admin only)',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(registerDomainSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Domain registration result'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
 });
 
-domainPurchase.post('/register', requireAdmin, async (c) => {
+domainPurchase.openapi(registerRoute, (async (c: any) => {
   const user = c.get('user');
   // Direct registration bypasses Stripe — restrict to super admins only
   if (!user.isSuper) {
@@ -206,14 +278,7 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = registerDomainSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { domain, years, contact } = parsed.data;
+  const { domain, years, contact } = c.req.valid('json');
 
   logger.info({ domain, years, accountId, initiatedBy: user.userId }, 'Direct domain registration initiated by super admin (bypasses Stripe)');
 
@@ -237,20 +302,31 @@ domainPurchase.post('/register', requireAdmin, async (c) => {
       500,
     );
   }
-});
+}) as any);
 
 // ────────────────────────────────────────────────────────────────────────────
 // POST /:id/renew-checkout — create Stripe checkout for domain renewal
 // ────────────────────────────────────────────────────────────────────────────
-const renewCheckoutSchema = z.object({
-  years: z.number().int().min(1).max(10).default(1),
-  successUrl: z.string().url(),
-  cancelUrl: z.string().url(),
+const renewCheckoutRoute = createRoute({
+  method: 'post',
+  path: '/{id}/renew-checkout',
+  tags: ['Domain Purchase'],
+  summary: 'Create Stripe checkout session for domain renewal',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(renewCheckoutSchema),
+  },
+  responses: {
+    200: jsonContent(checkoutResponseSchema, 'Checkout session URL'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
 });
 
-domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
+domainPurchase.openapi(renewCheckoutRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const registrationId = c.req.param('id');
+  const { id: registrationId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -267,13 +343,7 @@ domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
     return c.json({ error: 'Domain registration not found' }, 404);
   }
 
-  const body = await c.req.json();
-  const parsed = renewCheckoutSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { years, successUrl, cancelUrl } = parsed.data;
+  const { years, successUrl, cancelUrl } = c.req.valid('json');
 
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
@@ -311,16 +381,29 @@ domainPurchase.post('/:id/renew-checkout', requireAdmin, async (c) => {
   );
 
   return c.json({ url: session.url });
-});
+}) as any);
 
 // ────────────────────────────────────────────────────────────────────────────
 // POST /:id/renew — direct renew (for non-Stripe or after webhook)
 // ────────────────────────────────────────────────────────────────────────────
-const renewSchema = z.object({
-  years: z.number().int().min(1).max(10).default(1),
+const renewRoute = createRoute({
+  method: 'post',
+  path: '/{id}/renew',
+  tags: ['Domain Purchase'],
+  summary: 'Renew a domain directly (super admin only)',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(renewSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated domain registration'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
 });
 
-domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
+domainPurchase.openapi(renewRoute, (async (c: any) => {
   const user = c.get('user');
   // Direct renewal bypasses Stripe — restrict to super admins only
   if (!user.isSuper) {
@@ -328,7 +411,7 @@ domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
   }
 
   const accountId = c.get('accountId');
-  const registrationId = c.req.param('id');
+  const { id: registrationId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -345,17 +428,12 @@ domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
     return c.json({ error: 'Domain registration not found' }, 404);
   }
 
-  const body = await c.req.json();
-  const parsed = renewSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const { years } = c.req.valid('json');
 
   try {
     const updated = await registrarService.renewDomain(
       registrationId,
-      parsed.data.years,
+      years,
     );
 
     return c.json(updated);
@@ -369,12 +447,24 @@ domainPurchase.post('/:id/renew', requireAdmin, async (c) => {
       500,
     );
   }
-});
+}) as any);
 
 // ────────────────────────────────────────────────────────────────────────────
 // GET /registrations — list purchased domains for the current account
 // ────────────────────────────────────────────────────────────────────────────
-domainPurchase.get('/registrations', async (c) => {
+const listRegistrationsRoute = createRoute({
+  method: 'get',
+  path: '/registrations',
+  tags: ['Domain Purchase'],
+  summary: 'List purchased domains for the current account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of domain registrations'),
+    ...standardErrors,
+  },
+});
+
+domainPurchase.openapi(listRegistrationsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -383,6 +473,6 @@ domainPurchase.get('/registrations', async (c) => {
 
   const registrations = await registrarService.listRegistrations(accountId);
   return c.json(registrations);
-});
+}) as any);
 
 export default domainPurchase;

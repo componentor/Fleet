@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS `reseller_config` (
   `default_discount_fixed` int DEFAULT 0,
   `updated_at` timestamp DEFAULT (now())
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `reseller_accounts` (
   `id` varchar(36) PRIMARY KEY,
   `account_id` varchar(36) NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `reseller_accounts` (
   CONSTRAINT `reseller_accounts_account_id_unique` UNIQUE(`account_id`),
   CONSTRAINT `reseller_accounts_account_id_fk` FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE CASCADE
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `reseller_applications` (
   `id` varchar(36) PRIMARY KEY,
   `account_id` varchar(36) NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS `reseller_applications` (
   `created_at` timestamp DEFAULT (now()),
   CONSTRAINT `reseller_applications_account_id_fk` FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE CASCADE
 );
-
-CREATE INDEX `idx_reseller_accounts_status` ON `reseller_accounts` (`status`);
-CREATE INDEX `idx_reseller_applications_account_id` ON `reseller_applications` (`account_id`);
+--> statement-breakpoint
+CREATE INDEX `idx_reseller_accounts_status` ON `reseller_accounts` (`status`);--> statement-breakpoint
+CREATE INDEX `idx_reseller_applications_account_id` ON `reseller_applications` (`account_id`);--> statement-breakpoint
 CREATE INDEX `idx_reseller_applications_status` ON `reseller_applications` (`status`);

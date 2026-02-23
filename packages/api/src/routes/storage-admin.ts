@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import {
   db,
   storageClusters,
@@ -15,13 +15,23 @@ import { storageManager } from '../services/storage/storage-manager.js';
 import { migrationService } from '../services/storage/migration.service.js';
 import { getMaintenanceQueue, isQueueAvailable } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
+import {
+  jsonBody,
+  jsonContent,
+  errorResponseSchema,
+  messageResponseSchema,
+  standardErrors,
+  bearerSecurity,
+} from './_schemas.js';
 
 // UUID param validation helper
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const storageAdmin = new Hono<{
+type Env = {
   Variables: { user: AuthUser };
-}>();
+};
+
+const storageAdmin = new OpenAPIHono<Env>();
 
 storageAdmin.use('*', authMiddleware);
 
@@ -34,27 +44,12 @@ storageAdmin.use('*', async (c, next) => {
   await next();
 });
 
-// ── Cluster ─────────────────────────────────────────────────────────────
+// ── Schemas ──
 
-// GET /cluster — Get current storage cluster config and health
-storageAdmin.get('/cluster', async (c) => {
-  const cluster = await db.query.storageClusters.findFirst();
-  const health = await storageManager.getHealth();
-  const nodes = await db.query.storageNodes.findMany();
-
-  return c.json({
-    cluster: cluster ?? {
-      provider: 'local',
-      objectProvider: 'local',
-      status: 'healthy',
-      replicationFactor: 1,
-    },
-    health,
-    nodes,
-  });
+const idParamSchema = z.object({
+  id: z.string().openapi({ description: 'Resource ID' }),
 });
 
-// POST /cluster — Initialize or update cluster config
 /** Reject private/loopback IPs to prevent SSRF via storage endpoints. */
 function isPrivateOrLoopback(hostname: string): boolean {
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
@@ -67,7 +62,7 @@ function isPrivateOrLoopback(hostname: string): boolean {
   return false;
 }
 
-const objectConfigSchema = z.record(z.any()).default({}).refine((config) => {
+const objectConfigSchema = z.record(z.string(), z.any()).default({}).refine((config) => {
   if (config.endpoint) {
     try {
       const url = new URL(config.endpoint);
@@ -84,18 +79,83 @@ const clusterSchema = z.object({
   provider: z.enum(['local', 'glusterfs', 'ceph']),
   objectProvider: z.enum(['local', 'minio', 's3', 'gcs']),
   replicationFactor: z.number().int().min(1).max(5).default(3),
-  config: z.record(z.any()).default({}),
+  config: z.record(z.string(), z.any()).default({}),
   objectConfig: objectConfigSchema,
 });
 
-storageAdmin.post('/cluster', async (c) => {
-  const body = await c.req.json();
-  const parsed = clusterSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
-  }
+const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
+const hostnameRe = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
+const safePathRe = /^\/[a-zA-Z0-9/_-]+$/;
 
-  const data = parsed.data;
+const addNodeSchema = z.object({
+  nodeId: z.string().uuid().optional(),
+  hostname: z.string().min(1).max(253).regex(hostnameRe, 'Invalid hostname'),
+  ipAddress: z.string().regex(ipv4Re, 'Invalid IPv4 address').refine((ip) => {
+    return ip.split('.').every((p) => { const n = Number(p); return n >= 0 && n <= 255; });
+  }, 'IP octets must be 0-255'),
+  role: z.enum(['storage', 'storage+compute', 'arbiter']).default('storage'),
+  storagePathRoot: z.string().default('/srv/fleet-storage').refine((p) => {
+    return safePathRe.test(p) && !p.includes('..');
+  }, 'Invalid storage path'),
+  capacityGb: z.number().int().optional(),
+});
+
+const migrateSchema = z.object({
+  toProvider: z.enum(['local', 'glusterfs', 'ceph']),
+  toObjectProvider: z.enum(['local', 'minio', 's3', 'gcs']).optional(),
+});
+
+// ── Cluster Routes ──
+
+// GET /cluster — Get current storage cluster config and health
+const getClusterRoute = createRoute({
+  method: 'get',
+  path: '/cluster',
+  tags: ['Storage Admin'],
+  summary: 'Get current storage cluster config and health',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Storage cluster configuration and health'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(getClusterRoute, (async (c: any) => {
+  const cluster = await db.query.storageClusters.findFirst();
+  const health = await storageManager.getHealth();
+  const nodes = await db.query.storageNodes.findMany();
+
+  return c.json({
+    cluster: cluster ?? {
+      provider: 'local',
+      objectProvider: 'local',
+      status: 'healthy',
+      replicationFactor: 1,
+    },
+    health,
+    nodes,
+  });
+}) as any);
+
+// POST /cluster — Initialize or update cluster config
+const postClusterRoute = createRoute({
+  method: 'post',
+  path: '/cluster',
+  tags: ['Storage Admin'],
+  summary: 'Initialize or update cluster configuration',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(clusterSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Cluster configured successfully'),
+  },
+});
+
+storageAdmin.openapi(postClusterRoute, (async (c: any) => {
+  const data = c.req.valid('json');
+
   const existing = await db.query.storageClusters.findFirst();
 
   if (existing) {
@@ -146,68 +206,101 @@ storageAdmin.post('/cluster', async (c) => {
     logger.error({ err }, 'Failed to initialize storage cluster');
     return c.json({ error: 'Failed to initialize storage cluster', status: 'error' }, 500);
   }
-});
+}) as any);
 
 // POST /cluster/test — Test connectivity to storage nodes
-storageAdmin.post('/cluster/test', async (c) => {
-  const health = await storageManager.getHealth();
-  return c.json(health);
+const testClusterRoute = createRoute({
+  method: 'post',
+  path: '/cluster/test',
+  tags: ['Storage Admin'],
+  summary: 'Test connectivity to storage nodes',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Storage health check results'),
+    ...standardErrors,
+  },
 });
 
-// ── Nodes ───────────────────────────────────────────────────────────────
+storageAdmin.openapi(testClusterRoute, (async (c: any) => {
+  const health = await storageManager.getHealth();
+  return c.json(health);
+}) as any);
+
+// ── Node Routes ──
 
 // GET /nodes — List storage nodes
-storageAdmin.get('/nodes', async (c) => {
+const listNodesRoute = createRoute({
+  method: 'get',
+  path: '/nodes',
+  tags: ['Storage Admin'],
+  summary: 'List storage nodes',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of storage nodes'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(listNodesRoute, (async (c: any) => {
   const nodes = await db.query.storageNodes.findMany({
     with: { node: true },
   });
   return c.json(nodes);
-});
+}) as any);
 
 // POST /nodes — Add a storage node
-const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
-const hostnameRe = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
-const safePathRe = /^\/[a-zA-Z0-9/_-]+$/;
-
-const addNodeSchema = z.object({
-  nodeId: z.string().uuid().optional(),
-  hostname: z.string().min(1).max(253).regex(hostnameRe, 'Invalid hostname'),
-  ipAddress: z.string().regex(ipv4Re, 'Invalid IPv4 address').refine((ip) => {
-    return ip.split('.').every((p) => { const n = Number(p); return n >= 0 && n <= 255; });
-  }, 'IP octets must be 0-255'),
-  role: z.enum(['storage', 'storage+compute', 'arbiter']).default('storage'),
-  storagePathRoot: z.string().default('/srv/fleet-storage').refine((p) => {
-    return safePathRe.test(p) && !p.includes('..');
-  }, 'Invalid storage path'),
-  capacityGb: z.number().int().optional(),
+const addNodeRoute = createRoute({
+  method: 'post',
+  path: '/nodes',
+  tags: ['Storage Admin'],
+  summary: 'Add a storage node',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(addNodeSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Storage node created'),
+  },
 });
 
-storageAdmin.post('/nodes', async (c) => {
-  const body = await c.req.json();
-  const parsed = addNodeSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+storageAdmin.openapi(addNodeRoute, (async (c: any) => {
+  const data = c.req.valid('json');
 
   const cluster = await db.query.storageClusters.findFirst();
 
   const [node] = await insertReturning(storageNodes, {
     clusterId: cluster?.id ?? null,
-    nodeId: parsed.data.nodeId ?? null,
-    hostname: parsed.data.hostname,
-    ipAddress: parsed.data.ipAddress,
-    role: parsed.data.role,
-    storagePathRoot: parsed.data.storagePathRoot,
-    capacityGb: parsed.data.capacityGb ?? null,
+    nodeId: data.nodeId ?? null,
+    hostname: data.hostname,
+    ipAddress: data.ipAddress,
+    role: data.role,
+    storagePathRoot: data.storagePathRoot,
+    capacityGb: data.capacityGb ?? null,
     status: 'pending',
   });
 
   return c.json(node, 201);
-});
+}) as any);
 
 // DELETE /nodes/:id — Remove a storage node
-storageAdmin.delete('/nodes/:id', async (c) => {
-  const nodeId = c.req.param('id');
+const deleteNodeRoute = createRoute({
+  method: 'delete',
+  path: '/nodes/{id}',
+  tags: ['Storage Admin'],
+  summary: 'Remove a storage node',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Storage node removed'),
+  },
+});
+
+storageAdmin.openapi(deleteNodeRoute, (async (c: any) => {
+  const { id: nodeId } = c.req.valid('param');
   if (!uuidRe.test(nodeId)) return c.json({ error: 'Invalid node ID' }, 400);
 
   const node = await db.query.storageNodes.findFirst({
@@ -234,23 +327,47 @@ storageAdmin.delete('/nodes/:id', async (c) => {
   await db.delete(storageNodes).where(eq(storageNodes.id, nodeId));
 
   return c.json({ message: 'Storage node removed' });
-});
+}) as any);
 
-// ── Volumes (admin view) ────────────────────────────────────────────────
+// ── Volume Routes ──
 
 // GET /volumes — List all volumes across all accounts
-storageAdmin.get('/volumes', async (c) => {
+const listVolumesRoute = createRoute({
+  method: 'get',
+  path: '/volumes',
+  tags: ['Storage Admin'],
+  summary: 'List all volumes across all accounts',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of storage volumes'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(listVolumesRoute, (async (c: any) => {
   const volumes = await db.query.storageVolumes.findMany({
     where: isNull(storageVolumes.deletedAt),
     with: { account: true },
   });
   return c.json(volumes);
-});
+}) as any);
 
-// ── Health ──────────────────────────────────────────────────────────────
+// ── Health Route ──
 
 // GET /health — Detailed storage health
-storageAdmin.get('/health', async (c) => {
+const healthRoute = createRoute({
+  method: 'get',
+  path: '/health',
+  tags: ['Storage Admin'],
+  summary: 'Get detailed storage health',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Detailed storage health information'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(healthRoute, (async (c: any) => {
   const health = await storageManager.getHealth();
   const nodes = await db.query.storageNodes.findMany();
   const cluster = await db.query.storageClusters.findFirst();
@@ -268,33 +385,39 @@ storageAdmin.get('/health', async (c) => {
       healthy: n.status === 'active',
     })),
   });
-});
+}) as any);
 
-// ── Migrations ──────────────────────────────────────────────────────────
+// ── Migration Routes ──
 
 // POST /migrate — Start a data migration
-const migrateSchema = z.object({
-  toProvider: z.enum(['local', 'glusterfs', 'ceph']),
-  toObjectProvider: z.enum(['local', 'minio', 's3', 'gcs']).optional(),
+const startMigrateRoute = createRoute({
+  method: 'post',
+  path: '/migrate',
+  tags: ['Storage Admin'],
+  summary: 'Start a data migration',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(migrateSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Migration created'),
+  },
 });
 
-storageAdmin.post('/migrate', async (c) => {
-  const body = await c.req.json();
-  const parsed = migrateSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
-  }
+storageAdmin.openapi(startMigrateRoute, (async (c: any) => {
+  const data = c.req.valid('json');
 
   const cluster = await db.query.storageClusters.findFirst();
   const fromProvider = cluster?.provider ?? 'local';
 
-  if (parsed.data.toProvider === fromProvider) {
+  if (data.toProvider === fromProvider) {
     return c.json({ error: 'Target provider is the same as current provider' }, 400);
   }
 
   const [migration] = await insertReturning(storageMigrations, {
     fromProvider,
-    toProvider: parsed.data.toProvider,
+    toProvider: data.toProvider,
     status: 'pending',
     progress: 0,
   });
@@ -309,11 +432,26 @@ storageAdmin.post('/migrate', async (c) => {
   }
 
   return c.json(migration, 201);
-});
+}) as any);
 
 // GET /migrate/:id — Get migration progress
-storageAdmin.get('/migrate/:id', async (c) => {
-  const id = c.req.param('id');
+const getMigrateRoute = createRoute({
+  method: 'get',
+  path: '/migrate/{id}',
+  tags: ['Storage Admin'],
+  summary: 'Get migration progress',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Migration progress'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(getMigrateRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
   if (!uuidRe.test(id)) return c.json({ error: 'Invalid migration ID' }, 400);
 
   const progress = await migrationService.getProgress(id);
@@ -323,11 +461,26 @@ storageAdmin.get('/migrate/:id', async (c) => {
   }
 
   return c.json(progress);
-});
+}) as any);
 
 // POST /migrate/:id/pause — Pause a running migration
-storageAdmin.post('/migrate/:id/pause', async (c) => {
-  const id = c.req.param('id');
+const pauseMigrateRoute = createRoute({
+  method: 'post',
+  path: '/migrate/{id}/pause',
+  tags: ['Storage Admin'],
+  summary: 'Pause a running migration',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Migration paused'),
+  },
+});
+
+storageAdmin.openapi(pauseMigrateRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
   if (!uuidRe.test(id)) return c.json({ error: 'Invalid migration ID' }, 400);
 
   try {
@@ -336,11 +489,26 @@ storageAdmin.post('/migrate/:id/pause', async (c) => {
   } catch (err: any) {
     return c.json({ error: err.message ?? 'Failed to pause migration' }, 400);
   }
-});
+}) as any);
 
 // POST /migrate/:id/resume — Resume a paused migration
-storageAdmin.post('/migrate/:id/resume', async (c) => {
-  const id = c.req.param('id');
+const resumeMigrateRoute = createRoute({
+  method: 'post',
+  path: '/migrate/{id}/resume',
+  tags: ['Storage Admin'],
+  summary: 'Resume a paused migration',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Migration resumed'),
+  },
+});
+
+storageAdmin.openapi(resumeMigrateRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
   if (!uuidRe.test(id)) return c.json({ error: 'Invalid migration ID' }, 400);
 
   try {
@@ -359,11 +527,26 @@ storageAdmin.post('/migrate/:id/resume', async (c) => {
   } catch (err: any) {
     return c.json({ error: err.message ?? 'Failed to resume migration' }, 400);
   }
-});
+}) as any);
 
 // POST /migrate/:id/rollback — Rollback a completed/failed migration
-storageAdmin.post('/migrate/:id/rollback', async (c) => {
-  const id = c.req.param('id');
+const rollbackMigrateRoute = createRoute({
+  method: 'post',
+  path: '/migrate/{id}/rollback',
+  tags: ['Storage Admin'],
+  summary: 'Rollback a completed or failed migration',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Migration rolled back'),
+  },
+});
+
+storageAdmin.openapi(rollbackMigrateRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
   if (!uuidRe.test(id)) return c.json({ error: 'Invalid migration ID' }, 400);
 
   try {
@@ -372,12 +555,24 @@ storageAdmin.post('/migrate/:id/rollback', async (c) => {
   } catch (err: any) {
     return c.json({ error: err.message ?? 'Failed to rollback migration' }, 400);
   }
-});
+}) as any);
 
 // GET /migrate — List all migrations
-storageAdmin.get('/migrate', async (c) => {
+const listMigrationsRoute = createRoute({
+  method: 'get',
+  path: '/migrate',
+  tags: ['Storage Admin'],
+  summary: 'List all migrations',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of migrations'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(listMigrationsRoute, (async (c: any) => {
   const migrations = await db.query.storageMigrations.findMany();
   return c.json(migrations);
-});
+}) as any);
 
 export default storageAdmin;

@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import {
   db,
   accounts,
@@ -35,6 +35,7 @@ import { logger } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 async function queueEmail(data: EmailJobData): Promise<void> {
   if (isQueueAvailable()) {
@@ -70,27 +71,353 @@ type BillingEnv = {
   };
 };
 
-const billing = new Hono<BillingEnv>();
+const billing = new OpenAPIHono<BillingEnv>();
 
 // ─── Authenticated + tenant-scoped routes ────────────────────────────────────
 
-const authed = new Hono<BillingEnv>();
+const authed = new OpenAPIHono<BillingEnv>();
 authed.use('*', authMiddleware);
 authed.use('*', tenantMiddleware);
 
+// ── Schemas ──
+
+const checkoutSchema = z.object({
+  billingModel: z.enum(['fixed', 'usage', 'hybrid']),
+  billingCycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+  planId: z.string().optional(),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+}).openapi('CheckoutRequest');
+
+const changeCycleSchema = z.object({
+  cycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+}).openapi('ChangeCycleRequest');
+
+const portalSchema = z.object({
+  returnUrl: z.string().url(),
+}).openapi('PortalRequest');
+
+const billingConfigSchema = z.object({
+  billingModel: z.enum(['fixed', 'usage', 'hybrid']).optional(),
+  allowUserChoice: z.boolean().optional(),
+  allowedCycles: z.array(z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly'])).min(1).optional(),
+  cycleDiscounts: z.record(
+    z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+    z.object({
+      type: z.enum(['fixed', 'percentage']),
+      value: z.number().min(0),
+    }),
+  ).optional(),
+  trialDays: z.number().int().min(0).optional(),
+}).openapi('BillingConfigRequest');
+
+const slugParamSchema = z.object({
+  slug: z.string().openapi({ description: 'Plan slug' }),
+});
+
+const paymentMethodIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Payment method ID' }),
+});
+
+const pricePreviewQuerySchema = z.object({
+  planId: z.string().optional(),
+  cycle: z.string().optional(),
+});
+
+const usageHistoryQuerySchema = z.object({
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+});
+
+const estimateQuerySchema = z.object({
+  billingModel: z.string().optional(),
+  planId: z.string().optional(),
+  cycle: z.string().optional(),
+});
+
+// ── Route definitions ──
+
+const listPlansRoute = createRoute({
+  method: 'get',
+  path: '/plans',
+  tags: ['Billing'],
+  summary: 'List all visible billing plans',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of billing plans'),
+    ...standardErrors,
+  },
+});
+
+const getPlanRoute = createRoute({
+  method: 'get',
+  path: '/plans/{slug}',
+  tags: ['Billing'],
+  summary: 'Get a specific plan by slug',
+  security: bearerSecurity,
+  request: {
+    params: slugParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Plan details'),
+    ...standardErrors,
+  },
+});
+
+const checkoutRoute = createRoute({
+  method: 'post',
+  path: '/checkout',
+  tags: ['Billing'],
+  summary: 'Create a Stripe Checkout session',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: {
+    body: jsonBody(checkoutSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Checkout session'),
+    ...standardErrors,
+  },
+});
+
+const getSubscriptionRoute = createRoute({
+  method: 'get',
+  path: '/subscription',
+  tags: ['Billing'],
+  summary: 'Get current subscription for the account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Subscription details'),
+    ...standardErrors,
+  },
+});
+
+const changeCycleRoute = createRoute({
+  method: 'patch',
+  path: '/subscription/cycle',
+  tags: ['Billing'],
+  summary: 'Change billing cycle',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: {
+    body: jsonBody(changeCycleSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ message: z.string(), cycle: z.string() }), 'Cycle updated'),
+    ...standardErrors,
+  },
+});
+
+const cancelSubscriptionRoute = createRoute({
+  method: 'delete',
+  path: '/subscription',
+  tags: ['Billing'],
+  summary: 'Cancel subscription at period end',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Subscription cancellation confirmed'),
+    ...standardErrors,
+  },
+});
+
+const getUsageRoute = createRoute({
+  method: 'get',
+  path: '/usage',
+  tags: ['Billing'],
+  summary: 'Get usage summary with cost estimates',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Usage summary'),
+    ...standardErrors,
+  },
+});
+
+const getUsageHistoryRoute = createRoute({
+  method: 'get',
+  path: '/usage/history',
+  tags: ['Billing'],
+  summary: 'Get paginated usage records',
+  security: bearerSecurity,
+  request: {
+    query: usageHistoryQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Usage records'),
+    ...standardErrors,
+  },
+});
+
+const getInvoicesRoute = createRoute({
+  method: 'get',
+  path: '/invoices',
+  tags: ['Billing'],
+  summary: 'Get invoice history from Stripe',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Invoice list'),
+    ...standardErrors,
+  },
+});
+
+const createPortalRoute = createRoute({
+  method: 'post',
+  path: '/portal',
+  tags: ['Billing'],
+  summary: 'Create a Stripe customer billing portal session',
+  security: bearerSecurity,
+  middleware: [requireOwner] as const,
+  request: {
+    body: jsonBody(portalSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ url: z.string() }), 'Portal session URL'),
+    ...standardErrors,
+  },
+});
+
+const getPaymentMethodsRoute = createRoute({
+  method: 'get',
+  path: '/payment-methods',
+  tags: ['Billing'],
+  summary: 'List payment methods for the account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Payment methods'),
+    ...standardErrors,
+  },
+});
+
+const setupPaymentMethodRoute = createRoute({
+  method: 'post',
+  path: '/payment-methods/setup',
+  tags: ['Billing'],
+  summary: 'Create a setup intent for adding a new payment method',
+  security: bearerSecurity,
+  middleware: [requireOwner] as const,
+  responses: {
+    200: jsonContent(z.object({ clientSecret: z.string().nullable() }), 'Setup intent client secret'),
+    ...standardErrors,
+  },
+});
+
+const setDefaultPaymentMethodRoute = createRoute({
+  method: 'patch',
+  path: '/payment-methods/{id}/default',
+  tags: ['Billing'],
+  summary: 'Set a payment method as default',
+  security: bearerSecurity,
+  middleware: [requireOwner] as const,
+  request: {
+    params: paymentMethodIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Default payment method updated'),
+    ...standardErrors,
+  },
+});
+
+const deletePaymentMethodRoute = createRoute({
+  method: 'delete',
+  path: '/payment-methods/{id}',
+  tags: ['Billing'],
+  summary: 'Remove a payment method',
+  security: bearerSecurity,
+  middleware: [requireOwner] as const,
+  request: {
+    params: paymentMethodIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Payment method removed'),
+    ...standardErrors,
+  },
+});
+
+const getConfigRoute = createRoute({
+  method: 'get',
+  path: '/config',
+  tags: ['Billing'],
+  summary: 'Get billing configuration',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Billing configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateConfigRoute = createRoute({
+  method: 'patch',
+  path: '/config',
+  tags: ['Billing'],
+  summary: 'Update platform billing configuration (super admin only)',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(billingConfigSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Updated billing configuration'),
+    201: jsonContent(z.any(), 'Created billing configuration'),
+  },
+});
+
+const pricePreviewRoute = createRoute({
+  method: 'get',
+  path: '/price-preview',
+  tags: ['Billing'],
+  summary: 'Calculate price for a specific plan and cycle',
+  security: bearerSecurity,
+  request: {
+    query: pricePreviewQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Price preview'),
+    ...standardErrors,
+  },
+});
+
+const estimateRoute = createRoute({
+  method: 'get',
+  path: '/estimate',
+  tags: ['Billing'],
+  summary: 'Cost estimate based on current usage for a plan and cycle',
+  security: bearerSecurity,
+  request: {
+    query: estimateQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Cost estimate'),
+    ...standardErrors,
+  },
+});
+
+const resourceLimitsRoute = createRoute({
+  method: 'get',
+  path: '/resource-limits',
+  tags: ['Billing'],
+  summary: 'Get effective resource limits for this account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Resource limits'),
+    ...standardErrors,
+  },
+});
+
+// ── Handlers ──
+
 // GET /plans — list all visible billing plans
-authed.get('/plans', async (c) => {
+authed.openapi(listPlansRoute, (async (c: any) => {
   const plans = await db.query.billingPlans.findMany({
     where: eq(billingPlans.visible, true),
-    orderBy: (p, { asc }) => asc(p.sortOrder),
+    orderBy: (p: any, { asc }: any) => asc(p.sortOrder),
   });
 
   return c.json(plans);
-});
+}) as any);
 
 // GET /plans/:slug — get a specific plan by slug
-authed.get('/plans/:slug', async (c) => {
-  const slug = c.req.param('slug');
+authed.openapi(getPlanRoute, (async (c: any) => {
+  const { slug } = c.req.valid('param');
   const plan = await db.query.billingPlans.findFirst({
     where: and(eq(billingPlans.slug, slug), eq(billingPlans.visible, true)),
   });
@@ -100,30 +427,16 @@ authed.get('/plans/:slug', async (c) => {
   }
 
   return c.json(plan);
-});
+}) as any);
 
 // POST /checkout — create a Stripe Checkout session
-const checkoutSchema = z.object({
-  billingModel: z.enum(['fixed', 'usage', 'hybrid']),
-  billingCycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
-  planId: z.string().optional(),
-  successUrl: z.string().url(),
-  cancelUrl: z.string().url(),
-});
-
-authed.post('/checkout', requireOwner, requireScope('admin'), async (c) => {
+authed.openapi(checkoutRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = checkoutSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { billingModel, billingCycle, planId, successUrl, cancelUrl } = parsed.data;
+  const { billingModel, billingCycle, planId, successUrl, cancelUrl } = c.req.valid('json');
 
   if (billingModel === 'usage' || billingModel === 'hybrid') {
     return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
@@ -171,10 +484,10 @@ authed.post('/checkout', requireOwner, requireScope('admin'), async (c) => {
     logger.error({ err }, 'Failed to create checkout session');
     return c.json({ error: 'Checkout failed' }, 400);
   }
-});
+}) as any);
 
 // GET /subscription — current subscription for the account
-authed.get('/subscription', async (c) => {
+authed.openapi(getSubscriptionRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -183,7 +496,7 @@ authed.get('/subscription', async (c) => {
   const sub = await db.query.subscriptions.findFirst({
     where: eq(subscriptions.accountId, accountId),
     with: { plan: true },
-    orderBy: (s, { desc: d }) => d(s.createdAt),
+    orderBy: (s: any, { desc: d }: any) => d(s.createdAt),
   });
 
   if (!sub) {
@@ -201,26 +514,16 @@ authed.get('/subscription', async (c) => {
   }
 
   return c.json({ ...sub, stripeData });
-});
+}) as any);
 
 // PATCH /subscription/cycle — change billing cycle
-const changeCycleSchema = z.object({
-  cycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
-});
-
-authed.patch('/subscription/cycle', requireOwner, requireScope('admin'), async (c) => {
+authed.openapi(changeCycleRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = changeCycleSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { cycle } = parsed.data;
+  const { cycle } = c.req.valid('json');
 
   const config = await db.query.billingConfig.findFirst();
   const allowedCycles = (config?.allowedCycles ?? ['monthly', 'yearly']) as string[];
@@ -241,10 +544,10 @@ authed.patch('/subscription/cycle', requireOwner, requireScope('admin'), async (
     .where(eq(subscriptions.id, sub.id));
 
   return c.json({ message: 'Billing cycle updated', cycle });
-});
+}) as any);
 
 // DELETE /subscription — cancel subscription at period end
-authed.delete('/subscription', requireOwner, requireScope('admin'), async (c) => {
+authed.openapi(cancelSubscriptionRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -276,10 +579,10 @@ authed.delete('/subscription', requireOwner, requireScope('admin'), async (c) =>
   // Suspension happens when Stripe fires customer.subscription.deleted webhook.
 
   return c.json({ message: 'Subscription will cancel at end of billing period' });
-});
+}) as any);
 
 // GET /usage — usage summary with cost estimates
-authed.get('/usage', async (c) => {
+authed.openapi(getUsageRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -302,30 +605,31 @@ authed.get('/usage', async (c) => {
     runningContainers: runningCount?.count ?? 0,
     totalContainers: totalCount?.count ?? 0,
   });
-});
+}) as any);
 
 // GET /usage/history — paginated usage records
-authed.get('/usage/history', async (c) => {
+authed.openapi(getUsageHistoryRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const limit = Math.min(Number(c.req.query('limit') ?? 50), 100);
-  const offset = Number(c.req.query('offset') ?? 0);
+  const query = c.req.valid('query');
+  const limit = Math.min(Number(query.limit ?? 50), 100);
+  const offset = Number(query.offset ?? 0);
 
   const records = await db.query.usageRecords.findMany({
     where: eq(usageRecords.accountId, accountId),
-    orderBy: (u, { desc: d }) => d(u.recordedAt),
+    orderBy: (u: any, { desc: d }: any) => d(u.recordedAt),
     limit,
     offset,
   });
 
   return c.json(records);
-});
+}) as any);
 
 // GET /invoices — invoice history from Stripe
-authed.get('/invoices', async (c) => {
+authed.openapi(getInvoicesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -341,7 +645,7 @@ authed.get('/invoices', async (c) => {
 
   try {
     const result = await stripeService.listInvoices(account.stripeCustomerId);
-    const invoices = result.data.map((inv) => ({
+    const invoices = result.data.map((inv: any) => ({
       id: inv.id,
       amount: inv.amount_due,
       currency: inv.currency,
@@ -354,27 +658,19 @@ authed.get('/invoices', async (c) => {
     logger.error({ err }, 'Failed to fetch invoices from Stripe');
     return c.json({ error: 'Failed to fetch invoices' }, 500);
   }
-});
+}) as any);
 
 // POST /portal — create a Stripe customer billing portal session
-const portalSchema = z.object({
-  returnUrl: z.string().url(),
-});
-
-authed.post('/portal', requireOwner, async (c) => {
+authed.openapi(createPortalRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = portalSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const { returnUrl } = c.req.valid('json');
 
   // Validate return URL against APP_URL to prevent open redirects
-  if (!validateRedirectUrl(parsed.data.returnUrl)) {
+  if (!validateRedirectUrl(returnUrl)) {
     return c.json({ error: 'Invalid return URL: must match application origin' }, 400);
   }
 
@@ -388,14 +684,14 @@ authed.post('/portal', requireOwner, async (c) => {
 
   const session = await stripeService.createPortalSession(
     account.stripeCustomerId,
-    parsed.data.returnUrl,
+    returnUrl,
   );
 
   return c.json({ url: session.url });
-});
+}) as any);
 
 // GET /payment-methods — list payment methods for the account
-authed.get('/payment-methods', async (c) => {
+authed.openapi(getPaymentMethodsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -416,7 +712,7 @@ authed.get('/payment-methods', async (c) => {
     ]);
 
     return c.json({
-      methods: methods.data.map((pm) => ({
+      methods: methods.data.map((pm: any) => ({
         id: pm.id,
         brand: pm.card?.brand ?? 'unknown',
         last4: pm.card?.last4 ?? '****',
@@ -429,10 +725,10 @@ authed.get('/payment-methods', async (c) => {
     logger.error({ err }, 'Failed to fetch payment methods');
     return c.json({ error: 'Failed to fetch payment methods' }, 500);
   }
-});
+}) as any);
 
 // POST /payment-methods/setup — create a setup intent for adding a new payment method
-authed.post('/payment-methods/setup', requireOwner, async (c) => {
+authed.openapi(setupPaymentMethodRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -453,12 +749,12 @@ authed.post('/payment-methods/setup', requireOwner, async (c) => {
     logger.error({ err }, 'Failed to create setup intent');
     return c.json({ error: 'Failed to create setup intent' }, 500);
   }
-});
+}) as any);
 
 // PATCH /payment-methods/:id/default — set a payment method as default
-authed.patch('/payment-methods/:id/default', requireOwner, async (c) => {
+authed.openapi(setDefaultPaymentMethodRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const paymentMethodId = c.req.param('id');
+  const { id: paymentMethodId } = c.req.valid('param');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
@@ -478,11 +774,11 @@ authed.patch('/payment-methods/:id/default', requireOwner, async (c) => {
     logger.error({ err }, 'Failed to set default payment method');
     return c.json({ error: 'Failed to update default payment method' }, 500);
   }
-});
+}) as any);
 
 // DELETE /payment-methods/:id — remove a payment method
-authed.delete('/payment-methods/:id', requireOwner, async (c) => {
-  const paymentMethodId = c.req.param('id');
+authed.openapi(deletePaymentMethodRoute, (async (c: any) => {
+  const { id: paymentMethodId } = c.req.valid('param');
   const accountId = c.get('accountId');
 
   // Verify the payment method belongs to this account's Stripe customer
@@ -505,10 +801,10 @@ authed.delete('/payment-methods/:id', requireOwner, async (c) => {
     logger.error({ err }, 'Failed to detach payment method');
     return c.json({ error: 'Failed to remove payment method' }, 500);
   }
-});
+}) as any);
 
 // GET /config — billing configuration (public for end users)
-authed.get('/config', async (c) => {
+authed.openapi(getConfigRoute, (async (c: any) => {
   const config = await db.query.billingConfig.findFirst();
   const pricing = await db.query.pricingConfig.findFirst();
   const locations = await db.query.locationMultipliers.findMany();
@@ -527,42 +823,22 @@ authed.get('/config', async (c) => {
       containerCentsPerHour: pricing.containerCentsPerHour ?? 0,
       locationPricingEnabled: pricing.locationPricingEnabled ?? false,
     } : null,
-    locations: locations.map((l) => ({
+    locations: locations.map((l: any) => ({
       locationKey: l.locationKey,
       label: l.label,
       multiplier: l.multiplier,
     })),
   });
-});
+}) as any);
 
 // PATCH /config — update platform billing configuration (super admin only)
-const billingConfigSchema = z.object({
-  billingModel: z.enum(['fixed', 'usage', 'hybrid']).optional(),
-  allowUserChoice: z.boolean().optional(),
-  allowedCycles: z.array(z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly'])).min(1).optional(),
-  cycleDiscounts: z.record(
-    z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
-    z.object({
-      type: z.enum(['fixed', 'percentage']),
-      value: z.number().min(0),
-    }),
-  ).optional(),
-  trialDays: z.number().int().min(0).optional(),
-});
-
-authed.patch('/config', async (c) => {
+authed.openapi(updateConfigRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Super user access required' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = billingConfigSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   if (data.billingModel === 'usage' || data.billingModel === 'hybrid') {
     return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
@@ -587,12 +863,13 @@ authed.patch('/config', async (c) => {
   });
 
   return c.json(created, 201);
-});
+}) as any);
 
 // GET /price-preview — calculate price for a specific cycle
-authed.get('/price-preview', async (c) => {
-  const planId = c.req.query('planId');
-  const cycle = c.req.query('cycle') as string | undefined;
+authed.openapi(pricePreviewRoute, (async (c: any) => {
+  const query = c.req.valid('query');
+  const planId = query.planId;
+  const cycle = query.cycle as string | undefined;
 
   if (!planId || !cycle) {
     return c.json({ error: 'planId and cycle are required' }, 400);
@@ -670,18 +947,19 @@ authed.get('/price-preview', async (c) => {
     resellerMarkup,
     finalPrice,
   });
-});
+}) as any);
 
 // GET /estimate — cost estimate based on current usage for a plan+cycle
-authed.get('/estimate', async (c) => {
+authed.openapi(estimateRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const billingModel = c.req.query('billingModel') ?? 'fixed';
-  const planId = c.req.query('planId');
-  const cycle = c.req.query('cycle') ?? 'monthly';
+  const query = c.req.valid('query');
+  const billingModel = query.billingModel ?? 'fixed';
+  const planId = query.planId;
+  const cycle = query.cycle ?? 'monthly';
 
   const usageSummary = await usageService.getAccountUsageSummary(accountId);
 
@@ -710,10 +988,10 @@ authed.get('/estimate', async (c) => {
         : fixedCostCents + usageSummary.estimatedCostCents,
     usageBreakdown: usageSummary.breakdown,
   });
-});
+}) as any);
 
 // GET /resource-limits — effective resource limits for this account
-authed.get('/resource-limits', async (c) => {
+authed.openapi(resourceLimitsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   const global = await db.query.resourceLimits.findFirst({
@@ -736,7 +1014,7 @@ authed.get('/resource-limits', async (c) => {
     maxBandwidthGb: override?.maxBandwidthGb ?? global?.maxBandwidthGb ?? null,
     maxNfsStorageGb: override?.maxNfsStorageGb ?? global?.maxNfsStorageGb ?? null,
   });
-});
+}) as any);
 
 // ─── Service suspension helper ────────────────────────────────────────────────
 
@@ -761,6 +1039,7 @@ async function suspendAccountServices(accountId: string) {
 }
 
 // ─── Webhook route (unauthenticated, signature-verified) ─────────────────────
+// Kept as plain .post() because it reads the raw body via c.req.text()
 
 billing.post('/webhook', async (c) => {
   const signature = c.req.header('stripe-signature');

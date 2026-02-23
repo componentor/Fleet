@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { backupService } from '../services/backup.service.js';
@@ -8,10 +8,11 @@ import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const backupRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'backup' });
 
-const backupRoutes = new Hono<{
+const backupRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -23,14 +24,31 @@ backupRoutes.use('*', authMiddleware);
 backupRoutes.use('*', tenantMiddleware);
 
 // GET / — list backups for account
-backupRoutes.get('/', async (c) => {
+const listBackupsRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Backups'],
+  summary: 'List backups for the current account',
+  security: bearerSecurity,
+  request: {
+    query: z.object({
+      serviceId: z.string().uuid().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'List of backups'),
+    ...standardErrors,
+  },
+});
+
+backupRoutes.openapi(listBackupsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const serviceId = c.req.query('serviceId');
+  const { serviceId } = c.req.valid('query');
 
   const result = await backupService.listBackups(
     accountId,
@@ -38,7 +56,7 @@ backupRoutes.get('/', async (c) => {
   );
 
   return c.json(result);
-});
+}) as any);
 
 // POST / — create manual backup
 const createBackupSchema = z.object({
@@ -46,31 +64,47 @@ const createBackupSchema = z.object({
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
 });
 
-backupRoutes.post('/', backupRateLimit, requireMember, async (c) => {
+const createBackupRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Backups'],
+  summary: 'Create a manual backup',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(createBackupSchema),
+  },
+  responses: {
+    201: jsonContent(z.object({
+      id: z.string(),
+      status: z.string(),
+      storagePath: z.string().nullable(),
+      sizeBytes: z.string(),
+    }), 'Backup created'),
+    ...standardErrors,
+  },
+  middleware: [backupRateLimit, requireMember],
+});
+
+backupRoutes.openapi(createBackupRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = createBackupSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   try {
     const backup = await backupService.createBackup(
       accountId,
-      parsed.data.serviceId,
-      parsed.data.storageBackend,
+      data.serviceId,
+      data.storageBackend,
     );
 
     eventService.log({
       ...eventContext(c),
       eventType: EventTypes.BACKUP_CREATED,
-      description: `Created backup for '${parsed.data.serviceId ?? 'account'}'`,
+      description: `Created backup for '${data.serviceId ?? 'account'}'`,
       resourceType: 'backup',
       resourceId: backup.id,
     });
@@ -85,20 +119,37 @@ backupRoutes.post('/', backupRateLimit, requireMember, async (c) => {
     logger.error({ err }, 'Backup creation failed');
     return c.json({ error: 'Failed to create backup' }, 500);
   }
+}) as any);
+
+// GET /schedules — list backup schedules
+const listSchedulesRoute = createRoute({
+  method: 'get',
+  path: '/schedules',
+  tags: ['Backups'],
+  summary: 'List backup schedules',
+  security: bearerSecurity,
+  request: {
+    query: z.object({
+      serviceId: z.string().uuid().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'List of backup schedules'),
+    ...standardErrors,
+  },
 });
 
-// GET /schedules — list backup schedules (placed before /:id to avoid conflict)
-backupRoutes.get('/schedules', async (c) => {
+backupRoutes.openapi(listSchedulesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const serviceId = c.req.query('serviceId');
+  const { serviceId } = c.req.valid('query');
   const schedules = await backupService.listSchedules(accountId, serviceId ?? undefined);
   return c.json(schedules);
-});
+}) as any);
 
 // POST /schedules — create backup schedule
 const createScheduleSchema = z.object({
@@ -109,24 +160,35 @@ const createScheduleSchema = z.object({
   storageBackend: z.enum(['nfs', 'local']).default('nfs'),
 });
 
-backupRoutes.post('/schedules', backupRateLimit, requireMember, async (c) => {
+const createScheduleRoute = createRoute({
+  method: 'post',
+  path: '/schedules',
+  tags: ['Backups'],
+  summary: 'Create a backup schedule',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(createScheduleSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Schedule created'),
+    ...standardErrors,
+  },
+  middleware: [backupRateLimit, requireMember],
+});
+
+backupRoutes.openapi(createScheduleRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = createScheduleSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   try {
     const schedule = await backupService.createSchedule({
       accountId,
-      ...parsed.data,
+      ...data,
     });
 
     await schedulerService.onScheduleCreated(schedule.id);
@@ -136,7 +198,7 @@ backupRoutes.post('/schedules', backupRateLimit, requireMember, async (c) => {
     logger.error({ err }, 'Schedule creation failed');
     return c.json({ error: 'Failed to create schedule' }, 500);
   }
-});
+}) as any);
 
 // PATCH /schedules/:id — update backup schedule
 const updateScheduleSchema = z.object({
@@ -147,25 +209,37 @@ const updateScheduleSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-backupRoutes.patch('/schedules/:id', requireMember, async (c) => {
+const updateScheduleRoute = createRoute({
+  method: 'patch',
+  path: '/schedules/{id}',
+  tags: ['Backups'],
+  summary: 'Update a backup schedule',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+    body: jsonBody(updateScheduleSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Schedule updated'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+backupRoutes.openapi(updateScheduleRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const scheduleId = c.req.param('id');
+  const { id: scheduleId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = updateScheduleSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   const updated = await backupService.updateSchedule(
     scheduleId,
     accountId,
-    parsed.data,
+    data,
   );
 
   if (!updated) {
@@ -175,12 +249,28 @@ backupRoutes.patch('/schedules/:id', requireMember, async (c) => {
   await schedulerService.onScheduleUpdated(scheduleId);
 
   return c.json(updated);
-});
+}) as any);
 
 // DELETE /schedules/:id — delete backup schedule
-backupRoutes.delete('/schedules/:id', requireMember, async (c) => {
+const deleteScheduleRoute = createRoute({
+  method: 'delete',
+  path: '/schedules/{id}',
+  tags: ['Backups'],
+  summary: 'Delete a backup schedule',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Schedule deleted'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+backupRoutes.openapi(deleteScheduleRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const scheduleId = c.req.param('id');
+  const { id: scheduleId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -195,12 +285,33 @@ backupRoutes.delete('/schedules/:id', requireMember, async (c) => {
   schedulerService.onScheduleDeleted(scheduleId);
 
   return c.json({ message: 'Schedule deleted' });
-});
+}) as any);
 
 // POST /schedules/:id/run — manually trigger a scheduled backup
-backupRoutes.post('/schedules/:id/run', requireMember, async (c) => {
+const runScheduleRoute = createRoute({
+  method: 'post',
+  path: '/schedules/{id}/run',
+  tags: ['Backups'],
+  summary: 'Manually trigger a scheduled backup',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    201: jsonContent(z.object({
+      id: z.string(),
+      status: z.string(),
+      storagePath: z.string().nullable(),
+      sizeBytes: z.string(),
+    }), 'Backup triggered'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+backupRoutes.openapi(runScheduleRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const scheduleId = c.req.param('id');
+  const { id: scheduleId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -224,12 +335,27 @@ backupRoutes.post('/schedules/:id/run', requireMember, async (c) => {
     logger.error({ err }, 'Scheduled backup trigger failed');
     return c.json({ error: 'Failed to trigger backup' }, 500);
   }
-});
+}) as any);
 
 // GET /:id — backup details
-backupRoutes.get('/:id', async (c) => {
+const getBackupRoute = createRoute({
+  method: 'get',
+  path: '/{id}',
+  tags: ['Backups'],
+  summary: 'Get backup details',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Backup details'),
+    ...standardErrors,
+  },
+});
+
+backupRoutes.openapi(getBackupRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const backupId = c.req.param('id');
+  const { id: backupId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -245,12 +371,28 @@ backupRoutes.get('/:id', async (c) => {
     ...backup,
     sizeBytes: backup.sizeBytes?.toString() ?? '0',
   });
-});
+}) as any);
 
 // DELETE /:id — delete backup
-backupRoutes.delete('/:id', requireMember, async (c) => {
+const deleteBackupRoute = createRoute({
+  method: 'delete',
+  path: '/{id}',
+  tags: ['Backups'],
+  summary: 'Delete a backup',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Backup deleted'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+backupRoutes.openapi(deleteBackupRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const backupId = c.req.param('id');
+  const { id: backupId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -277,12 +419,28 @@ backupRoutes.delete('/:id', requireMember, async (c) => {
   });
 
   return c.json({ message: 'Backup deleted' });
-});
+}) as any);
 
 // POST /:id/restore — restore from backup
-backupRoutes.post('/:id/restore', requireMember, async (c) => {
+const restoreBackupRoute = createRoute({
+  method: 'post',
+  path: '/{id}/restore',
+  tags: ['Backups'],
+  summary: 'Restore from a backup',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Backup restored'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+backupRoutes.openapi(restoreBackupRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const backupId = c.req.param('id');
+  const { id: backupId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -319,6 +477,6 @@ backupRoutes.post('/:id/restore', requireMember, async (c) => {
     logger.error({ err }, 'Backup restore failed');
     return c.json({ error: 'Failed to restore backup' }, 500);
   }
-});
+}) as any);
 
 export default backupRoutes;

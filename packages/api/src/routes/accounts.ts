@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { verify } from 'argon2';
 import { db, accounts, userAccounts, users, services, auditLog, insertReturning, updateReturning, deleteReturning, countSql, eq, like, and, or, isNull, isNotNull, desc, gte, lte, safeTransaction } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
@@ -13,6 +13,7 @@ import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 async function queueEmail(data: EmailJobData): Promise<void> {
   if (isQueueAvailable()) {
@@ -23,7 +24,7 @@ async function queueEmail(data: EmailJobData): Promise<void> {
   }
 }
 
-const accountRoutes = new Hono<{
+const accountRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -40,17 +41,342 @@ function slugify(text: string): string {
     .replace(/^-|-$/g, '');
 }
 
+// ── Schemas ──
+
+const createAccountSchema = z.object({
+  name: z.string().min(1).max(255),
+  slug: z.string().min(1).max(255).optional(),
+  parentId: z.string().uuid().optional(),
+  trustRevocable: z.boolean().optional(),
+}).openapi('CreateAccountRequest');
+
+const updateAccountSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  trustRevocable: z.boolean().optional(),
+  status: z.enum(['active', 'suspended', 'pending']).optional(),
+}).openapi('UpdateAccountRequest');
+
+const deleteAccountSchema = z.object({
+  password: z.string().min(1),
+}).openapi('DeleteAccountRequest');
+
+const inviteMemberSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(['admin', 'member', 'viewer']).default('member'),
+}).openapi('InviteMemberRequest');
+
+const changeMemberRoleSchema = z.object({
+  role: z.enum(['owner', 'admin', 'member', 'viewer']),
+}).openapi('ChangeMemberRoleRequest');
+
+const idParamSchema = z.object({
+  id: z.string().openapi({ description: 'Account ID' }),
+});
+
+const idAndUserIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Account ID' }),
+  userId: z.string().openapi({ description: 'User ID' }),
+});
+
+const idAndChildIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Account ID' }),
+  childId: z.string().openapi({ description: 'Child account ID' }),
+});
+
+const activityQuerySchema = z.object({
+  page: z.string().optional(),
+  limit: z.string().optional(),
+  resourceType: z.string().optional(),
+  eventType: z.string().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  search: z.string().optional(),
+});
+
+// ── Route definitions ──
+
+const listAccountsRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Accounts'],
+  summary: 'List accounts the current user has access to',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of accounts'),
+    ...standardErrors,
+  },
+});
+
+const createAccountRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Accounts'],
+  summary: 'Create a sub-account',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(createAccountSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Created account'),
+    ...standardErrors,
+  },
+});
+
+const getAccountRoute = createRoute({
+  method: 'get',
+  path: '/{id}',
+  tags: ['Accounts'],
+  summary: 'Get account details',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware, cache(60)] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Account details'),
+    ...standardErrors,
+  },
+});
+
+const updateAccountRoute = createRoute({
+  method: 'patch',
+  path: '/{id}',
+  tags: ['Accounts'],
+  summary: 'Update account',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware, requireAdmin] as const,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(updateAccountSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated account'),
+    ...standardErrors,
+  },
+});
+
+const deleteAccountRoute = createRoute({
+  method: 'delete',
+  path: '/{id}',
+  tags: ['Accounts'],
+  summary: 'Schedule account for deletion (30-day grace period)',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(deleteAccountSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ message: z.string(), scheduledDeletionAt: z.string() }), 'Account scheduled for deletion'),
+    ...standardErrors,
+  },
+});
+
+const revokeDeletionRoute = createRoute({
+  method: 'post',
+  path: '/{id}/revoke-deletion',
+  tags: ['Accounts'],
+  summary: 'Cancel scheduled account deletion',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Deletion revoked'),
+    ...standardErrors,
+  },
+});
+
+const getAccountTreeRoute = createRoute({
+  method: 'get',
+  path: '/{id}/tree',
+  tags: ['Accounts'],
+  summary: 'Get full descendant tree',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Account tree'),
+    ...standardErrors,
+  },
+});
+
+const disconnectAccountRoute = createRoute({
+  method: 'post',
+  path: '/{id}/disconnect',
+  tags: ['Accounts'],
+  summary: 'Disconnect account from parent',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware, requireOwner] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Disconnected from parent'),
+    ...standardErrors,
+  },
+});
+
+const releaseChildRoute = createRoute({
+  method: 'post',
+  path: '/{id}/release/{childId}',
+  tags: ['Accounts'],
+  summary: 'Release a child account from parent',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware, requireOwner] as const,
+  request: {
+    params: idAndChildIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Child account released'),
+    ...standardErrors,
+  },
+});
+
+const impersonateAccountRoute = createRoute({
+  method: 'post',
+  path: '/{id}/impersonate',
+  tags: ['Accounts'],
+  summary: 'Super user enters account panel',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({
+      token: z.string(),
+      accountId: z.string(),
+      name: z.string().nullable(),
+      slug: z.string().nullable(),
+    }), 'Impersonation tokens'),
+    ...standardErrors,
+  },
+});
+
+const listMembersRoute = createRoute({
+  method: 'get',
+  path: '/{id}/members',
+  tags: ['Accounts'],
+  summary: 'List members of the account',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of members'),
+    ...standardErrors,
+  },
+});
+
+const inviteMemberRoute = createRoute({
+  method: 'post',
+  path: '/{id}/members',
+  tags: ['Accounts'],
+  summary: 'Invite a user to the account',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(inviteMemberSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Member added'),
+    ...standardErrors,
+  },
+});
+
+const changeMemberRoleRoute = createRoute({
+  method: 'patch',
+  path: '/{id}/members/{userId}',
+  tags: ['Accounts'],
+  summary: 'Change member role',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idAndUserIdParamSchema,
+    body: jsonBody(changeMemberRoleSchema),
+  },
+  responses: {
+    200: jsonContent(z.object({ message: z.string(), role: z.string() }), 'Role updated'),
+    ...standardErrors,
+  },
+});
+
+const removeMemberRoute = createRoute({
+  method: 'delete',
+  path: '/{id}/members/{userId}',
+  tags: ['Accounts'],
+  summary: 'Remove member from account',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idAndUserIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Member removed'),
+    ...standardErrors,
+  },
+});
+
+const getMyRoleRoute = createRoute({
+  method: 'get',
+  path: '/{id}/my-role',
+  tags: ['Accounts'],
+  summary: 'Get current user role in this account',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ role: z.string() }), 'User role in account'),
+    ...standardErrors,
+  },
+});
+
+const getActivityRoute = createRoute({
+  method: 'get',
+  path: '/{id}/activity',
+  tags: ['Accounts'],
+  summary: 'Account-scoped audit log with filtering',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+    query: activityQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.object({
+      data: z.array(z.any()),
+      pagination: z.object({
+        page: z.number(),
+        limit: z.number(),
+        total: z.number(),
+        totalPages: z.number(),
+      }),
+    }), 'Paginated audit log'),
+    ...standardErrors,
+  },
+});
+
+// ── Route handlers ──
+
 // GET / — list accounts the current user has access to
-accountRoutes.get('/', async (c) => {
+accountRoutes.openapi(listAccountsRoute, (async (c: any) => {
   const user = c.get('user');
 
   if (user.isSuper) {
     const allAccounts = await db.query.accounts.findMany({
       where: isNull(accounts.deletedAt),
-      orderBy: (a, { asc }) => asc(a.path),
+      orderBy: (a: any, { asc }: any) => asc(a.path),
       limit: 500,
     });
-    const sanitized = allAccounts.map(({ stripeCustomerId, ...rest }) => rest);
+    const sanitized = allAccounts.map(({ stripeCustomerId, ...rest }: any) => rest);
     return c.json(sanitized);
   }
 
@@ -59,31 +385,19 @@ accountRoutes.get('/', async (c) => {
     with: { account: true },
   });
 
-  return c.json(memberships.map((m) => {
+  return c.json(memberships.map((m: any) => {
     const { stripeCustomerId, ...rest } = m.account;
     return { ...rest, role: m.role };
   }));
-});
+}) as any);
 
 // POST / — create a sub-account
-const createAccountSchema = z.object({
-  name: z.string().min(1).max(255),
-  slug: z.string().min(1).max(255).optional(),
-  parentId: z.string().uuid().optional(),
-  trustRevocable: z.boolean().optional(),
-});
-
-accountRoutes.post('/', async (c) => {
+accountRoutes.openapi(createAccountRoute, (async (c: any) => {
   const user = c.get('user');
-  const body = await c.req.json();
-  const parsed = createAccountSchema.safeParse(body);
+  const data = c.req.valid('json');
 
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { name, trustRevocable } = parsed.data;
-  let { parentId } = parsed.data;
+  const { name, trustRevocable } = data;
+  let { parentId } = data;
 
   if (!parentId) {
     parentId = c.req.header('X-Account-Id') ?? undefined;
@@ -108,7 +422,7 @@ accountRoutes.post('/', async (c) => {
 
     if (!user.isSuper) {
       const membership = await db.query.userAccounts.findFirst({
-        where: (ua, { and, eq: e }) =>
+        where: (ua: any, { and, eq: e }: any) =>
           and(e(ua.userId, user.userId), e(ua.accountId, parentId!)),
       });
 
@@ -121,7 +435,7 @@ accountRoutes.post('/', async (c) => {
     depth = (parent.depth ?? 0) + 1;
   }
 
-  const slug = parsed.data.slug ?? slugify(name) + '-' + Date.now().toString(36);
+  const slug = data.slug ?? slugify(name) + '-' + Date.now().toString(36);
   const path = parentPath ? `${parentPath}.${slug}` : slug;
 
   const existingSlug = await db.query.accounts.findFirst({
@@ -170,10 +484,10 @@ accountRoutes.post('/', async (c) => {
   });
 
   return c.json(account, 201);
-});
+}) as any);
 
 // GET /:id — get account details
-accountRoutes.get('/:id', tenantMiddleware, cache(60), async (c) => {
+accountRoutes.openapi(getAccountRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -184,42 +498,30 @@ accountRoutes.get('/:id', tenantMiddleware, cache(60), async (c) => {
   });
 
   if (fullAccount) {
-    const { stripeCustomerId, ...rest } = fullAccount;
+    const { stripeCustomerId, ...rest } = fullAccount as any;
     return c.json(rest);
   }
 
   return c.json(fullAccount);
-});
+}) as any);
 
 // PATCH /:id — update account
-accountRoutes.patch('/:id', tenantMiddleware, requireAdmin, async (c) => {
+accountRoutes.openapi(updateAccountRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
   }
 
-  const updateSchema = z.object({
-    name: z.string().min(1).max(255).optional(),
-    trustRevocable: z.boolean().optional(),
-    status: z.enum(['active', 'suspended', 'pending']).optional(),
-  });
-
-  const body = await c.req.json();
-  const parsed = updateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
+  const data = c.req.valid('json');
   const user = c.get('user');
 
   // Only super admins can change account status (prevents self-un-suspend)
-  if (parsed.data.status && !user.isSuper) {
+  if (data.status && !user.isSuper) {
     return c.json({ error: 'Only platform administrators can change account status' }, 403);
   }
 
   const [updated] = await updateReturning(accounts, {
-    ...parsed.data,
+    ...data,
     updatedAt: new Date(),
   }, eq(accounts.id, account.id));
 
@@ -235,25 +537,23 @@ accountRoutes.patch('/:id', tenantMiddleware, requireAdmin, async (c) => {
       resourceName: updated.name,
     });
 
-    const { stripeCustomerId, ...rest } = updated;
+    const { stripeCustomerId, ...rest } = updated as any;
     return c.json(rest);
   }
 
   return c.json(updated);
-});
+}) as any);
 
 // DELETE /:id — schedule account for deletion (30-day grace period)
-accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
+accountRoutes.openapi(deleteAccountRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
   }
 
   const user = c.get('user');
+  const { password } = c.req.valid('json');
 
-  // Require password confirmation
-  const body = await c.req.json().catch(() => ({}));
-  const { password } = body as { password?: string };
   if (!password) {
     return c.json({ error: 'Password confirmation required to delete account' }, 400);
   }
@@ -273,7 +573,7 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
 
   if (!user.isSuper) {
     const membership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, user.userId), e(ua.accountId, account.id)),
     });
 
@@ -291,7 +591,7 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
     limit: 1000,
   });
 
-  const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
+  const allAccountIds = [account.id, ...descendants.map((d: any) => d.id)];
 
   // Mark all accounts as scheduled for deletion and stop their services
   await safeTransaction(async (tx) => {
@@ -348,10 +648,10 @@ accountRoutes.delete('/:id', tenantMiddleware, async (c) => {
     message: 'Account scheduled for deletion',
     scheduledDeletionAt: scheduledDate.toISOString(),
   });
-});
+}) as any);
 
 // POST /:id/revoke-deletion — cancel scheduled deletion
-accountRoutes.post('/:id/revoke-deletion', tenantMiddleware, async (c) => {
+accountRoutes.openapi(revokeDeletionRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -361,7 +661,7 @@ accountRoutes.post('/:id/revoke-deletion', tenantMiddleware, async (c) => {
 
   if (!user.isSuper) {
     const membership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, user.userId), e(ua.accountId, account.id)),
     });
 
@@ -383,7 +683,7 @@ accountRoutes.post('/:id/revoke-deletion', tenantMiddleware, async (c) => {
     limit: 1000,
   });
 
-  const allAccountIds = [account.id, ...descendants.map((d) => d.id)];
+  const allAccountIds = [account.id, ...descendants.map((d: any) => d.id)];
 
   await safeTransaction(async (tx) => {
     for (const accId of allAccountIds) {
@@ -398,10 +698,10 @@ accountRoutes.post('/:id/revoke-deletion', tenantMiddleware, async (c) => {
   await invalidateCache(`GET:/accounts/${account.id}:*`);
 
   return c.json({ message: 'Account deletion revoked' });
-});
+}) as any);
 
 // GET /:id/tree — full descendant tree
-accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
+accountRoutes.openapi(getAccountTreeRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -413,7 +713,7 @@ accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
 
   const descendants = await db.query.accounts.findMany({
     where: and(like(accounts.path, `${account.path}.%`), isNull(accounts.deletedAt)),
-    orderBy: (a, { asc }) => asc(a.depth),
+    orderBy: (a: any, { asc }: any) => asc(a.depth),
     limit: 1000,
   });
 
@@ -430,12 +730,12 @@ accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
   const root: TreeNode = { account: self, children: [] };
   nodeMap.set(self.id, root);
 
-  for (const desc of descendants) {
-    const node: TreeNode = { account: desc, children: [] };
-    nodeMap.set(desc.id, node);
+  for (const d of descendants) {
+    const node: TreeNode = { account: d, children: [] };
+    nodeMap.set(d.id, node);
 
-    if (desc.parentId) {
-      const parent = nodeMap.get(desc.parentId);
+    if (d.parentId) {
+      const parent = nodeMap.get(d.parentId);
       if (parent) {
         parent.children.push(node);
       }
@@ -443,10 +743,10 @@ accountRoutes.get('/:id/tree', tenantMiddleware, async (c) => {
   }
 
   return c.json(root);
-});
+}) as any);
 
 // POST /:id/disconnect — disconnect from parent
-accountRoutes.post('/:id/disconnect', tenantMiddleware, requireOwner, async (c) => {
+accountRoutes.openapi(disconnectAccountRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -483,13 +783,13 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, requireOwner, async (c) 
       })
       .where(eq(accounts.id, fullAccount.id));
 
-    const descendants = await tx.query.accounts.findMany({
+    const txDescendants = await tx.query.accounts.findMany({
       where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
       limit: 1000,
     });
 
-    for (const desc of descendants) {
-      const descPath = desc.path ?? '';
+    for (const d of txDescendants) {
+      const descPath = d.path ?? '';
       const newDescPath = descPath.replace(oldPath, newSlug);
       const newDepth = newDescPath.split('.').length - 1;
 
@@ -500,19 +800,19 @@ accountRoutes.post('/:id/disconnect', tenantMiddleware, requireOwner, async (c) 
           depth: newDepth,
           updatedAt: new Date(),
         })
-        .where(eq(accounts.id, desc.id));
+        .where(eq(accounts.id, d.id));
     }
   });
 
   return c.json({ message: 'Successfully disconnected from parent account' });
-});
+}) as any);
 
 // POST /:id/release/:childId — parent releases a child account
-accountRoutes.post('/:id/release/:childId', tenantMiddleware, requireOwner, async (c) => {
+accountRoutes.openapi(releaseChildRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) return c.json({ error: 'Account not found' }, 404);
 
-  const childId = c.req.param('childId');
+  const { childId } = c.req.valid('param');
   const child = await db.query.accounts.findFirst({
     where: and(eq(accounts.id, childId), isNull(accounts.deletedAt)),
   });
@@ -534,27 +834,27 @@ accountRoutes.post('/:id/release/:childId', tenantMiddleware, requireOwner, asyn
       })
       .where(eq(accounts.id, child.id));
 
-    const descendants = await tx.query.accounts.findMany({
+    const txDescendants = await tx.query.accounts.findMany({
       where: and(like(accounts.path, `${oldPath}.%`), isNull(accounts.deletedAt)),
       limit: 1000,
     });
 
-    for (const desc of descendants) {
-      const descPath = desc.path ?? '';
+    for (const d of txDescendants) {
+      const descPath = d.path ?? '';
       const newDescPath = descPath.replace(oldPath, newSlug);
       const newDepth = newDescPath.split('.').length - 1;
       await tx
         .update(accounts)
         .set({ path: newDescPath, depth: newDepth, updatedAt: new Date() })
-        .where(eq(accounts.id, desc.id));
+        .where(eq(accounts.id, d.id));
     }
   });
 
   return c.json({ message: 'Child account released successfully' });
-});
+}) as any);
 
 // POST /:id/impersonate — super user enters account's panel
-accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
+accountRoutes.openapi(impersonateAccountRoute, (async (c: any) => {
   const user = c.get('user');
   const account = c.get('account');
 
@@ -598,10 +898,10 @@ accountRoutes.post('/:id/impersonate', tenantMiddleware, async (c) => {
     name: account.name,
     slug: account.slug,
   });
-});
+}) as any);
 
 // GET /:id/members — list members of the account
-accountRoutes.get('/:id/members', tenantMiddleware, async (c) => {
+accountRoutes.openapi(listMembersRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -613,7 +913,7 @@ accountRoutes.get('/:id/members', tenantMiddleware, async (c) => {
     limit: 500,
   });
 
-  const members = memberships.map((m) => ({
+  const members = memberships.map((m: any) => ({
     id: m.user.id,
     email: m.user.email,
     name: m.user.name,
@@ -623,15 +923,10 @@ accountRoutes.get('/:id/members', tenantMiddleware, async (c) => {
   }));
 
   return c.json(members);
-});
+}) as any);
 
 // POST /:id/members — invite user to account
-const inviteMemberSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(['admin', 'member', 'viewer']).default('member'),
-});
-
-accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
+accountRoutes.openapi(inviteMemberRoute, (async (c: any) => {
   const account = c.get('account');
   const authUser = c.get('user');
 
@@ -642,7 +937,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
   let inviterRole: string = 'owner'; // Super users treated as owner
   if (!authUser.isSuper) {
     const inviterMembership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, authUser.userId), e(ua.accountId, account.id)),
     });
 
@@ -652,14 +947,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     inviterRole = inviterMembership.role ?? 'member';
   }
 
-  const body = await c.req.json();
-  const parsed = inviteMemberSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { email, role } = parsed.data;
+  const { email, role } = c.req.valid('json');
 
   // Prevent role escalation: admins cannot invite at admin level (only owners can)
   const ROLE_LEVELS: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
@@ -676,7 +964,7 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
   }
 
   const existingMembership = await db.query.userAccounts.findFirst({
-    where: (ua, { and, eq: e }) =>
+    where: (ua: any, { and, eq: e }: any) =>
       and(e(ua.userId, targetUser.id), e(ua.accountId, account.id)),
   });
 
@@ -726,32 +1014,23 @@ accountRoutes.post('/:id/members', tenantMiddleware, async (c) => {
     role,
     message: 'Member added successfully',
   }, 201);
-});
+}) as any);
 
 // PATCH /:id/members/:userId — change member role
-accountRoutes.patch('/:id/members/:userId', tenantMiddleware, async (c) => {
+accountRoutes.openapi(changeMemberRoleRoute, (async (c: any) => {
   const account = c.get('account');
   const authUser = c.get('user');
-  const targetUserId = c.req.param('userId');
+  const { userId: targetUserId } = c.req.valid('param');
 
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
   }
 
-  const roleSchema = z.object({
-    role: z.enum(['owner', 'admin', 'member', 'viewer']),
-  });
-
-  const body = await c.req.json();
-  const parsed = roleSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const { role } = c.req.valid('json');
 
   if (!authUser.isSuper) {
     const authMembership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, authUser.userId), e(ua.accountId, account.id)),
     });
 
@@ -760,7 +1039,7 @@ accountRoutes.patch('/:id/members/:userId', tenantMiddleware, async (c) => {
     }
   }
 
-  const [updated] = await updateReturning(userAccounts, { role: parsed.data.role },
+  const [updated] = await updateReturning(userAccounts, { role },
     and(
       eq(userAccounts.userId, targetUserId),
       eq(userAccounts.accountId, account.id),
@@ -774,19 +1053,19 @@ accountRoutes.patch('/:id/members/:userId', tenantMiddleware, async (c) => {
   eventService.log({
     ...eventContext(c),
     eventType: EventTypes.USER_ROLE_CHANGED,
-    description: `Changed role to ${parsed.data.role}`,
+    description: `Changed role to ${role}`,
     resourceType: 'user',
     resourceId: targetUserId,
   });
 
-  return c.json({ message: 'Role updated', role: parsed.data.role });
-});
+  return c.json({ message: 'Role updated', role });
+}) as any);
 
 // DELETE /:id/members/:userId — remove member from account
-accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
+accountRoutes.openapi(removeMemberRoute, (async (c: any) => {
   const account = c.get('account');
   const authUser = c.get('user');
-  const targetUserId = c.req.param('userId');
+  const { userId: targetUserId } = c.req.valid('param');
 
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -794,7 +1073,7 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
 
   if (targetUserId === authUser.userId) {
     const owners = await db.query.userAccounts.findMany({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.accountId, account.id), e(ua.role, 'owner')),
     });
 
@@ -807,7 +1086,7 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
     const ROLE_LEVELS: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
 
     const authMembership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, authUser.userId), e(ua.accountId, account.id)),
     });
 
@@ -817,7 +1096,7 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
 
     // Check target role — can only remove members below your own role level
     const targetMembership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, targetUserId), e(ua.accountId, account.id)),
     });
 
@@ -829,13 +1108,13 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
   // Prevent removing the last owner (even for self-removal, already checked above, but also for super admins)
   if (targetUserId !== authUser.userId) {
     const targetMembership = await db.query.userAccounts.findFirst({
-      where: (ua, { and, eq: e }) =>
+      where: (ua: any, { and, eq: e }: any) =>
         and(e(ua.userId, targetUserId), e(ua.accountId, account.id)),
     });
 
     if (targetMembership?.role === 'owner') {
       const owners = await db.query.userAccounts.findMany({
-        where: (ua, { and, eq: e }) =>
+        where: (ua: any, { and, eq: e }: any) =>
           and(e(ua.accountId, account.id), e(ua.role, 'owner')),
       });
 
@@ -866,10 +1145,10 @@ accountRoutes.delete('/:id/members/:userId', tenantMiddleware, async (c) => {
   });
 
   return c.json({ message: 'Member removed successfully' });
-});
+}) as any);
 
 // GET /:id/my-role — get current user's role in this account
-accountRoutes.get('/:id/my-role', tenantMiddleware, async (c) => {
+accountRoutes.openapi(getMyRoleRoute, (async (c: any) => {
   const account = c.get('account');
   if (!account) {
     return c.json({ error: 'Account not found' }, 404);
@@ -890,26 +1169,27 @@ accountRoutes.get('/:id/my-role', tenantMiddleware, async (c) => {
   }
 
   return c.json({ role: membership.role ?? 'member' });
-});
+}) as any);
 
 // GET /:id/activity — account-scoped audit log with filtering
-accountRoutes.get('/:id/activity', tenantMiddleware, async (c) => {
+accountRoutes.openapi(getActivityRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const paramId = c.req.param('id');
+  const { id: paramId } = c.req.valid('param');
 
   if (!accountId || accountId !== paramId) {
     return c.json({ error: 'Access denied' }, 403);
   }
 
-  const page = Math.max(1, Math.min(parseInt(c.req.query('page') ?? '1', 10) || 1, 10000));
-  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20), 100);
+  const query = c.req.valid('query');
+  const page = Math.max(1, Math.min(parseInt(query.page ?? '1', 10) || 1, 10000));
+  const limit = Math.min(Math.max(1, parseInt(query.limit ?? '20', 10) || 20), 100);
   const offset = (page - 1) * limit;
 
-  const resourceType = c.req.query('resourceType');
-  const eventType = c.req.query('eventType');
-  const dateFrom = c.req.query('dateFrom');
-  const dateTo = c.req.query('dateTo');
-  const search = c.req.query('search');
+  const resourceType = query.resourceType;
+  const eventType = query.eventType;
+  const dateFrom = query.dateFrom;
+  const dateTo = query.dateTo;
+  const search = query.search;
 
   const conditions: any[] = [eq(auditLog.accountId, accountId)];
   if (resourceType) conditions.push(eq(auditLog.resourceType, resourceType));
@@ -954,6 +1234,6 @@ accountRoutes.get('/:id/activity', tenantMiddleware, async (c) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
-});
+}) as any);
 
 export default accountRoutes;

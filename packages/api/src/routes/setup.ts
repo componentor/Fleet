@@ -1,13 +1,14 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'argon2';
 import { SignJWT } from 'jose';
 import { db, users, accounts, userAccounts, platformSettings, insertReturning, upsert, countSql } from '@fleet/db';
 import { dockerService } from '../services/docker.service.js';
 import { getValkey } from '../services/valkey.service.js';
+import { jsonBody, jsonContent, errorResponseSchema, noSecurity } from './_schemas.js';
 
-const setup = new Hono();
+const setup = new OpenAPIHono();
 
 // In-memory fallback when Valkey is unavailable
 let setupInProgressLocal = false;
@@ -94,15 +95,113 @@ async function detectDocker(): Promise<{
   }
 }
 
+// ── Response schemas ──
+
+const dockerStateSchema = z.object({
+  available: z.boolean(),
+  version: z.string().optional(),
+  swarm: z.enum(['active', 'inactive', 'pending', 'error']),
+  role: z.enum(['manager', 'worker']).optional(),
+  nodeId: z.string().optional(),
+  managerAddress: z.string().optional(),
+}).openapi('DockerState');
+
+const statusResponseSchema = z.object({
+  needsSetup: z.boolean(),
+  docker: dockerStateSchema,
+}).openapi('SetupStatusResponse');
+
+const swarmInitResponseSchema = z.object({
+  ok: z.boolean(),
+  docker: dockerStateSchema,
+}).openapi('SwarmInitResponse');
+
+const setupUserSchema = z.object({
+  id: z.string(),
+  email: z.string().nullable(),
+  name: z.string().nullable(),
+  isSuper: z.boolean(),
+  createdAt: z.string().or(z.date()),
+}).openapi('SetupUser');
+
+const setupResponseSchema = z.object({
+  tokens: z.object({
+    accessToken: z.string(),
+    refreshToken: z.string(),
+  }),
+  user: setupUserSchema,
+}).openapi('SetupResponse');
+
+// ── Request schemas ──
+
+const setupBodySchema = z.object({
+  name: z.string().min(1).max(255),
+  email: z.string().email().max(255),
+  password: z.string().min(8).max(128).refine(
+    (pw) => /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /\d/.test(pw),
+    'Password must contain at least one lowercase letter, one uppercase letter, and one digit',
+  ),
+  domain: z.string().max(255).optional(),
+  platformName: z.string().max(255).optional(),
+}).openapi('SetupRequest');
+
+// ── Route definitions ──
+
+const statusRoute = createRoute({
+  method: 'get',
+  path: '/status',
+  tags: ['Setup'],
+  summary: 'Check if first-run setup is needed and Docker state',
+  security: noSecurity,
+  responses: {
+    200: jsonContent(statusResponseSchema, 'Setup status'),
+  },
+});
+
+const swarmInitRoute = createRoute({
+  method: 'post',
+  path: '/swarm-init',
+  tags: ['Setup'],
+  summary: 'Initialize Docker Swarm on this node',
+  security: noSecurity,
+  responses: {
+    201: jsonContent(swarmInitResponseSchema, 'Swarm initialized successfully'),
+    400: jsonContent(errorResponseSchema, 'Docker unavailable or Swarm already active'),
+    403: jsonContent(errorResponseSchema, 'Setup already completed'),
+    409: jsonContent(errorResponseSchema, 'Setup already in progress'),
+    500: jsonContent(errorResponseSchema, 'Internal server error'),
+  },
+});
+
+const performSetupRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Setup'],
+  summary: 'Perform first-run setup and create admin user',
+  security: noSecurity,
+  request: {
+    body: jsonBody(setupBodySchema),
+  },
+  responses: {
+    201: jsonContent(setupResponseSchema, 'Setup completed, admin user created'),
+    400: jsonContent(errorResponseSchema, 'Validation error'),
+    403: jsonContent(errorResponseSchema, 'Setup already completed'),
+    409: jsonContent(errorResponseSchema, 'Setup already in progress'),
+    500: jsonContent(errorResponseSchema, 'Internal server error'),
+  },
+});
+
+// ── Route handlers ──
+
 // GET /status — check if first-run setup is needed + Docker state
-setup.get('/status', async (c) => {
+setup.openapi(statusRoute, async (c) => {
   const done = await isSetupComplete();
   const docker = await detectDocker();
-  return c.json({ needsSetup: !done, docker });
+  return c.json({ needsSetup: !done, docker }, 200);
 });
 
 // POST /swarm-init — initialize Docker Swarm on this node
-setup.post('/swarm-init', async (c) => {
+setup.openapi(swarmInitRoute, async (c) => {
   if (await isSetupComplete()) {
     return c.json({ error: 'Setup has already been completed' }, 403);
   }
@@ -148,18 +247,7 @@ setup.post('/swarm-init', async (c) => {
 });
 
 // POST / — perform first-run setup
-const setupSchema = z.object({
-  name: z.string().min(1).max(255),
-  email: z.string().email().max(255),
-  password: z.string().min(8).max(128).refine(
-    (pw) => /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /\d/.test(pw),
-    'Password must contain at least one lowercase letter, one uppercase letter, and one digit',
-  ),
-  domain: z.string().max(255).optional(),
-  platformName: z.string().max(255).optional(),
-});
-
-setup.post('/', async (c) => {
+setup.openapi(performSetupRoute, async (c) => {
   // Guard: only allow if no users exist
   if (await isSetupComplete()) {
     return c.json({ error: 'Setup has already been completed' }, 403);
@@ -170,14 +258,7 @@ setup.post('/', async (c) => {
   }
 
   try {
-    const body = await c.req.json();
-    const parsed = setupSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return c.json({ error: 'Validation failed' }, 400);
-    }
-
-    const { name, email, password, domain, platformName } = parsed.data;
+    const { name, email, password, domain, platformName } = c.req.valid('json');
 
     // 1. Hash password
     const passwordHash = await hash(password);

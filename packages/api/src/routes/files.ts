@@ -1,17 +1,14 @@
-import { Hono } from 'hono';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import { db, services, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
 import { uploadService } from '../services/upload.service.js';
 import { logger } from '../services/logger.js';
-import { writeFile as writeFileFs } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
+import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 // Block uploads of server-side executable files that could be exploited if served directly
 const BLOCKED_EXTENSIONS = new Set([
@@ -27,7 +24,7 @@ function hasBlockedExtension(filename: string): boolean {
   return BLOCKED_EXTENSIONS.has(lower) || [...BLOCKED_EXTENSIONS].some(ext => lower.endsWith(ext));
 }
 
-const fileRoutes = new Hono<{
+const fileRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -55,35 +52,80 @@ async function getUploadService(accountId: string, serviceId: string) {
 }
 
 // GET /:serviceId/list — list directory
-fileRoutes.get('/:serviceId/list', async (c) => {
+const listRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/list',
+  tags: ['Files'],
+  summary: 'List directory contents for a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    query: z.object({
+      path: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      entries: z.any(),
+      currentPath: z.string(),
+    }), 'Directory listing'),
+    ...standardErrors,
+  },
+});
+
+fileRoutes.openapi(listRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const path = c.req.query('path') || '/';
+  const { path } = c.req.valid('query');
+  const dirPath = path || '/';
 
   try {
-    const entries = await uploadService.listDirectory(svc!.sourcePath!, path);
-    return c.json({ entries, currentPath: path });
+    const entries = await uploadService.listDirectory(svc!.sourcePath!, dirPath);
+    return c.json({ entries, currentPath: dirPath });
   } catch (err) {
     logger.error({ err }, 'Failed to list directory');
     return c.json({ error: 'Failed to list directory' }, 500);
   }
-});
+}) as any);
 
 // GET /:serviceId/read — read file content
-fileRoutes.get('/:serviceId/read', async (c) => {
+const readRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/read',
+  tags: ['Files'],
+  summary: 'Read file content from a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    query: z.object({
+      path: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'File content'),
+    ...standardErrors,
+    413: jsonContent(errorResponseSchema, 'File too large'),
+  },
+});
+
+fileRoutes.openapi(readRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const path = c.req.query('path');
+  const { path } = c.req.valid('query');
   if (!path) return c.json({ error: 'Path parameter is required' }, 400);
 
   try {
@@ -98,19 +140,45 @@ fileRoutes.get('/:serviceId/read', async (c) => {
     }
     return c.json({ error: 'Failed to read file' }, 500);
   }
-});
+}) as any);
 
 // PUT /:serviceId/write — write file content
-fileRoutes.put('/:serviceId/write', requireMember, requireScope('write'), async (c) => {
+const writeFileBodySchema = z.object({
+  path: z.string(),
+  content: z.string(),
+});
+
+const writeRoute = createRoute({
+  method: 'put',
+  path: '/{serviceId}/write',
+  tags: ['Files'],
+  summary: 'Write file content to a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    body: jsonBody(writeFileBodySchema),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      path: z.string(),
+    }), 'File saved'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireScope('write')],
+});
+
+fileRoutes.openapi(writeRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const body = await c.req.json();
-  const { path, content } = body as { path?: string; content?: string };
+  const { path, content } = c.req.valid('json');
 
   if (!path || content === undefined) {
     return c.json({ error: 'Path and content are required' }, 400);
@@ -125,19 +193,44 @@ fileRoutes.put('/:serviceId/write', requireMember, requireScope('write'), async 
     }
     return c.json({ error: 'Failed to write file' }, 500);
   }
-});
+}) as any);
 
 // POST /:serviceId/mkdir — create directory
-fileRoutes.post('/:serviceId/mkdir', requireMember, requireScope('write'), async (c) => {
+const mkdirBodySchema = z.object({
+  path: z.string(),
+});
+
+const mkdirRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/mkdir',
+  tags: ['Files'],
+  summary: 'Create a directory in a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    body: jsonBody(mkdirBodySchema),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      path: z.string(),
+    }), 'Directory created'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireScope('write')],
+});
+
+fileRoutes.openapi(mkdirRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const body = await c.req.json();
-  const { path } = body as { path?: string };
+  const { path } = c.req.valid('json');
 
   if (!path) return c.json({ error: 'Path is required' }, 400);
 
@@ -150,19 +243,44 @@ fileRoutes.post('/:serviceId/mkdir', requireMember, requireScope('write'), async
     }
     return c.json({ error: 'Failed to create directory' }, 500);
   }
-});
+}) as any);
 
 // DELETE /:serviceId/delete — delete file or directory
-fileRoutes.delete('/:serviceId/delete', requireMember, requireScope('write'), async (c) => {
+const deleteBodySchema = z.object({
+  path: z.string(),
+});
+
+const deleteRoute = createRoute({
+  method: 'delete',
+  path: '/{serviceId}/delete',
+  tags: ['Files'],
+  summary: 'Delete a file or directory from a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    body: jsonBody(deleteBodySchema),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      path: z.string(),
+    }), 'Entry deleted'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireScope('write')],
+});
+
+fileRoutes.openapi(deleteRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const body = await c.req.json();
-  const { path } = body as { path?: string };
+  const { path } = c.req.valid('json');
 
   if (!path) return c.json({ error: 'Path is required' }, 400);
 
@@ -175,18 +293,41 @@ fileRoutes.delete('/:serviceId/delete', requireMember, requireScope('write'), as
     }
     return c.json({ error: 'Failed to delete' }, 500);
   }
-});
+}) as any);
 
 // GET /:serviceId/download — download a single file
-fileRoutes.get('/:serviceId/download', async (c) => {
+const downloadRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/download',
+  tags: ['Files'],
+  summary: 'Download a single file from a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    query: z.object({
+      path: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'File download stream',
+      content: { 'application/octet-stream': { schema: z.any() } },
+    },
+    ...standardErrors,
+  },
+});
+
+fileRoutes.openapi(downloadRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const path = c.req.query('path');
+  const { path } = c.req.valid('query');
   if (!path) return c.json({ error: 'Path parameter is required' }, 400);
 
   try {
@@ -202,18 +343,42 @@ fileRoutes.get('/:serviceId/download', async (c) => {
     }
     return c.json({ error: 'Failed to download file' }, 500);
   }
-});
+}) as any);
 
 // GET /:serviceId/download-archive — download entire project as archive
-fileRoutes.get('/:serviceId/download-archive', async (c) => {
+const downloadArchiveRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/download-archive',
+  tags: ['Files'],
+  summary: 'Download entire project as an archive',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    query: z.object({
+      format: z.enum(['zip', 'tar']).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Archive download stream',
+      content: { 'application/octet-stream': { schema: z.any() } },
+    },
+    ...standardErrors,
+  },
+});
+
+fileRoutes.openapi(downloadArchiveRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
   if (error) return c.json({ error }, status!);
 
-  const format = (c.req.query('format') || 'zip') as 'zip' | 'tar';
+  const { format: queryFormat } = c.req.valid('query');
+  const format = (queryFormat || 'zip') as 'zip' | 'tar';
   if (format !== 'zip' && format !== 'tar') {
     return c.json({ error: 'Format must be zip or tar' }, 400);
   }
@@ -239,12 +404,43 @@ fileRoutes.get('/:serviceId/download-archive', async (c) => {
     logger.error({ err }, 'Failed to create archive');
     return c.json({ error: 'Failed to create archive' }, 500);
   }
-});
+}) as any);
 
 // POST /:serviceId/upload — upload files to a specific path
-fileRoutes.post('/:serviceId/upload', requireMember, requireScope('write'), async (c) => {
+const uploadFileRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/upload',
+  tags: ['Files'],
+  summary: 'Upload a file to a specific path in a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    body: {
+      content: {
+        'multipart/form-data': {
+          schema: z.object({
+            file: z.any().openapi({ type: 'string', format: 'binary' }),
+            path: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      path: z.string(),
+    }), 'File uploaded'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireScope('write')],
+});
+
+fileRoutes.openapi(uploadFileRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const { error, status, svc } = await getUploadService(accountId, serviceId);
@@ -273,6 +469,6 @@ fileRoutes.post('/:serviceId/upload', requireMember, requireScope('write'), asyn
     }
     return c.json({ error: 'Failed to upload file' }, 500);
   }
-});
+}) as any);
 
 export default fileRoutes;

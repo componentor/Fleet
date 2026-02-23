@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, services, deployments, subscriptions, accounts, oauthProviders, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -13,6 +13,7 @@ import type { DeploymentJobData } from '../workers/deployment.worker.js';
 import { logger } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 
 // ── fleet.json manifest schema ───────────────────────────────────────────────
 const fleetManifestSchema = z.object({
@@ -20,7 +21,7 @@ const fleetManifestSchema = z.object({
   description: z.string().max(500).optional(),
   icon: z.string().url().optional(),
   website: z.string().url().optional(),
-  env: z.record(z.union([
+  env: z.record(z.string(), z.union([
     z.string(),
     z.object({
       description: z.string().max(200).optional(),
@@ -76,10 +77,50 @@ async function enqueueOrRunDeployment(data: DeploymentJobData) {
   }
 }
 
-// --- GitHub Webhook (unauthenticated, signature-verified) ---
-const webhookRoutes = new Hono();
+// ── Schemas ──
 
-webhookRoutes.post('/github/webhook', async (c) => {
+const deploymentIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Deployment ID' }),
+});
+
+const ownerRepoParamSchema = z.object({
+  owner: z.string().openapi({ description: 'GitHub repository owner' }),
+  repo: z.string().openapi({ description: 'GitHub repository name' }),
+});
+
+const serviceIdQuerySchema = z.object({
+  serviceId: z.string().optional().openapi({ description: 'Service ID to filter by' }),
+});
+
+const manifestQuerySchema = z.object({
+  repo: z.string().optional().openapi({ description: 'GitHub repo in owner/repo format' }),
+  branch: z.string().optional().openapi({ description: 'Branch name' }),
+});
+
+const triggerDeploySchema = z.object({
+  serviceId: z.string(),
+}).openapi('TriggerDeployRequest');
+
+const updateNotesSchema = z.object({
+  notes: z.string().max(500),
+}).openapi('UpdateDeploymentNotesRequest');
+
+// --- GitHub Webhook (unauthenticated, signature-verified) ---
+const webhookRoutes = new OpenAPIHono();
+
+const githubWebhookRoute = createRoute({
+  method: 'post',
+  path: '/github/webhook',
+  tags: ['Deployments'],
+  summary: 'GitHub webhook for auto-deploy (signature-verified)',
+  security: noSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Webhook processed'),
+    ...standardErrors,
+  },
+});
+
+webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
   const ghConfig = await getGitHubConfig();
   const webhookSecret = ghConfig.webhookSecret;
   if (!webhookSecret) {
@@ -219,10 +260,10 @@ webhookRoutes.post('/github/webhook', async (c) => {
   }
 
   return c.json({ message: `Triggered ${results.length} deployment(s)`, results });
-});
+}) as any);
 
 // --- Authenticated Deployment Routes ---
-const authenticatedRoutes = new Hono<{
+const authenticatedRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -233,10 +274,26 @@ const authenticatedRoutes = new Hono<{
 authenticatedRoutes.use('*', authMiddleware);
 authenticatedRoutes.use('*', tenantMiddleware);
 
-// GET / — list deployments for a service (via query param)
-authenticatedRoutes.get('/', async (c) => {
+// ── Route: GET / — list deployments for a service ──
+
+const listDeploymentsRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Deployments'],
+  summary: 'List deployments for a service',
+  security: bearerSecurity,
+  request: {
+    query: serviceIdQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of deployments'),
+    ...standardErrors,
+  },
+});
+
+authenticatedRoutes.openapi(listDeploymentsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.query('serviceId');
+  const { serviceId } = c.req.valid('query');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -262,12 +319,28 @@ authenticatedRoutes.get('/', async (c) => {
   });
 
   return c.json(deploys);
+}) as any);
+
+// ── Route: GET /:id — deployment details ──
+
+const getDeploymentRoute = createRoute({
+  method: 'get',
+  path: '/{id}',
+  tags: ['Deployments'],
+  summary: 'Get deployment details',
+  security: bearerSecurity,
+  request: {
+    params: deploymentIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Deployment details'),
+    ...standardErrors,
+  },
 });
 
-// GET /:id — deployment details
-authenticatedRoutes.get('/:id', async (c) => {
+authenticatedRoutes.openapi(getDeploymentRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const deploymentId = c.req.param('id');
+  const { id: deploymentId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -288,10 +361,29 @@ authenticatedRoutes.get('/:id', async (c) => {
   }
 
   return c.json(deployment);
+}) as any);
+
+// ── Route: POST /trigger — manually trigger a deployment ──
+
+const triggerDeployRoute = createRoute({
+  method: 'post',
+  path: '/trigger',
+  tags: ['Deployments'],
+  summary: 'Manually trigger a deployment for a service',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(triggerDeploySchema),
+  },
+  responses: {
+    202: jsonContent(z.object({ message: z.string(), deploymentId: z.string() }), 'Deployment triggered'),
+    ...standardErrors,
+    409: jsonContent(errorResponseSchema, 'Service already deploying'),
+    429: jsonContent(errorResponseSchema, 'Too many concurrent deployments'),
+  },
+  middleware: [requireMember, requireActiveSubscription] as const,
 });
 
-// POST /trigger — manually trigger a deployment for a service
-authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, async (c) => {
+authenticatedRoutes.openapi(triggerDeployRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
 
@@ -299,8 +391,7 @@ authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, a
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = (await c.req.json()) as { serviceId: string };
-  const { serviceId } = body;
+  const { serviceId } = c.req.valid('json');
 
   if (!serviceId) {
     return c.json({ error: 'serviceId is required' }, 400);
@@ -376,12 +467,29 @@ authenticatedRoutes.post('/trigger', requireMember, requireActiveSubscription, a
   });
 
   return c.json({ message: 'Deployment triggered', deploymentId: deployment.id }, 202);
+}) as any);
+
+// ── Route: POST /:id/rollback — rollback to a previous deployment ──
+
+const rollbackRoute = createRoute({
+  method: 'post',
+  path: '/{id}/rollback',
+  tags: ['Deployments'],
+  summary: 'Rollback to a previous deployment',
+  security: bearerSecurity,
+  request: {
+    params: deploymentIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ message: z.string(), deploymentId: z.string() }), 'Rollback succeeded'),
+    ...standardErrors,
+  },
+  middleware: [requireMember] as const,
 });
 
-// POST /:id/rollback — rollback to a previous deployment
-authenticatedRoutes.post('/:id/rollback', requireMember, async (c) => {
+authenticatedRoutes.openapi(rollbackRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const deploymentId = c.req.param('id');
+  const { id: deploymentId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -460,21 +568,36 @@ authenticatedRoutes.post('/:id/rollback', requireMember, async (c) => {
   });
 
   return c.json({ message: 'Rollback succeeded', deploymentId: rollbackDeploy.id });
+}) as any);
+
+// ── Route: PATCH /:id/notes — update deployment notes ──
+
+const updateNotesRoute = createRoute({
+  method: 'patch',
+  path: '/{id}/notes',
+  tags: ['Deployments'],
+  summary: 'Update deployment notes/annotations',
+  security: bearerSecurity,
+  request: {
+    params: deploymentIdParamSchema,
+    body: jsonBody(updateNotesSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Notes updated'),
+    ...standardErrors,
+  },
+  middleware: [requireMember] as const,
 });
 
-// PATCH /:id/notes — update deployment notes/annotations
-authenticatedRoutes.patch('/:id/notes', requireMember, async (c) => {
+authenticatedRoutes.openapi(updateNotesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const deploymentId = c.req.param('id');
+  const { id: deploymentId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = (await c.req.json()) as { notes: string };
-  if (typeof body.notes !== 'string' || body.notes.length > 500) {
-    return c.json({ error: 'Notes must be a string (max 500 chars)' }, 400);
-  }
+  const { notes } = c.req.valid('json');
 
   const deployment = await db.query.deployments.findFirst({
     where: eq(deployments.id, deploymentId),
@@ -486,16 +609,32 @@ authenticatedRoutes.patch('/:id/notes', requireMember, async (c) => {
   }
 
   await db.update(deployments)
-    .set({ notes: body.notes })
+    .set({ notes })
     .where(eq(deployments.id, deploymentId));
 
   return c.json({ message: 'Notes updated' });
+}) as any);
+
+// ── Route: GET /:id/logs — get deployment logs ──
+
+const getLogsRoute = createRoute({
+  method: 'get',
+  path: '/{id}/logs',
+  tags: ['Deployments'],
+  summary: 'Get deployment logs',
+  security: bearerSecurity,
+  request: {
+    params: deploymentIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ log: z.string(), status: z.string() }), 'Deployment logs'),
+    ...standardErrors,
+  },
 });
 
-// GET /:id/logs — get deployment logs
-authenticatedRoutes.get('/:id/logs', async (c) => {
+authenticatedRoutes.openapi(getLogsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const deploymentId = c.req.param('id');
+  const { id: deploymentId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -519,15 +658,28 @@ authenticatedRoutes.get('/:id/logs', async (c) => {
   const log = liveBuild?.log ?? deployment.log ?? '';
 
   return c.json({ log, status: liveBuild?.status ?? deployment.status });
-});
+}) as any);
 
 // --- GitHub Manifest (for one-click deploy) ---
 
-// GET /github/manifest — fetch fleet.json from a public (or private) GitHub repo
-authenticatedRoutes.get('/github/manifest', async (c) => {
+const getManifestRoute = createRoute({
+  method: 'get',
+  path: '/github/manifest',
+  tags: ['Deployments'],
+  summary: 'Fetch fleet.json from a GitHub repo',
+  security: bearerSecurity,
+  request: {
+    query: manifestQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Manifest data'),
+    ...standardErrors,
+  },
+});
+
+authenticatedRoutes.openapi(getManifestRoute, (async (c: any) => {
   const user = c.get('user');
-  const repo = c.req.query('repo');
-  const branch = c.req.query('branch');
+  const { repo, branch } = c.req.valid('query');
 
   if (!repo || !/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo)) {
     return c.json({ error: 'Invalid repo format. Expected owner/repo' }, 400);
@@ -549,7 +701,7 @@ authenticatedRoutes.get('/github/manifest', async (c) => {
     // No GitHub token — will try public access
   }
 
-  // Resolve branch: URL param → default branch via GitHub API
+  // Resolve branch: URL param -> default branch via GitHub API
   let targetBranch = branch;
   if (!targetBranch) {
     try {
@@ -610,12 +762,23 @@ authenticatedRoutes.get('/github/manifest', async (c) => {
     logger.error({ err, repo }, 'Failed to fetch fleet.json');
     return c.json({ manifest: null, branch: targetBranch, repo });
   }
-});
+}) as any);
 
 // --- GitHub Repo Management (authenticated) ---
 
-// GET /github/status — check if user has GitHub connected
-authenticatedRoutes.get('/github/status', async (c) => {
+const getGithubStatusRoute = createRoute({
+  method: 'get',
+  path: '/github/status',
+  tags: ['Deployments'],
+  summary: 'Check if user has GitHub connected',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ connected: z.boolean() }), 'GitHub connection status'),
+    ...standardErrors,
+  },
+});
+
+authenticatedRoutes.openapi(getGithubStatusRoute, (async (c: any) => {
   const user = c.get('user');
 
   const oauth = await db.query.oauthProviders.findFirst({
@@ -626,10 +789,23 @@ authenticatedRoutes.get('/github/status', async (c) => {
   });
 
   return c.json({ connected: !!oauth });
+}) as any);
+
+// ── Route: GET /github/repos — list user's GitHub repos ──
+
+const listGithubReposRoute = createRoute({
+  method: 'get',
+  path: '/github/repos',
+  tags: ['Deployments'],
+  summary: "List user's GitHub repositories",
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of GitHub repositories'),
+    ...standardErrors,
+  },
 });
 
-// GET /github/repos — list user's GitHub repositories
-authenticatedRoutes.get('/github/repos', async (c) => {
+authenticatedRoutes.openapi(listGithubReposRoute, (async (c: any) => {
   const user = c.get('user');
 
   // Get user's GitHub OAuth token
@@ -652,13 +828,28 @@ authenticatedRoutes.get('/github/repos', async (c) => {
     logger.error({ err }, 'Failed to fetch GitHub repos');
     return c.json({ error: 'Failed to fetch repositories from GitHub' }, 500);
   }
+}) as any);
+
+// ── Route: GET /github/repos/:owner/:repo/branches — list branches ──
+
+const listBranchesRoute = createRoute({
+  method: 'get',
+  path: '/github/repos/{owner}/{repo}/branches',
+  tags: ['Deployments'],
+  summary: 'List branches for a GitHub repository',
+  security: bearerSecurity,
+  request: {
+    params: ownerRepoParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of branches'),
+    ...standardErrors,
+  },
 });
 
-// GET /github/repos/:owner/:repo/branches — list branches
-authenticatedRoutes.get('/github/repos/:owner/:repo/branches', async (c) => {
+authenticatedRoutes.openapi(listBranchesRoute, (async (c: any) => {
   const user = c.get('user');
-  const owner = c.req.param('owner');
-  const repo = c.req.param('repo');
+  const { owner, repo } = c.req.valid('param');
 
   const oauth = await db.query.oauthProviders.findFirst({
     where: and(
@@ -679,10 +870,10 @@ authenticatedRoutes.get('/github/repos/:owner/:repo/branches', async (c) => {
     logger.error({ err }, 'Failed to fetch branches');
     return c.json({ error: 'Failed to fetch branches from GitHub' }, 500);
   }
-});
+}) as any);
 
 // --- Combine Routes ---
-const deploymentRoutes = new Hono();
+const deploymentRoutes = new OpenAPIHono();
 deploymentRoutes.route('/', webhookRoutes);
 deploymentRoutes.route('/', authenticatedRoutes);
 

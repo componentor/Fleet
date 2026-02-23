@@ -102,8 +102,13 @@ sqlite.exec(`
     memory_limit INTEGER,
     cpu_reservation INTEGER,
     memory_reservation INTEGER,
+    restart_condition TEXT DEFAULT 'on-failure',
+    restart_max_attempts INTEGER DEFAULT 3,
+    restart_delay TEXT DEFAULT '10s',
     source_type TEXT,
     source_path TEXT,
+    dockerfile TEXT,
+    tags TEXT DEFAULT '[]',
     stack_id TEXT,
     stopped_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
@@ -120,6 +125,11 @@ sqlite.exec(`
     status TEXT DEFAULT 'pending',
     log TEXT DEFAULT '',
     image_tag TEXT,
+    notes TEXT,
+    progress_step TEXT,
+    trigger TEXT,
+    started_at INTEGER,
+    completed_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch())
   );
 
@@ -293,6 +303,7 @@ sqlite.exec(`
     max_storage_gb INTEGER,
     max_bandwidth_gb INTEGER,
     max_nfs_storage_gb INTEGER,
+    max_container_disk_mb INTEGER,
     updated_at INTEGER DEFAULT (unixepoch())
   );
 
@@ -334,9 +345,14 @@ sqlite.exec(`
     user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
     action TEXT NOT NULL,
+    event_type TEXT,
+    description TEXT,
     resource_type TEXT,
     resource_id TEXT,
+    resource_name TEXT,
+    actor_email TEXT,
     ip_address TEXT,
+    source TEXT DEFAULT 'user',
     details TEXT DEFAULT '{}',
     created_at INTEGER DEFAULT (unixepoch())
   );
@@ -553,10 +569,13 @@ vi.mock('../services/docker.service.js', () => ({
       manager: 'manager-token',
     }),
     listServices: vi.fn().mockResolvedValue([]),
+    listTasks: vi.fn().mockResolvedValue([]),
     scaleService: vi.fn().mockResolvedValue(undefined),
     ensureNetwork: vi.fn().mockResolvedValue('network-id'),
     createNetwork: vi.fn().mockResolvedValue('network-id'),
     removeNetwork: vi.fn().mockResolvedValue(undefined),
+    waitForServiceTasksGone: vi.fn().mockResolvedValue(undefined),
+    removeVolume: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -693,7 +712,7 @@ vi.mock('../services/update.service.js', () => ({
 // ── Mock backup service ──
 vi.mock('../services/backup.service.js', () => ({
   backupService: {
-    createBackup: vi.fn().mockResolvedValue({ id: 'backup-1' }),
+    createBackup: vi.fn().mockResolvedValue({ id: 'backup-1', status: 'pending', storagePath: '/backups/backup-1', sizeBytes: 0 }),
     getBackup: vi.fn().mockResolvedValue(null),
     listBackups: vi.fn().mockResolvedValue([]),
     deleteBackup: vi.fn().mockResolvedValue(undefined),
@@ -702,6 +721,7 @@ vi.mock('../services/backup.service.js', () => ({
     listSchedules: vi.fn().mockResolvedValue([]),
     updateSchedule: vi.fn().mockResolvedValue({}),
     deleteSchedule: vi.fn().mockResolvedValue(undefined),
+    runScheduledBackup: vi.fn().mockResolvedValue({ id: 'backup-2', status: 'pending', storagePath: '/backups/backup-2', sizeBytes: 0 }),
   },
 }));
 
@@ -735,13 +755,22 @@ vi.mock('../services/github.service.js', () => ({
     createWebhook: vi.fn().mockResolvedValue(undefined),
     deleteWebhook: vi.fn().mockResolvedValue(undefined),
     verifyWebhookSignature: vi.fn().mockReturnValue(true),
+    getRepositories: vi.fn().mockResolvedValue([]),
+    getBranches: vi.fn().mockResolvedValue([]),
   },
+  getGitHubConfig: vi.fn().mockResolvedValue({
+    clientId: null,
+    clientSecret: null,
+    webhookSecret: null,
+  }),
 }));
 
 // ── Mock build service ──
 vi.mock('../services/build.service.js', () => ({
   buildService: {
     buildAndDeploy: vi.fn().mockResolvedValue({ deploymentId: 'deploy-1' }),
+    getBuildStatus: vi.fn().mockReturnValue(null),
+    cancelBuild: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -812,8 +841,16 @@ vi.mock('../services/usage.service.js', () => ({
 vi.mock('../services/template.service.js', () => ({
   templateService: {
     getTemplates: vi.fn().mockResolvedValue([]),
+    listTemplates: vi.fn().mockResolvedValue([]),
     getTemplate: vi.fn().mockResolvedValue(null),
+    getCategories: vi.fn().mockResolvedValue([]),
     deploy: vi.fn().mockResolvedValue({ serviceId: 'svc-1' }),
+    deployTemplate: vi.fn().mockResolvedValue({ serviceId: 'svc-1' }),
+    parseTemplate: vi.fn().mockReturnValue({ services: {}, volumes: {} }),
+    createTemplate: vi.fn().mockResolvedValue({ id: 'tpl-1' }),
+    updateTemplate: vi.fn().mockResolvedValue({ id: 'tpl-1' }),
+    deleteTemplate: vi.fn().mockResolvedValue(true),
+    syncBuiltinTemplates: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

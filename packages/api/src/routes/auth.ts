@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { hash, verify } from 'argon2';
 import { SignJWT, jwtVerify } from 'jose';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
@@ -9,7 +9,7 @@ import QRCode from 'qrcode';
 import { db, users, userAccounts, accounts, oauthProviders, insertReturning, safeTransaction, eq, and, isNull } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { logger, logToErrorTable } from '../services/logger.js';
+import { logger } from '../services/logger.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { emailService } from '../services/email.service.js';
 import { getValkey } from '../services/valkey.service.js';
@@ -17,8 +17,9 @@ import { getGitHubConfig } from '../services/github.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 
-const auth = new Hono();
+const auth = new OpenAPIHono();
 
 const JWT_SECRET_KEY = () => {
   const secret = process.env['JWT_SECRET'];
@@ -123,7 +124,8 @@ function userResponse(user: any) {
   };
 }
 
-// POST /register
+// ── Schemas ──
+
 const registerSchema = z.object({
   name: z.string().min(1).max(255),
   email: z.string().email().max(255),
@@ -133,15 +135,55 @@ const registerSchema = z.object({
   ),
 });
 
-auth.post('/register', authRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = registerSchema.safeParse(body);
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
 
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+const verifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
 
-  const { name, email, password } = parsed.data;
+const forgotPasswordSchema = z.object({
+  email: z.string().email().optional(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8).max(128),
+});
+
+const twoFactorCodeSchema = z.object({
+  code: z.string().min(1),
+});
+
+const twoFactorVerifySchema = z.object({
+  tempToken: z.string().min(1),
+  code: z.string().min(1),
+});
+
+// ── Routes ──
+
+// POST /register
+const registerRoute = createRoute({
+  method: 'post',
+  path: '/register',
+  tags: ['Auth'],
+  summary: 'Register a new user account',
+  security: noSecurity,
+  request: {
+    body: jsonBody(registerSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Registration successful'),
+    409: jsonContent(errorResponseSchema, 'User already exists'),
+  },
+  middleware: [authRateLimit],
+});
+
+auth.openapi(registerRoute, (async (c: any) => {
+  const { name, email, password } = c.req.valid('json');
 
   // Check if user already exists
   const existing = await db.query.users.findFirst({
@@ -233,23 +275,27 @@ auth.post('/register', authRateLimit, async (c) => {
     tokens,
     user: userResponse(user),
   }, 201);
-});
+}) as any);
 
 // POST /login
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+const loginRoute = createRoute({
+  method: 'post',
+  path: '/login',
+  tags: ['Auth'],
+  summary: 'Log in with email and password',
+  security: noSecurity,
+  request: {
+    body: jsonBody(loginSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Login successful or 2FA challenge required'),
+  },
+  middleware: [authRateLimit],
 });
 
-auth.post('/login', authRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = loginSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Invalid email or password' }, 400);
-  }
-
-  const { email, password } = parsed.data;
+auth.openapi(loginRoute, (async (c: any) => {
+  const { email, password } = c.req.valid('json');
 
   const user = await db.query.users.findFirst({
     where: and(eq(users.email, email), isNull(users.deletedAt)),
@@ -259,29 +305,12 @@ auth.post('/login', authRateLimit, async (c) => {
 
   if (!user || !user.passwordHash) {
     logger.warn({ email, ip: loginIp }, 'Failed login attempt — user not found');
-    logToErrorTable({
-      level: 'warn',
-      message: `Failed login: unknown user`,
-      path: '/auth/login',
-      ip: loginIp ?? null,
-      statusCode: 401,
-      metadata: { reason: 'user_not_found' },
-    });
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
   const valid = await verify(user.passwordHash, password);
   if (!valid) {
     logger.warn({ userId: user.id, ip: loginIp }, 'Failed login attempt — wrong password');
-    logToErrorTable({
-      level: 'warn',
-      message: `Failed login: wrong password`,
-      path: '/auth/login',
-      userId: user.id,
-      ip: loginIp ?? null,
-      statusCode: 401,
-      metadata: { reason: 'wrong_password' },
-    });
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
@@ -326,10 +355,25 @@ auth.post('/login', authRateLimit, async (c) => {
     tokens,
     user: userResponse(user),
   });
-});
+}) as any);
 
 // POST /refresh
-auth.post('/refresh', refreshRateLimit, async (c) => {
+const refreshRoute = createRoute({
+  method: 'post',
+  path: '/refresh',
+  tags: ['Auth'],
+  summary: 'Refresh access token using refresh cookie',
+  security: noSecurity,
+  request: {},
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'New token pair'),
+    503: jsonContent(errorResponseSchema, 'Service temporarily unavailable'),
+  },
+  middleware: [refreshRateLimit],
+});
+
+auth.openapi(refreshRoute, (async (c: any) => {
   const refreshToken = getCookie(c, 'fleet_refresh');
   if (!refreshToken) {
     return c.json({ error: 'Refresh token required' }, 400);
@@ -419,10 +463,24 @@ auth.post('/refresh', refreshRateLimit, async (c) => {
   } catch {
     return c.json({ error: 'Invalid or expired refresh token' }, 401);
   }
-});
+}) as any);
 
 // POST /logout
-auth.post('/logout', authMiddleware, async (c) => {
+const logoutRoute = createRoute({
+  method: 'post',
+  path: '/logout',
+  tags: ['Auth'],
+  summary: 'Log out and revoke tokens',
+  security: bearerSecurity,
+  request: {},
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Logged out successfully'),
+  },
+  middleware: [authMiddleware],
+});
+
+auth.openapi(logoutRoute, (async (c: any) => {
   const valkey = await getValkey();
 
   // Blocklist the access token
@@ -472,10 +530,24 @@ auth.post('/logout', authMiddleware, async (c) => {
   });
 
   return c.json({ message: 'Logged out successfully' });
+}) as any);
+
+// GET /me
+const meRoute = createRoute({
+  method: 'get',
+  path: '/me',
+  tags: ['Auth'],
+  summary: 'Get current authenticated user',
+  security: bearerSecurity,
+  request: {},
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Current user info'),
+  },
+  middleware: [authMiddleware],
 });
 
-// GET /me — requires auth
-auth.get('/me', authMiddleware, async (c) => {
+auth.openapi(meRoute, (async (c: any) => {
   const authUser = c.get('user');
 
   const user = await db.query.users.findFirst({
@@ -487,10 +559,24 @@ auth.get('/me', authMiddleware, async (c) => {
   }
 
   return c.json(userResponse(user));
+}) as any);
+
+// GET /me/accounts
+const meAccountsRoute = createRoute({
+  method: 'get',
+  path: '/me/accounts',
+  tags: ['Auth'],
+  summary: 'List all accounts the current user has access to',
+  security: bearerSecurity,
+  request: {},
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'List of accounts with roles'),
+  },
+  middleware: [authMiddleware],
 });
 
-// GET /me/accounts — list all accounts user has access to
-auth.get('/me/accounts', authMiddleware, async (c) => {
+auth.openapi(meAccountsRoute, (async (c: any) => {
   const authUser = c.get('user');
 
   const memberships = await db.query.userAccounts.findMany({
@@ -504,17 +590,29 @@ auth.get('/me/accounts', authMiddleware, async (c) => {
   }));
 
   return c.json(result);
-});
+}) as any);
 
 // --- Email Verification ---
 
 // POST /verify-email
-auth.post('/verify-email', verifyEmailRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const token = body?.token;
-  if (!token || typeof token !== 'string') {
-    return c.json({ error: 'Token is required' }, 400);
-  }
+const verifyEmailRoute = createRoute({
+  method: 'post',
+  path: '/verify-email',
+  tags: ['Auth'],
+  summary: 'Verify email address with token',
+  security: noSecurity,
+  request: {
+    body: jsonBody(verifyEmailSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Email verified'),
+  },
+  middleware: [verifyEmailRateLimit],
+});
+
+auth.openapi(verifyEmailRoute, (async (c: any) => {
+  const { token } = c.req.valid('json');
 
   const hashed = hashToken(token);
 
@@ -545,10 +643,24 @@ auth.post('/verify-email', verifyEmailRateLimit, async (c) => {
   }
 
   return c.json({ message: 'Email verified successfully' });
-});
+}) as any);
 
 // POST /resend-verification
-auth.post('/resend-verification', resendVerificationRateLimit, authMiddleware, async (c) => {
+const resendVerificationRoute = createRoute({
+  method: 'post',
+  path: '/resend-verification',
+  tags: ['Auth'],
+  summary: 'Resend email verification link',
+  security: bearerSecurity,
+  request: {},
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Verification email sent'),
+  },
+  middleware: [resendVerificationRateLimit, authMiddleware],
+});
+
+auth.openapi(resendVerificationRoute, (async (c: any) => {
   const authUser = c.get('user');
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
@@ -580,13 +692,29 @@ auth.post('/resend-verification', resendVerificationRateLimit, authMiddleware, a
   });
 
   return c.json({ message: 'Verification email sent' });
-});
+}) as any);
 
 // --- Password Reset ---
 
 // POST /forgot-password
-auth.post('/forgot-password', forgotPasswordRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => null);
+const forgotPasswordRoute = createRoute({
+  method: 'post',
+  path: '/forgot-password',
+  tags: ['Auth'],
+  summary: 'Request a password reset email',
+  security: noSecurity,
+  request: {
+    body: jsonBody(forgotPasswordSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Reset email sent (if account exists)'),
+  },
+  middleware: [forgotPasswordRateLimit],
+});
+
+auth.openapi(forgotPasswordRoute, (async (c: any) => {
+  const body = c.req.valid('json');
   const email = body?.email;
 
   // Always return 200 to prevent email enumeration
@@ -619,16 +747,27 @@ auth.post('/forgot-password', forgotPasswordRateLimit, async (c) => {
   }
 
   return c.json({ message: 'If an account exists with that email, a password reset link will be sent.' });
-});
+}) as any);
 
 // POST /reset-password
-auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const { token, password } = body ?? {};
+const resetPasswordRoute = createRoute({
+  method: 'post',
+  path: '/reset-password',
+  tags: ['Auth'],
+  summary: 'Reset password using token from email',
+  security: noSecurity,
+  request: {
+    body: jsonBody(resetPasswordSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Password reset successfully'),
+  },
+  middleware: [resetPasswordRateLimit],
+});
 
-  if (!token || !password || typeof token !== 'string' || typeof password !== 'string') {
-    return c.json({ error: 'Token and new password are required' }, 400);
-  }
+auth.openapi(resetPasswordRoute, (async (c: any) => {
+  const { token, password } = c.req.valid('json');
 
   if (password.length < 8 || password.length > 128) {
     return c.json({ error: 'Password must be between 8 and 128 characters' }, 400);
@@ -670,12 +809,26 @@ auth.post('/reset-password', resetPasswordRateLimit, async (c) => {
   }
 
   return c.json({ message: 'Password has been reset successfully' });
-});
+}) as any);
 
 // --- Two-Factor Authentication (TOTP) ---
 
-// POST /2fa/setup — generate TOTP secret and QR code
-auth.post('/2fa/setup', twoFactorSetupRateLimit, authMiddleware, async (c) => {
+// POST /2fa/setup
+const twoFactorSetupRoute = createRoute({
+  method: 'post',
+  path: '/2fa/setup',
+  tags: ['Auth'],
+  summary: 'Generate TOTP secret and QR code for 2FA setup',
+  security: bearerSecurity,
+  request: {},
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'TOTP secret, URI, and QR code'),
+  },
+  middleware: [twoFactorSetupRateLimit, authMiddleware],
+});
+
+auth.openapi(twoFactorSetupRoute, (async (c: any) => {
   const authUser = c.get('user');
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
@@ -707,17 +860,28 @@ auth.post('/2fa/setup', twoFactorSetupRateLimit, authMiddleware, async (c) => {
     otpauthUri,
     qrCode: qrCodeDataUrl,
   });
+}) as any);
+
+// POST /2fa/enable
+const twoFactorEnableRoute = createRoute({
+  method: 'post',
+  path: '/2fa/enable',
+  tags: ['Auth'],
+  summary: 'Verify TOTP code and enable 2FA',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(twoFactorCodeSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Backup codes'),
+  },
+  middleware: [twoFactorSetupRateLimit, authMiddleware],
 });
 
-// POST /2fa/enable — verify code and enable 2FA
-auth.post('/2fa/enable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
+auth.openapi(twoFactorEnableRoute, (async (c: any) => {
   const authUser = c.get('user');
-  const body = await c.req.json().catch(() => null);
-  const code = body?.code;
-
-  if (!code || typeof code !== 'string') {
-    return c.json({ error: 'Verification code is required' }, 400);
-  }
+  const { code } = c.req.valid('json');
 
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
@@ -755,17 +919,28 @@ auth.post('/2fa/enable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
   }).where(eq(users.id, user.id));
 
   return c.json({ backupCodes });
+}) as any);
+
+// POST /2fa/disable
+const twoFactorDisableRoute = createRoute({
+  method: 'post',
+  path: '/2fa/disable',
+  tags: ['Auth'],
+  summary: 'Disable 2FA with verification code',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(twoFactorCodeSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, '2FA disabled'),
+  },
+  middleware: [twoFactorSetupRateLimit, authMiddleware],
 });
 
-// POST /2fa/disable — disable 2FA
-auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => {
+auth.openapi(twoFactorDisableRoute, (async (c: any) => {
   const authUser = c.get('user');
-  const body = await c.req.json().catch(() => null);
-  const code = body?.code;
-
-  if (!code || typeof code !== 'string') {
-    return c.json({ error: 'Verification code is required' }, 400);
-  }
+  const { code } = c.req.valid('json');
 
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
@@ -824,16 +999,27 @@ auth.post('/2fa/disable', twoFactorSetupRateLimit, authMiddleware, async (c) => 
   });
 
   return c.json({ message: '2FA has been disabled' });
-});
+}) as any);
 
 // POST /2fa/verify — verify 2FA during login flow
-auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const { tempToken, code } = body ?? {};
+const twoFactorVerifyRoute = createRoute({
+  method: 'post',
+  path: '/2fa/verify',
+  tags: ['Auth'],
+  summary: 'Verify 2FA code during login flow',
+  security: noSecurity,
+  request: {
+    body: jsonBody(twoFactorVerifySchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Login tokens and user'),
+  },
+  middleware: [twoFactorVerifyRateLimit],
+});
 
-  if (!tempToken || !code || typeof tempToken !== 'string' || typeof code !== 'string') {
-    return c.json({ error: 'Temp token and code are required' }, 400);
-  }
+auth.openapi(twoFactorVerifyRoute, (async (c: any) => {
+  const { tempToken, code } = c.req.valid('json');
 
   // Verify temp token
   let userId: string;
@@ -916,9 +1102,10 @@ auth.post('/2fa/verify', twoFactorVerifyRateLimit, async (c) => {
   setRefreshTokenCookie(c, tokens.refreshToken);
 
   return c.json({ tokens, user: userResponse(user) });
-});
+}) as any);
 
 // --- OAuth Routes ---
+// OAuth redirect endpoints use plain .get() since they return c.redirect() — NOT REST endpoints
 
 // GET /github — redirect to GitHub OAuth
 auth.get('/github', oauthRateLimit, async (c) => {

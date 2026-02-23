@@ -1,13 +1,14 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, platformSettings, upsert, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { updateService } from '../services/update.service.js';
 import { runMigrations, verifyDatabase } from '@fleet/db/migrate';
 import { runSeeders } from '@fleet/db/seed';
 import { logger } from '../services/logger.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
-const updateRoutes = new Hono<{
+const updateRoutes = new OpenAPIHono<{
   Variables: { user: AuthUser };
 }>();
 
@@ -22,18 +23,236 @@ updateRoutes.use('*', async (c, next) => {
   await next();
 });
 
+// ── Response schemas ──
+
+const notificationResponseSchema = z.any().openapi('UpdateNotification');
+
+const checkResponseSchema = z.any().openapi('UpdateCheckResult');
+
+const releasesResponseSchema = z.object({
+  releases: z.array(z.any()),
+  rcEnabled: z.boolean(),
+}).openapi('ReleasesResponse');
+
+const updateSettingsSchema = z.object({
+  includeRcReleases: z.boolean(),
+  autoCheckEnabled: z.boolean(),
+  backupBeforeUpdate: z.boolean(),
+}).openapi('UpdateSettings');
+
+const updateStatusSchema = z.any().openapi('UpdateStatus');
+
+const dbStatusSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().optional(),
+}).openapi('DbStatus');
+
+// ── Request schemas ──
+
+const patchSettingsBodySchema = z.object({
+  includeRcReleases: z.boolean().optional(),
+  autoCheckEnabled: z.boolean().optional(),
+  backupBeforeUpdate: z.boolean().optional(),
+}).openapi('PatchUpdateSettings');
+
+const performUpdateBodySchema = z.object({
+  version: z.string().min(1),
+  skipBackup: z.boolean().optional().default(false),
+}).openapi('PerformUpdate');
+
+// ── Route definitions ──
+
+const notificationRoute = createRoute({
+  method: 'get',
+  path: '/notification',
+  tags: ['Updates'],
+  summary: 'Poll for update availability (cached, no GitHub API call)',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(notificationResponseSchema, 'Update notification status'),
+    ...standardErrors,
+  },
+});
+
+const checkRoute = createRoute({
+  method: 'get',
+  path: '/check',
+  tags: ['Updates'],
+  summary: 'Force-check for available updates (hits GitHub API)',
+  security: bearerSecurity,
+  request: {
+    query: z.object({
+      prerelease: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(checkResponseSchema, 'Update check result'),
+    ...standardErrors,
+  },
+});
+
+const releasesRoute = createRoute({
+  method: 'get',
+  path: '/releases',
+  tags: ['Updates'],
+  summary: 'List available releases',
+  security: bearerSecurity,
+  request: {
+    query: z.object({
+      limit: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(releasesResponseSchema, 'Available releases'),
+    ...standardErrors,
+  },
+});
+
+const patchSettingsRoute = createRoute({
+  method: 'patch',
+  path: '/settings',
+  tags: ['Updates'],
+  summary: 'Update update-related settings',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(patchSettingsBodySchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Settings saved'),
+    ...standardErrors,
+  },
+});
+
+const getSettingsRoute = createRoute({
+  method: 'get',
+  path: '/settings',
+  tags: ['Updates'],
+  summary: 'Get current update settings',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(updateSettingsSchema, 'Current update settings'),
+    ...standardErrors,
+  },
+});
+
+const statusRoute = createRoute({
+  method: 'get',
+  path: '/status',
+  tags: ['Updates'],
+  summary: 'Get current update/rollback state',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(updateStatusSchema, 'Current update status'),
+    ...standardErrors,
+  },
+});
+
+const performRoute = createRoute({
+  method: 'post',
+  path: '/perform',
+  tags: ['Updates'],
+  summary: 'Start a platform update (zero-downtime rolling update)',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(performUpdateBodySchema),
+  },
+  responses: {
+    ...standardErrors,
+    202: jsonContent(z.object({
+      message: z.string(),
+      status: z.string(),
+    }), 'Update started'),
+  },
+});
+
+const rollbackRoute = createRoute({
+  method: 'post',
+  path: '/rollback',
+  tags: ['Updates'],
+  summary: 'Roll back to the previous version',
+  security: bearerSecurity,
+  responses: {
+    ...standardErrors,
+    202: jsonContent(z.object({
+      message: z.string(),
+      status: z.string(),
+    }), 'Rollback started'),
+    409: jsonContent(errorResponseSchema, 'Cannot rollback in current state'),
+  },
+});
+
+const migrateRoute = createRoute({
+  method: 'post',
+  path: '/migrate',
+  tags: ['Updates'],
+  summary: 'Run database migrations only (without full update)',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      applied: z.number(),
+    }), 'Migrations completed'),
+    ...standardErrors,
+  },
+});
+
+const seedRoute = createRoute({
+  method: 'post',
+  path: '/seed',
+  tags: ['Updates'],
+  summary: 'Run database seeders only (without full update)',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      executed: z.number(),
+    }), 'Seeders completed'),
+    ...standardErrors,
+  },
+});
+
+const resetRoute = createRoute({
+  method: 'post',
+  path: '/reset',
+  tags: ['Updates'],
+  summary: 'Force-reset a stuck update state and release the lock',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      previousStatus: z.string(),
+      currentStatus: z.string(),
+    }), 'State reset successfully'),
+    ...standardErrors,
+  },
+});
+
+const dbStatusRoute = createRoute({
+  method: 'get',
+  path: '/db-status',
+  tags: ['Updates'],
+  summary: 'Verify database connectivity',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(dbStatusSchema, 'Database is reachable'),
+    ...standardErrors,
+  },
+});
+
+// ── Route handlers ──
+
 // GET /notification — lightweight endpoint for the dashboard to poll
 // Returns cached update availability (no GitHub API call).
 // The admin dashboard should poll this every ~60s and show a badge
 // when available === true.
-updateRoutes.get('/notification', (c) => {
+updateRoutes.openapi(notificationRoute, (async (c: any) => {
   return c.json(updateService.getNotification());
-});
+}) as any);
 
 // GET /check — force-check for available updates (hits GitHub API)
-updateRoutes.get('/check', async (c) => {
+updateRoutes.openapi(checkRoute, (async (c: any) => {
   // Check if RC releases are enabled in platform settings
-  let includePrerelease = c.req.query('prerelease') === 'true';
+  let includePrerelease = c.req.valid('query').prerelease === 'true';
 
   if (!includePrerelease) {
     try {
@@ -54,11 +273,11 @@ updateRoutes.get('/check', async (c) => {
   } catch (err) {
     return c.json({ error: `Failed to check for updates: ${String(err)}` }, 500);
   }
-});
+}) as any);
 
 // GET /releases — list available releases
-updateRoutes.get('/releases', async (c) => {
-  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '10', 10) || 10), 50);
+updateRoutes.openapi(releasesRoute, (async (c: any) => {
+  const limit = Math.min(Math.max(1, parseInt(c.req.valid('query').limit ?? '10', 10) || 10), 50);
 
   try {
     const releases = await updateService.listReleases(limit);
@@ -75,7 +294,7 @@ updateRoutes.get('/releases', async (c) => {
     // Filter out pre-releases unless RC is enabled
     const filtered = includeRc
       ? releases
-      : releases.filter((r) => !r.prerelease);
+      : releases.filter((r: any) => !r.prerelease);
 
     return c.json({
       releases: filtered,
@@ -84,65 +303,55 @@ updateRoutes.get('/releases', async (c) => {
   } catch (err) {
     return c.json({ error: `Failed to fetch releases: ${String(err)}` }, 500);
   }
-});
+}) as any);
 
 // PATCH /settings — update update-related settings (RC toggle, auto-check, backup)
-updateRoutes.patch('/settings', async (c) => {
-  const schema = z.object({
-    includeRcReleases: z.boolean().optional(),
-    autoCheckEnabled: z.boolean().optional(),
-    backupBeforeUpdate: z.boolean().optional(),
-  });
-
-  const body = await c.req.json();
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Invalid settings' }, 400);
-  }
+updateRoutes.openapi(patchSettingsRoute, (async (c: any) => {
+  const parsed = c.req.valid('json');
 
   const updates: Record<string, unknown> = {};
 
-  if (parsed.data.includeRcReleases !== undefined) {
+  if (parsed.includeRcReleases !== undefined) {
     await upsert(
       platformSettings,
-      { key: 'updates:includeRcReleases', value: parsed.data.includeRcReleases },
+      { key: 'updates:includeRcReleases', value: parsed.includeRcReleases },
       platformSettings.key,
-      { value: parsed.data.includeRcReleases, updatedAt: new Date() },
+      { value: parsed.includeRcReleases, updatedAt: new Date() },
     );
-    updates.includeRcReleases = parsed.data.includeRcReleases;
+    updates.includeRcReleases = parsed.includeRcReleases;
   }
 
-  if (parsed.data.autoCheckEnabled !== undefined) {
+  if (parsed.autoCheckEnabled !== undefined) {
     await upsert(
       platformSettings,
-      { key: 'updates:autoCheckEnabled', value: parsed.data.autoCheckEnabled },
+      { key: 'updates:autoCheckEnabled', value: parsed.autoCheckEnabled },
       platformSettings.key,
-      { value: parsed.data.autoCheckEnabled, updatedAt: new Date() },
+      { value: parsed.autoCheckEnabled, updatedAt: new Date() },
     );
 
-    if (parsed.data.autoCheckEnabled) {
+    if (parsed.autoCheckEnabled) {
       updateService.startPeriodicCheck();
     } else {
       updateService.stopPeriodicCheck();
     }
-    updates.autoCheckEnabled = parsed.data.autoCheckEnabled;
+    updates.autoCheckEnabled = parsed.autoCheckEnabled;
   }
 
-  if (parsed.data.backupBeforeUpdate !== undefined) {
+  if (parsed.backupBeforeUpdate !== undefined) {
     await upsert(
       platformSettings,
-      { key: 'updates:backupBeforeUpdate', value: parsed.data.backupBeforeUpdate },
+      { key: 'updates:backupBeforeUpdate', value: parsed.backupBeforeUpdate },
       platformSettings.key,
-      { value: parsed.data.backupBeforeUpdate, updatedAt: new Date() },
+      { value: parsed.backupBeforeUpdate, updatedAt: new Date() },
     );
-    updates.backupBeforeUpdate = parsed.data.backupBeforeUpdate;
+    updates.backupBeforeUpdate = parsed.backupBeforeUpdate;
   }
 
   return c.json({ message: 'Update settings saved', ...updates });
-});
+}) as any);
 
 // GET /settings — get current update settings
-updateRoutes.get('/settings', async (c) => {
+updateRoutes.openapi(getSettingsRoute, (async (c: any) => {
   const rcSetting = await db.query.platformSettings.findFirst({
     where: eq(platformSettings.key, 'updates:includeRcReleases'),
   });
@@ -158,13 +367,13 @@ updateRoutes.get('/settings', async (c) => {
     autoCheckEnabled: autoCheckSetting?.value !== false, // default true
     backupBeforeUpdate: backupSetting?.value !== false, // default true
   });
-});
+}) as any);
 
 // GET /status — current update/rollback state
 // With multiple API replicas, the update runs on only one instance.
 // If this replica's local state is idle, check the DB-persisted state
 // in case another replica is actively running an update.
-updateRoutes.get('/status', async (c) => {
+updateRoutes.openapi(statusRoute, (async (c: any) => {
   const localState = updateService.getState();
 
   if (localState.status !== 'idle') {
@@ -203,22 +412,11 @@ updateRoutes.get('/status', async (c) => {
   }
 
   return c.json(localState);
-});
+}) as any);
 
 // POST /perform — start a platform update (zero-downtime rolling update)
-updateRoutes.post('/perform', async (c) => {
-  const schema = z.object({
-    version: z.string().min(1),
-    skipBackup: z.boolean().optional().default(false),
-  });
-
-  const body = await c.req.json();
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'version is required' }, 400);
-  }
-
-  const { version, skipBackup: skipBackupParam } = parsed.data;
+updateRoutes.openapi(performRoute, (async (c: any) => {
+  const { version, skipBackup: skipBackupParam } = c.req.valid('json');
 
   // Resolve skipBackup: explicit request param > platform setting > default (false)
   let skipBackup = skipBackupParam;
@@ -249,7 +447,7 @@ updateRoutes.post('/perform', async (c) => {
       () => runSeeders(),
       { skipBackup },
     )
-    .catch((err) => {
+    .catch((err: any) => {
       logger.error({ err }, 'Update failed');
     });
 
@@ -257,10 +455,10 @@ updateRoutes.post('/perform', async (c) => {
     message: `Update to ${version} started. Poll GET /api/v1/updates/status for progress.`,
     status: 'started',
   }, 202);
-});
+}) as any);
 
 // POST /rollback — roll back to the previous version
-updateRoutes.post('/rollback', async (c) => {
+updateRoutes.openapi(rollbackRoute, (async (c: any) => {
   const state = updateService.getState();
 
   if (state.status !== 'idle' && state.status !== 'failed' && state.status !== 'completed') {
@@ -278,7 +476,7 @@ updateRoutes.post('/rollback', async (c) => {
   // Start rollback in the background
   updateService
     .rollback()
-    .catch((err) => {
+    .catch((err: any) => {
       logger.error({ err }, 'Rollback failed');
     });
 
@@ -286,10 +484,10 @@ updateRoutes.post('/rollback', async (c) => {
     message: 'Rollback started. Poll GET /api/v1/updates/status for progress.',
     status: 'rolling-back',
   }, 202);
-});
+}) as any);
 
 // POST /migrate — run database migrations only (without full update)
-updateRoutes.post('/migrate', async (c) => {
+updateRoutes.openapi(migrateRoute, (async (c: any) => {
   const dbCheck = await verifyDatabase();
   if (!dbCheck.ok) {
     return c.json({ error: `Database pre-flight failed: ${dbCheck.error}` }, 500);
@@ -304,10 +502,10 @@ updateRoutes.post('/migrate', async (c) => {
   } catch (err) {
     return c.json({ error: `Migration failed (rolled back): ${String(err)}` }, 500);
   }
-});
+}) as any);
 
 // POST /seed — run database seeders only (without full update)
-updateRoutes.post('/seed', async (c) => {
+updateRoutes.openapi(seedRoute, (async (c: any) => {
   try {
     const result = await runSeeders();
     return c.json({
@@ -317,10 +515,10 @@ updateRoutes.post('/seed', async (c) => {
   } catch (err) {
     return c.json({ error: `Seeder failed: ${String(err)}` }, 500);
   }
-});
+}) as any);
 
 // POST /reset — force-reset a stuck update state and release the lock
-updateRoutes.post('/reset', async (c) => {
+updateRoutes.openapi(resetRoute, (async (c: any) => {
   const state = updateService.getState();
 
   // Only allow reset when in a non-terminal state (stuck) or failed
@@ -340,12 +538,12 @@ updateRoutes.post('/reset', async (c) => {
     previousStatus: result.previousStatus,
     currentStatus: 'idle',
   });
-});
+}) as any);
 
 // GET /db-status — verify database connectivity
-updateRoutes.get('/db-status', async (c) => {
+updateRoutes.openapi(dbStatusRoute, (async (c: any) => {
   const result = await verifyDatabase();
   return c.json(result, result.ok ? 200 : 500);
-});
+}) as any);
 
 export default updateRoutes;

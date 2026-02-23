@@ -19,6 +19,10 @@ export const nodeMetrics = pgTable('node_metrics', {
   memUsed: bigint('mem_used', { mode: 'number' }).notNull(),
   memFree: bigint('mem_free', { mode: 'number' }).notNull(),
   containerCount: integer('container_count').notNull(),
+  diskTotal: bigint('disk_total', { mode: 'number' }).default(0).notNull(),
+  diskUsed: bigint('disk_used', { mode: 'number' }).default(0).notNull(),
+  diskFree: bigint('disk_free', { mode: 'number' }).default(0).notNull(),
+  diskType: varchar('disk_type').default('unknown').notNull(),
   recordedAt: timestamp('recorded_at').defaultNow(),
 }, (table) => [
   index('idx_node_metrics_node_id').on(table.nodeId),

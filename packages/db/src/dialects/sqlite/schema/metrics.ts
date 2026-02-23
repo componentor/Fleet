@@ -17,6 +17,10 @@ export const nodeMetrics = sqliteTable('node_metrics', {
   memUsed: integer('mem_used').notNull(),
   memFree: integer('mem_free').notNull(),
   containerCount: integer('container_count').notNull(),
+  diskTotal: integer('disk_total').default(0).notNull(),
+  diskUsed: integer('disk_used').default(0).notNull(),
+  diskFree: integer('disk_free').default(0).notNull(),
+  diskType: text('disk_type').default('unknown').notNull(),
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_node_metrics_node_id').on(table.nodeId),

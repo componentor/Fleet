@@ -141,6 +141,17 @@ const superRoutes: RouteRecordRaw[] = [
         name: 'super-resellers',
         component: () => import('@/pages/super/Resellers.vue'),
       },
+      {
+        path: 'jobs',
+        name: 'super-jobs',
+        component: () => import('@/pages/super/Jobs.vue'),
+      },
+      {
+        path: 'jobs/:queue/:id',
+        name: 'super-job-detail',
+        component: () => import('@/pages/super/JobDetail.vue'),
+        props: true,
+      },
     ],
   },
 ]
@@ -343,11 +354,15 @@ router.beforeEach(async (to) => {
   // Check if platform needs first-run setup (skip for setup routes themselves)
   if (!to.path.startsWith('/setup')) {
     const setupDone = localStorage.getItem('fleet_setup_done')
-    if (!setupDone) {
+    // Always re-check when not authenticated (handles DB reset / fresh install)
+    if (!setupDone || !isAuthenticated) {
       try {
         const res = await fetch('/api/v1/setup/status')
         const { needsSetup } = await res.json()
-        if (needsSetup) return { path: '/setup' }
+        if (needsSetup) {
+          localStorage.removeItem('fleet_setup_done')
+          return { path: '/setup' }
+        }
         localStorage.setItem('fleet_setup_done', 'true')
       } catch {
         // API not available, continue normally

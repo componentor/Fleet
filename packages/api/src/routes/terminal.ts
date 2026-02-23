@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, services, sshAccessRules, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -8,10 +8,11 @@ import { dockerService } from '../services/docker.service.js';
 import { sshService } from '../services/ssh.service.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
+import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const execRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 'terminal-exec' });
 
-const terminalRoutes = new Hono<{
+const terminalRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -25,10 +26,53 @@ const terminalRoutes = new Hono<{
 // to the parent, which would intercept WebSocket upgrades (they have no Authorization
 // header — auth is via query params). Apply middleware per-route instead.
 
+// ── Schemas ──
+
+const serviceIdParamSchema = z.object({
+  serviceId: z.string().openapi({ description: 'Service ID' }),
+});
+
+const execSchema = z.object({
+  command: z.array(z.string().max(1000)).min(1).max(50),
+}).openapi('TerminalExecRequest');
+
+const terminalInfoSchema = z.object({
+  serviceId: z.string(),
+  serviceName: z.string(),
+  available: z.boolean(),
+  containers: z.array(z.object({
+    containerId: z.string(),
+    nodeId: z.string(),
+    taskId: z.string(),
+  })),
+}).openapi('TerminalInfoResponse');
+
+const execOutputSchema = z.object({
+  output: z.string(),
+}).openapi('TerminalExecResponse');
+
+// ────────────────────────────────────────────────────────────────────────────
 // GET /info/:serviceId — get terminal connection info (pre-flight check)
-terminalRoutes.get('/info/:serviceId', authMiddleware, tenantMiddleware, requireMember, async (c) => {
+// ────────────────────────────────────────────────────────────────────────────
+const infoRoute = createRoute({
+  method: 'get',
+  path: '/info/{serviceId}',
+  tags: ['Terminal'],
+  summary: 'Get terminal connection info for a service',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(terminalInfoSchema, 'Terminal connection info'),
+    ...standardErrors,
+  },
+  middleware: [authMiddleware, tenantMiddleware, requireMember],
+});
+
+terminalRoutes.openapi(infoRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -65,32 +109,37 @@ terminalRoutes.get('/info/:serviceId', authMiddleware, tenantMiddleware, require
     logger.error({ err }, 'Failed to get service tasks');
     return c.json({ error: 'Failed to query Docker for running containers' }, 500);
   }
-});
+}) as any);
 
+// ────────────────────────────────────────────────────────────────────────────
 // POST /exec/:serviceId — execute a one-shot command in a container
-const execSchema = z.object({
-  command: z.array(z.string().max(1000)).min(1).max(50),
+// ────────────────────────────────────────────────────────────────────────────
+const execRoute = createRoute({
+  method: 'post',
+  path: '/exec/{serviceId}',
+  tags: ['Terminal'],
+  summary: 'Execute a one-shot command in a service container',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+    body: jsonBody(execSchema),
+  },
+  responses: {
+    200: jsonContent(execOutputSchema, 'Command execution output'),
+    ...standardErrors,
+  },
+  middleware: [execRateLimit, authMiddleware, tenantMiddleware, requireMember],
 });
 
-terminalRoutes.post('/exec/:serviceId', execRateLimit, authMiddleware, tenantMiddleware, requireMember, async (c) => {
+terminalRoutes.openapi(execRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json().catch(() => null);
-  if (!body) {
-    return c.json({ error: 'Invalid JSON body' }, 400);
-  }
-
-  const parsed = execSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
-  }
-
-  const { command } = parsed.data;
+  const { command } = c.req.valid('json');
 
   // Check IP allowlist
   const clientIp = c.req.header('X-Forwarded-For')?.split(',')[0]?.trim()
@@ -138,6 +187,6 @@ terminalRoutes.post('/exec/:serviceId', execRateLimit, authMiddleware, tenantMid
     logger.error({ err }, 'Exec failed');
     return c.json({ error: 'Command execution failed' }, 500);
   }
-});
+}) as any);
 
 export default terminalRoutes;

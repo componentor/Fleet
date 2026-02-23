@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { resolve as dnsResolve } from 'node:dns/promises';
 import { db, dnsZones, dnsRecords, domainRegistrations, insertReturning, updateReturning, safeTransaction, eq, and } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
@@ -10,8 +10,9 @@ import { randomUUID } from 'crypto';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { logger } from '../services/logger.js';
 import { getPlatformDomain } from './settings.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
-const dnsRoutes = new Hono<{
+const dnsRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -23,26 +24,9 @@ dnsRoutes.use('*', authMiddleware);
 dnsRoutes.use('*', tenantMiddleware);
 
 // ---------------------------------------------------------------------------
-// Zones
+// Schemas
 // ---------------------------------------------------------------------------
 
-// GET /zones — list DNS zones for current account
-dnsRoutes.get('/zones', async (c) => {
-  const accountId = c.get('accountId');
-
-  if (!accountId) {
-    return c.json({ error: 'Account context required' }, 400);
-  }
-
-  const zones = await db.query.dnsZones.findMany({
-    where: eq(dnsZones.accountId, accountId),
-    orderBy: (z, { desc }) => desc(z.createdAt),
-  });
-
-  return c.json(zones);
-});
-
-// POST /zones — add a domain (creates zone in DB, syncs to providers best-effort)
 const createZoneSchema = z.object({
   domain: z
     .string()
@@ -55,21 +39,246 @@ const createZoneSchema = z.object({
   nameservers: z.array(z.string()).optional(),
 });
 
-dnsRoutes.post('/zones', requireMember, async (c) => {
+const dnsRecordTypes = [
+  'A',
+  'AAAA',
+  'CNAME',
+  'MX',
+  'TXT',
+  'NS',
+  'SRV',
+  'CAA',
+  'PTR',
+  'SOA',
+] as const;
+
+const createRecordSchema = z.object({
+  type: z.enum(dnsRecordTypes),
+  name: z.string().min(1).max(255),
+  content: z.string().min(1).max(4096),
+  ttl: z.number().int().min(60).max(86400).default(3600),
+  priority: z.number().int().min(0).max(65535).optional(),
+});
+
+const updateRecordSchema = z.object({
+  type: z.enum(dnsRecordTypes).optional(),
+  name: z.string().min(1).max(255).optional(),
+  content: z.string().min(1).max(4096).optional(),
+  ttl: z.number().int().min(60).max(86400).optional(),
+  priority: z.number().int().min(0).max(65535).optional(),
+});
+
+const verifyZoneSchema = z.object({
+  token: z.string().optional(),
+});
+
+const nameserverSchema = z.object({
+  nameservers: z.array(
+    z.string().min(1).max(253).regex(/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/, 'Invalid nameserver hostname')
+  ).min(2).max(13),
+});
+
+const zoneIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Zone ID' }),
+});
+
+const recordIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Record ID' }),
+});
+
+// ---------------------------------------------------------------------------
+// Route definitions
+// ---------------------------------------------------------------------------
+
+const listZonesRoute = createRoute({
+  method: 'get',
+  path: '/zones',
+  tags: ['DNS'],
+  summary: 'List DNS zones for current account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of DNS zones'),
+    ...standardErrors,
+  },
+});
+
+const createZoneRoute = createRoute({
+  method: 'post',
+  path: '/zones',
+  tags: ['DNS'],
+  summary: 'Add a domain (creates zone)',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    body: jsonBody(createZoneSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Zone created'),
+    409: jsonContent(errorResponseSchema, 'Domain already exists'),
+  },
+});
+
+const getZoneRoute = createRoute({
+  method: 'get',
+  path: '/zones/{id}',
+  tags: ['DNS'],
+  summary: 'Get zone details with records',
+  security: bearerSecurity,
+  request: {
+    params: zoneIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Zone details with records'),
+    ...standardErrors,
+  },
+});
+
+const deleteZoneRoute = createRoute({
+  method: 'delete',
+  path: '/zones/{id}',
+  tags: ['DNS'],
+  summary: 'Remove a domain',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: zoneIdParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Zone deleted'),
+  },
+});
+
+const verifyZoneRoute = createRoute({
+  method: 'post',
+  path: '/zones/{id}/verify',
+  tags: ['DNS'],
+  summary: 'Verify domain ownership via DNS TXT record',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: zoneIdParamSchema,
+    body: jsonBody(verifyZoneSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Verification result'),
+    422: jsonContent(errorResponseSchema, 'Verification failed'),
+  },
+});
+
+const listRecordsRoute = createRoute({
+  method: 'get',
+  path: '/zones/{id}/records',
+  tags: ['DNS'],
+  summary: 'List records for a zone',
+  security: bearerSecurity,
+  request: {
+    params: zoneIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of DNS records'),
+    ...standardErrors,
+  },
+});
+
+const createRecordRoute = createRoute({
+  method: 'post',
+  path: '/zones/{id}/records',
+  tags: ['DNS'],
+  summary: 'Create a DNS record',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: zoneIdParamSchema,
+    body: jsonBody(createRecordSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Record created'),
+  },
+});
+
+const updateRecordRoute = createRoute({
+  method: 'patch',
+  path: '/records/{id}',
+  tags: ['DNS'],
+  summary: 'Update a DNS record',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: recordIdParamSchema,
+    body: jsonBody(updateRecordSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated record'),
+    ...standardErrors,
+  },
+});
+
+const deleteRecordRoute = createRoute({
+  method: 'delete',
+  path: '/records/{id}',
+  tags: ['DNS'],
+  summary: 'Delete a DNS record',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: recordIdParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Record deleted'),
+  },
+});
+
+const updateNameserversRoute = createRoute({
+  method: 'patch',
+  path: '/zones/{id}/nameservers',
+  tags: ['DNS'],
+  summary: 'Update nameservers for a zone',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: zoneIdParamSchema,
+    body: jsonBody(nameserverSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Nameservers updated'),
+    ...standardErrors,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+// GET /zones
+dnsRoutes.openapi(listZonesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = createZoneSchema.safeParse(body);
+  const zones = await db.query.dnsZones.findMany({
+    where: eq(dnsZones.accountId, accountId),
+    orderBy: (z: any, { desc }: any) => desc(z.createdAt),
+  });
 
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
+  return c.json(zones);
+}) as any);
+
+// POST /zones
+dnsRoutes.openapi(createZoneRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { domain, nameservers } = parsed.data;
+  const { domain, nameservers } = c.req.valid('json');
 
   // Check if domain already exists in our DB
   const existing = await db.query.dnsZones.findFirst({
@@ -138,12 +347,12 @@ dnsRoutes.post('/zones', requireMember, async (c) => {
     },
     201,
   );
-});
+}) as any);
 
-// GET /zones/:id — zone details + records
-dnsRoutes.get('/zones/:id', async (c) => {
+// GET /zones/:id
+dnsRoutes.openapi(getZoneRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const zoneId = c.req.param('id');
+  const { id: zoneId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -153,7 +362,7 @@ dnsRoutes.get('/zones/:id', async (c) => {
     where: and(eq(dnsZones.id, zoneId), eq(dnsZones.accountId, accountId)),
     with: {
       records: {
-        orderBy: (r, { asc }) => asc(r.name),
+        orderBy: (r: any, { asc }: any) => asc(r.name),
       },
     },
   });
@@ -163,12 +372,12 @@ dnsRoutes.get('/zones/:id', async (c) => {
   }
 
   return c.json(zone);
-});
+}) as any);
 
-// DELETE /zones/:id — remove domain
-dnsRoutes.delete('/zones/:id', requireMember, async (c) => {
+// DELETE /zones/:id
+dnsRoutes.openapi(deleteZoneRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const zoneId = c.req.param('id');
+  const { id: zoneId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -201,12 +410,12 @@ dnsRoutes.delete('/zones/:id', requireMember, async (c) => {
   });
 
   return c.json({ message: 'Zone deleted' });
-});
+}) as any);
 
-// POST /zones/:id/verify — verify domain ownership via DNS TXT record
-dnsRoutes.post('/zones/:id/verify', requireMember, async (c) => {
+// POST /zones/:id/verify
+dnsRoutes.openapi(verifyZoneRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const zoneId = c.req.param('id');
+  const { id: zoneId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -224,13 +433,8 @@ dnsRoutes.post('/zones/:id/verify', requireMember, async (c) => {
     return c.json({ message: 'Domain is already verified', verified: true });
   }
 
-  let token: string | undefined;
-  try {
-    const body = await c.req.json();
-    token = body.token;
-  } catch {
-    // No body provided
-  }
+  const data = c.req.valid('json');
+  const token = data?.token;
 
   if (!token) {
     return c.json(
@@ -277,45 +481,12 @@ dnsRoutes.post('/zones/:id/verify', requireMember, async (c) => {
   const [updated] = await updateReturning(dnsZones, { verified: true, updatedAt: new Date() }, eq(dnsZones.id, zoneId));
 
   return c.json({ message: 'Domain verified successfully', verified: true, zone: updated });
-});
+}) as any);
 
-// ---------------------------------------------------------------------------
-// Records
-// ---------------------------------------------------------------------------
-
-const dnsRecordTypes = [
-  'A',
-  'AAAA',
-  'CNAME',
-  'MX',
-  'TXT',
-  'NS',
-  'SRV',
-  'CAA',
-  'PTR',
-  'SOA',
-] as const;
-
-const createRecordSchema = z.object({
-  type: z.enum(dnsRecordTypes),
-  name: z.string().min(1).max(255),
-  content: z.string().min(1).max(4096),
-  ttl: z.number().int().min(60).max(86400).default(3600),
-  priority: z.number().int().min(0).max(65535).optional(),
-});
-
-const updateRecordSchema = z.object({
-  type: z.enum(dnsRecordTypes).optional(),
-  name: z.string().min(1).max(255).optional(),
-  content: z.string().min(1).max(4096).optional(),
-  ttl: z.number().int().min(60).max(86400).optional(),
-  priority: z.number().int().min(0).max(65535).optional(),
-});
-
-// GET /zones/:id/records — list records for a zone
-dnsRoutes.get('/zones/:id/records', async (c) => {
+// GET /zones/:id/records
+dnsRoutes.openapi(listRecordsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const zoneId = c.req.param('id');
+  const { id: zoneId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -331,16 +502,16 @@ dnsRoutes.get('/zones/:id/records', async (c) => {
 
   const records = await db.query.dnsRecords.findMany({
     where: eq(dnsRecords.zoneId, zoneId),
-    orderBy: (r, { asc }) => asc(r.name),
+    orderBy: (r: any, { asc }: any) => asc(r.name),
   });
 
   return c.json(records);
-});
+}) as any);
 
-// POST /zones/:id/records — create a DNS record
-dnsRoutes.post('/zones/:id/records', requireMember, async (c) => {
+// POST /zones/:id/records
+dnsRoutes.openapi(createRecordRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const zoneId = c.req.param('id');
+  const { id: zoneId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -354,14 +525,7 @@ dnsRoutes.post('/zones/:id/records', requireMember, async (c) => {
     return c.json({ error: 'Zone not found' }, 404);
   }
 
-  const body = await c.req.json();
-  const parsed = createRecordSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { type, name, content, ttl, priority } = parsed.data;
+  const { type, name, content, ttl, priority } = c.req.valid('json');
 
   // Sync to providers (best-effort)
   const result = await dnsManager.createRecord(zone.domain, name, type, content, ttl, priority);
@@ -396,12 +560,12 @@ dnsRoutes.post('/zones/:id/records', requireMember, async (c) => {
     },
     201,
   );
-});
+}) as any);
 
-// PATCH /records/:id — update a DNS record
-dnsRoutes.patch('/records/:id', requireMember, async (c) => {
+// PATCH /records/:id
+dnsRoutes.openapi(updateRecordRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const recordId = c.req.param('id');
+  const { id: recordId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -420,14 +584,7 @@ dnsRoutes.patch('/records/:id', requireMember, async (c) => {
     return c.json({ error: 'Record not found' }, 404);
   }
 
-  const body = await c.req.json();
-  const parsed = updateRecordSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const updates = parsed.data;
+  const updates = c.req.valid('json');
 
   const finalName = updates.name ?? record.name;
   const finalType = updates.type ?? record.type;
@@ -476,12 +633,12 @@ dnsRoutes.patch('/records/:id', requireMember, async (c) => {
     ...updated,
     warnings: result.warnings.length > 0 ? result.warnings : undefined,
   });
-});
+}) as any);
 
-// DELETE /records/:id — delete a DNS record
-dnsRoutes.delete('/records/:id', requireMember, async (c) => {
+// DELETE /records/:id
+dnsRoutes.openapi(deleteRecordRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const recordId = c.req.param('id');
+  const { id: recordId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -516,28 +673,18 @@ dnsRoutes.delete('/records/:id', requireMember, async (c) => {
   });
 
   return c.json({ message: 'Record deleted' });
-});
+}) as any);
 
-// ── Update nameservers ──────────────────────────────────────────────────────
-const nameserverSchema = z.object({
-  nameservers: z.array(
-    z.string().min(1).max(253).regex(/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/, 'Invalid nameserver hostname')
-  ).min(2).max(13),
-});
-
-dnsRoutes.patch('/zones/:id/nameservers', requireMember, async (c) => {
-  const zoneId = c.req.param('id');
+// PATCH /zones/:id/nameservers
+dnsRoutes.openapi(updateNameserversRoute, (async (c: any) => {
+  const { id: zoneId } = c.req.valid('param');
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = nameserverSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.flatten() }, 400);
-  }
+  const { nameservers } = c.req.valid('json');
 
   // Verify zone belongs to this account
   const zone = await db.query.dnsZones.findFirst({
@@ -550,7 +697,7 @@ dnsRoutes.patch('/zones/:id/nameservers', requireMember, async (c) => {
 
   // Update in DB
   await db.update(dnsZones)
-    .set({ nameservers: parsed.data.nameservers, updatedAt: new Date() })
+    .set({ nameservers, updatedAt: new Date() })
     .where(eq(dnsZones.id, zoneId));
 
   // If domain was purchased through Fleet, also update at registrar
@@ -565,7 +712,7 @@ dnsRoutes.patch('/zones/:id/nameservers', requireMember, async (c) => {
 
     if (registration) {
       const { registrarService } = await import('../services/registrar.service.js');
-      await registrarService.setNameservers(zone.domain, parsed.data.nameservers);
+      await registrarService.setNameservers(zone.domain, nameservers);
       registrarUpdated = true;
     }
   } catch (err) {
@@ -573,9 +720,9 @@ dnsRoutes.patch('/zones/:id/nameservers', requireMember, async (c) => {
   }
 
   return c.json({
-    nameservers: parsed.data.nameservers,
+    nameservers,
     registrarUpdated,
   });
-});
+}) as any);
 
 export default dnsRoutes;

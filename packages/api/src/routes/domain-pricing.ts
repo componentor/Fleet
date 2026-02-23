@@ -1,12 +1,20 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, domainTldPricing, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { insertReturning, updateReturning } from '@fleet/db';
 import { registrarService } from '../services/registrar.service.js';
 import { logger } from '../services/logger.js';
+import {
+  jsonBody,
+  jsonContent,
+  errorResponseSchema,
+  messageResponseSchema,
+  standardErrors,
+  bearerSecurity,
+} from './_schemas.js';
 
-const domainPricingRoutes = new Hono<{
+const domainPricingRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
   };
@@ -37,15 +45,23 @@ function computeSellPrice(providerPrice: number, markupType: string, markupValue
   }
 }
 
-// GET / — list all TLD pricing entries
-domainPricingRoutes.get('/', async (c) => {
-  const entries = await db.query.domainTldPricing.findMany({
-    orderBy: (p, { asc }) => asc(p.tld),
-  });
-  return c.json(entries);
-});
+// ── Schemas ──
 
-// POST / — create or update a TLD pricing entry
+const domainPricingEntrySchema = z.object({
+  id: z.string(),
+  tld: z.string(),
+  providerRegistrationPrice: z.number(),
+  providerRenewalPrice: z.number(),
+  markupType: z.string(),
+  markupValue: z.number(),
+  sellRegistrationPrice: z.number(),
+  sellRenewalPrice: z.number(),
+  enabled: z.boolean().nullable(),
+  currency: z.string(),
+  createdAt: z.any().nullable(),
+  updatedAt: z.any().nullable(),
+}).openapi('DomainPricingEntry');
+
 const upsertSchema = z.object({
   tld: z.string().min(1).max(63),
   providerRegistrationPrice: z.number().int().min(0),
@@ -54,17 +70,62 @@ const upsertSchema = z.object({
   markupValue: z.number().int().min(0).default(20),
   enabled: z.boolean().default(true),
   currency: z.string().length(3).default('USD'),
+}).openapi('DomainPricingUpsert');
+
+const patchSchema = z.object({
+  providerRegistrationPrice: z.number().int().min(0).optional(),
+  providerRenewalPrice: z.number().int().min(0).optional(),
+  markupType: z.enum(['percentage', 'fixed_amount', 'fixed_price']).optional(),
+  markupValue: z.number().int().min(0).optional(),
+  enabled: z.boolean().optional(),
+  currency: z.string().length(3).optional(),
+}).openapi('DomainPricingPatch');
+
+const idParamSchema = z.object({
+  id: z.string().openapi({ description: 'Pricing entry ID' }),
 });
 
-domainPricingRoutes.post('/', async (c) => {
-  const body = await c.req.json();
-  const parsed = upsertSchema.safeParse(body);
+// ── Routes ──
 
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+const listRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Domain Pricing'],
+  summary: 'List all TLD pricing entries',
+  security: bearerSecurity,
+  middleware: [],
+  responses: {
+    200: jsonContent(z.array(domainPricingEntrySchema), 'List of TLD pricing entries'),
+    ...standardErrors,
+  },
+});
 
-  const data = parsed.data;
+domainPricingRoutes.openapi(listRoute, (async (c: any) => {
+  const entries = await db.query.domainTldPricing.findMany({
+    orderBy: (p: any, { asc }: any) => asc(p.tld),
+  });
+  return c.json(entries, 200);
+}) as any);
+
+const upsertRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Domain Pricing'],
+  summary: 'Create or update a TLD pricing entry',
+  security: bearerSecurity,
+  middleware: [],
+  request: {
+    body: jsonBody(upsertSchema),
+  },
+  responses: {
+    200: jsonContent(domainPricingEntrySchema, 'Updated pricing entry'),
+    201: jsonContent(domainPricingEntrySchema, 'Created pricing entry'),
+    ...standardErrors,
+  },
+});
+
+domainPricingRoutes.openapi(upsertRoute, (async (c: any) => {
+  const data = c.req.valid('json');
   const tld = data.tld.replace(/^\./, '').toLowerCase();
 
   const sellRegistrationPrice = computeSellPrice(data.providerRegistrationPrice, data.markupType, data.markupValue);
@@ -87,7 +148,7 @@ domainPricingRoutes.post('/', async (c) => {
       currency: data.currency,
       updatedAt: new Date(),
     }, eq(domainTldPricing.id, existing.id));
-    return c.json(updated);
+    return c.json(updated, 200);
   }
 
   const [entry] = await insertReturning(domainTldPricing, {
@@ -103,26 +164,28 @@ domainPricingRoutes.post('/', async (c) => {
   });
 
   return c.json(entry, 201);
+}) as any);
+
+const patchRoute = createRoute({
+  method: 'patch',
+  path: '/{id}',
+  tags: ['Domain Pricing'],
+  summary: 'Update a single TLD pricing entry',
+  security: bearerSecurity,
+  middleware: [],
+  request: {
+    params: idParamSchema,
+    body: jsonBody(patchSchema),
+  },
+  responses: {
+    200: jsonContent(domainPricingEntrySchema, 'Updated pricing entry'),
+    ...standardErrors,
+  },
 });
 
-// PATCH /:id — update a single TLD pricing entry
-const patchSchema = z.object({
-  providerRegistrationPrice: z.number().int().min(0).optional(),
-  providerRenewalPrice: z.number().int().min(0).optional(),
-  markupType: z.enum(['percentage', 'fixed_amount', 'fixed_price']).optional(),
-  markupValue: z.number().int().min(0).optional(),
-  enabled: z.boolean().optional(),
-  currency: z.string().length(3).optional(),
-});
-
-domainPricingRoutes.patch('/:id', async (c) => {
-  const id = c.req.param('id');
-  const body = await c.req.json();
-  const parsed = patchSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+domainPricingRoutes.openapi(patchRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  const updates = c.req.valid('json');
 
   const existing = await db.query.domainTldPricing.findFirst({
     where: eq(domainTldPricing.id, id),
@@ -132,7 +195,6 @@ domainPricingRoutes.patch('/:id', async (c) => {
     return c.json({ error: 'Pricing entry not found' }, 404);
   }
 
-  const updates = parsed.data;
   const regPrice = updates.providerRegistrationPrice ?? existing.providerRegistrationPrice;
   const renPrice = updates.providerRenewalPrice ?? existing.providerRenewalPrice;
   const mType = updates.markupType ?? existing.markupType;
@@ -148,12 +210,27 @@ domainPricingRoutes.patch('/:id', async (c) => {
     updatedAt: new Date(),
   }, eq(domainTldPricing.id, id));
 
-  return c.json(updated);
+  return c.json(updated, 200);
+}) as any);
+
+const deleteRoute = createRoute({
+  method: 'delete',
+  path: '/{id}',
+  tags: ['Domain Pricing'],
+  summary: 'Remove a TLD pricing entry',
+  security: bearerSecurity,
+  middleware: [],
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Pricing entry deleted'),
+    ...standardErrors,
+  },
 });
 
-// DELETE /:id — remove a TLD pricing entry
-domainPricingRoutes.delete('/:id', async (c) => {
-  const id = c.req.param('id');
+domainPricingRoutes.openapi(deleteRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
 
   const existing = await db.query.domainTldPricing.findFirst({
     where: eq(domainTldPricing.id, id),
@@ -165,11 +242,27 @@ domainPricingRoutes.delete('/:id', async (c) => {
 
   await db.delete(domainTldPricing).where(eq(domainTldPricing.id, id));
 
-  return c.json({ message: 'Pricing entry deleted' });
+  return c.json({ message: 'Pricing entry deleted' }, 200);
+}) as any);
+
+const syncResponseSchema = z.object({
+  message: z.string(),
+}).openapi('DomainPricingSyncResponse');
+
+const syncRoute = createRoute({
+  method: 'post',
+  path: '/sync',
+  tags: ['Domain Pricing'],
+  summary: 'Sync TLD prices from registrar provider',
+  security: bearerSecurity,
+  middleware: [],
+  responses: {
+    200: jsonContent(syncResponseSchema, 'Sync result'),
+    ...standardErrors,
+  },
 });
 
-// POST /sync — fetch prices from registrar and populate/update entries
-domainPricingRoutes.post('/sync', async (c) => {
+domainPricingRoutes.openapi(syncRoute, (async (c: any) => {
   try {
     const provider = await registrarService.getProvider();
     const commonTlds = ['com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai', 'no', 'se', 'dk', 'fi'];
@@ -219,11 +312,11 @@ domainPricingRoutes.post('/sync', async (c) => {
       synced++;
     }
 
-    return c.json({ message: `Synced ${synced} TLD prices from provider` });
+    return c.json({ message: `Synced ${synced} TLD prices from provider` }, 200);
   } catch (err) {
     logger.error({ err }, 'Price sync failed');
     return c.json({ error: 'Failed to sync prices' }, 500);
   }
-});
+}) as any);
 
 export default domainPricingRoutes;

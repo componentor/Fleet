@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, services, deployments, insertReturning, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -14,8 +14,9 @@ import { writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
-const uploadRoutes = new Hono<{
+const uploadRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -47,7 +48,45 @@ function buildTraefikLabels(
 }
 
 // POST /deploy — upload and deploy a new service
-uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireScope('write'), async (c) => {
+const deployRoute = createRoute({
+  method: 'post',
+  path: '/deploy',
+  tags: ['Upload'],
+  summary: 'Upload and deploy a new service',
+  security: bearerSecurity,
+  request: {
+    body: {
+      content: {
+        'multipart/form-data': {
+          schema: z.object({
+            file: z.any().openapi({ type: 'string', format: 'binary' }),
+            name: z.string(),
+            buildFile: z.string().optional(),
+            replicas: z.string().optional(),
+            domain: z.string().optional(),
+            sslEnabled: z.string().optional(),
+            env: z.string().optional(),
+            ports: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: jsonContent(z.object({
+      service: z.any(),
+      deploymentId: z.string(),
+      detectedFiles: z.array(z.string()),
+      buildMethod: z.string(),
+      buildFile: z.string().nullable(),
+      detectedRuntime: z.string().nullable(),
+    }), 'Service created and deployment triggered'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireActiveSubscription, requireScope('write')],
+});
+
+uploadRoutes.openapi(deployRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -223,12 +262,43 @@ uploadRoutes.post('/deploy', requireMember, requireActiveSubscription, requireSc
     // Clean up temp file
     await rm(tmpPath, { force: true }).catch((err) => logger.warn({ err, tmpPath }, 'Failed to clean up temp file'));
   }
-});
+}) as any);
 
 // POST /:serviceId/rebuild — replace source and rebuild
-uploadRoutes.post('/:serviceId/rebuild', requireMember, requireScope('write'), async (c) => {
+const rebuildRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/rebuild',
+  tags: ['Upload'],
+  summary: 'Replace source and rebuild a service',
+  security: bearerSecurity,
+  request: {
+    params: z.object({
+      serviceId: z.string(),
+    }),
+    body: {
+      content: {
+        'multipart/form-data': {
+          schema: z.object({
+            file: z.any().openapi({ type: 'string', format: 'binary' }),
+            buildFile: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: jsonContent(z.object({
+      message: z.string(),
+      deploymentId: z.string(),
+    }), 'Rebuild triggered'),
+    ...standardErrors,
+  },
+  middleware: [requireMember, requireScope('write')],
+});
+
+uploadRoutes.openapi(rebuildRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const svc = await db.query.services.findFirst({
@@ -319,6 +389,6 @@ uploadRoutes.post('/:serviceId/rebuild', requireMember, requireScope('write'), a
   } finally {
     await rm(tmpPath, { force: true }).catch((err) => logger.warn({ err, tmpPath }, 'Failed to clean up temp file'));
   }
-});
+}) as any);
 
 export default uploadRoutes;

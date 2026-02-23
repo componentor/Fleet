@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, platformSettings, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -11,6 +11,7 @@ import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const UPLOAD_BASE = process.env['UPLOAD_BASE_PATH']
   ?? (process.env['NODE_ENV'] === 'production' ? '/srv/nfs/uploads' : join(process.cwd(), 'data', 'uploads'));
@@ -18,7 +19,7 @@ const BRANDING_DIR = join(UPLOAD_BASE, 'platform', 'branding');
 
 const settingsRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'settings' });
 
-const settings = new Hono<{
+const settings = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -77,27 +78,298 @@ export async function getPlatformDomain(): Promise<string> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GET /platform-domain — lightweight endpoint for any authenticated user.
-// Returns the bare root domain for connection guides, SFTP, webhooks, etc.
+// Schemas
 // ────────────────────────────────────────────────────────────────────────────
-settings.get('/platform-domain', cache(600), async (c) => {
-  const domain = await getPlatformDomain();
-  return c.json({ domain: domain === 'fleet.local' ? null : domain });
+
+const updateSettingsSchema = z.record(z.string(), z.unknown());
+
+const stripeSettingsSchema = z.object({
+  publishableKey: z.string().min(1),
+  secretKey: z.string().min(1),
+  webhookSecret: z.string().min(1).optional(),
+});
+
+const emailSettingsSchema = z.object({
+  provider: z.enum(['smtp', 'resend']).optional(),
+  smtpHost: z.string().optional(),
+  smtpPort: z.number().int().min(1).max(65535).optional(),
+  smtpUser: z.string().optional(),
+  smtpPass: z.string().optional(),
+  smtpFrom: z.string().email().optional(),
+  resendApiKey: z.string().optional(),
+  resendFrom: z.string().email().optional(),
+});
+
+const registrarSchema = z.object({
+  provider: z.string().min(1),
+  apiKey: z.string().min(1),
+  apiSecret: z.string().optional(),
+  resellerId: z.string().optional(),
+  sandbox: z.boolean().optional(),
+});
+
+const githubSettingsSchema = z.object({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  webhookSecret: z.string().min(1).optional(),
+});
+
+const googleSettingsSchema = z.object({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+});
+
+const brandingTypeParamSchema = z.object({
+  type: z.string().openapi({ description: 'Branding asset type (logo or favicon)' }),
+});
+
+const ALLOWED_ACCOUNT_SETTINGS = [
+  'notifications', 'timezone', 'language', 'theme',
+  'billing:plan', 'email:provider', 'email:smtpHost', 'email:smtpPort',
+  'email:smtpUser', 'email:smtpPass', 'email:smtpFrom',
+  'email:resendApiKey', 'email:resendFrom',
+];
+
+// ────────────────────────────────────────────────────────────────────────────
+// Route definitions
+// ────────────────────────────────────────────────────────────────────────────
+
+const getPlatformDomainRoute = createRoute({
+  method: 'get',
+  path: '/platform-domain',
+  tags: ['Settings'],
+  summary: 'Get the platform root domain',
+  security: bearerSecurity,
+  middleware: [cache(600)] as const,
+  responses: {
+    200: jsonContent(z.object({ domain: z.string().nullable() }), 'Platform domain'),
+    ...standardErrors,
+  },
+});
+
+const getSettingsRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Settings'],
+  summary: 'Get settings (platform-wide or account-scoped)',
+  security: bearerSecurity,
+  middleware: [cache(300)] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Settings object'),
+    ...standardErrors,
+  },
+});
+
+const updateSettingsRoute = createRoute({
+  method: 'patch',
+  path: '/',
+  tags: ['Settings'],
+  summary: 'Update settings (platform-wide or account-scoped)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(updateSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Settings updated'),
+  },
+});
+
+const updateStripeRoute = createRoute({
+  method: 'patch',
+  path: '/stripe',
+  tags: ['Settings'],
+  summary: 'Configure Stripe keys (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(stripeSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Stripe configuration updated'),
+  },
+});
+
+const updateEmailRoute = createRoute({
+  method: 'patch',
+  path: '/email',
+  tags: ['Settings'],
+  summary: 'Configure email provider',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(emailSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Email configuration updated'),
+  },
+});
+
+const getRegistrarRoute = createRoute({
+  method: 'get',
+  path: '/registrar',
+  tags: ['Settings'],
+  summary: 'Get configured domain registrar',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Registrar configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateRegistrarRoute = createRoute({
+  method: 'patch',
+  path: '/registrar',
+  tags: ['Settings'],
+  summary: 'Create or update domain registrar (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(registrarSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Registrar updated'),
+    201: jsonContent(z.any(), 'Registrar configured'),
+  },
+});
+
+const testRegistrarRoute = createRoute({
+  method: 'post',
+  path: '/registrar/test',
+  tags: ['Settings'],
+  summary: 'Test registrar connection (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Registrar connection test result'),
+    ...standardErrors,
+  },
+});
+
+const getGithubRoute = createRoute({
+  method: 'get',
+  path: '/github',
+  tags: ['Settings'],
+  summary: 'Get configured GitHub OAuth credentials',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'GitHub configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateGithubRoute = createRoute({
+  method: 'patch',
+  path: '/github',
+  tags: ['Settings'],
+  summary: 'Configure GitHub OAuth credentials (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(githubSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'GitHub configuration updated'),
+  },
+});
+
+const getGoogleRoute = createRoute({
+  method: 'get',
+  path: '/google',
+  tags: ['Settings'],
+  summary: 'Get configured Google OAuth credentials',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Google configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateGoogleRoute = createRoute({
+  method: 'patch',
+  path: '/google',
+  tags: ['Settings'],
+  summary: 'Configure Google OAuth credentials (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(googleSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Google configuration updated'),
+  },
+});
+
+const uploadBrandingRoute = createRoute({
+  method: 'post',
+  path: '/branding',
+  tags: ['Settings'],
+  summary: 'Upload logo, favicon, or set title (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Branding updated'),
+  },
+});
+
+const getBrandingRoute = createRoute({
+  method: 'get',
+  path: '/branding',
+  tags: ['Settings'],
+  summary: 'Get current branding settings (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Branding configuration'),
+    ...standardErrors,
+  },
+});
+
+const deleteBrandingRoute = createRoute({
+  method: 'delete',
+  path: '/branding/{type}',
+  tags: ['Settings'],
+  summary: 'Remove a branding asset (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    params: brandingTypeParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Branding asset removed'),
+  },
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// GET / — get settings
-// Super user with no account context: returns platform-wide settings.
-// Account context: returns account-scoped settings.
+// Handlers
 // ────────────────────────────────────────────────────────────────────────────
-settings.get('/', cache(300), async (c) => {
+
+// GET /platform-domain
+settings.openapi(getPlatformDomainRoute, (async (c: any) => {
+  const domain = await getPlatformDomain();
+  return c.json({ domain: domain === 'fleet.local' ? null : domain });
+}) as any);
+
+// GET /
+settings.openapi(getSettingsRoute, (async (c: any) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
   if (user.isSuper && !accountId) {
     // Platform-wide settings
     const rows = await db.query.platformSettings.findMany({
-      orderBy: (s, { asc }) => asc(s.key),
+      orderBy: (s: any, { asc }: any) => asc(s.key),
     });
 
     // Mask sensitive values so encrypted secrets are never sent to the client
@@ -121,7 +393,7 @@ settings.get('/', cache(300), async (c) => {
 
   // Account-scoped settings are stored with a key prefix
   const rows = await db.query.platformSettings.findMany({
-    orderBy: (s, { asc }) => asc(s.key),
+    orderBy: (s: any, { asc }: any) => asc(s.key),
   });
 
   const prefix = `account:${accountId}:`;
@@ -133,32 +405,15 @@ settings.get('/', cache(300), async (c) => {
   }
 
   return c.json(result);
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// PATCH / — update settings
-// ────────────────────────────────────────────────────────────────────────────
-const updateSettingsSchema = z.record(z.unknown());
-
-const ALLOWED_ACCOUNT_SETTINGS = [
-  'notifications', 'timezone', 'language', 'theme',
-  'billing:plan', 'email:provider', 'email:smtpHost', 'email:smtpPort',
-  'email:smtpUser', 'email:smtpPass', 'email:smtpFrom',
-  'email:resendApiKey', 'email:resendFrom',
-];
-
-settings.patch('/', settingsRateLimit, requireAdmin, async (c) => {
+// PATCH /
+settings.openapi(updateSettingsRoute, (async (c: any) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
-  const body = await c.req.json();
-  const parsed = updateSettingsSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const entries = Object.entries(parsed.data);
+  const data = c.req.valid('json');
+  const entries = Object.entries(data);
 
   if (entries.length === 0) {
     return c.json({ error: 'No settings provided' }, 400);
@@ -207,33 +462,17 @@ settings.patch('/', settingsRateLimit, requireAdmin, async (c) => {
   await invalidateCache('GET:/settings/*');
 
   return c.json({ message: 'Account settings updated', updated: entries.map(([k]) => k) });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// PATCH /stripe — configure Stripe keys
-// Only super admins can set the platform Stripe keys.
-// ────────────────────────────────────────────────────────────────────────────
-const stripeSettingsSchema = z.object({
-  publishableKey: z.string().min(1),
-  secretKey: z.string().min(1),
-  webhookSecret: z.string().min(1).optional(),
-});
-
-settings.patch('/stripe', settingsRateLimit, requireAdmin, async (c) => {
+// PATCH /stripe
+settings.openapi(updateStripeRoute, (async (c: any) => {
   const user = c.get('user');
 
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure Stripe' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = stripeSettingsSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   await upsertSetting('stripe:publishableKey', data.publishableKey); // publishable key is public, no need to encrypt
   await upsertSetting('stripe:secretKey', encrypt(data.secretKey));
@@ -244,36 +483,14 @@ settings.patch('/stripe', settingsRateLimit, requireAdmin, async (c) => {
 
   logger.info({ changedBy: user.userId }, 'Stripe configuration updated');
   return c.json({ message: 'Stripe configuration updated' });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// PATCH /email — configure email provider
-// Super admins can set the global email provider.
-// Account admins can set account-level email settings.
-// ────────────────────────────────────────────────────────────────────────────
-const emailSettingsSchema = z.object({
-  provider: z.enum(['smtp', 'resend']).optional(),
-  smtpHost: z.string().optional(),
-  smtpPort: z.number().int().min(1).max(65535).optional(),
-  smtpUser: z.string().optional(),
-  smtpPass: z.string().optional(),
-  smtpFrom: z.string().email().optional(),
-  resendApiKey: z.string().optional(),
-  resendFrom: z.string().email().optional(),
-});
-
-settings.patch('/email', settingsRateLimit, requireAdmin, async (c) => {
+// PATCH /email
+settings.openapi(updateEmailRoute, (async (c: any) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
-  const body = await c.req.json();
-  const parsed = emailSettingsSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   if (user.isSuper && !accountId) {
     // Platform-level email config
@@ -323,12 +540,10 @@ settings.patch('/email', settingsRateLimit, requireAdmin, async (c) => {
   }
 
   return c.json({ message: 'Account email configuration updated' });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// GET /registrar — get configured domain registrar
-// ────────────────────────────────────────────────────────────────────────────
-settings.get('/registrar', requireAdmin, async (c) => {
+// GET /registrar
+settings.openapi(getRegistrarRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can view registrar config' }, 403);
@@ -351,32 +566,16 @@ settings.get('/registrar', requireAdmin, async (c) => {
     // Mask the API key
     apiKeySet: !!registrar.apiKey,
   });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// PATCH /registrar — create/update domain registrar
-// ────────────────────────────────────────────────────────────────────────────
-const registrarSchema = z.object({
-  provider: z.string().min(1),
-  apiKey: z.string().min(1),
-  apiSecret: z.string().optional(),
-  resellerId: z.string().optional(),
-  sandbox: z.boolean().optional(),
-});
-
-settings.patch('/registrar', settingsRateLimit, requireAdmin, async (c) => {
+// PATCH /registrar
+settings.openapi(updateRegistrarRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure registrar' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = registrarSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { provider, apiKey, apiSecret, resellerId, sandbox } = parsed.data;
+  const { provider, apiKey, apiSecret, resellerId, sandbox } = c.req.valid('json');
   const { domainRegistrars, eq: eqOp, insertReturning, updateReturning } = await import('@fleet/db');
 
   const existing = await db.query.domainRegistrars.findFirst({
@@ -413,12 +612,10 @@ settings.patch('/registrar', settingsRateLimit, requireAdmin, async (c) => {
   registrarService.resetProvider();
 
   return c.json({ message: 'Registrar configured', id: created?.id }, 201);
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// POST /registrar/test — test registrar connection
-// ────────────────────────────────────────────────────────────────────────────
-settings.post('/registrar/test', requireAdmin, async (c) => {
+// POST /registrar/test
+settings.openapi(testRegistrarRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can test registrar' }, 403);
@@ -432,12 +629,10 @@ settings.post('/registrar/test', requireAdmin, async (c) => {
   } catch (err) {
     return c.json({ success: false, error: 'Registrar connection test failed' }, 500);
   }
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// GET /github — get configured GitHub OAuth credentials
-// ────────────────────────────────────────────────────────────────────────────
-settings.get('/github', requireAdmin, async (c) => {
+// GET /github
+settings.openapi(getGithubRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can view GitHub config' }, 403);
@@ -453,30 +648,16 @@ settings.get('/github', requireAdmin, async (c) => {
     clientSecretSet: !!(clientSecret || process.env['GITHUB_CLIENT_SECRET']),
     webhookSecretSet: !!(webhookSecret || process.env['GITHUB_WEBHOOK_SECRET']),
   });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// PATCH /github — configure GitHub OAuth credentials
-// ────────────────────────────────────────────────────────────────────────────
-const githubSettingsSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
-  webhookSecret: z.string().min(1).optional(),
-});
-
-settings.patch('/github', settingsRateLimit, requireAdmin, async (c) => {
+// PATCH /github
+settings.openapi(updateGithubRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure GitHub' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = githubSettingsSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   await upsertSetting('github:clientId', data.clientId);
   await upsertSetting('github:clientSecret', encrypt(data.clientSecret));
@@ -491,12 +672,10 @@ settings.patch('/github', settingsRateLimit, requireAdmin, async (c) => {
 
   logger.info({ changedBy: user.userId }, 'GitHub configuration updated');
   return c.json({ message: 'GitHub configuration updated' });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// GET /google — get configured Google OAuth credentials
-// ────────────────────────────────────────────────────────────────────────────
-settings.get('/google', requireAdmin, async (c) => {
+// GET /google
+settings.openapi(getGoogleRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can view Google config' }, 403);
@@ -510,29 +689,16 @@ settings.get('/google', requireAdmin, async (c) => {
     clientId: (clientId as string) || process.env['GOOGLE_CLIENT_ID'] || '',
     clientSecretSet: !!(clientSecret || process.env['GOOGLE_CLIENT_SECRET']),
   });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// PATCH /google — configure Google OAuth credentials
-// ────────────────────────────────────────────────────────────────────────────
-const googleSettingsSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
-});
-
-settings.patch('/google', settingsRateLimit, requireAdmin, async (c) => {
+// PATCH /google
+settings.openapi(updateGoogleRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure Google' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = googleSettingsSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   await upsertSetting('google:clientId', data.clientId);
   await upsertSetting('google:clientSecret', encrypt(data.clientSecret));
@@ -543,12 +709,10 @@ settings.patch('/google', settingsRateLimit, requireAdmin, async (c) => {
 
   logger.info({ changedBy: user.userId }, 'Google configuration updated');
   return c.json({ message: 'Google configuration updated' });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// POST /branding — upload logo, favicon, or set title (super admin only)
-// ────────────────────────────────────────────────────────────────────────────
-settings.post('/branding', settingsRateLimit, requireAdmin, async (c) => {
+// POST /branding
+settings.openapi(uploadBrandingRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure branding' }, 403);
@@ -626,12 +790,10 @@ settings.post('/branding', settingsRateLimit, requireAdmin, async (c) => {
 
   logger.info({ saved, changedBy: user.userId }, 'Branding updated');
   return c.json({ message: 'Branding updated', saved });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// GET /branding — get current branding settings (super admin only)
-// ────────────────────────────────────────────────────────────────────────────
-settings.get('/branding', requireAdmin, async (c) => {
+// GET /branding
+settings.openapi(getBrandingRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can view branding config' }, 403);
@@ -648,18 +810,16 @@ settings.get('/branding', requireAdmin, async (c) => {
     logoSet: !!logoFilename,
     faviconSet: !!faviconFilename,
   });
-});
+}) as any);
 
-// ────────────────────────────────────────────────────────────────────────────
-// DELETE /branding/:type — remove a branding asset (super admin only)
-// ────────────────────────────────────────────────────────────────────────────
-settings.delete('/branding/:type', settingsRateLimit, requireAdmin, async (c) => {
+// DELETE /branding/:type
+settings.openapi(deleteBrandingRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) {
     return c.json({ error: 'Only super admins can configure branding' }, 403);
   }
 
-  const type = c.req.param('type');
+  const { type } = c.req.valid('param');
   if (type !== 'logo' && type !== 'favicon') {
     return c.json({ error: 'Invalid type. Must be "logo" or "favicon"' }, 400);
   }
@@ -675,6 +835,6 @@ settings.delete('/branding/:type', settingsRateLimit, requireAdmin, async (c) =>
 
   logger.info({ type, changedBy: user.userId }, 'Branding asset removed');
   return c.json({ message: `Branding ${type} removed` });
-});
+}) as any);
 
 export default settings;

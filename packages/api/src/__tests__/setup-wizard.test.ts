@@ -33,7 +33,7 @@ describe('Setup API', () => {
         body: JSON.stringify({
           name: 'Admin User',
           email: 'admin@example.com',
-          password: 'securepass123',
+          password: 'SecurePass123',
           domain: 'panel.example.com',
           platformName: 'My Platform',
         }),
@@ -58,7 +58,7 @@ describe('Setup API', () => {
         body: JSON.stringify({
           name: 'Admin',
           email: 'admin@test.com',
-          password: 'password123',
+          password: 'Password123',
         }),
       });
 
@@ -78,7 +78,7 @@ describe('Setup API', () => {
         body: JSON.stringify({
           name: 'Admin',
           email: 'admin@test.com',
-          password: 'password123',
+          password: 'Password123',
         }),
       });
 
@@ -95,7 +95,7 @@ describe('Setup API', () => {
         body: JSON.stringify({
           name: 'Admin',
           email: 'not-an-email',
-          password: 'password123',
+          password: 'Password123',
         }),
       });
 
@@ -134,7 +134,7 @@ describe('Setup API', () => {
         body: JSON.stringify({
           name: 'Admin',
           email: 'admin@test.com',
-          password: 'password123',
+          password: 'Password123',
         }),
       });
 

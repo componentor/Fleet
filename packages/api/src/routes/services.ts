@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { db, services, deployments, oauthProviders, resourceLimits, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
@@ -16,6 +16,7 @@ import { uploadService } from '../services/upload.service.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { getPlatformDomain } from './settings.js';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 // Images that need writable filesystem and default user (not UID 1000)
 const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
@@ -38,7 +39,7 @@ async function getContainerDiskLimit(accountId: string): Promise<number | undefi
   return globalLimit?.maxContainerDiskMb ?? undefined;
 }
 
-const serviceRoutes = new Hono<{
+const serviceRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -73,8 +74,489 @@ function buildTraefikLabels(
   return labels;
 }
 
+// ── Schemas ──
+
+const createServiceSchema = z.object({
+  name: z.string().min(1).max(63).regex(/^[a-zA-Z0-9]([a-zA-Z0-9_.-]*[a-zA-Z0-9])?$/, 'Service name must contain only letters, numbers, hyphens, dots, and underscores'),
+  image: z.string().min(1),
+  replicas: z.number().int().min(1).max(100).default(1),
+  env: z.record(z.string(), z.string()).default({}),
+  ports: z.array(z.object({
+    target: z.number().int().min(1).max(65535),
+    published: z.number().int().min(1).max(65535).optional(),
+    protocol: z.enum(['tcp', 'udp']).default('tcp'),
+  })).default([]),
+  volumes: z.array(z.object({
+    source: z.string(),
+    target: z.string(),
+    readonly: z.boolean().default(false),
+  })).default([]),
+  domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
+  sslEnabled: z.boolean().default(true),
+  nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
+  placementConstraints: z.array(
+    z.string().max(200).refine(
+      (s) => {
+        const lower = s.toLowerCase();
+        return !lower.includes('node.role') && !lower.includes('node.id') && !lower.includes('node.hostname');
+      },
+      { message: 'Constraints on node.role, node.id, and node.hostname are not allowed' },
+    ),
+  ).default([]),
+  updateParallelism: z.number().int().min(1).default(1),
+  updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').default('10s'),
+  rollbackOnFailure: z.boolean().default(true),
+  healthCheck: z.object({
+    cmd: z.string().max(1000),
+    interval: z.number().int().min(1),
+    timeout: z.number().int().min(1),
+    retries: z.number().int().min(1).max(20),
+  }).nullable().optional(),
+  githubRepo: z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/, 'Must be in owner/repo format').nullable().optional(),
+  githubBranch: z.string().nullable().optional(),
+  autoDeploy: z.boolean().default(false),
+  sourceType: z.enum(['docker', 'github', 'upload', 'marketplace']).nullable().optional(),
+  sourcePath: z.string().nullable().optional(),
+  tags: z.array(z.string().max(50)).max(20).default([]),
+}).openapi('CreateServiceRequest');
+
+const updateServiceSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  image: z.string().min(1).optional(),
+  replicas: z.number().int().min(0).max(100).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  ports: z.array(z.object({
+    target: z.number().int().min(1).max(65535),
+    published: z.number().int().min(1).max(65535).optional(),
+    protocol: z.enum(['tcp', 'udp']).default('tcp'),
+  })).optional(),
+  domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
+  sslEnabled: z.boolean().optional(),
+  placementConstraints: z.array(
+    z.string().max(200).refine(
+      (s) => {
+        const lower = s.toLowerCase();
+        return !lower.includes('node.role') && !lower.includes('node.id') && !lower.includes('node.hostname');
+      },
+      { message: 'Constraints on node.role, node.id, and node.hostname are not allowed' },
+    ),
+  ).optional(),
+  nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
+  updateParallelism: z.number().int().min(1).optional(),
+  updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
+  rollbackOnFailure: z.boolean().optional(),
+  healthCheck: z.object({
+    cmd: z.string().max(1000),
+    interval: z.number().int().min(1),
+    timeout: z.number().int().min(1),
+    retries: z.number().int().min(1).max(20),
+  }).nullable().optional(),
+  restartCondition: z.enum(['none', 'on-failure', 'any']).optional(),
+  restartMaxAttempts: z.number().int().min(0).max(100).optional(),
+  restartDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
+  autoDeploy: z.boolean().optional(),
+  githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
+}).openapi('UpdateServiceRequest');
+
+const dockerfileContentSchema = z.object({
+  content: z.string().min(1).max(100_000),
+}).openapi('DockerfileContentRequest');
+
+const idParamSchema = z.object({
+  id: z.string().openapi({ description: 'Service ID' }),
+});
+
+const serviceIdParamSchema = z.object({
+  serviceId: z.string().openapi({ description: 'Service ID' }),
+});
+
+const stackIdParamSchema = z.object({
+  stackId: z.string().openapi({ description: 'Stack ID' }),
+});
+
+const logsQuerySchema = z.object({
+  tail: z.string().optional().openapi({ description: 'Number of log lines to fetch (default 100, max 5000)' }),
+});
+
+/**
+ * Helper: register or remove GitHub webhook when autoDeploy changes.
+ * Returns the webhook ID on registration, null on removal.
+ */
+async function manageWebhook(opts: {
+  userId: string;
+  githubRepo: string;
+  enable: boolean;
+  existingWebhookId: number | null;
+}): Promise<number | null> {
+  const oauth = await db.query.oauthProviders.findFirst({
+    where: and(
+      eq(oauthProviders.userId, opts.userId),
+      eq(oauthProviders.provider, 'github'),
+    ),
+  });
+
+  if (!oauth?.accessToken) {
+    throw new Error('GitHub account not connected');
+  }
+
+  const token = decrypt(oauth.accessToken);
+  const parts = opts.githubRepo.split('/');
+  const owner = parts[0]!;
+  const repo = parts[1]!;
+
+  if (opts.enable) {
+    // Build webhook URL from platform domain
+    const platformDomain = await getPlatformDomain();
+    const apiBase = platformDomain && platformDomain !== 'fleet.local'
+      ? `https://${platformDomain}/api/v1`
+      : `http://localhost:${process.env['PORT'] ?? '3000'}/api/v1`;
+    const webhookUrl = `${apiBase}/deployments/github/webhook`;
+    const ghConfig = await getGitHubConfig();
+    const webhookSecret = ghConfig.webhookSecret;
+
+    if (!webhookSecret) {
+      throw new Error('GitHub webhook secret not configured');
+    }
+
+    const webhook = await githubService.createWebhook(token, owner, repo, webhookUrl, webhookSecret);
+    return webhook.id;
+  } else {
+    // Remove existing webhook
+    if (opts.existingWebhookId) {
+      await githubService.deleteWebhook(token, owner, repo, opts.existingWebhookId).catch((err) => {
+        logger.warn({ err, hookId: opts.existingWebhookId }, 'Failed to delete GitHub webhook (may already be removed)');
+      });
+    }
+    return null;
+  }
+}
+
+// ── Route definitions ──
+
+const listServicesRoute = createRoute({
+  method: 'get',
+  path: '/',
+  tags: ['Services'],
+  summary: 'List services for the current account',
+  security: bearerSecurity,
+  middleware: [cache(30)] as const,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'List of services'),
+    ...standardErrors,
+  },
+});
+
+const createServiceRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['Services'],
+  summary: 'Deploy a new service',
+  security: bearerSecurity,
+  middleware: [requireMember, requireActiveSubscription, requireScope('write')] as const,
+  request: {
+    body: jsonBody(createServiceSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Created service'),
+    409: jsonContent(errorResponseSchema, 'Port collision'),
+    429: jsonContent(errorResponseSchema, 'Service quota reached'),
+  },
+});
+
+const getServiceRoute = createRoute({
+  method: 'get',
+  path: '/{id}',
+  tags: ['Services'],
+  summary: 'Get service details',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Service details with Docker status'),
+    ...standardErrors,
+  },
+});
+
+const getServiceStatsRoute = createRoute({
+  method: 'get',
+  path: '/{id}/stats',
+  tags: ['Services'],
+  summary: 'Get live container resource stats',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Container stats'),
+    ...standardErrors,
+  },
+});
+
+const updateServiceRoute = createRoute({
+  method: 'patch',
+  path: '/{id}',
+  tags: ['Services'],
+  summary: 'Update a service',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(updateServiceSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated service'),
+    ...standardErrors,
+    429: jsonContent(errorResponseSchema, 'Replica quota exceeded'),
+  },
+});
+
+const deleteServiceRoute = createRoute({
+  method: 'delete',
+  path: '/{id}',
+  tags: ['Services'],
+  summary: 'Destroy a service',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Service destroyed'),
+    ...standardErrors,
+  },
+});
+
+const restartServiceRoute = createRoute({
+  method: 'post',
+  path: '/{id}/restart',
+  tags: ['Services'],
+  summary: 'Restart a service (force update)',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Restart initiated'),
+    ...standardErrors,
+  },
+});
+
+const redeployServiceRoute = createRoute({
+  method: 'post',
+  path: '/{id}/redeploy',
+  tags: ['Services'],
+  summary: 'Rebuild and redeploy a service',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Redeployment initiated'),
+    ...standardErrors,
+    409: jsonContent(errorResponseSchema, 'Service is already deploying'),
+  },
+});
+
+const stopServiceRoute = createRoute({
+  method: 'post',
+  path: '/{id}/stop',
+  tags: ['Services'],
+  summary: 'Stop a running service (scale to 0)',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Service stopped'),
+    ...standardErrors,
+    409: jsonContent(errorResponseSchema, 'Cannot stop deploying service'),
+  },
+});
+
+const cancelDeployRoute = createRoute({
+  method: 'post',
+  path: '/{id}/cancel-deploy',
+  tags: ['Services'],
+  summary: 'Cancel an in-progress deployment',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Deployment cancelled'),
+    ...standardErrors,
+  },
+});
+
+const startServiceRoute = createRoute({
+  method: 'post',
+  path: '/{id}/start',
+  tags: ['Services'],
+  summary: 'Start a stopped service (restore replicas)',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Service started'),
+    ...standardErrors,
+  },
+});
+
+const syncServiceRoute = createRoute({
+  method: 'post',
+  path: '/{id}/sync',
+  tags: ['Services'],
+  summary: 'Manually sync service status with Docker',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.object({ status: z.string(), synced: z.boolean() }), 'Sync result'),
+    ...standardErrors,
+  },
+});
+
+const getServiceLogsRoute = createRoute({
+  method: 'get',
+  path: '/{id}/logs',
+  tags: ['Services'],
+  summary: 'Get service logs',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    query: logsQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Service logs'),
+    ...standardErrors,
+  },
+});
+
+const getDeploymentsRoute = createRoute({
+  method: 'get',
+  path: '/{id}/deployments',
+  tags: ['Services'],
+  summary: 'Get deployment history',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Deployment history'),
+    ...standardErrors,
+  },
+});
+
+const deleteStackRoute = createRoute({
+  method: 'delete',
+  path: '/stack/{stackId}',
+  tags: ['Services'],
+  summary: 'Destroy all services in a stack',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: stackIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Stack deleted'),
+    ...standardErrors,
+  },
+});
+
+const restartStackRoute = createRoute({
+  method: 'post',
+  path: '/stack/{stackId}/restart',
+  tags: ['Services'],
+  summary: 'Restart all services in a stack',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: stackIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Stack restart initiated'),
+    ...standardErrors,
+  },
+});
+
+const getStackStatusRoute = createRoute({
+  method: 'get',
+  path: '/stack/{stackId}/status',
+  tags: ['Services'],
+  summary: 'Get deployment progress for a template stack',
+  security: bearerSecurity,
+  request: {
+    params: stackIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Stack status'),
+    ...standardErrors,
+  },
+});
+
+const getDockerfileRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/dockerfile',
+  tags: ['Services'],
+  summary: 'Get Dockerfile content for a service',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Dockerfile content'),
+    ...standardErrors,
+  },
+});
+
+const previewServiceRoute = createRoute({
+  method: 'post',
+  path: '/preview',
+  tags: ['Services'],
+  summary: 'Dry-run deployment preview (no actual deployment)',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    body: jsonBody(createServiceSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Deployment preview'),
+    ...standardErrors,
+  },
+});
+
+const updateDockerfileRoute = createRoute({
+  method: 'put',
+  path: '/{serviceId}/dockerfile',
+  tags: ['Services'],
+  summary: 'Update Dockerfile content for a service',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: serviceIdParamSchema,
+    body: jsonBody(dockerfileContentSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Dockerfile updated'),
+    ...standardErrors,
+  },
+});
+
+// ── Route handlers ──
+
 // GET / — list services for the current account (with live Docker status sync)
-serviceRoutes.get('/', cache(30), async (c) => {
+serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -83,7 +565,7 @@ serviceRoutes.get('/', cache(30), async (c) => {
 
   const result = await db.query.services.findMany({
     where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
-    orderBy: (s, { desc }) => desc(s.createdAt),
+    orderBy: (s: any, { desc }: any) => desc(s.createdAt),
   });
 
   // Live Docker status sync — reconcile DB status with actual Swarm state
@@ -144,68 +626,17 @@ serviceRoutes.get('/', cache(30), async (c) => {
   }
 
   return c.json(result);
-});
+}) as any);
 
 // POST / — deploy a new service
-const createServiceSchema = z.object({
-  name: z.string().min(1).max(63).regex(/^[a-zA-Z0-9]([a-zA-Z0-9_.-]*[a-zA-Z0-9])?$/, 'Service name must contain only letters, numbers, hyphens, dots, and underscores'),
-  image: z.string().min(1),
-  replicas: z.number().int().min(1).max(100).default(1),
-  env: z.record(z.string()).default({}),
-  ports: z.array(z.object({
-    target: z.number().int().min(1).max(65535),
-    published: z.number().int().min(1).max(65535).optional(),
-    protocol: z.enum(['tcp', 'udp']).default('tcp'),
-  })).default([]),
-  volumes: z.array(z.object({
-    source: z.string(),
-    target: z.string(),
-    readonly: z.boolean().default(false),
-  })).default([]),
-  domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
-  sslEnabled: z.boolean().default(true),
-  nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
-  placementConstraints: z.array(
-    z.string().max(200).refine(
-      (s) => {
-        const lower = s.toLowerCase();
-        return !lower.includes('node.role') && !lower.includes('node.id') && !lower.includes('node.hostname');
-      },
-      { message: 'Constraints on node.role, node.id, and node.hostname are not allowed' },
-    ),
-  ).default([]),
-  updateParallelism: z.number().int().min(1).default(1),
-  updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').default('10s'),
-  rollbackOnFailure: z.boolean().default(true),
-  healthCheck: z.object({
-    cmd: z.string().max(1000),
-    interval: z.number().int().min(1),
-    timeout: z.number().int().min(1),
-    retries: z.number().int().min(1).max(20),
-  }).nullable().optional(),
-  githubRepo: z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/, 'Must be in owner/repo format').nullable().optional(),
-  githubBranch: z.string().nullable().optional(),
-  autoDeploy: z.boolean().default(false),
-  sourceType: z.enum(['docker', 'github', 'upload', 'marketplace']).nullable().optional(),
-  sourcePath: z.string().nullable().optional(),
-  tags: z.array(z.string().max(50)).max(20).default([]),
-});
-
-serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('write'), async (c) => {
+serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = createServiceSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const data = parsed.data;
+  const data = c.req.valid('json');
 
   // Per-account service quota
   const SERVICE_QUOTA = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
@@ -218,8 +649,8 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
   }
 
   // Check for port collisions with other accounts' services
-  if (data.ports.some((p) => p.published)) {
-    const publishedPorts = data.ports.filter((p) => p.published).map((p) => p.published!);
+  if (data.ports.some((p: any) => p.published)) {
+    const publishedPorts = data.ports.filter((p: any) => p.published).map((p: any) => p.published!);
     // Only fetch services from OTHER accounts (not the full table)
     const otherServices = await db.query.services.findMany({
       where: and(not(eq(services.accountId, accountId)), isNull(services.deletedAt)),
@@ -311,12 +742,12 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
       image: data.image,
       replicas: data.replicas,
       env: data.env,
-      ports: data.ports.map((p) => ({
+      ports: data.ports.map((p: any) => ({
         target: p.target,
         published: p.published ?? 0,
         protocol: p.protocol,
       })),
-      volumes: data.volumes.map((v) => ({
+      volumes: data.volumes.map((v: any) => ({
         source: v.source,
         target: v.target,
         readonly: v.readonly,
@@ -366,12 +797,12 @@ serviceRoutes.post('/', requireMember, requireActiveSubscription, requireScope('
     // Return 201 with stopped status so the client knows Docker deployment failed
     return c.json({ ...svc, status: 'stopped', warning: 'Docker deployment failed — service saved but not running' }, 201);
   }
-});
+}) as any);
 
 // GET /:id — service details
-serviceRoutes.get('/:id', async (c) => {
+serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -379,7 +810,7 @@ serviceRoutes.get('/:id', async (c) => {
 
   const svc = await db.query.services.findFirst({
     where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
-    with: { deployments: { orderBy: (d, { desc }) => desc(d.createdAt), limit: 10 } },
+    with: { deployments: { orderBy: (d: any, { desc }: any) => desc(d.createdAt), limit: 10 } },
   });
 
   if (!svc) {
@@ -429,12 +860,12 @@ serviceRoutes.get('/:id', async (c) => {
   }
 
   return c.json({ ...svc, dockerStatus });
-});
+}) as any);
 
 // GET /:id/stats — live container resource stats
-serviceRoutes.get('/:id/stats', async (c) => {
+serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -475,7 +906,7 @@ serviceRoutes.get('/:id/stats', async (c) => {
     // Uptime: time since last successful deployment
     const lastDeploy = await db.query.deployments.findFirst({
       where: and(eq(deployments.serviceId, serviceId), eq(deployments.status, 'succeeded')),
-      orderBy: (d, { desc }) => desc(d.createdAt),
+      orderBy: (d: any, { desc }: any) => desc(d.createdAt),
     });
 
     return c.json({
@@ -493,116 +924,19 @@ serviceRoutes.get('/:id/stats', async (c) => {
     logger.error({ err }, 'Failed to fetch service stats');
     return c.json({ error: 'Failed to fetch service stats' }, 500);
   }
-});
+}) as any);
 
 // PATCH /:id — update service
-const updateServiceSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  image: z.string().min(1).optional(),
-  replicas: z.number().int().min(0).max(100).optional(),
-  env: z.record(z.string()).optional(),
-  ports: z.array(z.object({
-    target: z.number().int().min(1).max(65535),
-    published: z.number().int().min(1).max(65535).optional(),
-    protocol: z.enum(['tcp', 'udp']).default('tcp'),
-  })).optional(),
-  domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
-  sslEnabled: z.boolean().optional(),
-  placementConstraints: z.array(
-    z.string().max(200).refine(
-      (s) => {
-        const lower = s.toLowerCase();
-        return !lower.includes('node.role') && !lower.includes('node.id') && !lower.includes('node.hostname');
-      },
-      { message: 'Constraints on node.role, node.id, and node.hostname are not allowed' },
-    ),
-  ).optional(),
-  nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
-  updateParallelism: z.number().int().min(1).optional(),
-  updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
-  rollbackOnFailure: z.boolean().optional(),
-  healthCheck: z.object({
-    cmd: z.string().max(1000),
-    interval: z.number().int().min(1),
-    timeout: z.number().int().min(1),
-    retries: z.number().int().min(1).max(20),
-  }).nullable().optional(),
-  restartCondition: z.enum(['none', 'on-failure', 'any']).optional(),
-  restartMaxAttempts: z.number().int().min(0).max(100).optional(),
-  restartDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
-  autoDeploy: z.boolean().optional(),
-  githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
-  tags: z.array(z.string().max(50)).max(20).optional(),
-});
-
-/**
- * Helper: register or remove GitHub webhook when autoDeploy changes.
- * Returns the webhook ID on registration, null on removal.
- */
-async function manageWebhook(opts: {
-  userId: string;
-  githubRepo: string;
-  enable: boolean;
-  existingWebhookId: number | null;
-}): Promise<number | null> {
-  const oauth = await db.query.oauthProviders.findFirst({
-    where: and(
-      eq(oauthProviders.userId, opts.userId),
-      eq(oauthProviders.provider, 'github'),
-    ),
-  });
-
-  if (!oauth?.accessToken) {
-    throw new Error('GitHub account not connected');
-  }
-
-  const token = decrypt(oauth.accessToken);
-  const parts = opts.githubRepo.split('/');
-  const owner = parts[0]!;
-  const repo = parts[1]!;
-
-  if (opts.enable) {
-    // Build webhook URL from platform domain
-    const platformDomain = await getPlatformDomain();
-    const apiBase = platformDomain && platformDomain !== 'fleet.local'
-      ? `https://${platformDomain}/api/v1`
-      : `http://localhost:${process.env['PORT'] ?? '3000'}/api/v1`;
-    const webhookUrl = `${apiBase}/deployments/github/webhook`;
-    const ghConfig = await getGitHubConfig();
-    const webhookSecret = ghConfig.webhookSecret;
-
-    if (!webhookSecret) {
-      throw new Error('GitHub webhook secret not configured');
-    }
-
-    const webhook = await githubService.createWebhook(token, owner, repo, webhookUrl, webhookSecret);
-    return webhook.id;
-  } else {
-    // Remove existing webhook
-    if (opts.existingWebhookId) {
-      await githubService.deleteWebhook(token, owner, repo, opts.existingWebhookId).catch((err) => {
-        logger.warn({ err, hookId: opts.existingWebhookId }, 'Failed to delete GitHub webhook (may already be removed)');
-      });
-    }
-    return null;
-  }
-}
-
-serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = updateServiceSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   const svc = await db.query.services.findFirst({
     where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
@@ -611,8 +945,6 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
   if (!svc) {
     return c.json({ error: 'Service not found' }, 404);
   }
-
-  const data = parsed.data;
 
   // Enforce per-account total replica quota when scaling
   if (data.replicas !== undefined && data.replicas > (svc.replicas ?? 1)) {
@@ -669,7 +1001,7 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
           'fleet.service-id': serviceId,
         },
         constraints: dockerFields.placementConstraints ?? (svc.placementConstraints as string[]) ?? [],
-        ports: dockerFields.ports?.map((p) => ({
+        ports: dockerFields.ports?.map((p: any) => ({
           target: p.target,
           published: p.published ?? 0,
           protocol: p.protocol,
@@ -713,13 +1045,13 @@ serviceRoutes.patch('/:id', requireMember, requireScope('write'), async (c) => {
     resourceName: svc.name,
   });
   return c.json(updated);
-});
+}) as any);
 
 // DELETE /:id — destroy service
-serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -810,12 +1142,12 @@ serviceRoutes.delete('/:id', requireMember, requireScope('write'), async (c) => 
     resourceName: svc.name,
   });
   return c.json({ message: 'Service destroyed' });
-});
+}) as any);
 
 // POST /:id/restart — restart service (force update)
-serviceRoutes.post('/:id/restart', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -854,12 +1186,12 @@ serviceRoutes.post('/:id/restart', requireMember, requireScope('write'), async (
     logger.error({ err }, 'Service restart failed');
     return c.json({ error: 'Failed to restart service' }, 500);
   }
-});
+}) as any);
 
 // POST /:id/redeploy — rebuild and redeploy
-serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1058,12 +1390,12 @@ serviceRoutes.post('/:id/redeploy', requireMember, requireScope('write'), async 
     resourceName: svc.name,
   });
   return c.json({ message: 'Redeployment initiated', deploymentId: deployment?.id });
-});
+}) as any);
 
 // POST /:id/stop — stop a running service (scale to 0)
-serviceRoutes.post('/:id/stop', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(stopServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1109,12 +1441,12 @@ serviceRoutes.post('/:id/stop', requireMember, requireScope('write'), async (c) 
     resourceName: svc.name,
   });
   return c.json({ message: 'Service stopped' });
-});
+}) as any);
 
 // POST /:id/cancel-deploy — cancel an in-progress deployment
-serviceRoutes.post('/:id/cancel-deploy', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(cancelDeployRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1171,12 +1503,12 @@ serviceRoutes.post('/:id/cancel-deploy', requireMember, requireScope('write'), a
     resourceName: svc.name,
   });
   return c.json({ message: 'Deployment cancelled' });
-});
+}) as any);
 
 // POST /:id/start — start a stopped service (restore replicas)
-serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1286,12 +1618,12 @@ serviceRoutes.post('/:id/start', requireMember, requireScope('write'), async (c)
     resourceName: svc.name,
   });
   return c.json({ message: 'Service started' });
-});
+}) as any);
 
 // POST /:id/sync — manually sync service status with Docker
-serviceRoutes.post('/:id/sync', requireMember, async (c) => {
+serviceRoutes.openapi(syncServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1340,12 +1672,12 @@ serviceRoutes.post('/:id/sync', requireMember, async (c) => {
   await invalidateCache(`GET:/services:${accountId}`);
 
   return c.json({ status: newStatus, synced: true });
-});
+}) as any);
 
 // GET /:id/logs — stream service logs
-serviceRoutes.get('/:id/logs', async (c) => {
+serviceRoutes.openapi(getServiceLogsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1404,12 +1736,12 @@ serviceRoutes.get('/:id/logs', async (c) => {
     logger.error({ err }, 'Log fetch failed');
     return c.json({ error: 'Failed to fetch logs' }, 500);
   }
-});
+}) as any);
 
 // GET /:id/deployments — deployment history
-serviceRoutes.get('/:id/deployments', async (c) => {
+serviceRoutes.openapi(getDeploymentsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('id');
+  const { id: serviceId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1425,18 +1757,18 @@ serviceRoutes.get('/:id/deployments', async (c) => {
 
   const deploys = await db.query.deployments.findMany({
     where: eq(deployments.serviceId, serviceId),
-    orderBy: (d, { desc }) => desc(d.createdAt),
+    orderBy: (d: any, { desc }: any) => desc(d.createdAt),
     limit: 100,
   });
 
   return c.json(deploys);
-});
+}) as any);
 
 // DELETE /stack/:stackId — destroy all services in a stack
-serviceRoutes.delete('/stack/:stackId', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
-  const stackId = c.req.param('stackId');
+  const { stackId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1515,12 +1847,12 @@ serviceRoutes.delete('/stack/:stackId', requireMember, requireScope('write'), as
     details: { serviceCount: stackServices.length },
   });
   return c.json({ message: 'Stack deleted', results });
-});
+}) as any);
 
 // POST /stack/:stackId/restart — restart all services in a stack
-serviceRoutes.post('/stack/:stackId/restart', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const stackId = c.req.param('stackId');
+  const { stackId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1562,12 +1894,12 @@ serviceRoutes.post('/stack/:stackId/restart', requireMember, requireScope('write
     details: { serviceCount: stackServices.length },
   });
   return c.json({ message: 'Stack restart initiated', results });
-});
+}) as any);
 
 // GET /stack/:stackId/status — deployment progress for a template stack
-serviceRoutes.get('/stack/:stackId/status', async (c) => {
+serviceRoutes.openapi(getStackStatusRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const stackId = c.req.param('stackId');
+  const { stackId } = c.req.valid('param');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1607,12 +1939,12 @@ serviceRoutes.get('/stack/:stackId/status', async (c) => {
       dockerServiceId: s.dockerServiceId,
     })),
   });
-});
+}) as any);
 
 // GET /:serviceId/dockerfile — get Dockerfile content
-serviceRoutes.get('/:serviceId/dockerfile', async (c) => {
+serviceRoutes.openapi(getDockerfileRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const svc = await db.query.services.findFirst({
@@ -1637,21 +1969,15 @@ serviceRoutes.get('/:serviceId/dockerfile', async (c) => {
   }
 
   return c.json({ content: null, source: 'none', runtime: null });
-});
+}) as any);
 
 // POST /preview — dry-run deployment preview (no actual deployment)
-serviceRoutes.post('/preview', requireMember, async (c) => {
+serviceRoutes.openapi(previewServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
-  const body = await c.req.json();
-  const parsed = createServiceSchema.safeParse(body);
+  const data = c.req.valid('json');
 
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed', details: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`) }, 400);
-  }
-
-  const data = parsed.data;
   const warnings: string[] = [];
 
   // Check service quota
@@ -1665,8 +1991,8 @@ serviceRoutes.post('/preview', requireMember, async (c) => {
   }
 
   // Check port collisions
-  if (data.ports.some((p) => p.published)) {
-    const publishedPorts = data.ports.filter((p) => p.published).map((p) => p.published!);
+  if (data.ports.some((p: any) => p.published)) {
+    const publishedPorts = data.ports.filter((p: any) => p.published).map((p: any) => p.published!);
     const otherServices = await db.query.services.findMany({
       where: and(not(eq(services.accountId, accountId)), isNull(services.deletedAt)),
       columns: { id: true, ports: true },
@@ -1699,12 +2025,12 @@ serviceRoutes.post('/preview', requireMember, async (c) => {
     warnings,
     valid: warnings.length === 0,
   });
-});
+}) as any);
 
 // PUT /:serviceId/dockerfile — update Dockerfile content
-serviceRoutes.put('/:serviceId/dockerfile', requireMember, requireScope('write'), async (c) => {
+serviceRoutes.openapi(updateDockerfileRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const serviceId = c.req.param('serviceId');
+  const { serviceId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const svc = await db.query.services.findFirst({
@@ -1712,15 +2038,7 @@ serviceRoutes.put('/:serviceId/dockerfile', requireMember, requireScope('write')
   });
   if (!svc) return c.json({ error: 'Service not found' }, 404);
 
-  const body = (await c.req.json()) as { content: string };
-  if (!body.content || typeof body.content !== 'string') {
-    return c.json({ error: 'Dockerfile content is required' }, 400);
-  }
-
-  // Limit Dockerfile size
-  if (body.content.length > 100_000) {
-    return c.json({ error: 'Dockerfile content too large (max 100KB)' }, 400);
-  }
+  const body = c.req.valid('json');
 
   // Save to DB
   await db.update(services)
@@ -1738,6 +2056,6 @@ serviceRoutes.put('/:serviceId/dockerfile', requireMember, requireScope('write')
   }
 
   return c.json({ message: 'Dockerfile updated' });
-});
+}) as any);
 
 export default serviceRoutes;

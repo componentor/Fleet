@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import {
   db,
   sharedDomains,
@@ -20,6 +20,7 @@ import { dockerService } from '../services/docker.service.js';
 import { stripeService } from '../services/stripe.service.js';
 import { invalidateCache } from '../middleware/cache.js';
 import { logger } from '../services/logger.js';
+import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -55,7 +56,7 @@ function buildTraefikLabels(
 
 // ─── Shared Domains Routes ────────────────────────────────────────────
 
-const sharedDomainRoutes = new Hono<{
+const sharedDomainRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -72,23 +73,35 @@ sharedDomainRoutes.use('*', tenantMiddleware);
 // ═══════════════════════════════════════════════════════════════════════
 
 // GET /admin — List all shared domains with claim counts
-sharedDomainRoutes.get('/admin', async (c) => {
+const listAdminDomainsRoute = createRoute({
+  method: 'get',
+  path: '/admin',
+  tags: ['Shared Domains'],
+  summary: 'List all shared domains with claim counts (super admin)',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of shared domains with claim counts'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(listAdminDomainsRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super user access required' }, 403);
 
   const domains = await db.query.sharedDomains.findMany({
     with: { claims: { columns: { id: true } } },
-    orderBy: (t, { desc }) => [desc(t.createdAt)],
+    orderBy: (t: any, { desc }: any) => [desc(t.createdAt)],
   });
 
   return c.json(
-    domains.map((d) => ({
+    domains.map((d: any) => ({
       ...d,
       claimCount: d.claims.length,
       claims: undefined,
     })),
   );
-});
+}) as any);
 
 // POST /admin — Add a shared domain
 const createSchema = z.object({
@@ -105,15 +118,27 @@ const createSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-sharedDomainRoutes.post('/admin', async (c) => {
+const createAdminDomainRoute = createRoute({
+  method: 'post',
+  path: '/admin',
+  tags: ['Shared Domains'],
+  summary: 'Add a shared domain (super admin)',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(createSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Created shared domain'),
+    409: jsonContent(errorResponseSchema, 'Domain already exists'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(createAdminDomainRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super user access required' }, 403);
 
-  const body = await c.req.json().catch(() => null);
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid input', details: parsed.error.flatten() }, 400);
-
-  const { domain, pricingType, price, currency, maxPerAccount, enabled } = parsed.data;
+  const { domain, pricingType, price, currency, maxPerAccount, enabled } = c.req.valid('json');
 
   // Check for duplicate domain
   const existing = await db.query.sharedDomains.findFirst({
@@ -133,7 +158,7 @@ sharedDomainRoutes.post('/admin', async (c) => {
   });
 
   return c.json(created, 201);
-});
+}) as any);
 
 // PATCH /admin/:id — Update shared domain config
 const updateSchema = z.object({
@@ -144,34 +169,61 @@ const updateSchema = z.object({
   maxPerAccount: z.number().int().min(0).optional(),
 });
 
-sharedDomainRoutes.patch('/admin/:id', async (c) => {
+const updateAdminDomainRoute = createRoute({
+  method: 'patch',
+  path: '/admin/{id}',
+  tags: ['Shared Domains'],
+  summary: 'Update shared domain config (super admin)',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+    body: jsonBody(updateSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated shared domain'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(updateAdminDomainRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super user access required' }, 403);
 
-  const id = c.req.param('id');
-  if (!uuidRe.test(id)) return c.json({ error: 'Invalid ID' }, 400);
+  const { id } = c.req.valid('param');
 
-  const body = await c.req.json().catch(() => null);
-  const parsed = updateSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid input', details: parsed.error.flatten() }, 400);
+  const data = c.req.valid('json');
 
   const [updated] = await updateReturning(
     sharedDomains,
-    { ...parsed.data, updatedAt: new Date() },
+    { ...data, updatedAt: new Date() },
     eq(sharedDomains.id, id),
   );
 
   if (!updated) return c.json({ error: 'Not found' }, 404);
   return c.json(updated);
-});
+}) as any);
 
 // DELETE /admin/:id — Remove shared domain (cascades claims)
-sharedDomainRoutes.delete('/admin/:id', async (c) => {
+const deleteAdminDomainRoute = createRoute({
+  method: 'delete',
+  path: '/admin/{id}',
+  tags: ['Shared Domains'],
+  summary: 'Remove a shared domain (super admin)',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Domain deleted'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(deleteAdminDomainRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super user access required' }, 403);
 
-  const id = c.req.param('id');
-  if (!uuidRe.test(id)) return c.json({ error: 'Invalid ID' }, 400);
+  const { id } = c.req.valid('param');
 
   // Clear service domain references before cascade-deleting claims
   const claims = await db.query.subdomainClaims.findMany({
@@ -188,20 +240,32 @@ sharedDomainRoutes.delete('/admin/:id', async (c) => {
   const [deleted] = await deleteReturning(sharedDomains, eq(sharedDomains.id, id));
   if (!deleted) return c.json({ error: 'Not found' }, 404);
   return c.json({ success: true });
-});
+}) as any);
 
 // ═══════════════════════════════════════════════════════════════════════
 // User endpoints
 // ═══════════════════════════════════════════════════════════════════════
 
 // GET /available — List enabled shared domains
-sharedDomainRoutes.get('/available', async (c) => {
+const listAvailableRoute = createRoute({
+  method: 'get',
+  path: '/available',
+  tags: ['Shared Domains'],
+  summary: 'List enabled shared domains',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of available shared domains'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(listAvailableRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account required' }, 400);
 
   const domains = await db.query.sharedDomains.findMany({
     where: eq(sharedDomains.enabled, true),
-    orderBy: (t, { asc }) => [asc(t.domain)],
+    orderBy: (t: any, { asc }: any) => [asc(t.domain)],
   });
 
   // Get claim counts per domain for this account
@@ -211,12 +275,12 @@ sharedDomainRoutes.get('/available', async (c) => {
   });
 
   const claimsPerDomain = new Map<string, number>();
-  for (const c of myClaims) {
-    claimsPerDomain.set(c.sharedDomainId, (claimsPerDomain.get(c.sharedDomainId) ?? 0) + 1);
+  for (const cl of myClaims) {
+    claimsPerDomain.set(cl.sharedDomainId, (claimsPerDomain.get(cl.sharedDomainId) ?? 0) + 1);
   }
 
   return c.json(
-    domains.map((d) => ({
+    domains.map((d: any) => ({
       id: d.id,
       domain: d.domain,
       pricingType: d.pricingType,
@@ -226,10 +290,22 @@ sharedDomainRoutes.get('/available', async (c) => {
       myClaimCount: claimsPerDomain.get(d.id) ?? 0,
     })),
   );
-});
+}) as any);
 
 // GET /mine — List user's claimed subdomains
-sharedDomainRoutes.get('/mine', async (c) => {
+const listMineRoute = createRoute({
+  method: 'get',
+  path: '/mine',
+  tags: ['Shared Domains'],
+  summary: "List user's claimed subdomains",
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of claimed subdomains'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(listMineRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account required' }, 400);
 
@@ -239,11 +315,11 @@ sharedDomainRoutes.get('/mine', async (c) => {
       sharedDomain: { columns: { domain: true, pricingType: true, price: true, currency: true } },
       service: { columns: { id: true, name: true } },
     },
-    orderBy: (t, { desc }) => [desc(t.createdAt)],
+    orderBy: (t: any, { desc }: any) => [desc(t.createdAt)],
   });
 
   return c.json(
-    claims.map((cl) => ({
+    claims.map((cl: any) => ({
       id: cl.id,
       subdomain: cl.subdomain,
       fullDomain: `${cl.subdomain}.${cl.sharedDomain.domain}`,
@@ -258,7 +334,7 @@ sharedDomainRoutes.get('/mine', async (c) => {
       createdAt: cl.createdAt,
     })),
   );
-});
+}) as any);
 
 // POST /claim — Claim a subdomain
 const claimSchema = z.object({
@@ -271,15 +347,27 @@ const claimSchema = z.object({
   serviceId: z.string().uuid().optional(),
 });
 
-sharedDomainRoutes.post('/claim', async (c) => {
+const claimSubdomainRoute = createRoute({
+  method: 'post',
+  path: '/claim',
+  tags: ['Shared Domains'],
+  summary: 'Claim a subdomain',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(claimSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Claimed subdomain'),
+    409: jsonContent(errorResponseSchema, 'Subdomain already taken'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(claimSubdomainRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account required' }, 400);
 
-  const body = await c.req.json().catch(() => null);
-  const parsed = claimSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid input', details: parsed.error.flatten() }, 400);
-
-  const { sharedDomainId, subdomain, serviceId } = parsed.data;
+  const { sharedDomainId, subdomain, serviceId } = c.req.valid('json');
 
   // Validate subdomain format
   if (!subdomainRegex.test(subdomain)) {
@@ -433,25 +521,36 @@ sharedDomainRoutes.post('/claim', async (c) => {
     logger.error({ err, subdomain: fullDomain }, 'Failed to create Stripe checkout for subdomain');
     return c.json({ error: 'Failed to create payment session' }, 500);
   }
-});
+}) as any);
 
 // PATCH /:id — Update claim (change service assignment)
 const updateClaimSchema = z.object({
   serviceId: z.string().uuid().nullable(),
 });
 
-sharedDomainRoutes.patch('/:id', async (c) => {
+const updateClaimRoute = createRoute({
+  method: 'patch',
+  path: '/{id}',
+  tags: ['Shared Domains'],
+  summary: 'Update claim service assignment',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+    body: jsonBody(updateClaimSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated claim'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(updateClaimRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account required' }, 400);
 
-  const id = c.req.param('id');
-  if (!uuidRe.test(id)) return c.json({ error: 'Invalid ID' }, 400);
+  const { id } = c.req.valid('param');
 
-  const body = await c.req.json().catch(() => null);
-  const parsed = updateClaimSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'Invalid input', details: parsed.error.flatten() }, 400);
-
-  const { serviceId } = parsed.data;
+  const { serviceId } = c.req.valid('json');
 
   // Verify claim belongs to this account
   const claim = await db.query.subdomainClaims.findFirst({
@@ -484,15 +583,29 @@ sharedDomainRoutes.patch('/:id', async (c) => {
   );
 
   return c.json(updated);
-});
+}) as any);
 
 // DELETE /:id — Release a subdomain
-sharedDomainRoutes.delete('/:id', async (c) => {
+const deleteClaimRoute = createRoute({
+  method: 'delete',
+  path: '/{id}',
+  tags: ['Shared Domains'],
+  summary: 'Release a subdomain',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean() }), 'Subdomain released'),
+    ...standardErrors,
+  },
+});
+
+sharedDomainRoutes.openapi(deleteClaimRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account required' }, 400);
 
-  const id = c.req.param('id');
-  if (!uuidRe.test(id)) return c.json({ error: 'Invalid ID' }, 400);
+  const { id } = c.req.valid('param');
 
   const claim = await db.query.subdomainClaims.findFirst({
     where: and(eq(subdomainClaims.id, id), eq(subdomainClaims.accountId, accountId)),
@@ -516,7 +629,7 @@ sharedDomainRoutes.delete('/:id', async (c) => {
 
   await deleteReturning(subdomainClaims, and(eq(subdomainClaims.id, id), eq(subdomainClaims.accountId, accountId))!);
   return c.json({ success: true });
-});
+}) as any);
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 

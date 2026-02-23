@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
@@ -7,11 +7,19 @@ import { requireMember, requireAdmin } from '../middleware/rbac.js';
 import { cache } from '../middleware/cache.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
+import {
+  jsonBody,
+  jsonContent,
+  errorResponseSchema,
+  messageResponseSchema,
+  standardErrors,
+  bearerSecurity,
+} from './_schemas.js';
 
 const deployRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'marketplace-deploy' });
 const imageTagsRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 'image-tags' });
 
-const marketplace = new Hono<{
+const marketplace = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
     account: AccountContext | null;
@@ -22,28 +30,140 @@ const marketplace = new Hono<{
 marketplace.use('*', authMiddleware);
 marketplace.use('*', tenantMiddleware);
 
+// ── Schemas ──
+
+const templateSummarySchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  iconUrl: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  isBuiltin: z.boolean().nullable(),
+}).openapi('TemplateSummary');
+
+const templateDetailSchema = templateSummarySchema.extend({
+  composeTemplate: z.string(),
+  serviceDefinitions: z.any().optional(),
+  volumes: z.any().optional(),
+}).openapi('TemplateDetail');
+
+const imageTagsResponseSchema = z.object({
+  tags: z.array(z.string()),
+  defaultTag: z.string(),
+}).openapi('ImageTagsResponse');
+
+const deploySchema = z.object({
+  slug: z.string().min(1),
+  config: z.record(z.string(), z.string()).default({}),
+  composeOverride: z.string().optional(),
+  imageOverrides: z.record(z.string(), z.string().min(1)).optional(),
+  resourceOverrides: z.record(z.string(), z.object({
+    replicas: z.number().int().min(0).max(100).optional(),
+    cpuLimit: z.number().int().min(0).optional(),
+    memoryLimit: z.number().int().min(0).optional(),
+  })).optional(),
+}).openapi('MarketplaceDeploy');
+
+const createTemplateSchema = z.object({
+  slug: z.string().min(1).max(255),
+  name: z.string().min(1).max(255),
+  description: z.string().optional(),
+  iconUrl: z.string().url().optional(),
+  category: z.string().optional(),
+  composeTemplate: z.string().min(1),
+  isBuiltin: z.boolean().optional(),
+}).openapi('CreateTemplate');
+
+const updateTemplateSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  description: z.string().optional(),
+  iconUrl: z.string().url().optional(),
+  category: z.string().optional(),
+  composeTemplate: z.string().min(1).optional(),
+}).openapi('UpdateTemplate');
+
+const slugParamSchema = z.object({
+  slug: z.string().openapi({ description: 'Template slug' }),
+});
+
+const imageQuerySchema = z.object({
+  image: z.string().min(1).openapi({ description: 'Docker image name' }),
+});
+
+const categoryQuerySchema = z.object({
+  category: z.string().optional().openapi({ description: 'Filter by category' }),
+});
+
+// ── Routes ──
+
 // GET /templates — list all available templates
-marketplace.get('/templates', cache(600), async (c) => {
+const listTemplatesRoute = createRoute({
+  method: 'get',
+  path: '/templates',
+  tags: ['Marketplace'],
+  summary: 'List all available templates',
+  security: bearerSecurity,
+  middleware: [cache(600)] as const,
+  request: {
+    query: categoryQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.array(templateSummarySchema), 'List of templates'),
+    ...standardErrors,
+  },
+});
+
+marketplace.openapi(listTemplatesRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const category = c.req.query('category');
+  const { category } = c.req.valid('query');
 
   const templates = await templateService.listTemplates({
     category: category ?? undefined,
     accountId: accountId ?? undefined,
   });
 
-  return c.json(templates);
-});
+  return c.json(templates, 200);
+}) as any);
 
 // GET /templates/categories — list template categories
-marketplace.get('/templates/categories', async (c) => {
-  const categories = await templateService.getCategories();
-  return c.json(categories);
+const listCategoriesRoute = createRoute({
+  method: 'get',
+  path: '/templates/categories',
+  tags: ['Marketplace'],
+  summary: 'List template categories',
+  security: bearerSecurity,
+  middleware: [],
+  responses: {
+    200: jsonContent(z.array(z.string()), 'List of categories'),
+    ...standardErrors,
+  },
 });
 
+marketplace.openapi(listCategoriesRoute, (async (c: any) => {
+  const categories = await templateService.getCategories();
+  return c.json(categories, 200);
+}) as any);
+
 // GET /templates/:slug — get template details with variable schema
-marketplace.get('/templates/:slug', async (c) => {
-  const slug = c.req.param('slug');
+const getTemplateRoute = createRoute({
+  method: 'get',
+  path: '/templates/{slug}',
+  tags: ['Marketplace'],
+  summary: 'Get template details',
+  security: bearerSecurity,
+  middleware: [],
+  request: {
+    params: slugParamSchema,
+  },
+  responses: {
+    200: jsonContent(templateDetailSchema, 'Template details'),
+    ...standardErrors,
+  },
+});
+
+marketplace.openapi(getTemplateRoute, (async (c: any) => {
+  const { slug } = c.req.valid('param');
 
   const template = await templateService.getTemplate(slug);
 
@@ -58,15 +178,28 @@ marketplace.get('/templates/:slug', async (c) => {
     ...template,
     serviceDefinitions: parsed.services,
     volumes: parsed.volumes,
-  });
-});
+  }, 200);
+}) as any);
 
 // GET /image-tags — fetch available Docker Hub tags for an image
-marketplace.get('/image-tags', imageTagsRateLimit, cache(600), async (c) => {
-  const image = c.req.query('image');
-  if (!image) {
-    return c.json({ error: 'image query parameter required' }, 400);
-  }
+const imageTagsRoute = createRoute({
+  method: 'get',
+  path: '/image-tags',
+  tags: ['Marketplace'],
+  summary: 'Fetch available Docker Hub tags for an image',
+  security: bearerSecurity,
+  middleware: [imageTagsRateLimit, cache(600)] as const,
+  request: {
+    query: imageQuerySchema,
+  },
+  responses: {
+    200: jsonContent(imageTagsResponseSchema, 'Image tags'),
+    ...standardErrors,
+  },
+});
+
+marketplace.openapi(imageTagsRoute, (async (c: any) => {
+  const { image } = c.req.valid('query');
 
   // Parse image into namespace/repo (official images use "library" namespace)
   const parts = image.split(':')[0]!.split('/');
@@ -90,14 +223,14 @@ marketplace.get('/image-tags', imageTagsRateLimit, cache(600), async (c) => {
     );
 
     if (!res.ok) {
-      return c.json({ tags: [defaultTag], defaultTag });
+      return c.json({ tags: [defaultTag], defaultTag }, 200);
     }
 
     const data = (await res.json()) as { results?: Array<{ name: string }> };
-    const rawTags = (data.results ?? []).map((t) => t.name);
+    const rawTags = (data.results ?? []).map((t: any) => t.name);
 
     // Filter out SHA digests and overly long tags, keep meaningful versions
-    const filtered = rawTags.filter((tag) => {
+    const filtered = rawTags.filter((tag: string) => {
       if (tag.length > 40) return false;
       if (/^sha-/.test(tag)) return false;
       if (/^[0-9a-f]{7,}$/.test(tag)) return false;
@@ -106,44 +239,41 @@ marketplace.get('/image-tags', imageTagsRateLimit, cache(600), async (c) => {
 
     // Ensure the default tag is included at the top
     const tags = filtered.includes(defaultTag)
-      ? [defaultTag, ...filtered.filter((t) => t !== defaultTag)]
+      ? [defaultTag, ...filtered.filter((t: string) => t !== defaultTag)]
       : [defaultTag, ...filtered];
 
-    return c.json({ tags, defaultTag });
+    return c.json({ tags, defaultTag }, 200);
   } catch (err) {
     logger.error({ err, image }, 'Failed to fetch Docker Hub tags');
-    return c.json({ tags: [defaultTag], defaultTag });
+    return c.json({ tags: [defaultTag], defaultTag }, 200);
   }
-});
+}) as any);
 
 // POST /deploy — deploy a template
-const deploySchema = z.object({
-  slug: z.string().min(1),
-  config: z.record(z.string()).default({}),
-  composeOverride: z.string().optional(),
-  imageOverrides: z.record(z.string().min(1)).optional(),
-  resourceOverrides: z.record(z.object({
-    replicas: z.number().int().min(0).max(100).optional(),
-    cpuLimit: z.number().int().min(0).optional(),
-    memoryLimit: z.number().int().min(0).optional(),
-  })).optional(),
+const deployRoute = createRoute({
+  method: 'post',
+  path: '/deploy',
+  tags: ['Marketplace'],
+  summary: 'Deploy a template',
+  security: bearerSecurity,
+  middleware: [deployRateLimit, requireMember] as const,
+  request: {
+    body: jsonBody(deploySchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Deployment result'),
+    ...standardErrors,
+  },
 });
 
-marketplace.post('/deploy', deployRateLimit, requireMember, async (c) => {
+marketplace.openapi(deployRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = deploySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { slug, config, composeOverride, imageOverrides, resourceOverrides } = parsed.data;
+  const { slug, config, composeOverride, imageOverrides, resourceOverrides } = c.req.valid('json');
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
@@ -165,39 +295,39 @@ marketplace.post('/deploy', deployRateLimit, requireMember, async (c) => {
     logger.error({ err }, 'Template deployment failed');
     return c.json({ error: 'Failed to deploy template' }, 500);
   }
-});
+}) as any);
 
 // POST /templates — create a custom template (admin or account-scoped)
-const createTemplateSchema = z.object({
-  slug: z.string().min(1).max(255),
-  name: z.string().min(1).max(255),
-  description: z.string().optional(),
-  iconUrl: z.string().url().optional(),
-  category: z.string().optional(),
-  composeTemplate: z.string().min(1),
-  isBuiltin: z.boolean().optional(),
+const createTemplateRoute = createRoute({
+  method: 'post',
+  path: '/templates',
+  tags: ['Marketplace'],
+  summary: 'Create a custom template',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  request: {
+    body: jsonBody(createTemplateSchema),
+  },
+  responses: {
+    201: jsonContent(templateDetailSchema, 'Created template'),
+    ...standardErrors,
+  },
 });
 
-marketplace.post('/templates', requireAdmin, async (c) => {
+marketplace.openapi(createTemplateRoute, (async (c: any) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
-  // Only super users can create builtin templates
-  const body = await c.req.json();
-  const parsed = createTemplateSchema.safeParse(body);
+  const data = c.req.valid('json');
 
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  if (parsed.data.isBuiltin && !user.isSuper) {
+  if (data.isBuiltin && !user.isSuper) {
     return c.json({ error: 'Only super users can create builtin templates' }, 403);
   }
 
   try {
     const template = await templateService.createTemplate({
-      ...parsed.data,
-      accountId: parsed.data.isBuiltin ? undefined : (accountId ?? undefined),
+      ...data,
+      accountId: data.isBuiltin ? undefined : (accountId ?? undefined),
     });
 
     return c.json(template, 201);
@@ -205,20 +335,29 @@ marketplace.post('/templates', requireAdmin, async (c) => {
     logger.error({ err }, 'Template creation failed');
     return c.json({ error: 'Failed to create template' }, 500);
   }
-});
+}) as any);
 
 // PATCH /templates/:slug — update a template
-const updateTemplateSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  description: z.string().optional(),
-  iconUrl: z.string().url().optional(),
-  category: z.string().optional(),
-  composeTemplate: z.string().min(1).optional(),
+const updateTemplateRoute = createRoute({
+  method: 'patch',
+  path: '/templates/{slug}',
+  tags: ['Marketplace'],
+  summary: 'Update a template',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  request: {
+    params: slugParamSchema,
+    body: jsonBody(updateTemplateSchema),
+  },
+  responses: {
+    200: jsonContent(templateDetailSchema, 'Updated template'),
+    ...standardErrors,
+  },
 });
 
-marketplace.patch('/templates/:slug', requireAdmin, async (c) => {
+marketplace.openapi(updateTemplateRoute, (async (c: any) => {
   const user = c.get('user');
-  const slug = c.req.param('slug');
+  const { slug } = c.req.valid('param');
 
   const template = await templateService.getTemplate(slug);
 
@@ -231,26 +370,37 @@ marketplace.patch('/templates/:slug', requireAdmin, async (c) => {
     return c.json({ error: 'Only super users can update builtin templates' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = updateTemplateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   try {
-    const updated = await templateService.updateTemplate(template.id, parsed.data);
-    return c.json(updated);
+    const updated = await templateService.updateTemplate(template.id, data);
+    return c.json(updated, 200);
   } catch (err) {
     logger.error({ err }, 'Template update failed');
     return c.json({ error: 'Failed to update template' }, 500);
   }
-});
+}) as any);
 
 // DELETE /templates/:slug — delete a template
-marketplace.delete('/templates/:slug', requireAdmin, async (c) => {
+const deleteTemplateRoute = createRoute({
+  method: 'delete',
+  path: '/templates/{slug}',
+  tags: ['Marketplace'],
+  summary: 'Delete a template',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  request: {
+    params: slugParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Template deleted'),
+    ...standardErrors,
+  },
+});
+
+marketplace.openapi(deleteTemplateRoute, (async (c: any) => {
   const user = c.get('user');
-  const slug = c.req.param('slug');
+  const { slug } = c.req.valid('param');
 
   const template = await templateService.getTemplate(slug);
 
@@ -268,11 +418,24 @@ marketplace.delete('/templates/:slug', requireAdmin, async (c) => {
     return c.json({ error: 'Failed to delete template' }, 500);
   }
 
-  return c.json({ message: 'Template deleted' });
-});
+  return c.json({ message: 'Template deleted' }, 200);
+}) as any);
 
 // POST /sync — sync builtin templates from disk (admin only)
-marketplace.post('/sync', async (c) => {
+const syncRoute = createRoute({
+  method: 'post',
+  path: '/sync',
+  tags: ['Marketplace'],
+  summary: 'Sync builtin templates from disk',
+  security: bearerSecurity,
+  middleware: [],
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Sync result'),
+    ...standardErrors,
+  },
+});
+
+marketplace.openapi(syncRoute, (async (c: any) => {
   const user = c.get('user');
 
   if (!user.isSuper) {
@@ -281,11 +444,11 @@ marketplace.post('/sync', async (c) => {
 
   try {
     await templateService.syncBuiltinTemplates();
-    return c.json({ message: 'Templates synced successfully' });
+    return c.json({ message: 'Templates synced successfully' }, 200);
   } catch (err) {
     logger.error({ err }, 'Template sync failed');
     return c.json({ error: 'Failed to sync templates' }, 500);
   }
-});
+}) as any);
 
 export default marketplace;

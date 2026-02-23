@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { apiReference } from '@scalar/hono-api-reference';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
@@ -42,11 +44,21 @@ import databaseRoutes, { databaseDownloadRoutes } from './routes/database.js';
 import storageAdminRoutes from './routes/storage-admin.js';
 import sharedDomainRoutes from './routes/shared-domains.js';
 import resellerRoutes from './routes/reseller.js';
+import jobRoutes from './routes/jobs.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
 // Ensure CORS_ORIGIN, APP_URL, and all secrets are identical across instances.
-export const app = new Hono();
+export const app = new OpenAPIHono({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      return c.json({
+        error: 'Validation failed',
+        details: result.error.issues.map((i) => `${(i.path as (string | number)[]).join('.')}: ${i.message}`),
+      }, 400);
+    }
+  },
+});
 
 // WebSocket support — export for use in index.ts
 export const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
@@ -195,7 +207,16 @@ async function verifyWsToken(token: string) {
 }
 
 // API v1 routes
-const api = new Hono();
+const api = new OpenAPIHono({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      return c.json({
+        error: 'Validation failed',
+        details: result.error.issues.map((i) => `${(i.path as (string | number)[]).join('.')}: ${i.message}`),
+      }, 400);
+    }
+  },
+});
 
 // Audit logging for mutating requests (POST/PUT/PATCH/DELETE)
 api.use('*', auditMiddleware);
@@ -229,6 +250,7 @@ api.route('/files', fileRoutes);
 api.route('/database', databaseRoutes);
 api.route('/dl/database', databaseDownloadRoutes); // public token-gated download (no auth middleware)
 api.route('/admin/storage', storageAdminRoutes);
+api.route('/admin/jobs', jobRoutes);
 api.route('/shared-domains', sharedDomainRoutes);
 api.route('/reseller', resellerRoutes);
 
@@ -866,5 +888,43 @@ app.get('/api/v1/branding/:type', brandingRateLimit, async (c) => {
 });
 
 app.route('/api/v1', api);
+
+// ── OpenAPI Spec + Scalar API Docs ──
+// Generates the spec from all routes registered with .openapi() on OpenAPIHono instances.
+// Routes using plain .get()/.post() still work but won't appear in the spec until converted.
+app.doc('/api/docs/openapi.json', {
+  openapi: '3.1.0',
+  info: {
+    title: 'Fleet API',
+    version: process.env['FLEET_VERSION'] ?? '0.1.0',
+    description: 'Fleet PaaS platform API — deploy, manage, and scale containerized applications on Docker Swarm.',
+  },
+  servers: [
+    { url: process.env['APP_URL'] ?? 'http://localhost:3000', description: 'Fleet API Server' },
+  ],
+  security: [{ bearerAuth: [] }],
+});
+
+// Register security schemes
+app.openAPIRegistry.registerComponent('securitySchemes', 'bearerAuth', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT',
+  description: 'JWT access token obtained from POST /api/v1/auth/login or /api/v1/auth/register',
+});
+app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {
+  type: 'apiKey',
+  in: 'header',
+  name: 'X-API-Key',
+  description: 'API key created via POST /api/v1/api-keys',
+});
+
+// Scalar API Reference UI (three-column layout)
+const docsRateLimit = rateLimiter({ windowMs: 60_000, max: 60, keyPrefix: 'docs' });
+app.get('/api/docs', docsRateLimit, apiReference({
+  theme: 'kepler',
+  url: '/api/docs/openapi.json',
+  metaData: { title: 'Fleet API Reference' },
+}));
 
 export type AppType = typeof app;

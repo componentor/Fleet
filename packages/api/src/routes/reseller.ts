@@ -1,5 +1,6 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from '@hono/zod-openapi';
+import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 import {
   db,
   accounts,
@@ -41,7 +42,7 @@ type ResellerEnv = {
   };
 };
 
-const reseller = new Hono<ResellerEnv>();
+const reseller = new OpenAPIHono<ResellerEnv>();
 
 // ── Helper: calculate discount amount ─────────────────────────────────────────
 
@@ -159,12 +160,24 @@ export async function calculateResellerPricing(accountId: string, basePriceCents
 
 // ── Authenticated + tenant-scoped routes ────────────────────────────────────
 
-const authed = new Hono<ResellerEnv>();
+const authed = new OpenAPIHono<ResellerEnv>();
 authed.use('*', authMiddleware);
 authed.use('*', tenantMiddleware);
 
 // GET /status — check if current account is a reseller
-authed.get('/status', async (c) => {
+const getStatusRoute = createRoute({
+  method: 'get',
+  path: '/status',
+  tags: ['Reseller'],
+  summary: 'Check reseller status for current account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Reseller status'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getStatusRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -209,14 +222,30 @@ authed.get('/status', async (c) => {
     canApply,
     pendingApplication: pendingApp ?? null,
   });
-});
+}) as any);
 
 // POST /apply — apply to become a reseller
 const applySchema = z.object({
   message: z.string().max(1000).optional(),
 });
 
-authed.post('/apply', requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyPrefix: 'reseller-apply' }), async (c) => {
+const applyRoute = createRoute({
+  method: 'post',
+  path: '/apply',
+  tags: ['Reseller'],
+  summary: 'Apply to become a reseller',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(applySchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Application submitted or auto-approved'),
+  },
+  middleware: [requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyPrefix: 'reseller-apply' })],
+});
+
+authed.openapi(applyRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
@@ -241,11 +270,7 @@ authed.post('/apply', requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyP
     return c.json({ error: 'Application already pending' }, 400);
   }
 
-  const body = await c.req.json();
-  const parsed = applySchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   if (config.approvalMode === 'auto') {
     // Auto-approve: create reseller account directly
@@ -258,7 +283,7 @@ authed.post('/apply', requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyP
     // Also create application record for audit trail
     await db.insert(resellerApplications).values({
       accountId,
-      message: parsed.data.message ?? null,
+      message: data.message ?? null,
       status: 'approved',
       reviewedAt: new Date(),
       reviewNote: 'Auto-approved',
@@ -271,7 +296,7 @@ authed.post('/apply', requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyP
   // Manual approval: create application
   const [app] = await insertReturning(resellerApplications, {
     accountId,
-    message: parsed.data.message ?? null,
+    message: data.message ?? null,
     status: 'pending',
   });
 
@@ -290,7 +315,7 @@ authed.post('/apply', requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyP
         to: su.email!,
         variables: {
           accountName: account?.name ?? 'Unknown',
-          message: parsed.data.message ?? '',
+          message: data.message ?? '',
           adminUrl: `${process.env['APP_URL'] ?? ''}/admin/resellers`,
         },
       }).catch(() => {});
@@ -301,10 +326,22 @@ authed.post('/apply', requireOwner, rateLimiter({ windowMs: 60_000, max: 5, keyP
 
   logger.info({ accountId, userId: user.userId }, 'Reseller application submitted');
   return c.json({ message: 'Application submitted', application: app }, 201);
-});
+}) as any);
 
 // GET /dashboard — reseller dashboard data
-authed.get('/dashboard', async (c) => {
+const getDashboardRoute = createRoute({
+  method: 'get',
+  path: '/dashboard',
+  tags: ['Reseller'],
+  summary: 'Get reseller dashboard data',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Dashboard data'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getDashboardRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -330,7 +367,7 @@ authed.get('/dashboard', async (c) => {
     subAccountCount: subAccounts.length,
     subAccounts,
   });
-});
+}) as any);
 
 // PATCH /markup — update reseller's own markup
 const markupSchema = z.object({
@@ -339,7 +376,23 @@ const markupSchema = z.object({
   markupFixed: z.number().int().min(0).optional(),
 });
 
-authed.patch('/markup', requireOwner, async (c) => {
+const patchMarkupRoute = createRoute({
+  method: 'patch',
+  path: '/markup',
+  tags: ['Reseller'],
+  summary: 'Update reseller markup settings',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(markupSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Markup updated'),
+    ...standardErrors,
+  },
+  middleware: [requireOwner],
+});
+
+authed.openapi(patchMarkupRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -350,21 +403,17 @@ authed.patch('/markup', requireOwner, async (c) => {
     return c.json({ error: 'Not a reseller' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = markupSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   const [updated] = await updateReturning(resellerAccounts, {
-    markupType: parsed.data.markupType,
-    markupPercent: parsed.data.markupPercent ?? 0,
-    markupFixed: parsed.data.markupFixed ?? 0,
+    markupType: data.markupType,
+    markupPercent: data.markupPercent ?? 0,
+    markupFixed: data.markupFixed ?? 0,
     updatedAt: new Date(),
   }, eq(resellerAccounts.id, resellerAccount.id));
 
   return c.json({ message: 'Markup updated', resellerAccount: updated });
-});
+}) as any);
 
 // PATCH /branding — update reseller branding
 const brandingSchema = z.object({
@@ -376,7 +425,23 @@ const brandingSchema = z.object({
   brandDescription: z.string().max(500).optional(),
 });
 
-authed.patch('/branding', requireOwner, async (c) => {
+const patchBrandingRoute = createRoute({
+  method: 'patch',
+  path: '/branding',
+  tags: ['Reseller'],
+  summary: 'Update reseller branding',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(brandingSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Branding updated'),
+    ...standardErrors,
+  },
+  middleware: [requireOwner],
+});
+
+authed.openapi(patchBrandingRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -387,16 +452,12 @@ authed.patch('/branding', requireOwner, async (c) => {
     return c.json({ error: 'Not a reseller' }, 403);
   }
 
-  const body = await c.req.json();
-  const parsed = brandingSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   // Check slug uniqueness if changing
-  if (parsed.data.signupSlug && parsed.data.signupSlug !== resellerAccount.signupSlug) {
+  if (data.signupSlug && data.signupSlug !== resellerAccount.signupSlug) {
     const existingSlug = await db.query.resellerAccounts.findFirst({
-      where: eq(resellerAccounts.signupSlug, parsed.data.signupSlug),
+      where: eq(resellerAccounts.signupSlug, data.signupSlug),
     });
     if (existingSlug) {
       return c.json({ error: 'This signup slug is already taken' }, 400);
@@ -404,20 +465,33 @@ authed.patch('/branding', requireOwner, async (c) => {
   }
 
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
-  if (parsed.data.signupSlug !== undefined) updateData['signupSlug'] = parsed.data.signupSlug;
-  if (parsed.data.customDomain !== undefined) updateData['customDomain'] = parsed.data.customDomain || null;
-  if (parsed.data.brandName !== undefined) updateData['brandName'] = parsed.data.brandName || null;
-  if (parsed.data.brandLogoUrl !== undefined) updateData['brandLogoUrl'] = parsed.data.brandLogoUrl || null;
-  if (parsed.data.brandPrimaryColor !== undefined) updateData['brandPrimaryColor'] = parsed.data.brandPrimaryColor || null;
-  if (parsed.data.brandDescription !== undefined) updateData['brandDescription'] = parsed.data.brandDescription || null;
+  if (data.signupSlug !== undefined) updateData['signupSlug'] = data.signupSlug;
+  if (data.customDomain !== undefined) updateData['customDomain'] = data.customDomain || null;
+  if (data.brandName !== undefined) updateData['brandName'] = data.brandName || null;
+  if (data.brandLogoUrl !== undefined) updateData['brandLogoUrl'] = data.brandLogoUrl || null;
+  if (data.brandPrimaryColor !== undefined) updateData['brandPrimaryColor'] = data.brandPrimaryColor || null;
+  if (data.brandDescription !== undefined) updateData['brandDescription'] = data.brandDescription || null;
 
   const [updated] = await updateReturning(resellerAccounts, updateData, eq(resellerAccounts.id, resellerAccount.id));
 
   return c.json({ message: 'Branding updated', resellerAccount: updated });
-});
+}) as any);
 
 // POST /connect — start Stripe Connect onboarding
-authed.post('/connect', requireOwner, async (c) => {
+const postConnectRoute = createRoute({
+  method: 'post',
+  path: '/connect',
+  tags: ['Reseller'],
+  summary: 'Start Stripe Connect onboarding',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ url: z.string() }), 'Connect onboarding URL'),
+    ...standardErrors,
+  },
+  middleware: [requireOwner],
+});
+
+authed.openapi(postConnectRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
@@ -450,10 +524,22 @@ authed.post('/connect', requireOwner, async (c) => {
   );
 
   return c.json({ url: accountLink.url });
-});
+}) as any);
 
 // GET /connect/status — check Stripe Connect onboarding status
-authed.get('/connect/status', async (c) => {
+const getConnectStatusRoute = createRoute({
+  method: 'get',
+  path: '/connect/status',
+  tags: ['Reseller'],
+  summary: 'Check Stripe Connect onboarding status',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Connect status'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getConnectStatusRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
@@ -483,12 +569,28 @@ authed.get('/connect/status', async (c) => {
   } catch {
     return c.json({ connected: false, onboarded: false });
   }
-});
+}) as any);
 
 // POST /sub-accounts/:subAccountId/enable-reselling
-authed.post('/sub-accounts/:subAccountId/enable-reselling', requireOwner, async (c) => {
+const enableResellingRoute = createRoute({
+  method: 'post',
+  path: '/sub-accounts/{subAccountId}/enable-reselling',
+  tags: ['Reseller'],
+  summary: 'Enable reselling for a sub-account',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ subAccountId: z.string() }),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'Reselling enabled'),
+  },
+  middleware: [requireOwner],
+});
+
+authed.openapi(enableResellingRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const subAccountId = c.req.param('subAccountId');
+  const { subAccountId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const config = await db.query.resellerConfig.findFirst();
@@ -527,12 +629,28 @@ authed.post('/sub-accounts/:subAccountId/enable-reselling', requireOwner, async 
   });
 
   return c.json({ message: 'Reselling enabled for sub-account', resellerAccount: created }, 201);
-});
+}) as any);
 
 // POST /sub-accounts/:subAccountId/disable-reselling
-authed.post('/sub-accounts/:subAccountId/disable-reselling', requireOwner, async (c) => {
+const disableResellingRoute = createRoute({
+  method: 'post',
+  path: '/sub-accounts/{subAccountId}/disable-reselling',
+  tags: ['Reseller'],
+  summary: 'Disable reselling for a sub-account',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ subAccountId: z.string() }),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Reselling disabled'),
+    ...standardErrors,
+  },
+  middleware: [requireOwner],
+});
+
+authed.openapi(disableResellingRoute, (async (c: any) => {
   const accountId = c.get('accountId');
-  const subAccountId = c.req.param('subAccountId');
+  const { subAccountId } = c.req.valid('param');
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const subAccount = await db.query.accounts.findFirst({
@@ -554,10 +672,22 @@ authed.post('/sub-accounts/:subAccountId/disable-reselling', requireOwner, async
     .where(eq(resellerAccounts.id, resellerAccount.id));
 
   return c.json({ message: 'Reselling disabled for sub-account' });
-});
+}) as any);
 
 // GET /parent-branding — get parent reseller's branding for sub-account dashboard
-authed.get('/parent-branding', async (c) => {
+const getParentBrandingRoute = createRoute({
+  method: 'get',
+  path: '/parent-branding',
+  tags: ['Reseller'],
+  summary: 'Get parent reseller branding for sub-account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Parent branding data'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getParentBrandingRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) return c.json({ found: false });
 
@@ -584,18 +714,30 @@ authed.get('/parent-branding', async (c) => {
     brandLogoUrl: parentReseller.brandLogoUrl,
     brandPrimaryColor: parentReseller.brandPrimaryColor,
   });
-});
+}) as any);
 
 reseller.route('/', authed);
 
 // ── Super admin routes ─────────────────────────────────────────────────────
 
-const admin = new Hono<ResellerEnv>();
+const admin = new OpenAPIHono<ResellerEnv>();
 admin.use('*', authMiddleware);
 admin.use('*', tenantMiddleware);
 
 // GET /admin/config
-admin.get('/config', async (c) => {
+const getConfigRoute = createRoute({
+  method: 'get',
+  path: '/config',
+  tags: ['Reseller'],
+  summary: 'Get reseller program configuration',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Reseller config'),
+    ...standardErrors,
+  },
+});
+
+admin.openapi(getConfigRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
@@ -608,7 +750,7 @@ admin.get('/config', async (c) => {
     defaultDiscountPercent: 0,
     defaultDiscountFixed: 0,
   });
-});
+}) as any);
 
 // PATCH /admin/config
 const configSchema = z.object({
@@ -620,54 +762,84 @@ const configSchema = z.object({
   defaultDiscountFixed: z.number().int().min(0).optional(),
 });
 
-admin.patch('/config', rateLimiter({ windowMs: 60_000, max: 10, keyPrefix: 'reseller-admin' }), async (c) => {
+const patchConfigRoute = createRoute({
+  method: 'patch',
+  path: '/config',
+  tags: ['Reseller'],
+  summary: 'Update reseller program configuration',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(configSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.any(), 'Updated config'),
+    201: jsonContent(z.any(), 'Created config'),
+  },
+  middleware: [rateLimiter({ windowMs: 60_000, max: 10, keyPrefix: 'reseller-admin' })],
+});
+
+admin.openapi(patchConfigRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const body = await c.req.json();
-  const parsed = configSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const data = c.req.valid('json');
 
   const existing = await db.query.resellerConfig.findFirst();
 
   if (existing) {
     const [updated] = await updateReturning(resellerConfig, {
-      ...parsed.data,
+      ...data,
       updatedAt: new Date(),
     }, eq(resellerConfig.id, existing.id));
     return c.json(updated);
   }
 
   const [created] = await insertReturning(resellerConfig, {
-    enabled: parsed.data.enabled ?? false,
-    approvalMode: parsed.data.approvalMode ?? 'manual',
-    allowSubAccountReselling: parsed.data.allowSubAccountReselling ?? false,
-    defaultDiscountType: parsed.data.defaultDiscountType ?? 'percentage',
-    defaultDiscountPercent: parsed.data.defaultDiscountPercent ?? 0,
-    defaultDiscountFixed: parsed.data.defaultDiscountFixed ?? 0,
+    enabled: data.enabled ?? false,
+    approvalMode: data.approvalMode ?? 'manual',
+    allowSubAccountReselling: data.allowSubAccountReselling ?? false,
+    defaultDiscountType: data.defaultDiscountType ?? 'percentage',
+    defaultDiscountPercent: data.defaultDiscountPercent ?? 0,
+    defaultDiscountFixed: data.defaultDiscountFixed ?? 0,
   });
 
   return c.json(created, 201);
-});
+}) as any);
 
 // GET /admin/accounts — list all reseller accounts
-admin.get('/accounts', async (c) => {
+const getAccountsRoute = createRoute({
+  method: 'get',
+  path: '/accounts',
+  tags: ['Reseller'],
+  summary: 'List all reseller accounts',
+  security: bearerSecurity,
+  request: {
+    query: z.object({
+      status: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'List of reseller accounts'),
+    ...standardErrors,
+  },
+});
+
+admin.openapi(getAccountsRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const statusFilter = c.req.query('status');
+  const { status: statusFilter } = c.req.valid('query');
 
   const all = await db.query.resellerAccounts.findMany({
     with: { account: { columns: { id: true, name: true, slug: true } } },
-    orderBy: (r, { desc: d }) => d(r.createdAt),
+    orderBy: (r: any, { desc: d }: any) => d(r.createdAt),
   });
 
-  const filtered = statusFilter ? all.filter((r) => r.status === statusFilter) : all;
+  const filtered = statusFilter ? all.filter((r: any) => r.status === statusFilter) : all;
 
   return c.json(filtered);
-});
+}) as any);
 
 // PATCH /admin/accounts/:accountId — update a reseller's settings
 const updateResellerSchema = z.object({
@@ -678,17 +850,28 @@ const updateResellerSchema = z.object({
   status: z.enum(['active', 'suspended']).optional(),
 });
 
-admin.patch('/accounts/:accountId', async (c) => {
+const patchAccountRoute = createRoute({
+  method: 'patch',
+  path: '/accounts/{accountId}',
+  tags: ['Reseller'],
+  summary: 'Update a reseller account settings',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ accountId: z.string() }),
+    body: jsonBody(updateResellerSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated reseller account'),
+    ...standardErrors,
+  },
+});
+
+admin.openapi(patchAccountRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const targetAccountId = c.req.param('accountId');
-
-  const body = await c.req.json();
-  const parsed = updateResellerSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
+  const { accountId: targetAccountId } = c.req.valid('param');
+  const data = c.req.valid('json');
 
   const resellerAccount = await db.query.resellerAccounts.findFirst({
     where: eq(resellerAccounts.accountId, targetAccountId),
@@ -698,41 +881,74 @@ admin.patch('/accounts/:accountId', async (c) => {
   }
 
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
-  if (parsed.data.discountType !== undefined) updateData['discountType'] = parsed.data.discountType;
-  if (parsed.data.discountPercent !== undefined) updateData['discountPercent'] = parsed.data.discountPercent;
-  if (parsed.data.discountFixed !== undefined) updateData['discountFixed'] = parsed.data.discountFixed;
-  if (parsed.data.canSubAccountResell !== undefined) updateData['canSubAccountResell'] = parsed.data.canSubAccountResell;
-  if (parsed.data.status !== undefined) updateData['status'] = parsed.data.status;
+  if (data.discountType !== undefined) updateData['discountType'] = data.discountType;
+  if (data.discountPercent !== undefined) updateData['discountPercent'] = data.discountPercent;
+  if (data.discountFixed !== undefined) updateData['discountFixed'] = data.discountFixed;
+  if (data.canSubAccountResell !== undefined) updateData['canSubAccountResell'] = data.canSubAccountResell;
+  if (data.status !== undefined) updateData['status'] = data.status;
 
   const [updated] = await updateReturning(resellerAccounts, updateData, eq(resellerAccounts.id, resellerAccount.id));
 
-  logger.info({ targetAccountId, changedBy: user.userId, changes: parsed.data }, 'Reseller account updated');
+  logger.info({ targetAccountId, changedBy: user.userId, changes: data }, 'Reseller account updated');
   return c.json(updated);
-});
+}) as any);
 
 // GET /admin/applications — list reseller applications
-admin.get('/applications', async (c) => {
+const getApplicationsRoute = createRoute({
+  method: 'get',
+  path: '/applications',
+  tags: ['Reseller'],
+  summary: 'List reseller applications',
+  security: bearerSecurity,
+  request: {
+    query: z.object({
+      status: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'List of applications'),
+    ...standardErrors,
+  },
+});
+
+admin.openapi(getApplicationsRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const statusFilter = c.req.query('status') ?? 'pending';
+  const { status: statusFilter } = c.req.valid('query');
+  const effectiveFilter = statusFilter ?? 'pending';
 
   const apps = await db.query.resellerApplications.findMany({
     with: { account: { columns: { id: true, name: true, slug: true } } },
-    orderBy: (a, { desc: d }) => d(a.createdAt),
+    orderBy: (a: any, { desc: d }: any) => d(a.createdAt),
   });
 
-  const filtered = statusFilter === 'all' ? apps : apps.filter((a) => a.status === statusFilter);
+  const filtered = effectiveFilter === 'all' ? apps : apps.filter((a: any) => a.status === effectiveFilter);
 
   return c.json(filtered);
-});
+}) as any);
 
 // POST /admin/applications/:id/approve
-admin.post('/applications/:id/approve', async (c) => {
+const approveApplicationRoute = createRoute({
+  method: 'post',
+  path: '/applications/{id}/approve',
+  tags: ['Reseller'],
+  summary: 'Approve a reseller application',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Application approved'),
+    ...standardErrors,
+  },
+});
+
+admin.openapi(approveApplicationRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const appId = c.req.param('id');
+  const { id: appId } = c.req.valid('param');
   const app = await db.query.resellerApplications.findFirst({
     where: eq(resellerApplications.id, appId),
   });
@@ -755,18 +971,34 @@ admin.post('/applications/:id/approve', async (c) => {
 
   logger.info({ appId, accountId: app.accountId, approvedBy: user.userId }, 'Reseller application approved');
   return c.json({ message: 'Application approved', resellerAccount });
-});
+}) as any);
 
 // POST /admin/applications/:id/reject
 const rejectSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
-admin.post('/applications/:id/reject', async (c) => {
+const rejectApplicationRoute = createRoute({
+  method: 'post',
+  path: '/applications/{id}/reject',
+  tags: ['Reseller'],
+  summary: 'Reject a reseller application',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+    body: jsonBody(rejectSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Application rejected'),
+    ...standardErrors,
+  },
+});
+
+admin.openapi(rejectApplicationRoute, (async (c: any) => {
   const user = c.get('user');
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const appId = c.req.param('id');
+  const { id: appId } = c.req.valid('param');
   const app = await db.query.resellerApplications.findFirst({
     where: eq(resellerApplications.id, appId),
   });
@@ -774,31 +1006,46 @@ admin.post('/applications/:id/reject', async (c) => {
     return c.json({ error: 'Application not found or already processed' }, 404);
   }
 
-  const body = await c.req.json();
-  const parsed = rejectSchema.safeParse(body);
+  const data = c.req.valid('json');
 
   await db.update(resellerApplications)
     .set({
       status: 'rejected',
       reviewedBy: user.userId,
       reviewedAt: new Date(),
-      reviewNote: parsed.success ? parsed.data.note ?? null : null,
+      reviewNote: data.note ?? null,
     })
     .where(eq(resellerApplications.id, appId));
 
   logger.info({ appId, accountId: app.accountId, rejectedBy: user.userId }, 'Reseller application rejected');
   return c.json({ message: 'Application rejected' });
-});
+}) as any);
 
 reseller.route('/admin', admin);
 
 // ── Public routes (no auth) — reseller signup pages ──────────────────────────
 
-const publicRoutes = new Hono();
+const publicRoutes = new OpenAPIHono();
 
 // GET /r/:slug — get reseller signup page data
-publicRoutes.get('/:slug', rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'reseller-page' }), async (c) => {
-  const slug = c.req.param('slug');
+const getResellerPageRoute = createRoute({
+  method: 'get',
+  path: '/{slug}',
+  tags: ['Reseller'],
+  summary: 'Get reseller signup page data',
+  security: noSecurity,
+  request: {
+    params: z.object({ slug: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Reseller page data'),
+    ...standardErrors,
+  },
+  middleware: [rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'reseller-page' })],
+});
+
+publicRoutes.openapi(getResellerPageRoute, (async (c: any) => {
+  const { slug } = c.req.valid('param');
 
   const resellerAccount = await db.query.resellerAccounts.findFirst({
     where: and(eq(resellerAccounts.signupSlug, slug), eq(resellerAccounts.status, 'active')),
@@ -817,13 +1064,13 @@ publicRoutes.get('/:slug', rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: '
   // Get plans with reseller-adjusted pricing
   const plans = await db.query.billingPlans.findMany({
     where: eq(billingPlans.visible, true),
-    orderBy: (p, { asc }) => asc(p.sortOrder),
+    orderBy: (p: any, { asc }: any) => asc(p.sortOrder),
   });
 
   const discount = await getEffectiveDiscount(resellerAccount);
   const billingCfg = await db.query.billingConfig.findFirst();
 
-  const adjustedPlans = plans.map((plan) => {
+  const adjustedPlans = plans.map((plan: any) => {
     const discountAmount = calculateDiscount(plan.priceCents, discount.type, discount.percent, discount.fixed);
     const discountedPrice = plan.priceCents - discountAmount;
     const markupAmount = calculateMarkup(
@@ -852,7 +1099,7 @@ publicRoutes.get('/:slug', rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: '
       cycleDiscounts: billingCfg.cycleDiscounts,
     } : null,
   });
-});
+}) as any);
 
 // POST /r/:slug/register — register through reseller's page
 const registerSchema = z.object({
@@ -861,8 +1108,25 @@ const registerSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
-publicRoutes.post('/:slug/register', rateLimiter({ windowMs: 15 * 60_000, max: 10, keyPrefix: 'reseller-register' }), async (c) => {
-  const slug = c.req.param('slug');
+const registerRoute = createRoute({
+  method: 'post',
+  path: '/{slug}/register',
+  tags: ['Reseller'],
+  summary: 'Register through reseller signup page',
+  security: noSecurity,
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: jsonBody(registerSchema),
+  },
+  responses: {
+    ...standardErrors,
+    201: jsonContent(z.any(), 'User registered'),
+  },
+  middleware: [rateLimiter({ windowMs: 15 * 60_000, max: 10, keyPrefix: 'reseller-register' })],
+});
+
+publicRoutes.openapi(registerRoute, (async (c: any) => {
+  const { slug } = c.req.valid('param');
 
   const resellerAccount = await db.query.resellerAccounts.findFirst({
     where: and(eq(resellerAccounts.signupSlug, slug), eq(resellerAccounts.status, 'active')),
@@ -877,13 +1141,8 @@ publicRoutes.post('/:slug/register', rateLimiter({ windowMs: 15 * 60_000, max: 1
     return c.json({ error: 'Reseller program is not available' }, 404);
   }
 
-  const body = await c.req.json();
-  const parsed = registerSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: 'Validation failed' }, 400);
-  }
-
-  const { name, email, password } = parsed.data;
+  const data = c.req.valid('json');
+  const { name, email, password } = data;
 
   // Check if user already exists
   const existingUser = await db.query.users.findFirst({
@@ -946,14 +1205,30 @@ publicRoutes.post('/:slug/register', rateLimiter({ windowMs: 15 * 60_000, max: 1
     user: { id: newUser.id, name: newUser.name, email: newUser.email },
     account: { id: newAccount.id, name: newAccount.name, slug: newAccount.slug },
   }, 201);
-});
+}) as any);
 
 reseller.route('/r', publicRoutes);
 
 // ── Public route: get branding for custom domain ─────────────────────────────
 
-reseller.get('/branding/:domain', rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'reseller-brand' }), async (c) => {
-  const domain = c.req.param('domain');
+const getBrandingByDomainRoute = createRoute({
+  method: 'get',
+  path: '/branding/{domain}',
+  tags: ['Reseller'],
+  summary: 'Get reseller branding by custom domain',
+  security: noSecurity,
+  request: {
+    params: z.object({ domain: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Branding data'),
+    ...standardErrors,
+  },
+  middleware: [rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'reseller-brand' })],
+});
+
+reseller.openapi(getBrandingByDomainRoute, (async (c: any) => {
+  const { domain } = c.req.valid('param');
 
   const resellerAccount = await db.query.resellerAccounts.findFirst({
     where: and(eq(resellerAccounts.customDomain, domain), eq(resellerAccounts.status, 'active')),
@@ -972,6 +1247,6 @@ reseller.get('/branding/:domain', rateLimiter({ windowMs: 60_000, max: 30, keyPr
     brandPrimaryColor: resellerAccount.brandPrimaryColor,
     brandDescription: resellerAccount.brandDescription,
   });
-});
+}) as any);
 
 export default reseller;

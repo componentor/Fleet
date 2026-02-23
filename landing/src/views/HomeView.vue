@@ -141,10 +141,13 @@ const plans = computed(() => [
   },
 ])
 
+const apiDocsUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+
 const navLinks = computed<NavLink[]>(() => [
   { label: t('nav.features'), href: '#features' },
   { label: t('nav.pricing'), href: '#pricing' },
   { label: 'Docs', href: '/docs', routerLink: true },
+  { label: 'API', href: `${apiDocsUrl}/api/docs`, external: true },
   { label: t('nav.github'), href: 'https://github.com/fleet', external: true },
 ])
 </script>

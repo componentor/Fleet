@@ -6,7 +6,7 @@ import {
   HardDrive, Server, Shield, CheckCircle2, ArrowRight, ArrowLeft,
   Loader2, Plus, Trash2, RefreshCw, AlertTriangle, Database,
   Cloud, Monitor, Settings, Activity, BookOpen, ChevronDown,
-  ChevronUp, Lock, Network, Terminal,
+  ChevronUp, Lock, Network, Terminal, Wifi, WifiOff, Cpu,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -44,7 +44,20 @@ interface StorageNode {
 }
 const storageNodes = ref<StorageNode[]>([])
 const showAddNode = ref(false)
+const showPickNode = ref(false)
 const showSetupGuide = ref(false)
+const swarmNodes = ref<any[]>([])
+const loadingSwarmNodes = ref(false)
+
+// Probe diagnostics per node ID
+interface ProbeResult {
+  loading: boolean
+  ports: { port: number; service: string; open: boolean; latencyMs: number | null }[]
+  metrics: { cpuCount: number | null; memTotal: number | null; memFree: number | null; diskTotal: number | null; diskUsed: number | null; diskFree: number | null; diskType: string | null; containerCount: number | null }
+  recommendations: { suitableForStorage: boolean; diskSpaceAdequate: boolean; nfsPorts: boolean; glusterfsPorts: boolean; suggestedRole: string }
+  error: string
+}
+const probeResults = ref<Record<string, ProbeResult>>({})
 const newNode = ref<StorageNode>({
   hostname: '',
   ipAddress: '',
@@ -140,7 +153,7 @@ const canProceed = computed(() => {
 // ── Lifecycle ────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await loadCluster()
+  await Promise.all([loadCluster(), fetchSwarmNodes()])
 })
 
 // ── API ──────────────────────────────────────────────────────────────────
@@ -169,6 +182,80 @@ function startWizard() {
   success.value = ''
 }
 
+async function fetchSwarmNodes() {
+  loadingSwarmNodes.value = true
+  try {
+    swarmNodes.value = await api.get<any[]>('/nodes')
+    // Auto-probe all swarm nodes for diagnostics
+    for (const sn of swarmNodes.value) {
+      if (sn.id) probeNode(sn.id)
+    }
+  } catch {
+    swarmNodes.value = []
+  } finally {
+    loadingSwarmNodes.value = false
+  }
+}
+
+// Swarm nodes not yet added as storage nodes
+const availableSwarmNodes = computed(() => {
+  const usedHostnames = new Set(storageNodes.value.map(n => n.hostname))
+  const usedIps = new Set(storageNodes.value.map(n => n.ipAddress))
+  return swarmNodes.value.filter(n => !usedHostnames.has(n.hostname) && !usedIps.has(n.ipAddress))
+})
+
+function formatBytes(bytes: number | null): string {
+  if (bytes == null || bytes === 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  let val = bytes
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++ }
+  return `${val.toFixed(1)} ${units[i]}`
+}
+
+async function probeNode(nodeId: string) {
+  const existing = probeResults.value[nodeId]
+  if (existing?.loading) return
+  probeResults.value[nodeId] = {
+    loading: true,
+    ports: existing?.ports ?? [],
+    metrics: existing?.metrics ?? { cpuCount: null, memTotal: null, memFree: null, diskTotal: null, diskUsed: null, diskFree: null, diskType: null, containerCount: null },
+    recommendations: existing?.recommendations ?? { suitableForStorage: false, diskSpaceAdequate: false, nfsPorts: false, glusterfsPorts: false, suggestedRole: 'storage' },
+    error: '',
+  }
+  try {
+    const result = await api.post(`/nodes/${nodeId}/probe`, {}) as any
+    probeResults.value[nodeId] = {
+      loading: false,
+      ports: result.ports ?? [],
+      metrics: result.metrics ?? {},
+      recommendations: result.recommendations ?? {},
+      error: '',
+    }
+  } catch (err: any) {
+    probeResults.value[nodeId] = {
+      ...probeResults.value[nodeId]!,
+      loading: false,
+      error: err?.body?.error || t('storageSetup.probeFailed'),
+    }
+  }
+}
+
+function pickSwarmNode(swarmNode: any) {
+  const probe = probeResults.value[swarmNode.id]
+  const diskTotalGb = probe?.metrics?.diskTotal ? Math.round(probe.metrics.diskTotal / (1024 * 1024 * 1024)) : null
+  const suggestedRole = probe?.recommendations?.suggestedRole ?? 'storage+compute'
+  storageNodes.value.push({
+    hostname: swarmNode.hostname ?? 'unknown',
+    ipAddress: swarmNode.ipAddress ?? '0.0.0.0',
+    role: suggestedRole as StorageNode['role'],
+    storagePathRoot: '/srv/fleet-storage',
+    capacityGb: diskTotalGb,
+    testStatus: 'pending',
+    testMessage: '',
+  })
+}
+
 function addNode() {
   storageNodes.value.push({ ...newNode.value })
   newNode.value = {
@@ -192,11 +279,47 @@ async function testNode(index: number) {
   node.testStatus = 'testing'
   node.testMessage = t('storageSetup.testingConnectivity')
 
+  // Find the swarm node ID by matching hostname/IP
+  const swarmNode = swarmNodes.value.find(sn => sn.hostname === node.hostname || sn.ipAddress === node.ipAddress)
+  if (!swarmNode?.id) {
+    // Fall back to generic test
+    try {
+      await api.post('/admin/storage/cluster/test', {}) as any
+      node.testStatus = 'ok'
+      node.testMessage = t('storageSetup.connected')
+    } catch (err: any) {
+      node.testStatus = 'error'
+      node.testMessage = err?.body?.error || t('storageSetup.connectionFailed')
+    }
+    return
+  }
+
   try {
-    // For now, just validate via API health check
-    const result = await api.post('/admin/storage/cluster/test', {}) as any
-    node.testStatus = 'ok'
-    node.testMessage = t('storageSetup.connected')
+    const result = await api.post(`/nodes/${swarmNode.id}/probe`, {}) as any
+    const openPorts = (result.ports ?? []).filter((p: any) => p.open)
+    const closedPorts = (result.ports ?? []).filter((p: any) => !p.open)
+
+    // Update probe results cache
+    probeResults.value[swarmNode.id] = {
+      loading: false,
+      ports: result.ports ?? [],
+      metrics: result.metrics ?? {},
+      recommendations: result.recommendations ?? {},
+      error: '',
+    }
+
+    // Auto-fill capacity from probe
+    if (result.metrics?.diskTotal && !node.capacityGb) {
+      node.capacityGb = Math.round(result.metrics.diskTotal / (1024 * 1024 * 1024))
+    }
+
+    if (closedPorts.length === 0) {
+      node.testStatus = 'ok'
+      node.testMessage = t('storageSetup.allPortsOpen', { count: openPorts.length })
+    } else {
+      node.testStatus = closedPorts.length > openPorts.length ? 'error' : 'ok'
+      node.testMessage = t('storageSetup.portsStatus', { open: openPorts.length, closed: closedPorts.length })
+    }
   } catch (err: any) {
     node.testStatus = 'error'
     node.testMessage = err?.body?.error || t('storageSetup.connectionFailed')
@@ -1172,8 +1295,118 @@ async function rollbackActiveMigration() {
             </div>
           </div>
 
-          <!-- Add node form -->
+          <!-- Pick from existing swarm nodes -->
+          <div v-if="availableSwarmNodes.length && !showAddNode" class="space-y-2">
+            <p class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('storageSetup.pickFromSwarm') }}</p>
+            <div class="grid grid-cols-1 gap-3">
+              <div
+                v-for="sn in availableSwarmNodes"
+                :key="sn.id"
+                class="rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary-400 dark:hover:border-primary-600 transition-colors overflow-hidden"
+              >
+                <!-- Node header row -->
+                <div class="flex items-center gap-3 p-3 cursor-pointer hover:bg-primary-50 dark:hover:bg-primary-900/10" @click="pickSwarmNode(sn)">
+                  <Server class="w-4 h-4 text-gray-400 shrink-0" />
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ sn.hostname }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ sn.ipAddress }} &middot; {{ sn.role }}</p>
+                  </div>
+                  <Plus class="w-4 h-4 text-primary-500 shrink-0" />
+                </div>
+
+                <!-- Diagnostics panel -->
+                <div v-if="probeResults[sn.id]" class="px-3 pb-3 border-t border-gray-100 dark:border-gray-700/50">
+                  <!-- Loading state -->
+                  <div v-if="probeResults[sn.id]?.loading" class="flex items-center gap-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                    <Loader2 class="w-3 h-3 animate-spin" />
+                    {{ t('storageSetup.probing') }}
+                  </div>
+
+                  <!-- Error state -->
+                  <div v-else-if="probeResults[sn.id]?.error" class="flex items-center gap-2 py-2 text-xs text-red-600 dark:text-red-400">
+                    <AlertTriangle class="w-3 h-3" />
+                    {{ probeResults[sn.id]!.error }}
+                    <button @click.stop="probeNode(sn.id)" class="ml-auto text-primary-600 dark:text-primary-400 hover:underline">{{ t('storageSetup.retry') }}</button>
+                  </div>
+
+                  <!-- Results -->
+                  <template v-else>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 py-2">
+                      <!-- Disk Type -->
+                      <div class="flex items-center gap-1.5 text-xs">
+                        <HardDrive class="w-3 h-3 text-gray-400" />
+                        <span class="text-gray-500 dark:text-gray-400">{{ t('storageSetup.diskType') }}:</span>
+                        <span class="font-medium text-gray-900 dark:text-white uppercase">{{ probeResults[sn.id]!.metrics.diskType || '—' }}</span>
+                      </div>
+
+                      <!-- Disk Capacity -->
+                      <div class="flex items-center gap-1.5 text-xs">
+                        <Database class="w-3 h-3 text-gray-400" />
+                        <span class="text-gray-500 dark:text-gray-400">{{ t('storageSetup.capacity') }}:</span>
+                        <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(probeResults[sn.id]!.metrics.diskTotal) }}</span>
+                      </div>
+
+                      <!-- Disk Free -->
+                      <div class="flex items-center gap-1.5 text-xs">
+                        <Activity class="w-3 h-3 text-gray-400" />
+                        <span class="text-gray-500 dark:text-gray-400">{{ t('storageSetup.free') }}:</span>
+                        <span class="font-medium" :class="probeResults[sn.id]!.recommendations.diskSpaceAdequate ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">{{ formatBytes(probeResults[sn.id]!.metrics.diskFree) }}</span>
+                      </div>
+
+                      <!-- CPU / RAM -->
+                      <div class="flex items-center gap-1.5 text-xs">
+                        <Cpu class="w-3 h-3 text-gray-400" />
+                        <span class="text-gray-500 dark:text-gray-400">{{ probeResults[sn.id]!.metrics.cpuCount ?? '—' }} CPU</span>
+                        <span class="text-gray-300 dark:text-gray-600">|</span>
+                        <span class="text-gray-500 dark:text-gray-400">{{ formatBytes(probeResults[sn.id]!.metrics.memTotal) }}</span>
+                      </div>
+                    </div>
+
+                    <!-- Port status chips -->
+                    <div class="flex flex-wrap gap-1 py-1">
+                      <span
+                        v-for="p in probeResults[sn.id]!.ports"
+                        :key="p.port"
+                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        :class="p.open ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'"
+                      >
+                        <component :is="p.open ? Wifi : WifiOff" class="w-2.5 h-2.5" />
+                        {{ p.port }} {{ p.service }}
+                      </span>
+                    </div>
+
+                    <!-- Recommendation badge -->
+                    <div class="flex items-center gap-2 pt-1">
+                      <span
+                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                        :class="probeResults[sn.id]!.recommendations.suitableForStorage ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'"
+                      >
+                        <CheckCircle2 v-if="probeResults[sn.id]!.recommendations.suitableForStorage" class="w-3 h-3" />
+                        <AlertTriangle v-else class="w-3 h-3" />
+                        {{ probeResults[sn.id]!.recommendations.suitableForStorage ? t('storageSetup.suitableForStorage') : t('storageSetup.lowDiskSpace') }}
+                      </span>
+                      <span class="text-[10px] text-gray-500 dark:text-gray-400">
+                        {{ t('storageSetup.suggestedRole') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ probeResults[sn.id]!.recommendations.suggestedRole }}</span>
+                      </span>
+                      <button @click.stop="probeNode(sn.id)" class="ml-auto text-[10px] text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+                        <RefreshCw class="w-2.5 h-2.5" />
+                        {{ t('storageSetup.rescan') }}
+                      </button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="loadingSwarmNodes && !swarmNodes.length" class="flex items-center justify-center py-4 text-sm text-gray-500 dark:text-gray-400">
+            <Loader2 class="w-4 h-4 animate-spin mr-2" />
+            {{ t('storageSetup.loadingNodes') }}
+          </div>
+
+          <!-- Add node form (manual entry) -->
           <div v-if="showAddNode" class="p-4 rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50/50 dark:bg-primary-900/10 space-y-3">
+            <p class="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('storageSetup.manualEntry') }}</p>
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.hostname') }}</label>
@@ -1208,7 +1441,7 @@ async function rollbackActiveMigration() {
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-primary-400 hover:text-primary-600 transition-colors text-sm w-full justify-center"
           >
             <Plus class="w-4 h-4" />
-            {{ t('storageSetup.addStorageNode') }}
+            {{ t('storageSetup.addManualNode') }}
           </button>
         </div>
       </div>

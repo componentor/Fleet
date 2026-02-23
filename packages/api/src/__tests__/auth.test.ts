@@ -27,7 +27,7 @@ describe('Auth', () => {
       const res = await req('POST', '/auth/register', {
         name: 'Test User',
         email: 'test@example.com',
-        password: 'password123',
+        password: 'Password123',
       });
       expect(res.status).toBe(201);
       const body = await res.json() as any;
@@ -42,7 +42,7 @@ describe('Auth', () => {
       const res = await req('POST', '/auth/register', {
         name: 'Dup User',
         email: 'dup@example.com',
-        password: 'password123',
+        password: 'Password123',
       });
       expect(res.status).toBe(409);
     });
@@ -105,7 +105,13 @@ describe('Auth', () => {
         .setExpirationTime('7d')
         .sign(secret);
 
-      const res = await req('POST', '/auth/refresh', { refreshToken });
+      const res = await app.request('/api/v1/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': `fleet_refresh=${refreshToken}`,
+        },
+      });
       expect(res.status).toBe(200);
       const body = await res.json() as any;
       expect(body.tokens.accessToken).toBeDefined();
@@ -113,8 +119,19 @@ describe('Auth', () => {
     });
 
     it('rejects invalid refresh token', async () => {
-      const res = await req('POST', '/auth/refresh', { refreshToken: 'invalid-token' });
+      const res = await app.request('/api/v1/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': 'fleet_refresh=invalid-token',
+        },
+      });
       expect(res.status).toBe(401);
+    });
+
+    it('rejects missing refresh token cookie', async () => {
+      const res = await req('POST', '/auth/refresh', {});
+      expect(res.status).toBe(400);
     });
   });
 
