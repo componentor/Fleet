@@ -694,6 +694,19 @@ export class UpdateService {
       await this.persistState();
       await this.clearPersistedState();
       this.events.emit('update', this.state);
+
+      // Clear stale "update available" so the nav doesn't keep showing the badge
+      this.cachedNotification = {
+        available: false,
+        current: this.state.currentVersion,
+        latest: this.cachedNotification.latest,
+        checkedAt: new Date().toISOString(),
+      };
+      try {
+        const valkey = await getValkey();
+        if (valkey) await valkey.del('fleet:update-notification');
+      } catch { /* non-critical */ }
+
       throw err;
     } finally {
       this.updateAbort = null;
