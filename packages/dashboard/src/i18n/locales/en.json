@@ -1879,6 +1879,9 @@
     "backupDisabledWarning": "WARNING: Pre-update backup is DISABLED in settings.",
     "updateStarted": "Update to {version} started. Monitoring progress...",
     "rollbackStarted": "Rollback started. Monitoring progress...",
-    "versionTransition": "Version transition"
+    "versionTransition": "Version transition",
+    "restarting": "Containers are restarting...",
+    "restartingDesc": "The platform is applying the update. This page will automatically refresh once the API is back online.",
+    "pinging": "Waiting..."
   }
 }

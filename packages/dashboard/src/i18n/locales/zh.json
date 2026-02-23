@@ -1875,6 +1875,9 @@
     "backupDisabledWarning": "警告：更新前备份已在设置中禁用。",
     "updateStarted": "已开始更新到 {version}。正在监控进度...",
     "rollbackStarted": "回滚已开始。正在监控进度...",
-    "versionTransition": "版本过渡"
+    "versionTransition": "版本过渡",
+    "restarting": "容器正在重新启动...",
+    "restartingDesc": "平台正在应用更新。API 恢复在线后，此页面将自动刷新。",
+    "pinging": "等待中..."
   }
 }

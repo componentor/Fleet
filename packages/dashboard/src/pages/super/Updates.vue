@@ -36,6 +36,10 @@ const autoCheckEnabled = ref(true)
 // Update state
 const updateState = ref<any>({ status: 'idle' })
 
+// Restart waiting state
+const waitingForRestart = ref(false)
+const restartPingCount = ref(0)
+
 // DB status
 const dbStatus = ref<any>(null)
 
@@ -124,7 +128,13 @@ async function fetchAll() {
     includeRcReleases.value = settingsData.includeRcReleases ?? false
     autoCheckEnabled.value = settingsData.autoCheckEnabled ?? true
     backupBeforeUpdate.value = settingsData.backupBeforeUpdate !== false
-    updateState.value = statusData
+    // Don't overwrite a local failed/completed state with 'idle' from server — user must dismiss first
+    const localStatus = updateState.value?.status
+    if (statusData.status === 'idle' && (localStatus === 'failed' || localStatus === 'completed')) {
+      // Keep the local state — user hasn't dismissed yet
+    } else {
+      updateState.value = statusData
+    }
     releases.value = releasesData.releases ?? []
     rcEnabled.value = releasesData.rcEnabled ?? false
     updateAvailable.value = notif.available ?? false
@@ -321,16 +331,31 @@ function startPolling() {
           // Push to shared store so SuperLayout sidebar updates immediately
           updateVersion(ver, latestVersion.value, false)
         }
-        // Retry fetchAll with backoff to handle API restart window
-        const retryFetch = async (delay: number, retries: number) => {
-          await new Promise(r => setTimeout(r, delay))
-          try {
-            await fetchAll()
-          } catch {
-            if (retries > 0) await retryFetch(delay * 2, retries - 1)
-          }
+        // On success: show "restarting" state and ping until the API comes back
+        if (state.status === 'completed') {
+          waitingForRestart.value = true
+          restartPingCount.value = 0
+          // Wait a moment for containers to begin restarting, then start pinging
+          await new Promise(r => setTimeout(r, 3000))
+          const pingInterval = setInterval(async () => {
+            restartPingCount.value++
+            try {
+              await api.get<any>('/updates/status')
+              // API is back up — refresh data and stop pinging
+              clearInterval(pingInterval)
+              const savedState = { ...updateState.value }
+              await fetchAll()
+              updateState.value = savedState
+              waitingForRestart.value = false
+            } catch {
+              // API still down — keep pinging (up to 60 attempts = ~2 minutes)
+              if (restartPingCount.value >= 60) {
+                clearInterval(pingInterval)
+                waitingForRestart.value = false
+              }
+            }
+          }, 2000)
         }
-        retryFetch(3000, 2)
       }
     } catch { /* ignore -- API may be restarting */ }
   }, 2000)
@@ -443,9 +468,12 @@ onUnmounted(() => {
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <button
-              v-if="updateState.status === 'completed'"
+              v-if="updateState.status === 'completed' || updateState.status === 'failed'"
               @click="updateState = { status: 'idle' }"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/30"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              :class="updateState.status === 'failed'
+                ? 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30'
+                : 'border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/30'"
             >
               <XCircle class="w-3.5 h-3.5" />
               {{ t('updates.dismiss') }}
@@ -539,6 +567,31 @@ onUnmounted(() => {
                 <span class="text-gray-600 dark:text-gray-500 select-none w-8 text-right shrink-0">{{ idx + 1 }}</span>
                 <span class="text-gray-300 dark:text-gray-400 whitespace-pre-wrap break-words">{{ line }}</span>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3b. Restart waiting banner -->
+      <div v-if="waitingForRestart" class="bg-white dark:bg-gray-800 rounded-xl border border-amber-300 dark:border-amber-700 shadow-sm overflow-hidden">
+        <div class="px-6 py-5 bg-amber-50 dark:bg-amber-900/10">
+          <div class="flex items-center gap-4">
+            <div class="shrink-0">
+              <Loader2 class="w-6 h-6 text-amber-600 dark:text-amber-400 animate-spin" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-semibold text-amber-700 dark:text-amber-300">
+                {{ t('updates.restarting') }}
+              </p>
+              <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                {{ t('updates.restartingDesc') }}
+              </p>
+            </div>
+            <div class="shrink-0">
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                {{ t('updates.pinging') }}
+              </span>
             </div>
           </div>
         </div>

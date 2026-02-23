@@ -1875,6 +1875,9 @@
     "backupDisabledWarning": "WARNUNG: Backup vor Update ist in den Einstellungen DEAKTIVIERT.",
     "updateStarted": "Update auf {version} gestartet. Fortschritt wird überwacht...",
     "rollbackStarted": "Zurücksetzen gestartet. Fortschritt wird überwacht...",
-    "versionTransition": "Versionsübergang"
+    "versionTransition": "Versionsübergang",
+    "restarting": "Container werden neu gestartet...",
+    "restartingDesc": "Die Plattform wendet das Update an. Diese Seite wird automatisch aktualisiert, sobald die API wieder erreichbar ist.",
+    "pinging": "Warten..."
   }
 }

@@ -1875,6 +1875,9 @@
     "backupDisabledWarning": "ADVARSEL: Sikkerhetskopi før oppdatering er DEAKTIVERT i innstillingene.",
     "updateStarted": "Oppdatering til {version} startet. Overvåker fremdrift...",
     "rollbackStarted": "Tilbakerulling startet. Overvåker fremdrift...",
-    "versionTransition": "Versjonsovergang"
+    "versionTransition": "Versjonsovergang",
+    "restarting": "Containerne starter på nytt...",
+    "restartingDesc": "Plattformen installerer oppdateringen. Siden oppdateres automatisk når API-et er tilbake.",
+    "pinging": "Venter..."
   }
 }

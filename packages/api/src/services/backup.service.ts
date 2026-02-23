@@ -103,6 +103,7 @@ export class BackupService {
     storageBackend: string = 'nfs',
     existingBackupId?: string,
     existingBackupPath?: string,
+    options?: { forceLocal?: boolean },
   ): Promise<{ id: string }> {
     let backupId: string;
     let backupPath: string;
@@ -135,7 +136,7 @@ export class BackupService {
       });
     }
 
-    await this.runBackup(backupId, accountId, serviceId, backupPath);
+    await this.runBackup(backupId, accountId, serviceId, backupPath, options?.forceLocal);
     return { id: backupId };
   }
 
@@ -144,10 +145,11 @@ export class BackupService {
     accountId: string,
     serviceId: string | null,
     backupPath: string,
+    forceLocal?: boolean,
   ): Promise<void> {
     // Use a temp directory for archive creation (Docker needs local paths)
     const tempDir = join(tmpdir(), `fleet-backup-${backupId}`);
-    const useObjectStorage = this.isObjectStorageAvailable();
+    const useObjectStorage = forceLocal ? false : this.isObjectStorageAvailable();
     const objectKeyPrefix = `${accountId}/${backupId}`;
 
     try {
