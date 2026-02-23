@@ -26,6 +26,18 @@ export interface VolumeResult {
   driverOptions: Record<string, string>;
 }
 
+/** Host prerequisites needed by a storage provider. */
+export interface StoragePrerequisite {
+  /** apt/yum package name to install on each Swarm node */
+  package: string;
+  /** Human-readable description */
+  description: string;
+  /** Command to check if already installed (exit 0 = installed) */
+  checkCommand: string;
+  /** apt install command */
+  installCommand: string;
+}
+
 export interface VolumeStorageProvider {
   readonly name: string;
 
@@ -44,6 +56,9 @@ export interface VolumeStorageProvider {
 
   /** Driver-specific options for mounting a volume in Docker. */
   getDockerVolumeOptions(name: string): Record<string, string>;
+
+  /** Host packages/tools required on each Swarm node for volumes to mount. */
+  getPrerequisites(): StoragePrerequisite[];
 
   /** Provider health status. */
   getHealth(): Promise<StorageHealth>;

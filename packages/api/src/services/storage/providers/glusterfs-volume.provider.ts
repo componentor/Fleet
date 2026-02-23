@@ -7,6 +7,7 @@ import type {
   VolumeResult,
   StorageHealth,
   StorageNodeHealth,
+  StoragePrerequisite,
 } from '../storage-provider.js';
 
 const execFile = promisify(execFileCb);
@@ -214,7 +215,10 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   }
 
   getDockerVolumeDriver(): string {
-    return 'glusterfs';
+    // Use Docker's built-in 'local' driver with type=glusterfs mount options.
+    // This avoids needing a third-party Docker volume plugin — only requires
+    // glusterfs-client (FUSE) to be installed on each Swarm node.
+    return 'local';
   }
 
   getDockerVolumeOptions(name: string): Record<string, string> {
@@ -223,10 +227,27 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
     if (!mountNode) return {};
 
     return {
+      'type': 'glusterfs',
       'o': `addr=${mountNode.ip},volfile-id=/${name}`,
       'device': `${mountNode.ip}:/${name}`,
-      'type': 'glusterfs',
     };
+  }
+
+  getPrerequisites(): StoragePrerequisite[] {
+    return [
+      {
+        package: 'glusterfs-server',
+        description: 'GlusterFS server daemon',
+        checkCommand: 'which glusterd',
+        installCommand: 'apt-get install -y glusterfs-server && systemctl enable --now glusterd',
+      },
+      {
+        package: 'glusterfs-client',
+        description: 'GlusterFS FUSE client (required for Docker volume mounts)',
+        checkCommand: 'which glusterfs',
+        installCommand: 'apt-get install -y glusterfs-client',
+      },
+    ];
   }
 
   async getHealth(): Promise<StorageHealth> {

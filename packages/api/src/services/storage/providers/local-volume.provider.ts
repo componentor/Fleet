@@ -6,6 +6,7 @@ import type {
   VolumeInfo,
   VolumeResult,
   StorageHealth,
+  StoragePrerequisite,
 } from '../storage-provider.js';
 
 const execFile = promisify(execFileCb);
@@ -128,6 +129,10 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
 
   getDockerVolumeOptions(_name: string): Record<string, string> {
     return {};
+  }
+
+  getPrerequisites(): StoragePrerequisite[] {
+    return [];
   }
 
   async getHealth(): Promise<StorageHealth> {

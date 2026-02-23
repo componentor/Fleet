@@ -18,6 +18,7 @@ import { verify } from 'argon2';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { migrationService } from '../services/storage/migration.service.js';
+import { dockerService } from '../services/docker.service.js';
 import { getMaintenanceQueue, isQueueAvailable } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
 import {
@@ -209,6 +210,19 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
   try {
     await storageManager.reload();
 
+    // Auto-install prerequisites on all Swarm nodes if needed
+    const prerequisites = storageManager.volumes.getPrerequisites();
+    let prereqResult = null;
+    if (prerequisites.length > 0) {
+      logger.info({ packages: prerequisites.map((p) => p.package) }, 'Auto-installing storage prerequisites on all nodes');
+      const installCommands = prerequisites.map((p) => p.installCommand);
+      const command = `apt-get update -qq && ${installCommands.join(' && ')}`;
+      prereqResult = await dockerService.runOnAllNodes(command, { timeoutMs: 180_000 });
+      if (!prereqResult.success) {
+        logger.warn({ results: prereqResult.results }, 'Some nodes failed prerequisite installation');
+      }
+    }
+
     // Mark as healthy if reload succeeds
     const cluster = await db.query.storageClusters.findFirst();
     if (cluster) {
@@ -218,7 +232,15 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       }).where(eq(storageClusters.id, cluster.id));
     }
 
-    return c.json({ message: 'Storage cluster configured', status: 'healthy' });
+    return c.json({
+      message: 'Storage cluster configured',
+      status: 'healthy',
+      prerequisites: prereqResult ? {
+        installed: prereqResult.success,
+        packages: prerequisites.map((p) => p.package),
+        results: prereqResult.results,
+      } : undefined,
+    });
   } catch (err) {
     // Mark as error
     const cluster = await db.query.storageClusters.findFirst();
@@ -493,6 +515,178 @@ storageAdmin.openapi(healthRoute, (async (c: any) => {
       healthy: n.status === 'active',
     })),
   });
+}) as any);
+
+// ── Repair Route ──
+
+// POST /repair-services — Fix Docker services with stale volume driver config
+const repairServicesRoute = createRoute({
+  method: 'post',
+  path: '/repair-services',
+  tags: ['Storage Admin'],
+  summary: 'Repair Docker services with stale volume driver configuration',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Repair results'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
+  const driver = storageManager.volumes.getDockerVolumeDriver();
+
+  // List all Docker services managed by Fleet (cast to any for flexible property access)
+  const allServices: any[] = await dockerService.listServices();
+  const fleetServices = allServices.filter((s) =>
+    s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
+  );
+
+  const repaired: string[] = [];
+  const failed: Array<{ name: string; error: string }> = [];
+
+  for (const svc of fleetServices) {
+    const spec = svc.Spec;
+    if (!spec?.TaskTemplate?.ContainerSpec) continue;
+
+    const mounts: any[] = spec.TaskTemplate.ContainerSpec.Mounts ?? [];
+    let needsUpdate = false;
+
+    for (const mount of mounts) {
+      if (mount.Type !== 'volume') continue;
+      const currentDriver = mount.VolumeOptions?.DriverConfig?.Name;
+      // Check if mount uses a stale non-local driver that doesn't match current config
+      if (currentDriver && currentDriver !== 'local' && currentDriver !== driver) {
+        needsUpdate = true;
+        break;
+      }
+      // Also check if current driver is 'local' but mount has no VolumeOptions when it should
+      if (driver === 'local' && !mount.VolumeOptions?.DriverConfig && mount.Source) {
+        const driverOpts = storageManager.volumes.getDockerVolumeOptions(mount.Source);
+        if (Object.keys(driverOpts).length > 0) {
+          needsUpdate = true;
+          break;
+        }
+      }
+    }
+
+    if (!needsUpdate) continue;
+
+    // Rebuild mounts with correct driver config
+    const newMounts = mounts.map((mount: any) => {
+      if (mount.Type !== 'volume' || !mount.Source) return mount;
+      const driverOpts = storageManager.volumes.getDockerVolumeOptions(mount.Source);
+      const hasDriverOpts = Object.keys(driverOpts).length > 0;
+      return {
+        ...mount,
+        VolumeOptions: hasDriverOpts ? {
+          NoCopy: false,
+          Labels: {},
+          DriverConfig: { Name: driver, Options: driverOpts },
+        } : undefined,
+      };
+    });
+
+    try {
+      const dockerSvc = dockerService.getDockerClient().getService(svc.ID);
+      spec.TaskTemplate.ContainerSpec.Mounts = newMounts;
+      await dockerSvc.update({
+        ...spec,
+        version: svc.Version?.Index,
+        TaskTemplate: {
+          ...spec.TaskTemplate,
+          ForceUpdate: ((spec.TaskTemplate as any).ForceUpdate ?? 0) + 1,
+        },
+      } as any);
+      repaired.push(spec.Name);
+      logger.info({ service: spec.Name }, 'Repaired volume driver config');
+    } catch (err) {
+      failed.push({ name: spec.Name ?? svc.ID, error: (err as Error).message });
+      logger.error({ err, service: spec.Name }, 'Failed to repair service');
+    }
+  }
+
+  return c.json({
+    message: `Repaired ${repaired.length} service(s), ${failed.length} failed`,
+    repaired,
+    failed,
+  });
+}) as any);
+
+// ── Prerequisites Routes ──
+
+// GET /prerequisites — Get required host packages for the current storage provider
+const getPrerequisitesRoute = createRoute({
+  method: 'get',
+  path: '/prerequisites',
+  tags: ['Storage Admin'],
+  summary: 'Get required host packages for the current storage provider',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of required packages'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(getPrerequisitesRoute, (async (c: any) => {
+  try {
+    const prerequisites = storageManager.volumes.getPrerequisites();
+    return c.json({ prerequisites });
+  } catch {
+    return c.json({ prerequisites: [] });
+  }
+}) as any);
+
+// POST /prerequisites/install — Install required packages on all Swarm nodes
+const installPrerequisitesRoute = createRoute({
+  method: 'post',
+  path: '/prerequisites/install',
+  tags: ['Storage Admin'],
+  summary: 'Install required packages on all Swarm nodes',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Installation results'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(installPrerequisitesRoute, (async (c: any) => {
+  let prerequisites;
+  try {
+    prerequisites = storageManager.volumes.getPrerequisites();
+  } catch {
+    return c.json({ error: 'Storage manager not initialized' }, 400);
+  }
+
+  if (prerequisites.length === 0) {
+    return c.json({ message: 'No prerequisites needed', results: [] });
+  }
+
+  // Build a combined install command for all prerequisites
+  const installCommands = prerequisites.map((p) => p.installCommand);
+  const command = `apt-get update -qq && ${installCommands.join(' && ')}`;
+
+  logger.info({ prerequisites: prerequisites.map((p) => p.package), command }, 'Installing storage prerequisites on all nodes');
+
+  try {
+    const result = await dockerService.runOnAllNodes(command, { timeoutMs: 180_000 });
+
+    if (result.success) {
+      logger.info({ results: result.results }, 'Storage prerequisites installed on all nodes');
+    } else {
+      logger.warn({ results: result.results }, 'Some nodes failed prerequisite installation');
+    }
+
+    return c.json({
+      success: result.success,
+      message: result.success
+        ? 'Prerequisites installed on all nodes'
+        : 'Some nodes failed — check results for details',
+      results: result.results,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to install storage prerequisites');
+    return c.json({ error: `Failed to install prerequisites: ${(err as Error).message}` }, 500);
+  }
 }) as any);
 
 // ── Migration Routes ──

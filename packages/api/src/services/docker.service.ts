@@ -64,6 +64,11 @@ export interface ServiceTaskInfo {
 }
 
 export class DockerService {
+  /** Expose the raw Dockerode client for advanced operations. */
+  getDockerClient(): Dockerode {
+    return docker;
+  }
+
   private static readonly BLOCKED_MOUNT_SOURCES = [
     'docker.sock',
     '/var/run',
@@ -127,12 +132,13 @@ export class DockerService {
           Mounts: opts.volumes.map((v) => {
             const driver = storageManager.volumes.getDockerVolumeDriver();
             const driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+            const hasDriverOpts = Object.keys(driverOpts).length > 0;
             return {
               Source: v.source,
               Target: v.target,
               Type: 'volume' as const,
               ReadOnly: v.readonly ?? false,
-              VolumeOptions: driver !== 'local' ? {
+              VolumeOptions: hasDriverOpts ? {
                 NoCopy: false,
                 Labels: {},
                 DriverConfig: { Name: driver, Options: driverOpts },
@@ -270,12 +276,13 @@ export class DockerService {
       const driver = storageManager.volumes.getDockerVolumeDriver();
       spec.TaskTemplate.ContainerSpec.Mounts = opts.volumes.map((v) => {
         const driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+        const hasDriverOpts = Object.keys(driverOpts).length > 0;
         return {
           Source: v.source,
           Target: v.target,
           Type: 'volume' as const,
           ReadOnly: v.readonly ?? false,
-          VolumeOptions: driver !== 'local' ? {
+          VolumeOptions: hasDriverOpts ? {
             NoCopy: false,
             Labels: {},
             DriverConfig: { Name: driver, Options: driverOpts },
@@ -921,6 +928,97 @@ export class DockerService {
   async resizeExec(execId: string, h: number, w: number): Promise<void> {
     const exec = docker.getExec(execId);
     await exec.resize({ h, w });
+  }
+
+  /**
+   * Run a shell command on all Swarm nodes via a global one-shot Docker service.
+   * Uses chroot into the host filesystem to install packages, etc.
+   * Returns once all node tasks have completed or timed out.
+   */
+  async runOnAllNodes(command: string, opts?: { timeoutMs?: number }): Promise<{
+    success: boolean;
+    results: Array<{ nodeId: string; status: string; error?: string }>;
+  }> {
+    const timeout = opts?.timeoutMs ?? 120_000;
+    const serviceName = `fleet-node-cmd-${Date.now().toString(36)}`;
+
+    // Create a global service with host root mounted, running the command via chroot
+    const svc = await docker.createService({
+      Name: serviceName,
+      Labels: { 'fleet.internal': 'true', 'fleet.one-shot': 'true' },
+      TaskTemplate: {
+        ContainerSpec: {
+          Image: 'alpine:latest',
+          // Mount host root filesystem and chroot into it to run commands
+          Mounts: [{
+            Type: 'bind' as const,
+            Source: '/',
+            Target: '/host',
+            ReadOnly: false,
+          }],
+          Args: ['sh', '-c', `chroot /host sh -c '${command.replace(/'/g, "'\\''")}'`],
+        },
+        RestartPolicy: {
+          Condition: 'none' as const,
+          MaxAttempts: 0,
+        },
+        Resources: {
+          Limits: { MemoryBytes: 512 * 1024 * 1024 },
+        },
+      },
+      Mode: { Global: {} },
+    } as any);
+
+    const serviceId = svc.id;
+
+    // Poll for completion
+    const startTime = Date.now();
+    const results: Array<{ nodeId: string; status: string; error?: string }> = [];
+
+    try {
+      while (Date.now() - startTime < timeout) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        const tasks = await docker.listTasks({ filters: { service: [serviceName] } });
+        const allDone = tasks.length > 0 && tasks.every(
+          (t: any) => t.Status?.State === 'complete' || t.Status?.State === 'failed' || t.Status?.State === 'rejected',
+        );
+
+        if (allDone) {
+          for (const t of tasks) {
+            results.push({
+              nodeId: t.NodeID ?? 'unknown',
+              status: t.Status?.State ?? 'unknown',
+              error: t.Status?.State === 'failed' ? (t.Status?.Err ?? t.Status?.Message) : undefined,
+            });
+          }
+          break;
+        }
+      }
+
+      // If we timed out, collect whatever status we have
+      if (results.length === 0) {
+        const tasks = await docker.listTasks({ filters: { service: [serviceName] } });
+        for (const t of tasks) {
+          results.push({
+            nodeId: t.NodeID ?? 'unknown',
+            status: t.Status?.State ?? 'timeout',
+            error: 'Timed out waiting for completion',
+          });
+        }
+      }
+    } finally {
+      // Always clean up the one-shot service
+      try {
+        const service = docker.getService(serviceId);
+        await service.remove();
+      } catch { /* ignore cleanup failures */ }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'complete'),
+      results,
+    };
   }
 }
 

@@ -6,6 +6,7 @@ import type {
   VolumeResult,
   StorageHealth,
   StorageNodeHealth,
+  StoragePrerequisite,
 } from '../storage-provider.js';
 
 const execFile = promisify(execFileCb);
@@ -251,6 +252,17 @@ export class CephVolumeProvider implements VolumeStorageProvider {
     }
 
     return opts;
+  }
+
+  getPrerequisites(): StoragePrerequisite[] {
+    return [
+      {
+        package: 'ceph-common',
+        description: 'Ceph client tools and RBD kernel module (required for Docker volume mounts)',
+        checkCommand: 'which rbd',
+        installCommand: 'apt-get install -y ceph-common',
+      },
+    ];
   }
 
   async getHealth(): Promise<StorageHealth> {

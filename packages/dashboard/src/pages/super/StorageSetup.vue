@@ -444,6 +444,17 @@ async function initializeCluster() {
     }
 
     const result = await api.post('/admin/storage/cluster', clusterConfig) as any
+
+    // Show prerequisite installation results
+    if (result.prerequisites) {
+      const pkgs = result.prerequisites.packages?.join(', ') || ''
+      if (result.prerequisites.installed) {
+        initLogs.value.push(`Installed prerequisites on all nodes: ${pkgs}`)
+      } else {
+        initLogs.value.push(`WARNING: Some nodes failed prerequisite installation (${pkgs}). Check node logs.`)
+      }
+    }
+
     initLogs.value.push(t('storageSetup.clusterStatusLog', { status: result.status }))
 
     if (result.status === 'healthy') {
@@ -663,6 +674,30 @@ async function rollbackActiveMigration() {
     closeMigrationWizard()
   } catch (err: any) {
     error.value = err?.body?.error || t('storageSetup.rollbackFailed')
+  }
+}
+
+// ── Repair Services ──────────────────────────────────────────────────────
+
+const repairLoading = ref(false)
+const repairResult = ref<{ repaired: string[]; failed: { name: string; error: string }[] } | null>(null)
+
+async function repairServices() {
+  repairLoading.value = true
+  repairResult.value = null
+  error.value = ''
+  try {
+    const result = await api.post('/admin/storage/repair-services', {}) as any
+    repairResult.value = { repaired: result.repaired || [], failed: result.failed || [] }
+    if (result.repaired?.length) {
+      success.value = `Repaired ${result.repaired.length} service(s)`
+    } else {
+      success.value = 'All services are already using the correct volume driver'
+    }
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to repair services'
+  } finally {
+    repairLoading.value = false
   }
 }
 
@@ -949,6 +984,48 @@ async function attachNewNode() {
             <button @click="showAttachNode = false" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
               {{ t('common.cancel') }}
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Maintenance (only when distributed storage is configured) -->
+      <div v-if="isConfigured && clusterData?.cluster?.provider !== 'local'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Maintenance</h2>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-gray-900 dark:text-white">Repair Service Volume Mounts</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Update Docker services to use the correct volume driver configuration. Use this if services are stuck with "missing plugin" errors.
+              </p>
+            </div>
+            <button
+              @click="repairServices"
+              :disabled="repairLoading"
+              class="shrink-0 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Loader2 v-if="repairLoading" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+              {{ repairLoading ? 'Repairing...' : 'Repair Services' }}
+            </button>
+          </div>
+          <div v-if="repairResult" class="text-sm">
+            <div v-if="repairResult.repaired.length" class="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 mb-2">
+              <p class="font-medium text-green-700 dark:text-green-400">Repaired {{ repairResult.repaired.length }} service(s):</p>
+              <ul class="mt-1 text-green-600 dark:text-green-400/80">
+                <li v-for="name in repairResult.repaired" :key="name">{{ name }}</li>
+              </ul>
+            </div>
+            <div v-if="repairResult.failed.length" class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <p class="font-medium text-red-700 dark:text-red-400">Failed ({{ repairResult.failed.length }}):</p>
+              <ul class="mt-1 text-red-600 dark:text-red-400/80">
+                <li v-for="f in repairResult.failed" :key="f.name">{{ f.name }}: {{ f.error }}</li>
+              </ul>
+            </div>
+            <div v-if="!repairResult.repaired.length && !repairResult.failed.length" class="p-3 rounded-lg bg-gray-50 dark:bg-gray-700/30 border border-gray-200 dark:border-gray-600">
+              <p class="text-gray-600 dark:text-gray-400">All services are already using the correct configuration.</p>
+            </div>
           </div>
         </div>
       </div>
