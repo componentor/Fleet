@@ -1,5 +1,5 @@
 import Docker from 'dockerode'
-import { cpus, freemem, totalmem, hostname } from 'node:os'
+import { cpus, freemem, totalmem, hostname as osHostname } from 'node:os'
 import { logger } from './logger.js'
 
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || '/var/run/docker.sock'
@@ -7,6 +7,21 @@ const docker = new Docker({ socketPath: DOCKER_SOCKET })
 
 const FETCH_TIMEOUT_MS = 10_000 // 10 second timeout for API calls
 const UNHEALTHY_THRESHOLD = 10 // Consider unhealthy after 10 consecutive failures
+
+// Resolve the real node hostname from Docker Swarm info (os.hostname() returns container ID)
+let resolvedHostname = ''
+async function getNodeHostname(): Promise<string> {
+  if (resolvedHostname) return resolvedHostname
+  try {
+    const info = await docker.info()
+    if (info.Name) {
+      resolvedHostname = info.Name
+      return resolvedHostname
+    }
+  } catch { /* Docker not available */ }
+  resolvedHostname = osHostname()
+  return resolvedHostname
+}
 
 export class NodeMonitor {
   private intervalId: ReturnType<typeof setInterval> | null = null
@@ -78,7 +93,7 @@ export class NodeMonitor {
     }
 
     return {
-      hostname: hostname(),
+      hostname: await getNodeHostname(),
       cpuCount,
       memTotal,
       memUsed,

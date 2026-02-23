@@ -6,7 +6,6 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
-import os from 'node:os';
 
 // All node agents share the Docker overlay IP, so this limit is per-cluster not per-node
 const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 300, keyPrefix: 'heartbeat' });
@@ -78,21 +77,34 @@ nodeRoutes.post('/:id/heartbeat', heartbeatRateLimit, async (c) => {
 
   // Auto-register the node on first heartbeat (reuse existing by hostname to prevent duplicates)
   if (!node) {
-    const reportedHostname = hb.hostname ?? os.hostname();
+    const reportedHostname = hb.hostname ?? 'unknown';
+    // Try to get the real IP from request headers
+    const clientIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+      ?? c.req.header('x-real-ip')
+      ?? '0.0.0.0';
+
     const existing = await db.query.nodes.findFirst({
       where: eq(nodes.hostname, reportedHostname),
     });
     if (existing) {
       node = existing;
+      const updates: Record<string, any> = {};
       // Update dockerNodeId if agent now provides one
       if (nodeId !== 'unknown' && !existing.dockerNodeId) {
-        await db.update(nodes).set({ dockerNodeId: nodeId }).where(eq(nodes.id, existing.id));
+        updates.dockerNodeId = nodeId;
+      }
+      // Update IP if we now have a real one
+      if (clientIp !== '0.0.0.0' && existing.ipAddress === '0.0.0.0') {
+        updates.ipAddress = clientIp;
+      }
+      if (Object.keys(updates).length > 0) {
+        await db.update(nodes).set(updates).where(eq(nodes.id, existing.id));
       }
     } else {
       const [created] = await insertReturning(nodes, {
         hostname: reportedHostname,
         dockerNodeId: nodeId !== 'unknown' ? nodeId : null,
-        ipAddress: '0.0.0.0',
+        ipAddress: clientIp,
         role: 'manager',
         status: 'active',
       });
@@ -144,16 +156,45 @@ adminNodeRoutes.get('/', async (c) => {
     orderBy: (n, { asc }) => asc(n.hostname),
   });
 
-  // Also fetch live Docker node info
+  // Also fetch live Docker node info and sync back to DB
   try {
     const dockerNodes = await dockerService.listNodes();
     const dockerMap = new Map(
-      dockerNodes.map((n) => [n.ID, n]),
+      dockerNodes.map((n: any) => [n.ID, n]),
     );
 
-    const merged = dbNodes.map((n) => ({
-      ...n,
-      docker: n.dockerNodeId ? dockerMap.get(n.dockerNodeId) ?? null : null,
+    const merged = await Promise.all(dbNodes.map(async (n) => {
+      const dockerNode = n.dockerNodeId ? dockerMap.get(n.dockerNodeId) ?? null : null;
+
+      // Sync real IP/hostname/status from Docker Swarm into DB
+      if (dockerNode) {
+        const updates: Record<string, any> = {};
+        const dockerAddr = (dockerNode as any).Status?.Addr;
+        const dockerHostname = (dockerNode as any).Description?.Hostname;
+        const dockerStatus = (dockerNode as any).Status?.State; // "ready" | "down" | "disconnected"
+
+        if (dockerAddr && dockerAddr !== '0.0.0.0' && n.ipAddress === '0.0.0.0') {
+          updates.ipAddress = dockerAddr;
+        }
+        // Sync hostname if current one looks like a container ID (12 hex chars)
+        if (dockerHostname && /^[0-9a-f]{12}$/i.test(n.hostname)) {
+          updates.hostname = dockerHostname;
+        }
+        // Sync status from Docker
+        if (dockerStatus === 'ready' && n.status !== 'active' && n.status !== 'draining') {
+          updates.status = 'active';
+        } else if (dockerStatus === 'down' || dockerStatus === 'disconnected') {
+          updates.status = 'offline';
+        }
+
+        if (Object.keys(updates).length > 0) {
+          updates.updatedAt = new Date();
+          await db.update(nodes).set(updates).where(eq(nodes.id, n.id));
+          Object.assign(n, updates);
+        }
+      }
+
+      return { ...n, docker: dockerNode };
     }));
 
     return c.json(merged);
