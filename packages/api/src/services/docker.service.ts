@@ -1,4 +1,5 @@
 import Dockerode from 'dockerode';
+import { resolve as resolvePath } from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
@@ -84,7 +85,7 @@ export class DockerService {
   private validateVolumeMounts(volumes: CreateSwarmServiceOptions['volumes']): void {
     for (const v of volumes) {
       // Resolve path to prevent traversal via ../ sequences
-      const resolved = require('node:path').resolve(v.source);
+      const resolved = resolvePath(v.source);
       const src = resolved.toLowerCase().trim();
       // Block docker socket by name anywhere in the path
       if (src.includes('docker.sock')) {

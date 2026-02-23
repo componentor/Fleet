@@ -37,6 +37,9 @@ const supportEmail = ref('')
 const stripePublishableKey = ref('')
 const stripeSecretKey = ref('')
 const stripeWebhookSecret = ref('')
+const stripeConfigured = ref(false)
+const stripeSecretKeyHint = ref('')
+const stripeWebhookSecretHint = ref('')
 
 // Email settings
 const emailProvider = ref<'smtp' | 'resend'>('smtp')
@@ -47,17 +50,22 @@ const smtpPass = ref('')
 const smtpFrom = ref('')
 const resendApiKey = ref('')
 const resendFrom = ref('')
+const smtpPassHint = ref('')
+const resendApiKeyHint = ref('')
 
 // GitHub settings
 const githubClientId = ref('')
 const githubClientSecret = ref('')
 const githubWebhookSecret = ref('')
 const githubConfigured = ref(false)
+const githubClientSecretHint = ref('')
+const githubWebhookSecretHint = ref('')
 
 // Google settings
 const googleClientId = ref('')
 const googleClientSecret = ref('')
 const googleConfigured = ref(false)
+const googleClientSecretHint = ref('')
 
 // Registrar settings
 const registrarProvider = ref('resellerclub')
@@ -66,7 +74,8 @@ const registrarApiKey = ref('')
 const registrarApiSecret = ref('')
 const registrarSandbox = ref(false)
 const registrarConfigured = ref(false)
-const registrarApiKeyMasked = ref('')
+const registrarApiKeyHint = ref('')
+const registrarApiSecretHint = ref('')
 const testingConnection = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 
@@ -103,10 +112,29 @@ async function fetchSettings() {
     smtpUser.value = data['email:smtpUser'] as string ?? ''
     smtpFrom.value = data['email:smtpFrom'] as string ?? ''
     resendFrom.value = data['email:resendFrom'] as string ?? ''
+    // Masked hints for email secrets (from generic GET /settings)
+    const smtpPassVal = data['email:smtpPass'] as string ?? ''
+    smtpPassHint.value = smtpPassVal && smtpPassVal !== '' ? smtpPassVal : ''
+    const resendKeyVal = data['email:resendApiKey'] as string ?? ''
+    resendApiKeyHint.value = resendKeyVal && resendKeyVal !== '' ? resendKeyVal : ''
   } catch {
     // Settings may not exist yet
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchStripe() {
+  try {
+    const data = await api.get<any>('/settings/stripe')
+    stripeConfigured.value = data.configured ?? false
+    if (data.configured) {
+      stripePublishableKey.value = data.publishableKey ?? ''
+      stripeSecretKeyHint.value = data.secretKeyHint ?? ''
+      stripeWebhookSecretHint.value = data.webhookSecretHint ?? ''
+    }
+  } catch {
+    // Not configured
   }
 }
 
@@ -115,6 +143,8 @@ async function fetchGitHub() {
     const data = await api.get<any>('/settings/github')
     githubConfigured.value = data.configured ?? false
     githubClientId.value = data.clientId ?? ''
+    githubClientSecretHint.value = data.clientSecretHint ?? ''
+    githubWebhookSecretHint.value = data.webhookSecretHint ?? ''
   } catch {
     // Not configured
   }
@@ -126,7 +156,8 @@ async function fetchRegistrar() {
     registrarConfigured.value = data.configured ?? false
     if (data.configured) {
       registrarProvider.value = data.provider ?? 'resellerclub'
-      registrarApiKeyMasked.value = data.apiKeySet ? '(configured)' : ''
+      registrarApiKeyHint.value = data.apiKeyHint ?? ''
+      registrarApiSecretHint.value = data.apiSecretHint ?? ''
       const config = data.config as Record<string, string> | null
       registrarResellerId.value = config?.resellerId ?? ''
       registrarSandbox.value = config?.sandbox === 'true'
@@ -168,19 +199,21 @@ async function saveGeneral() {
 }
 
 async function saveGitHub() {
-  if (!githubClientId.value || !githubClientSecret.value) {
-    error.value = 'Client ID and Client Secret are required'
+  const payload: Record<string, string> = {}
+  if (githubClientId.value) payload.clientId = githubClientId.value
+  if (githubClientSecret.value) payload.clientSecret = githubClientSecret.value
+  if (githubWebhookSecret.value) payload.webhookSecret = githubWebhookSecret.value
+
+  if (Object.keys(payload).length === 0) {
+    error.value = 'Enter at least one field to update'
     return
   }
+
   saving.value = true
   error.value = ''
   success.value = ''
   try {
-    await api.patch('/settings/github', {
-      clientId: githubClientId.value,
-      clientSecret: githubClientSecret.value,
-      webhookSecret: githubWebhookSecret.value || undefined,
-    })
+    await api.patch('/settings/github', payload)
     success.value = 'GitHub configuration saved'
     githubClientSecret.value = ''
     githubWebhookSecret.value = ''
@@ -198,24 +231,27 @@ async function fetchGoogle() {
     const data = await api.get<any>('/settings/google')
     googleConfigured.value = data.configured ?? false
     googleClientId.value = data.clientId ?? ''
+    googleClientSecretHint.value = data.clientSecretHint ?? ''
   } catch {
     // Not configured
   }
 }
 
 async function saveGoogle() {
-  if (!googleClientId.value || !googleClientSecret.value) {
-    error.value = 'Client ID and Client Secret are required'
+  const payload: Record<string, string> = {}
+  if (googleClientId.value) payload.clientId = googleClientId.value
+  if (googleClientSecret.value) payload.clientSecret = googleClientSecret.value
+
+  if (Object.keys(payload).length === 0) {
+    error.value = 'Enter at least one field to update'
     return
   }
+
   saving.value = true
   error.value = ''
   success.value = ''
   try {
-    await api.patch('/settings/google', {
-      clientId: googleClientId.value,
-      clientSecret: googleClientSecret.value,
-    })
+    await api.patch('/settings/google', payload)
     success.value = 'Google configuration saved'
     googleClientSecret.value = ''
     await fetchGoogle()
@@ -228,23 +264,25 @@ async function saveGoogle() {
 }
 
 async function saveStripe() {
-  if (!stripePublishableKey.value || !stripeSecretKey.value) {
-    error.value = 'Publishable key and secret key are required'
+  const payload: Record<string, string> = {}
+  if (stripePublishableKey.value) payload.publishableKey = stripePublishableKey.value
+  if (stripeSecretKey.value) payload.secretKey = stripeSecretKey.value
+  if (stripeWebhookSecret.value) payload.webhookSecret = stripeWebhookSecret.value
+
+  if (Object.keys(payload).length === 0) {
+    error.value = 'Enter at least one field to update'
     return
   }
+
   saving.value = true
   error.value = ''
   success.value = ''
   try {
-    await api.patch('/settings/stripe', {
-      publishableKey: stripePublishableKey.value,
-      secretKey: stripeSecretKey.value,
-      webhookSecret: stripeWebhookSecret.value || undefined,
-    })
+    await api.patch('/settings/stripe', payload)
     success.value = 'Stripe configuration saved'
-    stripePublishableKey.value = ''
     stripeSecretKey.value = ''
     stripeWebhookSecret.value = ''
+    await fetchStripe()
     setTimeout(() => { success.value = '' }, 3000)
   } catch (err: any) {
     error.value = err?.body?.error || 'Failed to save Stripe configuration'
@@ -280,21 +318,22 @@ async function saveEmail() {
 }
 
 async function saveRegistrar() {
-  if (!registrarApiKey.value) {
-    error.value = 'API key is required'
+  if (!registrarConfigured.value && !registrarApiKey.value) {
+    error.value = 'API key is required for initial configuration'
     return
   }
   saving.value = true
   error.value = ''
   success.value = ''
   try {
-    await api.patch('/settings/registrar', {
+    const payload: Record<string, any> = {
       provider: registrarProvider.value,
-      apiKey: registrarApiKey.value,
-      apiSecret: registrarApiSecret.value || undefined,
-      resellerId: registrarResellerId.value || undefined,
-      sandbox: registrarSandbox.value || undefined,
-    })
+    }
+    if (registrarApiKey.value) payload.apiKey = registrarApiKey.value
+    if (registrarApiSecret.value) payload.apiSecret = registrarApiSecret.value
+    if (registrarResellerId.value) payload.resellerId = registrarResellerId.value
+    if (registrarSandbox.value) payload.sandbox = registrarSandbox.value
+    await api.patch('/settings/registrar', payload)
     success.value = 'Domain registrar saved'
     registrarApiKey.value = ''
     registrarApiSecret.value = ''
@@ -427,6 +466,7 @@ function formatCents(cents: number): string {
 
 onMounted(() => {
   fetchSettings()
+  fetchStripe()
   fetchGitHub()
   fetchGoogle()
   fetchRegistrar()
@@ -522,15 +562,15 @@ onMounted(() => {
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientId') }}</label>
-              <input v-model="githubClientId" type="text" placeholder="Ov23li..." required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="githubClientId" type="text" placeholder="Ov23li..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientSecret') }}</label>
-              <input v-model="githubClientSecret" type="password" placeholder="Enter client secret" required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="githubClientSecret" type="password" :placeholder="githubClientSecretHint || 'Enter client secret'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubWebhookSecret') }} ({{ $t('common.optional') }})</label>
-              <input v-model="githubWebhookSecret" type="password" placeholder="Enter webhook secret" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="githubWebhookSecret" type="password" :placeholder="githubWebhookSecretHint || 'Enter webhook secret'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.githubOAuthHint') }}</p>
             <div class="pt-2 flex justify-end">
@@ -556,11 +596,11 @@ onMounted(() => {
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientId') }}</label>
-              <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientSecret') }}</label>
-              <input v-model="googleClientSecret" type="password" placeholder="Enter client secret" required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="googleClientSecret" type="password" :placeholder="googleClientSecretHint || 'Enter client secret'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.googleOAuthHint') }}</p>
             <div class="pt-2 flex justify-end">
@@ -580,17 +620,21 @@ onMounted(() => {
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.stripeConfigDesc') }}</p>
           </div>
           <form @submit.prevent="saveStripe" class="p-6 space-y-5">
+            <div v-if="stripeConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p class="text-sm text-green-700 dark:text-green-300">Stripe configured (Publishable Key: <strong class="font-mono">{{ stripePublishableKey }}</strong>)</p>
+            </div>
+
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripePublishableKey') }}</label>
-              <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeSecretKey') }}</label>
-              <input v-model="stripeSecretKey" type="password" placeholder="sk_live_..." required class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="stripeSecretKey" type="password" :placeholder="stripeSecretKeyHint || 'sk_live_...'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeWebhookSecret') }} ({{ $t('common.optional') }})</label>
-              <input v-model="stripeWebhookSecret" type="password" placeholder="whsec_..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="stripeWebhookSecret" type="password" :placeholder="stripeWebhookSecretHint || 'whsec_...'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
             <div class="pt-2 flex justify-end">
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
@@ -634,7 +678,7 @@ onMounted(() => {
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPass') }}</label>
-                <input v-model="smtpPass" type="password" placeholder="Enter new password to update" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <input v-model="smtpPass" type="password" :placeholder="smtpPassHint || 'Enter new password to update'" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
@@ -645,7 +689,7 @@ onMounted(() => {
             <template v-if="emailProvider === 'resend'">
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Resend API Key</label>
-                <input v-model="resendApiKey" type="password" placeholder="re_..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <input v-model="resendApiKey" type="password" :placeholder="resendApiKeyHint || 're_...'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
@@ -671,7 +715,7 @@ onMounted(() => {
           </div>
           <form @submit.prevent="saveRegistrar" class="p-6 space-y-5">
             <div v-if="registrarConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-              <p class="text-sm text-green-700 dark:text-green-300">Registrar configured: <strong>{{ registrarProvider }}</strong> ({{ registrarApiKeyMasked }})</p>
+              <p class="text-sm text-green-700 dark:text-green-300">Registrar configured: <strong>{{ registrarProvider }}</strong><template v-if="registrarApiKeyHint"> (API Key: <span class="font-mono">{{ registrarApiKeyHint }}</span>)</template></p>
             </div>
 
             <div>
@@ -690,7 +734,7 @@ onMounted(() => {
 
             <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Key</label>
-              <input v-model="registrarApiKey" type="password" placeholder="Enter API key" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="registrarApiKey" type="password" :placeholder="registrarApiKeyHint || 'Enter API key'" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
 
             <!-- Name.com fields -->
@@ -701,7 +745,7 @@ onMounted(() => {
 
             <div v-if="registrarProvider === 'namecom'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Token</label>
-              <input v-model="registrarApiSecret" type="password" placeholder="Enter API token" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="registrarApiSecret" type="password" :placeholder="registrarApiSecretHint || 'Enter API token'" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
             </div>
 
             <!-- Sandbox toggle (shared) -->

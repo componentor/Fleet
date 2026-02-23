@@ -6,7 +6,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
-import { encrypt } from '../services/crypto.service.js';
+import { encrypt, decrypt } from '../services/crypto.service.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
 import { join } from 'node:path';
@@ -39,6 +39,21 @@ async function getSetting(key: string): Promise<unknown | null> {
     where: eq(platformSettings.key, key),
   });
   return row?.value ?? null;
+}
+
+/**
+ * Decrypt a stored secret and return first 3 chars + bullet dots.
+ * Returns null if the value is not set.
+ */
+function maskSecret(encryptedValue: unknown): string | null {
+  if (encryptedValue == null || typeof encryptedValue !== 'string' || encryptedValue.length === 0) return null;
+  try {
+    const plain = decrypt(encryptedValue);
+    if (plain.length <= 3) return '\u2022\u2022\u2022';
+    return plain.slice(0, 3) + '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+  } catch {
+    return '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+  }
 }
 
 async function upsertSetting(key: string, value: unknown): Promise<void> {
@@ -84,8 +99,8 @@ export async function getPlatformDomain(): Promise<string> {
 const updateSettingsSchema = z.record(z.string(), z.unknown());
 
 const stripeSettingsSchema = z.object({
-  publishableKey: z.string().min(1),
-  secretKey: z.string().min(1),
+  publishableKey: z.string().min(1).optional(),
+  secretKey: z.string().min(1).optional(),
   webhookSecret: z.string().min(1).optional(),
 });
 
@@ -102,21 +117,21 @@ const emailSettingsSchema = z.object({
 
 const registrarSchema = z.object({
   provider: z.string().min(1),
-  apiKey: z.string().min(1),
+  apiKey: z.string().min(1).optional(),
   apiSecret: z.string().optional(),
   resellerId: z.string().optional(),
   sandbox: z.boolean().optional(),
 });
 
 const githubSettingsSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
+  clientId: z.string().min(1).optional(),
+  clientSecret: z.string().min(1).optional(),
   webhookSecret: z.string().min(1).optional(),
 });
 
 const googleSettingsSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
+  clientId: z.string().min(1).optional(),
+  clientSecret: z.string().min(1).optional(),
 });
 
 const brandingTypeParamSchema = z.object({
@@ -173,6 +188,19 @@ const updateSettingsRoute = createRoute({
   responses: {
     ...standardErrors,
     200: jsonContent(z.any(), 'Settings updated'),
+  },
+});
+
+const getStripeRoute = createRoute({
+  method: 'get',
+  path: '/stripe',
+  tags: ['Settings'],
+  summary: 'Get configured Stripe keys (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Stripe configuration'),
+    ...standardErrors,
   },
 });
 
@@ -366,7 +394,7 @@ settings.openapi(getSettingsRoute, (async (c: any) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
-  // Mask sensitive values so encrypted secrets are never sent to the client
+  // Mask sensitive values — show first 3 chars hint instead of full encrypted blob
   const SENSITIVE_PATTERNS = ['secret', 'password', 'apikey', 'token', 'private'];
   const isSensitive = (key: string): boolean => {
     const lower = key.toLowerCase();
@@ -384,7 +412,7 @@ settings.openapi(getSettingsRoute, (async (c: any) => {
     for (const row of rows) {
       // Skip account-scoped keys — only return platform keys
       if (row.key.startsWith('account:')) continue;
-      result[row.key] = isSensitive(row.key) && row.value != null ? '••••••••' : row.value;
+      result[row.key] = isSensitive(row.key) && row.value != null ? (maskSecret(row.value) ?? '••••••••') : row.value;
     }
 
     // Also merge in account-scoped settings if an account is selected
@@ -482,6 +510,25 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
   return c.json({ message: 'Account settings updated', updated: entries.map(([k]) => k) });
 }) as any);
 
+// GET /stripe
+settings.openapi(getStripeRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can view Stripe config' }, 403);
+  }
+
+  const publishableKey = await getSetting('stripe:publishableKey');
+  const secretKey = await getSetting('stripe:secretKey');
+  const webhookSecret = await getSetting('stripe:webhookSecret');
+
+  return c.json({
+    configured: !!(publishableKey && secretKey),
+    publishableKey: (publishableKey as string) || '',
+    secretKeyHint: maskSecret(secretKey),
+    webhookSecretHint: maskSecret(webhookSecret),
+  });
+}) as any);
+
 // PATCH /stripe
 settings.openapi(updateStripeRoute, (async (c: any) => {
   const user = c.get('user');
@@ -492,9 +539,12 @@ settings.openapi(updateStripeRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
-  await upsertSetting('stripe:publishableKey', data.publishableKey); // publishable key is public, no need to encrypt
-  await upsertSetting('stripe:secretKey', encrypt(data.secretKey));
-
+  if (data.publishableKey) {
+    await upsertSetting('stripe:publishableKey', data.publishableKey);
+  }
+  if (data.secretKey) {
+    await upsertSetting('stripe:secretKey', encrypt(data.secretKey));
+  }
   if (data.webhookSecret) {
     await upsertSetting('stripe:webhookSecret', encrypt(data.webhookSecret));
   }
@@ -581,8 +631,9 @@ settings.openapi(getRegistrarRoute, (async (c: any) => {
     id: registrar.id,
     provider: registrar.provider,
     config: registrar.config,
-    // Mask the API key
     apiKeySet: !!registrar.apiKey,
+    apiKeyHint: maskSecret(registrar.apiKey),
+    apiSecretHint: maskSecret(registrar.apiSecret),
   });
 }) as any);
 
@@ -605,16 +656,18 @@ settings.openapi(updateRegistrarRoute, (async (c: any) => {
   if (sandbox !== undefined) config['sandbox'] = String(sandbox);
 
   if (existing) {
-    const [updated] = await updateReturning(domainRegistrars, {
-      provider,
-      apiKey: encrypt(apiKey),
-      apiSecret: apiSecret ? encrypt(apiSecret) : null,
-      config,
-    }, eqOp(domainRegistrars.id, existing.id));
+    const updates: Record<string, any> = { provider, config };
+    if (apiKey) updates.apiKey = encrypt(apiKey);
+    if (apiSecret) updates.apiSecret = encrypt(apiSecret);
+    const [updated] = await updateReturning(domainRegistrars, updates, eqOp(domainRegistrars.id, existing.id));
     // Reset provider cache
     const { registrarService } = await import('../services/registrar.service.js');
     registrarService.resetProvider();
     return c.json({ message: 'Registrar updated', id: updated?.id });
+  }
+
+  if (!apiKey) {
+    return c.json({ error: 'API key is required for initial configuration' }, 400);
   }
 
   const [created] = await insertReturning(domainRegistrars, {
@@ -664,7 +717,9 @@ settings.openapi(getGithubRoute, (async (c: any) => {
     configured: !!(clientId || process.env['GITHUB_CLIENT_ID']),
     clientId: (clientId as string) || process.env['GITHUB_CLIENT_ID'] || '',
     clientSecretSet: !!(clientSecret || process.env['GITHUB_CLIENT_SECRET']),
+    clientSecretHint: maskSecret(clientSecret) ?? (process.env['GITHUB_CLIENT_SECRET'] ? 'env••••••••' : null),
     webhookSecretSet: !!(webhookSecret || process.env['GITHUB_WEBHOOK_SECRET']),
+    webhookSecretHint: maskSecret(webhookSecret) ?? (process.env['GITHUB_WEBHOOK_SECRET'] ? 'env••••••••' : null),
   });
 }) as any);
 
@@ -677,9 +732,12 @@ settings.openapi(updateGithubRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
-  await upsertSetting('github:clientId', data.clientId);
-  await upsertSetting('github:clientSecret', encrypt(data.clientSecret));
-
+  if (data.clientId) {
+    await upsertSetting('github:clientId', data.clientId);
+  }
+  if (data.clientSecret) {
+    await upsertSetting('github:clientSecret', encrypt(data.clientSecret));
+  }
   if (data.webhookSecret) {
     await upsertSetting('github:webhookSecret', encrypt(data.webhookSecret));
   }
@@ -706,6 +764,7 @@ settings.openapi(getGoogleRoute, (async (c: any) => {
     configured: !!(clientId || process.env['GOOGLE_CLIENT_ID']),
     clientId: (clientId as string) || process.env['GOOGLE_CLIENT_ID'] || '',
     clientSecretSet: !!(clientSecret || process.env['GOOGLE_CLIENT_SECRET']),
+    clientSecretHint: maskSecret(clientSecret) ?? (process.env['GOOGLE_CLIENT_SECRET'] ? 'env••••••••' : null),
   });
 }) as any);
 
@@ -718,8 +777,12 @@ settings.openapi(updateGoogleRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
-  await upsertSetting('google:clientId', data.clientId);
-  await upsertSetting('google:clientSecret', encrypt(data.clientSecret));
+  if (data.clientId) {
+    await upsertSetting('google:clientId', data.clientId);
+  }
+  if (data.clientSecret) {
+    await upsertSetting('google:clientSecret', encrypt(data.clientSecret));
+  }
 
   // Invalidate cached config so the new values take effect immediately
   const { invalidateGoogleConfigCache } = await import('../services/google.service.js');
