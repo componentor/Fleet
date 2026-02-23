@@ -12,7 +12,7 @@ const branding = useBranding()
 
 const activeSection = ref('general')
 const loading = ref(true)
-const saving = ref(false)
+const savingField = ref<string | null>(null)
 const error = ref('')
 const success = ref('')
 
@@ -178,53 +178,6 @@ async function fetchPricing() {
   }
 }
 
-async function saveGeneral() {
-  saving.value = true
-  error.value = ''
-  success.value = ''
-  try {
-    await api.patch('/settings', {
-      'platform:name': platformName.value,
-      'platform:domain': platformDomain.value,
-      'platform:url': platformUrl.value,
-      'platform:supportEmail': supportEmail.value,
-    })
-    success.value = 'General settings saved'
-    setTimeout(() => { success.value = '' }, 3000)
-  } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save settings'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function saveGitHub() {
-  const payload: Record<string, string> = {}
-  if (githubClientId.value) payload.clientId = githubClientId.value
-  if (githubClientSecret.value) payload.clientSecret = githubClientSecret.value
-  if (githubWebhookSecret.value) payload.webhookSecret = githubWebhookSecret.value
-
-  if (Object.keys(payload).length === 0) {
-    error.value = 'Enter at least one field to update'
-    return
-  }
-
-  saving.value = true
-  error.value = ''
-  success.value = ''
-  try {
-    await api.patch('/settings/github', payload)
-    success.value = 'GitHub configuration saved'
-    githubClientSecret.value = ''
-    githubWebhookSecret.value = ''
-    await fetchGitHub()
-    setTimeout(() => { success.value = '' }, 3000)
-  } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save GitHub configuration'
-  } finally {
-    saving.value = false
-  }
-}
 
 async function fetchGoogle() {
   try {
@@ -237,114 +190,6 @@ async function fetchGoogle() {
   }
 }
 
-async function saveGoogle() {
-  const payload: Record<string, string> = {}
-  if (googleClientId.value) payload.clientId = googleClientId.value
-  if (googleClientSecret.value) payload.clientSecret = googleClientSecret.value
-
-  if (Object.keys(payload).length === 0) {
-    error.value = 'Enter at least one field to update'
-    return
-  }
-
-  saving.value = true
-  error.value = ''
-  success.value = ''
-  try {
-    await api.patch('/settings/google', payload)
-    success.value = 'Google configuration saved'
-    googleClientSecret.value = ''
-    await fetchGoogle()
-    setTimeout(() => { success.value = '' }, 3000)
-  } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save Google configuration'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function saveStripe() {
-  const payload: Record<string, string> = {}
-  if (stripePublishableKey.value) payload.publishableKey = stripePublishableKey.value
-  if (stripeSecretKey.value) payload.secretKey = stripeSecretKey.value
-  if (stripeWebhookSecret.value) payload.webhookSecret = stripeWebhookSecret.value
-
-  if (Object.keys(payload).length === 0) {
-    error.value = 'Enter at least one field to update'
-    return
-  }
-
-  saving.value = true
-  error.value = ''
-  success.value = ''
-  try {
-    await api.patch('/settings/stripe', payload)
-    success.value = 'Stripe configuration saved'
-    stripeSecretKey.value = ''
-    stripeWebhookSecret.value = ''
-    await fetchStripe()
-    setTimeout(() => { success.value = '' }, 3000)
-  } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save Stripe configuration'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function saveEmail() {
-  saving.value = true
-  error.value = ''
-  success.value = ''
-  try {
-    await api.patch('/settings/email', {
-      provider: emailProvider.value,
-      smtpHost: smtpHost.value || undefined,
-      smtpPort: smtpPort.value || undefined,
-      smtpUser: smtpUser.value || undefined,
-      smtpPass: smtpPass.value || undefined,
-      smtpFrom: smtpFrom.value || undefined,
-      resendApiKey: resendApiKey.value || undefined,
-      resendFrom: resendFrom.value || undefined,
-    })
-    success.value = 'Email configuration saved'
-    smtpPass.value = ''
-    resendApiKey.value = ''
-    setTimeout(() => { success.value = '' }, 3000)
-  } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save email configuration'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function saveRegistrar() {
-  if (!registrarConfigured.value && !registrarApiKey.value) {
-    error.value = 'API key is required for initial configuration'
-    return
-  }
-  saving.value = true
-  error.value = ''
-  success.value = ''
-  try {
-    const payload: Record<string, any> = {
-      provider: registrarProvider.value,
-    }
-    if (registrarApiKey.value) payload.apiKey = registrarApiKey.value
-    if (registrarApiSecret.value) payload.apiSecret = registrarApiSecret.value
-    if (registrarResellerId.value) payload.resellerId = registrarResellerId.value
-    if (registrarSandbox.value) payload.sandbox = registrarSandbox.value
-    await api.patch('/settings/registrar', payload)
-    success.value = 'Domain registrar saved'
-    registrarApiKey.value = ''
-    registrarApiSecret.value = ''
-    await fetchRegistrar()
-    setTimeout(() => { success.value = '' }, 3000)
-  } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to save registrar configuration'
-  } finally {
-    saving.value = false
-  }
-}
 
 async function testConnection() {
   testingConnection.value = true
@@ -464,6 +309,71 @@ function formatCents(cents: number): string {
   return (cents / 100).toFixed(2)
 }
 
+async function saveOneField(fieldKey: string, apiCall: () => Promise<void>, afterSave?: () => Promise<void>) {
+  savingField.value = fieldKey
+  error.value = ''
+  success.value = ''
+  try {
+    await apiCall()
+    success.value = 'Saved'
+    if (afterSave) await afterSave()
+    setTimeout(() => { success.value = '' }, 2000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save'
+  } finally {
+    savingField.value = null
+  }
+}
+
+function saveGeneralField(key: string, value: string) {
+  saveOneField(`general:${key}`, () => api.patch('/settings', { [key]: value }))
+}
+
+function saveGitHubField(key: string, value: string) {
+  if (!value) return
+  saveOneField(`github:${key}`, () => api.patch('/settings/github', { [key]: value }), async () => {
+    if (key === 'clientSecret') githubClientSecret.value = ''
+    if (key === 'webhookSecret') githubWebhookSecret.value = ''
+    await fetchGitHub()
+  })
+}
+
+function saveGoogleField(key: string, value: string) {
+  if (!value) return
+  saveOneField(`google:${key}`, () => api.patch('/settings/google', { [key]: value }), async () => {
+    if (key === 'clientSecret') googleClientSecret.value = ''
+    await fetchGoogle()
+  })
+}
+
+function saveStripeField(key: string, value: string) {
+  if (!value) return
+  saveOneField(`stripe:${key}`, () => api.patch('/settings/stripe', { [key]: value }), async () => {
+    if (key === 'secretKey') stripeSecretKey.value = ''
+    if (key === 'webhookSecret') stripeWebhookSecret.value = ''
+    await fetchStripe()
+  })
+}
+
+function saveRegistrarField(key: string, value: any) {
+  if (!value && value !== false) return
+  const payload: Record<string, any> = { provider: registrarProvider.value, [key]: value }
+  saveOneField(`registrar:${key}`, () => api.patch('/settings/registrar', payload), async () => {
+    if (key === 'apiKey') registrarApiKey.value = ''
+    if (key === 'apiSecret') registrarApiSecret.value = ''
+    await fetchRegistrar()
+  })
+}
+
+function saveEmailField(key: string, value: any) {
+  const payload: Record<string, any> = { provider: emailProvider.value, [key]: value }
+  saveOneField(`email:${key}`, () => api.patch('/settings/email', payload), async () => {
+    if (key === 'smtpPass') smtpPass.value = ''
+    if (key === 'resendApiKey') resendApiKey.value = ''
+    await fetchSettings()
+  })
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -521,32 +431,49 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.generalSettings') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.generalSettingsDesc') }}</p>
           </div>
-          <form @submit.prevent="saveGeneral" class="p-6 space-y-5">
+          <div class="p-6 space-y-5">
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformName') }}</label>
-              <input v-model="platformName" type="text" placeholder="Fleet" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="platformName" type="text" placeholder="Fleet" @keydown.enter="saveGeneralField('platform:name', platformName)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="saveGeneralField('platform:name', platformName)" :disabled="savingField === 'general:platform:name'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'general:platform:name'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.rootDomain') }}</label>
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ $t('super.settings.rootDomainDesc') }}</p>
-              <input v-model="platformDomain" type="text" placeholder="fleet.example.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="platformDomain" type="text" placeholder="fleet.example.com" @keydown.enter="saveGeneralField('platform:domain', platformDomain)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="saveGeneralField('platform:domain', platformDomain)" :disabled="savingField === 'general:platform:domain'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'general:platform:domain'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformUrl') }}</label>
-              <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" @keydown.enter="saveGeneralField('platform:url', platformUrl)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="saveGeneralField('platform:url', platformUrl)" :disabled="savingField === 'general:platform:url'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'general:platform:url'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.email') }}</label>
-              <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" @keydown.enter="saveGeneralField('platform:supportEmail', supportEmail)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="saveGeneralField('platform:supportEmail', supportEmail)" :disabled="savingField === 'general:platform:supportEmail'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'general:platform:supportEmail'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                <Save v-else class="w-4 h-4" />
-                {{ saving ? $t('common.saving') : $t('common.save') }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
 
         <!-- GitHub Configuration -->
@@ -555,32 +482,43 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.githubConfig') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.githubConfigDesc') }}</p>
           </div>
-          <form @submit.prevent="saveGitHub" class="p-6 space-y-5">
+          <div class="p-6 space-y-5">
             <div v-if="githubConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
               <p class="text-sm text-green-700 dark:text-green-300 break-all">GitHub configured (Client ID: <strong class="font-mono">{{ githubClientId }}</strong>)</p>
             </div>
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientId') }}</label>
-              <input v-model="githubClientId" type="text" placeholder="Ov23li..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="githubClientId" type="text" placeholder="Ov23li..." @keydown.enter="saveGitHubField('clientId', githubClientId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveGitHubField('clientId', githubClientId)" :disabled="savingField === 'github:clientId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'github:clientId'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientSecret') }}</label>
-              <input v-model="githubClientSecret" type="password" :placeholder="githubClientSecretHint || 'Enter client secret'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="githubClientSecret" type="password" :placeholder="githubClientSecretHint || 'Enter client secret'" @keydown.enter="saveGitHubField('clientSecret', githubClientSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveGitHubField('clientSecret', githubClientSecret)" :disabled="savingField === 'github:clientSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'github:clientSecret'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubWebhookSecret') }} ({{ $t('common.optional') }})</label>
-              <input v-model="githubWebhookSecret" type="password" :placeholder="githubWebhookSecretHint || 'Enter webhook secret'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="githubWebhookSecret" type="password" :placeholder="githubWebhookSecretHint || 'Enter webhook secret'" @keydown.enter="saveGitHubField('webhookSecret', githubWebhookSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveGitHubField('webhookSecret', githubWebhookSecret)" :disabled="savingField === 'github:webhookSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'github:webhookSecret'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.githubOAuthHint') }}</p>
-            <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                <Save v-else class="w-4 h-4" />
-                {{ saving ? $t('common.saving') : $t('common.save') }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
 
         <!-- Google Configuration -->
@@ -589,28 +527,33 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.googleConfig') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.googleConfigDesc') }}</p>
           </div>
-          <form @submit.prevent="saveGoogle" class="p-6 space-y-5">
+          <div class="p-6 space-y-5">
             <div v-if="googleConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
               <p class="text-sm text-green-700 dark:text-green-300 break-all">Google configured (Client ID: <strong class="font-mono">{{ googleClientId }}</strong>)</p>
             </div>
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientId') }}</label>
-              <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" @keydown.enter="saveGoogleField('clientId', googleClientId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveGoogleField('clientId', googleClientId)" :disabled="savingField === 'google:clientId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'google:clientId'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientSecret') }}</label>
-              <input v-model="googleClientSecret" type="password" :placeholder="googleClientSecretHint || 'Enter client secret'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="googleClientSecret" type="password" :placeholder="googleClientSecretHint || 'Enter client secret'" @keydown.enter="saveGoogleField('clientSecret', googleClientSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveGoogleField('clientSecret', googleClientSecret)" :disabled="savingField === 'google:clientSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'google:clientSecret'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('super.settings.googleOAuthHint') }}</p>
-            <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                <Save v-else class="w-4 h-4" />
-                {{ saving ? $t('common.saving') : $t('common.save') }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
 
         <!-- Stripe Configuration -->
@@ -619,31 +562,42 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.stripeConfig') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.stripeConfigDesc') }}</p>
           </div>
-          <form @submit.prevent="saveStripe" class="p-6 space-y-5">
+          <div class="p-6 space-y-5">
             <div v-if="stripeConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
               <p class="text-sm text-green-700 dark:text-green-300 break-all">Stripe configured (Publishable Key: <strong class="font-mono">{{ stripePublishableKey }}</strong>)</p>
             </div>
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripePublishableKey') }}</label>
-              <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." @keydown.enter="saveStripeField('publishableKey', stripePublishableKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveStripeField('publishableKey', stripePublishableKey)" :disabled="savingField === 'stripe:publishableKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'stripe:publishableKey'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeSecretKey') }}</label>
-              <input v-model="stripeSecretKey" type="password" :placeholder="stripeSecretKeyHint || 'sk_live_...'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="stripeSecretKey" type="password" :placeholder="stripeSecretKeyHint || 'sk_live_...'" @keydown.enter="saveStripeField('secretKey', stripeSecretKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveStripeField('secretKey', stripeSecretKey)" :disabled="savingField === 'stripe:secretKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'stripe:secretKey'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeWebhookSecret') }} ({{ $t('common.optional') }})</label>
-              <input v-model="stripeWebhookSecret" type="password" :placeholder="stripeWebhookSecretHint || 'whsec_...'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="stripeWebhookSecret" type="password" :placeholder="stripeWebhookSecretHint || 'whsec_...'" @keydown.enter="saveStripeField('webhookSecret', stripeWebhookSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveStripeField('webhookSecret', stripeWebhookSecret)" :disabled="savingField === 'stripe:webhookSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'stripe:webhookSecret'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                <Save v-else class="w-4 h-4" />
-                {{ saving ? $t('common.saving') : $t('common.save') }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
 
         <!-- Email Configuration -->
@@ -652,59 +606,97 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.emailConfig') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.emailConfigDesc') }}</p>
           </div>
-          <form @submit.prevent="saveEmail" class="p-6 space-y-5">
+          <div class="p-6 space-y-5">
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Provider</label>
-              <select v-model="emailProvider" class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
-                <option value="smtp">SMTP</option>
-                <option value="resend">Resend</option>
-              </select>
+              <div class="flex items-center gap-2 max-w-xs">
+                <select v-model="emailProvider" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
+                  <option value="smtp">SMTP</option>
+                  <option value="resend">Resend</option>
+                </select>
+                <button @click="saveEmailField('provider', emailProvider)" :disabled="savingField === 'email:provider'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'email:provider'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <template v-if="emailProvider === 'smtp'">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpHost') }}</label>
-                  <input v-model="smtpHost" type="text" placeholder="smtp.example.com" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpHost') }}</label>
+                <div class="flex items-center gap-2 max-w-md">
+                  <input v-model="smtpHost" type="text" placeholder="smtp.example.com" @keydown.enter="saveEmailField('smtpHost', smtpHost)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                  <button @click="saveEmailField('smtpHost', smtpHost)" :disabled="savingField === 'email:smtpHost'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:smtpHost'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
                 </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPort') }}</label>
-                  <input v-model.number="smtpPort" type="number" placeholder="587" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPort') }}</label>
+                <div class="flex items-center gap-2 max-w-xs">
+                  <input v-model.number="smtpPort" type="number" placeholder="587" @keydown.enter="saveEmailField('smtpPort', smtpPort)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                  <button @click="saveEmailField('smtpPort', smtpPort)" :disabled="savingField === 'email:smtpPort'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:smtpPort'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
                 </div>
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpUser') }}</label>
-                <input v-model="smtpUser" type="text" placeholder="your-username" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <div class="flex items-center gap-2 max-w-md">
+                  <input v-model="smtpUser" type="text" placeholder="your-username" @keydown.enter="saveEmailField('smtpUser', smtpUser)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                  <button @click="saveEmailField('smtpUser', smtpUser)" :disabled="savingField === 'email:smtpUser'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:smtpUser'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPass') }}</label>
-                <input v-model="smtpPass" type="password" :placeholder="smtpPassHint || 'Enter new password to update'" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <div class="flex items-center gap-2 max-w-md">
+                  <input v-model="smtpPass" type="password" :placeholder="smtpPassHint || 'Enter new password to update'" @keydown.enter="saveEmailField('smtpPass', smtpPass)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                  <button @click="saveEmailField('smtpPass', smtpPass)" :disabled="savingField === 'email:smtpPass'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:smtpPass'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
-                <input v-model="smtpFrom" type="email" placeholder="noreply@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <div class="flex items-center gap-2 max-w-md">
+                  <input v-model="smtpFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('smtpFrom', smtpFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                  <button @click="saveEmailField('smtpFrom', smtpFrom)" :disabled="savingField === 'email:smtpFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:smtpFrom'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </template>
 
             <template v-if="emailProvider === 'resend'">
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Resend API Key</label>
-                <input v-model="resendApiKey" type="password" :placeholder="resendApiKeyHint || 're_...'" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <div class="flex items-center gap-2 max-w-lg">
+                  <input v-model="resendApiKey" type="password" :placeholder="resendApiKeyHint || 're_...'" @keydown.enter="saveEmailField('resendApiKey', resendApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                  <button @click="saveEmailField('resendApiKey', resendApiKey)" :disabled="savingField === 'email:resendApiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:resendApiKey'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
-                <input v-model="resendFrom" type="email" placeholder="noreply@your-platform.com" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <div class="flex items-center gap-2 max-w-md">
+                  <input v-model="resendFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('resendFrom', resendFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                  <button @click="saveEmailField('resendFrom', resendFrom)" :disabled="savingField === 'email:resendFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <Loader2 v-if="savingField === 'email:resendFrom'" class="w-4 h-4 animate-spin" />
+                    <Save v-else class="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </template>
-
-            <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                <Save v-else class="w-4 h-4" />
-                {{ saving ? $t('common.saving') : $t('common.save') }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
 
         <!-- Domain Registrar -->
@@ -713,44 +705,70 @@ onMounted(() => {
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.domainRegistrar') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.domainRegistrarDesc') }}</p>
           </div>
-          <form @submit.prevent="saveRegistrar" class="p-6 space-y-5">
+          <div class="p-6 space-y-5">
             <div v-if="registrarConfigured" class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
               <p class="text-sm text-green-700 dark:text-green-300 break-all">Registrar configured: <strong>{{ registrarProvider }}</strong><template v-if="registrarApiKeyHint"> (API Key: <span class="font-mono">{{ registrarApiKeyHint }}</span>)</template></p>
             </div>
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Provider</label>
-              <select v-model="registrarProvider" class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
-                <option value="resellerclub">ResellerClub</option>
-                <option value="namecom">Name.com</option>
-              </select>
+              <div class="flex items-center gap-2 max-w-xs">
+                <select v-model="registrarProvider" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
+                  <option value="resellerclub">ResellerClub</option>
+                  <option value="namecom">Name.com</option>
+                </select>
+              </div>
             </div>
 
             <!-- ResellerClub fields -->
             <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Reseller ID</label>
-              <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" @keydown.enter="saveRegistrarField('resellerId', registrarResellerId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="saveRegistrarField('resellerId', registrarResellerId)" :disabled="savingField === 'registrar:resellerId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'registrar:resellerId'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Key</label>
-              <input v-model="registrarApiKey" type="password" :placeholder="registrarApiKeyHint || 'Enter API key'" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="registrarApiKey" type="password" :placeholder="registrarApiKeyHint || 'Enter API key'" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'registrar:apiKey'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <!-- Name.com fields -->
             <div v-if="registrarProvider === 'namecom'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Username</label>
-              <input v-model="registrarApiKey" type="text" placeholder="Your Name.com username" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="registrarApiKey" type="text" placeholder="Your Name.com username" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'registrar:apiKey'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <div v-if="registrarProvider === 'namecom'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Token</label>
-              <input v-model="registrarApiSecret" type="password" :placeholder="registrarApiSecretHint || 'Enter API token'" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <div class="flex items-center gap-2 max-w-md">
+                <input v-model="registrarApiSecret" type="password" :placeholder="registrarApiSecretHint || 'Enter API token'" @keydown.enter="saveRegistrarField('apiSecret', registrarApiSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+                <button @click="saveRegistrarField('apiSecret', registrarApiSecret)" :disabled="savingField === 'registrar:apiSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <Loader2 v-if="savingField === 'registrar:apiSecret'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <!-- Sandbox toggle (shared) -->
             <div class="flex items-center gap-3">
-              <input id="registrar-sandbox" v-model="registrarSandbox" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+              <input id="registrar-sandbox" v-model="registrarSandbox" type="checkbox" @change="saveRegistrarField('sandbox', registrarSandbox)" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
               <label for="registrar-sandbox" class="text-sm text-gray-700 dark:text-gray-300">Sandbox mode (use test API)</label>
             </div>
 
@@ -773,15 +791,7 @@ onMounted(() => {
                 </span>
               </div>
             </div>
-
-            <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                <Save v-else class="w-4 h-4" />
-                {{ saving ? $t('common.saving') : $t('common.save') }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
 
         <!-- Domain Pricing -->
