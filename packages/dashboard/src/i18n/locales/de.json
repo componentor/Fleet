@@ -1844,6 +1844,8 @@
     "autoCheck": "Automatisch nach Updates suchen",
     "rcVersions": "Release-Candidate-Versionen (RC) einbeziehen",
     "settingsSaved": "Update-Einstellungen gespeichert",
+    "stepStarting": "Starten",
+    "starting": "Update wird gestartet...",
     "stepBackup": "Backup",
     "stepSnapshot": "Snapshot",
     "stepVerifyImages": "Prüfen",

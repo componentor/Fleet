@@ -1844,6 +1844,8 @@
     "autoCheck": "自动检查更新",
     "rcVersions": "包含候选发布版本（RC）",
     "settingsSaved": "更新设置已保存",
+    "stepStarting": "启动中",
+    "starting": "正在启动更新...",
     "stepBackup": "备份",
     "stepSnapshot": "快照",
     "stepVerifyImages": "验证",

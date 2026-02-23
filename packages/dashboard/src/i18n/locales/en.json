@@ -1848,6 +1848,8 @@
     "autoCheck": "Automatically check for updates",
     "rcVersions": "Include release candidate (RC) versions",
     "settingsSaved": "Update settings saved",
+    "stepStarting": "Starting",
+    "starting": "Starting update...",
     "stepBackup": "Backup",
     "stepSnapshot": "Snapshot",
     "stepVerifyImages": "Verify",

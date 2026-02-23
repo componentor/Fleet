@@ -28,9 +28,18 @@ export function updateVersion(current: string, latest?: string | null, updateAva
   if (versionInfo.value?.current && current && !isNewerOrEqual(current, versionInfo.value.current)) {
     return
   }
+  // Never show "available" if we're already on the latest version
+  let available = updateAvailable ?? false
+  if (available && latest && current) {
+    const cleanCurrent = current.replace(/^v/, '')
+    const cleanLatest = latest.replace(/^v/, '')
+    if (cleanCurrent === cleanLatest) {
+      available = false
+    }
+  }
   versionInfo.value = {
     current,
     latest: latest ?? versionInfo.value?.latest ?? null,
-    updateAvailable: updateAvailable ?? false,
+    updateAvailable: available,
   }
 }

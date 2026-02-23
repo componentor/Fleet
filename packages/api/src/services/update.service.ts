@@ -220,6 +220,12 @@ export class UpdateService {
 
   /** Returns the cached update notification (no GitHub API call). */
   getNotification(): UpdateNotification {
+    // Guard: never report "available" if we're already on that version
+    if (this.cachedNotification.available && this.cachedNotification.latest?.tag) {
+      if (!this.isNewerVersion(this.cachedNotification.latest.tag, this.state.currentVersion)) {
+        this.cachedNotification.available = false;
+      }
+    }
     return this.cachedNotification;
   }
 

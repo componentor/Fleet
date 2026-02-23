@@ -1844,6 +1844,8 @@
     "autoCheck": "Sjekk automatisk etter oppdateringer",
     "rcVersions": "Inkluder kandidatversjoner (RC)",
     "settingsSaved": "Oppdateringsinnstillinger lagret",
+    "stepStarting": "Starter",
+    "starting": "Starter oppdatering...",
     "stepBackup": "Sikkerhetskopi",
     "stepSnapshot": "Øyeblikksbilde",
     "stepVerifyImages": "Verifiser",

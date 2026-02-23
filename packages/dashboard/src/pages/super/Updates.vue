@@ -77,6 +77,7 @@ function cancelConfirm() {
 
 // Progress stepper
 const PROGRESS_STEPS = [
+  { key: 'starting', label: 'updates.stepStarting' },
   { key: 'backing-up', label: 'updates.stepBackup' },
   { key: 'pulling', label: 'updates.stepSnapshot' },
   { key: 'verifying-images', label: 'updates.stepVerifyImages' },
@@ -93,7 +94,7 @@ const currentStepIndex = computed(() => {
   return PROGRESS_STEPS.findIndex(s => s.key === status)
 })
 
-const activeStates = ['checking', 'backing-up', 'pulling', 'verifying-images', 'migrating', 'updating', 'seeding', 'verifying', 'rolling-back']
+const activeStates = ['starting', 'checking', 'backing-up', 'pulling', 'verifying-images', 'migrating', 'updating', 'seeding', 'verifying', 'rolling-back']
 
 function isActiveState(status: string) {
   return activeStates.includes(status)
@@ -188,7 +189,15 @@ async function performUpdate(version: string) {
       error.value = ''
       try {
         await api.post<any>('/updates/perform', { version })
-        success.value = t('updates.updateStarted', { version })
+        // Optimistic: show progress immediately instead of waiting for polling
+        updateState.value = {
+          status: 'starting',
+          currentVersion: currentVersion.value,
+          targetVersion: version,
+          log: '',
+        }
+        showLogExpanded.value = true
+        success.value = ''
         startPolling()
       } catch (err: any) {
         error.value = err?.body?.error || t('updates.failed')
@@ -314,8 +323,11 @@ function startPolling() {
   statusPollInterval = setInterval(async () => {
     try {
       const state = await api.get<any>('/updates/status')
-      // Only update local state if we got a non-idle response, OR the grace period expired
-      if (state.status !== 'idle' || Date.now() - pollStartedAt > 15000) {
+      // Accept real progress from server; keep optimistic 'starting' state while server still idle
+      if (state.status !== 'idle') {
+        updateState.value = state
+      } else if (Date.now() - pollStartedAt > 15000) {
+        // Grace period expired but server still idle — update failed to start
         updateState.value = state
       }
       if (state.status === 'completed' || state.status === 'failed') {
@@ -460,7 +472,7 @@ onUnmounted(() => {
               updateState.status === 'completed' ? 'text-green-700 dark:text-green-300' :
               'text-blue-700 dark:text-blue-300'
             ">
-              {{ updateState.status === 'completed' ? t('updates.completed') : updateState.status === 'failed' ? t('updates.failed') : updateState.status === 'rolling-back' ? t('updates.rollingBack') : t('updates.title') }}
+              {{ updateState.status === 'completed' ? t('updates.completed') : updateState.status === 'failed' ? t('updates.failed') : updateState.status === 'rolling-back' ? t('updates.rollingBack') : updateState.status === 'starting' ? t('updates.starting') : t('updates.title') }}
             </p>
             <p v-if="updateState.targetVersion" class="text-xs mt-0.5 text-gray-600 dark:text-gray-400">
               {{ t('updates.versionTransition') }}: {{ updateState.currentVersion }} &rarr; {{ updateState.targetVersion }}
