@@ -366,22 +366,35 @@ settings.openapi(getSettingsRoute, (async (c: any) => {
   const user = c.get('user');
   const accountId = c.get('accountId');
 
-  if (user.isSuper && !accountId) {
-    // Platform-wide settings
+  // Mask sensitive values so encrypted secrets are never sent to the client
+  const SENSITIVE_PATTERNS = ['secret', 'password', 'apikey', 'token', 'private'];
+  const isSensitive = (key: string): boolean => {
+    const lower = key.toLowerCase();
+    return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
+  };
+
+  if (user.isSuper) {
+    // Super admins always get platform-wide settings (they need them for the Settings page
+    // even when an account is selected in the sidebar)
     const rows = await db.query.platformSettings.findMany({
       orderBy: (s: any, { asc }: any) => asc(s.key),
     });
 
-    // Mask sensitive values so encrypted secrets are never sent to the client
-    const SENSITIVE_PATTERNS = ['secret', 'password', 'apikey', 'token', 'private'];
-    const isSensitive = (key: string): boolean => {
-      const lower = key.toLowerCase();
-      return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
-    };
-
     const result: Record<string, unknown> = {};
     for (const row of rows) {
+      // Skip account-scoped keys — only return platform keys
+      if (row.key.startsWith('account:')) continue;
       result[row.key] = isSensitive(row.key) && row.value != null ? '••••••••' : row.value;
+    }
+
+    // Also merge in account-scoped settings if an account is selected
+    if (accountId) {
+      const prefix = `account:${accountId}:`;
+      for (const row of rows) {
+        if (row.key.startsWith(prefix)) {
+          result[row.key.slice(prefix.length)] = row.value;
+        }
+      }
     }
 
     return c.json(result);
