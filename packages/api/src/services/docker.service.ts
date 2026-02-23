@@ -150,10 +150,9 @@ export class DockerService {
                 Retries: opts.healthCheck.retries,
               }
             : undefined,
-          // Security hardening (opt-out for database/stateful images via readOnly: false)
-          ReadOnly: opts.readOnly !== false,
-          ...(opts.user !== undefined ? { User: opts.user } : opts.readOnly !== false ? { User: '1000' } : {}),
-          CapabilityDrop: ['ALL'],
+          // Security: only apply ReadOnly / custom User when explicitly requested
+          ...(opts.readOnly === true ? { ReadOnly: true } : {}),
+          ...(opts.user !== undefined ? { User: opts.user } : {}),
         },
         Resources: {
           Limits: {

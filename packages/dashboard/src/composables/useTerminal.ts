@@ -165,10 +165,18 @@ export function useTerminal() {
       // onerror is always followed by onclose, handle reconnection there
     }
 
-    ws.onclose = () => {
+    ws.onclose = (evt) => {
       connectionState.value = 'disconnected'
 
       if (intentionalClose) return
+
+      // Permanent errors — don't retry, show the reason
+      const permanentCodes = [4001, 4003, 4004, 4029]
+      if (permanentCodes.includes(evt.code)) {
+        const reason = evt.reason || 'Connection refused'
+        terminal?.writeln(`\r\n\x1b[31m${reason}\x1b[0m`)
+        return
+      }
 
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         const delay = everConnected

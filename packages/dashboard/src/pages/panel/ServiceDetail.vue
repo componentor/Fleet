@@ -519,12 +519,19 @@ const dockerStatus = computed(() => service.value?.dockerStatus ?? null)
 const failedTasks = computed(() => {
   if (!dockerStatus.value?.tasks) return []
   return dockerStatus.value.tasks
-    .filter((t: any) => t.status === 'failed')
+    .filter((t: any) => t.status === 'failed' || t.status === 'rejected')
+    .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+})
+
+const pendingTasks = computed(() => {
+  if (!dockerStatus.value?.tasks) return []
+  return dockerStatus.value.tasks
+    .filter((t: any) => ['pending', 'assigned', 'accepted', 'preparing', 'starting', 'new'].includes(t.status))
     .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 })
 
 const failureReason = computed(() => {
-  if (service.value?.status !== 'failed' || failedTasks.value.length === 0) return null
+  if (failedTasks.value.length === 0) return null
   const latest = failedTasks.value[0]
   const parts: string[] = []
   if (latest.error) {
@@ -1246,12 +1253,30 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- Deploying progress -->
+          <div v-if="service.status === 'deploying' && pendingTasks.length > 0 && failedTasks.length === 0" class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-5">
+            <div class="flex items-start gap-3">
+              <Loader2 class="w-5 h-5 text-yellow-500 dark:text-yellow-400 shrink-0 mt-0.5 animate-spin" />
+              <div class="min-w-0 flex-1">
+                <h3 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200">Service is deploying</h3>
+                <p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">Waiting for containers to start...</p>
+                <div class="mt-3 space-y-2">
+                  <div v-for="task in pendingTasks.slice(0, 5)" :key="task.id" class="flex items-center gap-3 text-xs text-yellow-700 dark:text-yellow-300 bg-yellow-100/50 dark:bg-yellow-900/30 rounded-lg px-3 py-2">
+                    <span class="font-mono shrink-0">{{ task.id.slice(0, 12) }}</span>
+                    <span class="capitalize">{{ task.status }}</span>
+                    <span v-if="task.message" class="truncate text-yellow-600 dark:text-yellow-400">{{ task.message }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Failure alert -->
-          <div v-if="service.status === 'failed' && failedTasks.length > 0" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-5">
+          <div v-if="failedTasks.length > 0" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-5">
             <div class="flex items-start gap-3">
               <XCircle class="w-5 h-5 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
               <div class="min-w-0 flex-1">
-                <h3 class="text-sm font-semibold text-red-800 dark:text-red-200">Service failed to start</h3>
+                <h3 class="text-sm font-semibold text-red-800 dark:text-red-200">{{ service.status === 'failed' ? 'Service failed to start' : 'Task failures detected' }}</h3>
                 <p class="text-sm text-red-700 dark:text-red-300 mt-1">{{ failureReason }}</p>
                 <div class="mt-3 space-y-2">
                   <p class="text-xs font-medium text-red-600 dark:text-red-400 uppercase">Recent failed tasks ({{ failedTasks.length }})</p>

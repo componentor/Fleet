@@ -299,9 +299,6 @@ export class TemplateService {
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
 
-    // Images that need writable filesystem and default user (not UID 1000)
-    const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
-
     const createdServices: Array<{
       id: string;
       name: string;
@@ -362,8 +359,6 @@ export class TemplateService {
       try {
         const swarmName = serviceNameMap[svcDef.name]!;
 
-        const needsWritable = IMAGE_NEEDS_WRITABLE.test(image);
-
         const result = await dockerService.createService({
           name: swarmName,
           image,
@@ -385,8 +380,6 @@ export class TemplateService {
           },
           constraints: [],
           networkId,
-          readOnly: !needsWritable,
-          user: needsWritable ? undefined : '1000',
           updateParallelism: 1,
           updateDelay: '10s',
           rollbackOnFailure: true,

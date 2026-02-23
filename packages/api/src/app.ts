@@ -740,10 +740,20 @@ api.get(
             return;
           }
 
-          const result = await dockerService.execInContainer(
-            targetContainer,
-            ['/bin/sh'],
-          );
+          // Try multiple shells — some images only have bash or ash
+          let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
+          for (const shell of ['/bin/sh', '/bin/bash', '/bin/ash']) {
+            try {
+              result = await dockerService.execInContainer(targetContainer, [shell]);
+              break;
+            } catch {
+              // Try next shell
+            }
+          }
+          if (!result) {
+            ws.close(4004, 'No shell available in container');
+            return;
+          }
           dockerStream = result.stream as import('node:stream').Duplex;
           execId = result.execId;
 

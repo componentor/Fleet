@@ -18,9 +18,6 @@ import { processDeploymentInline, type DeploymentJobData } from '../workers/depl
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
-// Images that need writable filesystem and default user (not UID 1000)
-const IMAGE_NEEDS_WRITABLE = /postgres|mysql|mariadb|mongo|redis|valkey|clickhouse|nextcloud|wordpress|ghost|strapi|gitea|n8n|minio|vaultwarden|uptime-kuma|directus|supabase|hasura|appwrite|pocketbase/i;
-
 /**
  * Get the container disk size limit for an account (in MB).
  * Returns the account-specific override, or the global default, or undefined (no limit).
@@ -606,6 +603,8 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
             newStatus = 'failed';
           } else if (svc.status === 'deploying' && tasks.running > 0) {
             newStatus = 'running';
+          } else if (svc.status === 'deploying' && tasks.running === 0 && tasks.failed > 0) {
+            newStatus = 'failed';
           }
         }
 
@@ -733,8 +732,6 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     const networkId = await dockerService.ensureNetwork(networkName);
 
     const swarmServiceName = `fleet-${accountId}-${data.name}`;
-
-    const needsWritable = IMAGE_NEEDS_WRITABLE.test(data.image);
     const storageLimitMb = await getContainerDiskLimit(accountId);
 
     const result = await dockerService.createService({
@@ -763,8 +760,6 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       updateDelay: data.updateDelay,
       rollbackOnFailure: data.rollbackOnFailure,
       networkId,
-      readOnly: !needsWritable,
-      user: needsWritable ? undefined : '1000',
       storageLimitMb,
     });
 
@@ -772,12 +767,12 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       .update(services)
       .set({
         dockerServiceId: result.id,
-        status: 'running',
+        status: 'deploying',
         updatedAt: new Date(),
       })
       .where(eq(services.id, svc.id));
 
-    const response: Record<string, unknown> = { ...svc, dockerServiceId: result.id, status: 'running' };
+    const response: Record<string, unknown> = { ...svc, dockerServiceId: result.id, status: 'deploying' };
     if (webhookWarning) response.warning = webhookWarning;
     eventService.log({
       ...eventContext(c),
@@ -839,6 +834,8 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
         correctedStatus = 'failed';
       } else if (svc.status === 'deploying' && runningTasks > 0) {
         correctedStatus = 'running';
+      } else if (svc.status === 'deploying' && runningTasks === 0 && failedTasks > 0) {
+        correctedStatus = 'failed';
       }
     } catch {
       // Docker service doesn't exist anymore — correct the DB
@@ -1166,13 +1163,12 @@ serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
   }
 
   try {
-    // Force update triggers a rolling restart — also fix ReadOnly/User if needed
-    const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc.image);
+    // Force update triggers a rolling restart
     await dockerService.updateService(svc.dockerServiceId, {
       image: svc.image,
-      readOnly: !needsWritable,
-      ...(needsWritable ? {} : { user: '1000' }),
     });
+
+    await invalidateCache(`GET:/services:${accountId}`);
 
     eventService.log({
       ...eventContext(c),
@@ -1288,7 +1284,6 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       constraints.push(`node.id == ${svc!.nodeConstraint}`);
     }
 
-    const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc!.image);
     const storageLimitMb = await getContainerDiskLimit(accountId!);
 
     const result = await dockerService.createService({
@@ -1317,8 +1312,6 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       updateDelay: svc!.updateDelay ?? '10s',
       rollbackOnFailure: svc!.rollbackOnFailure ?? true,
       networkId,
-      readOnly: !needsWritable,
-      user: needsWritable ? undefined : '1000',
       storageLimitMb,
     });
 
@@ -1332,12 +1325,9 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       // Check if the Docker service still exists in Swarm
       try {
         await dockerService.inspectService(dockerSvcId);
-        // Exists — force re-pull the image and fix container spec if needed
-        const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc.image);
+        // Exists — force re-pull the image
         await dockerService.updateService(dockerSvcId, {
           image: svc.image,
-          readOnly: !needsWritable,
-          ...(needsWritable ? {} : { user: '1000' }),
         });
       } catch {
         // Docker service is gone — create a new one
@@ -1541,7 +1531,6 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
         constraints.push(`node.id == ${svc.nodeConstraint}`);
       }
 
-      const needsWritable = IMAGE_NEEDS_WRITABLE.test(svc.image);
       const storageLimitMb = await getContainerDiskLimit(accountId);
 
       const result = await dockerService.createService({
@@ -1570,14 +1559,12 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
         updateDelay: svc.updateDelay ?? '10s',
         rollbackOnFailure: svc.rollbackOnFailure ?? true,
         networkId,
-        readOnly: !needsWritable,
-        user: needsWritable ? undefined : '1000',
         storageLimitMb,
       });
 
       await db
         .update(services)
-        .set({ dockerServiceId: result.id, status: 'running', stoppedAt: null, updatedAt: new Date() })
+        .set({ dockerServiceId: result.id, status: 'deploying', stoppedAt: null, updatedAt: new Date() })
         .where(eq(services.id, serviceId));
 
       await invalidateCache(`GET:/services:${accountId}`);
@@ -1605,7 +1592,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
 
   await db
     .update(services)
-    .set({ status: 'running', stoppedAt: null, updatedAt: new Date() })
+    .set({ status: 'deploying', stoppedAt: null, updatedAt: new Date() })
     .where(eq(services.id, serviceId));
 
   await invalidateCache(`GET:/services:${accountId}`);
@@ -1886,6 +1873,8 @@ serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
       results.push({ id: svc.id, name: svc.name, success: false });
     }
   }
+
+  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
