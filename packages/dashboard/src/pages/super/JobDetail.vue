@@ -153,9 +153,9 @@ onMounted(() => {
     <template v-else>
       <!-- Job header card -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-6">
-        <div class="flex items-start justify-between">
-          <div>
-            <div class="flex items-center gap-3 mb-2">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-3 mb-2">
               <h1 class="text-xl font-bold text-gray-900 dark:text-white">{{ t('jobs.jobDetail') }}</h1>
               <span :class="['inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full', statusColor(job.status)]">
                 <component :is="statusIcon(job.status)" class="w-3.5 h-3.5" />
@@ -163,13 +163,13 @@ onMounted(() => {
               </span>
             </div>
             <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600 dark:text-gray-400">
-              <span><span class="font-medium text-gray-700 dark:text-gray-300">{{ t('jobs.jobId') }}:</span> {{ job.id }}</span>
+              <span class="break-all"><span class="font-medium text-gray-700 dark:text-gray-300">{{ t('jobs.jobId') }}:</span> {{ job.id }}</span>
               <span><span class="font-medium text-gray-700 dark:text-gray-300">{{ t('jobs.queue') }}:</span> <span class="capitalize">{{ job.queue ?? queue }}</span></span>
               <span v-if="job.name"><span class="font-medium text-gray-700 dark:text-gray-300">{{ t('jobs.jobName') }}:</span> {{ job.name }}</span>
               <span v-if="job.attempts != null"><span class="font-medium text-gray-700 dark:text-gray-300">{{ t('jobs.attempts') }}:</span> {{ job.attempts }}</span>
             </div>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
             <button
               v-if="job.status === 'failed'"
               @click="retryJob"

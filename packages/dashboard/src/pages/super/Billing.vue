@@ -391,18 +391,18 @@ onMounted(() => { fetchAll() })
       </div>
 
       <!-- Section 2: Plan Tiers -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
-        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="min-w-0">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.planTiers') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.planTiersDesc') }}</p>
           </div>
-          <div class="flex gap-2">
-            <button @click="syncAllPlans" :disabled="syncing" class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors">
-              <RefreshCw :class="['w-4 h-4', syncing ? 'animate-spin' : '']" /> {{ t('super.billing.syncAllStripe') }}
+          <div class="flex gap-2 shrink-0">
+            <button @click="syncAllPlans" :disabled="syncing" class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors whitespace-nowrap">
+              <RefreshCw :class="['w-4 h-4 shrink-0', syncing ? 'animate-spin' : '']" /> {{ t('super.billing.syncAllStripe') }}
             </button>
-            <button @click="openPlanForm()" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors">
-              <Plus class="w-4 h-4" /> {{ t('super.billing.addPlan') }}
+            <button @click="openPlanForm()" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors whitespace-nowrap">
+              <Plus class="w-4 h-4 shrink-0" /> {{ t('super.billing.addPlan') }}
             </button>
           </div>
         </div>
@@ -410,8 +410,8 @@ onMounted(() => { fetchAll() })
         <!-- Plan form modal -->
         <div v-if="showPlanForm" class="p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750">
           <form @submit.prevent="savePlan" class="space-y-4">
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div class="col-span-2">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div class="sm:col-span-2">
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.planName') }}</label>
                 <input v-model="planForm.name" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
@@ -424,7 +424,7 @@ onMounted(() => { fetchAll() })
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               <div>
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.cpuLimit') }}</label>
                 <input v-model.number="planForm.cpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
@@ -446,7 +446,7 @@ onMounted(() => { fetchAll() })
                 <input v-model.number="planForm.bandwidthLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
             </div>
-            <div class="flex items-center gap-4">
+            <div class="flex flex-wrap items-center gap-4">
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                 <input type="checkbox" v-model="planForm.isFree" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> {{ t('super.billing.freeTier') }}
               </label>
@@ -481,14 +481,14 @@ onMounted(() => { fetchAll() })
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-for="plan in plans" :key="plan.id" :class="!plan.visible ? 'opacity-50' : ''">
-                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium">
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium whitespace-nowrap">
                   {{ plan.name }}
                   <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">{{ t('super.billing.free') }}</span>
                   <span v-if="plan.isDefault" class="ml-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded">{{ t('super.billing.default') }}</span>
                 </td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ plan.slug }}</td>
-                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ formatCents(plan.priceCents) }}/mo</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono whitespace-nowrap">{{ plan.slug }}</td>
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">{{ formatCents(plan.priceCents) }}/mo</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
                 <td class="px-6 py-4">
                   <span :class="plan.stripeProductId ? 'text-green-600 dark:text-green-400' : 'text-gray-400'" class="text-xs font-medium">
                     {{ plan.stripeProductId ? t('super.billing.synced') : t('super.billing.notSynced') }}

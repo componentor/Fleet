@@ -133,7 +133,7 @@ onUnmounted(() => {
 <template>
   <div>
     <!-- Header -->
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <Bug class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.errors.title') }}</h1>

@@ -189,7 +189,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-wrap items-center justify-between gap-y-3 mb-6">
       <div class="flex items-center gap-3">
         <ScrollText class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
