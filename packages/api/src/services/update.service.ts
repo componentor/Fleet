@@ -645,6 +645,15 @@ export class UpdateService {
         checkedAt: new Date().toISOString(),
       };
 
+      // Also clear Valkey cache so new containers don't read stale available=true
+      try {
+        const valkey = await getValkey();
+        if (valkey) {
+          await valkey.del('fleet:update-notification');
+          await valkey.del('fleet:update-check-lock');
+        }
+      } catch { /* non-critical */ }
+
       // 10. Update fleet_api LAST. This will trigger a rolling restart that kills
       //     this container. We do NOT wait for convergence — Docker handles it.
       //     The new container starts with 'completed' state already persisted.
@@ -989,7 +998,18 @@ export class UpdateService {
         }
       }
 
-      await this.checkForUpdates();
+      // Respect the includeRcReleases setting (same as the /check endpoint)
+      let includePrerelease = false;
+      try {
+        const rcSetting = await db.query.platformSettings.findFirst({
+          where: eq(platformSettings.key, 'updates:includeRcReleases'),
+        });
+        if (rcSetting?.value === true) {
+          includePrerelease = true;
+        }
+      } catch { /* default to stable only */ }
+
+      await this.checkForUpdates(includePrerelease);
 
       // Cache result in Valkey for other replicas
       if (valkey) {

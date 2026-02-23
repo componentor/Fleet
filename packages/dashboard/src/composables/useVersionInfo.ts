@@ -12,8 +12,8 @@ export const versionInfo = ref<{
  * Returns true if a >= b.
  */
 function isNewerOrEqual(a: string, b: string): boolean {
-  const pa = a.replace(/^v/, '').split('.').map(Number)
-  const pb = b.replace(/^v/, '').split('.').map(Number)
+  const pa = a.replace(/^v/, '').replace(/-.*$/, '').split('.').map(Number)
+  const pb = b.replace(/^v/, '').replace(/-.*$/, '').split('.').map(Number)
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const na = pa[i] ?? 0
     const nb = pb[i] ?? 0
