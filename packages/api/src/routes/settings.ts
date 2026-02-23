@@ -419,13 +419,18 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
     return c.json({ error: 'No settings provided' }, 400);
   }
 
-  if (user.isSuper && !accountId) {
+  // Allowlist for platform setting keys to prevent arbitrary setting injection
+  const ALLOWED_PLATFORM_PREFIXES = [
+    'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
+    'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
+    'updates:',
+  ];
+
+  // Detect if any keys are platform-scoped (super admin settings page sends platform:* keys even with an account selected)
+  const isPlatformUpdate = user.isSuper && entries.some(([k]) => ALLOWED_PLATFORM_PREFIXES.some((p) => k.startsWith(p)));
+
+  if (isPlatformUpdate) {
     // Platform settings — only super admins
-    // Allowlist for platform setting keys to prevent arbitrary setting injection
-    const ALLOWED_PLATFORM_PREFIXES = [
-      'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
-      'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
-    ];
     const disallowedPlatformKeys = entries
       .map(([k]) => k)
       .filter((k) => !ALLOWED_PLATFORM_PREFIXES.some((p) => k.startsWith(p)));
