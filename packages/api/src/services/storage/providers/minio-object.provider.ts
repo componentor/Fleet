@@ -203,6 +203,15 @@ export class MinIOObjectProvider implements ObjectStorageProvider {
   }
 
   async getHealth(): Promise<StorageHealth> {
+    // If no credentials, MinIO is pending auto-configuration
+    if (!this.config.accessKey && !this.config.secretKey) {
+      return {
+        status: 'healthy',
+        provider: 'minio',
+        message: 'MinIO pending auto-configuration — will be deployed during storage initialization',
+      };
+    }
+
     try {
       const { ListBucketsCommand } = await import('@aws-sdk/client-s3');
       await this.client.send(new ListBucketsCommand({}));

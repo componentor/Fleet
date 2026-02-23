@@ -220,6 +220,12 @@ class StorageManager {
   // ── Health ──────────────────────────────────────────────────────────────
 
   async getHealth(): Promise<{ volumes: StorageHealth; objects: StorageHealth }> {
+    if (!this.initialized || !this.volumeProvider || !this.objectProvider) {
+      return {
+        volumes: { status: 'error', provider: 'unknown', message: 'Storage manager not initialized' },
+        objects: { status: 'error', provider: 'unknown', message: 'Storage manager not initialized' },
+      };
+    }
     const [volumeHealth, objectHealth] = await Promise.all([
       this.volumeProvider.getHealth(),
       this.objectProvider.getHealth(),

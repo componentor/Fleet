@@ -7,8 +7,10 @@ import {
   storageVolumes,
   storageMigrations,
   eq,
+  and,
   isNull,
   insertReturning,
+  updateReturning,
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { storageManager } from '../services/storage/storage-manager.js';
@@ -270,6 +272,32 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
 
   const cluster = await db.query.storageClusters.findFirst();
 
+  // Check for existing node with same hostname + IP (prevents duplicates on retry)
+  const existing = await db.query.storageNodes.findFirst({
+    where: and(
+      eq(storageNodes.hostname, data.hostname),
+      eq(storageNodes.ipAddress, data.ipAddress),
+    ),
+  });
+
+  if (existing) {
+    // Update existing node instead of creating a duplicate
+    const [updated] = await updateReturning(
+      storageNodes,
+      {
+        clusterId: cluster?.id ?? null,
+        nodeId: data.nodeId ?? null,
+        role: data.role,
+        storagePathRoot: data.storagePathRoot,
+        capacityGb: data.capacityGb ?? null,
+        status: 'pending',
+        updatedAt: new Date(),
+      },
+      eq(storageNodes.id, existing.id),
+    );
+    return c.json(updated, 200);
+  }
+
   const [node] = await insertReturning(storageNodes, {
     clusterId: cluster?.id ?? null,
     nodeId: data.nodeId ?? null,
@@ -282,6 +310,29 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
   });
 
   return c.json(node, 201);
+}) as any);
+
+// DELETE /nodes — Remove all storage nodes (cleanup/reset)
+const deleteAllNodesRoute = createRoute({
+  method: 'delete',
+  path: '/nodes',
+  tags: ['Storage Admin'],
+  summary: 'Remove all storage nodes',
+  security: bearerSecurity,
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'All storage nodes removed'),
+  },
+});
+
+storageAdmin.openapi(deleteAllNodesRoute, (async (c: any) => {
+  const all = await db.query.storageNodes.findMany();
+  if (all.length > 0) {
+    for (const node of all) {
+      await db.delete(storageNodes).where(eq(storageNodes.id, node.id));
+    }
+  }
+  return c.json({ message: `Removed ${all.length} storage node(s)` });
 }) as any);
 
 // DELETE /nodes/:id — Remove a storage node
