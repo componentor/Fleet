@@ -149,6 +149,35 @@ const latestDeployment = ref<any>(null)
 const deploymentPolling = ref<ReturnType<typeof setInterval> | null>(null)
 const showSuccessBanner = ref(false)
 
+// Service status polling — polls service detail while deploying to track Docker task state
+let statusPolling: ReturnType<typeof setInterval> | null = null
+
+function startStatusPolling() {
+  stopStatusPolling()
+  statusPolling = setInterval(async () => {
+    try {
+      service.value = await api.get(`/services/${serviceId}`)
+      const s = service.value as any
+      if (s?.status !== 'deploying' && s?.status !== 'building') {
+        stopStatusPolling()
+        if (s?.status === 'running') {
+          toast.success('Service is now running')
+          if (activeTab.value === 'overview') startStatsPolling()
+        } else if (s?.status === 'failed') {
+          toast.error('Service deployment failed')
+        }
+      }
+    } catch { /* ignore */ }
+  }, 4000)
+}
+
+function stopStatusPolling() {
+  if (statusPolling) {
+    clearInterval(statusPolling)
+    statusPolling = null
+  }
+}
+
 const progressSteps = [
   { key: 'queued', label: 'Queued' },
   { key: 'cloning', label: 'Cloning' },
@@ -687,6 +716,7 @@ async function startService() {
   try {
     await api.post(`/services/${serviceId}/start`, {})
     await fetchService()
+    if (service.value?.status === 'deploying') startStatusPolling()
   } catch {
     toast.error(t('service.startFailed', 'Failed to start service'))
   } finally {
@@ -699,6 +729,7 @@ async function restartService() {
   try {
     await api.post(`/services/${serviceId}/restart`, {})
     await fetchService()
+    if (service.value?.status === 'deploying') startStatusPolling()
   } catch {
     toast.error(t('service.restartFailed', 'Failed to restart service'))
   } finally {
@@ -721,6 +752,10 @@ async function redeployService() {
         latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
         deployStream.start(newDeploymentId)
       }
+    }
+    // Always start status polling to track Docker task state transitions
+    if (service.value?.status === 'deploying') {
+      startStatusPolling()
     }
   } catch {
     toast.error(t('service.redeployFailed', 'Failed to redeploy service'))
@@ -1089,8 +1124,9 @@ onMounted(async () => {
     startStatsPolling()
   }
   // Start deployment polling if service is deploying
-  if (service.value?.status === 'deploying') {
+  if (service.value?.status === 'deploying' || service.value?.status === 'building') {
     startDeploymentPolling()
+    startStatusPolling()
   }
   // Load latest deployment for progress stepper
   await pollLatestDeployment()
@@ -1103,6 +1139,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopStatsPolling()
   stopDeploymentPolling()
+  stopStatusPolling()
   deployStream.stop()
 })
 </script>
