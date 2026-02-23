@@ -86,11 +86,12 @@ updateRoutes.get('/releases', async (c) => {
   }
 });
 
-// PATCH /settings — update update-related settings (RC toggle, auto-check)
+// PATCH /settings — update update-related settings (RC toggle, auto-check, backup)
 updateRoutes.patch('/settings', async (c) => {
   const schema = z.object({
     includeRcReleases: z.boolean().optional(),
     autoCheckEnabled: z.boolean().optional(),
+    backupBeforeUpdate: z.boolean().optional(),
   });
 
   const body = await c.req.json();
@@ -127,6 +128,16 @@ updateRoutes.patch('/settings', async (c) => {
     updates.autoCheckEnabled = parsed.data.autoCheckEnabled;
   }
 
+  if (parsed.data.backupBeforeUpdate !== undefined) {
+    await upsert(
+      platformSettings,
+      { key: 'updates:backupBeforeUpdate', value: parsed.data.backupBeforeUpdate },
+      platformSettings.key,
+      { value: parsed.data.backupBeforeUpdate, updatedAt: new Date() },
+    );
+    updates.backupBeforeUpdate = parsed.data.backupBeforeUpdate;
+  }
+
   return c.json({ message: 'Update settings saved', ...updates });
 });
 
@@ -138,10 +149,14 @@ updateRoutes.get('/settings', async (c) => {
   const autoCheckSetting = await db.query.platformSettings.findFirst({
     where: eq(platformSettings.key, 'updates:autoCheckEnabled'),
   });
+  const backupSetting = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'updates:backupBeforeUpdate'),
+  });
 
   return c.json({
     includeRcReleases: rcSetting?.value === true,
     autoCheckEnabled: autoCheckSetting?.value !== false, // default true
+    backupBeforeUpdate: backupSetting?.value !== false, // default true
   });
 });
 
@@ -194,6 +209,7 @@ updateRoutes.get('/status', async (c) => {
 updateRoutes.post('/perform', async (c) => {
   const schema = z.object({
     version: z.string().min(1),
+    skipBackup: z.boolean().optional().default(false),
   });
 
   const body = await c.req.json();
@@ -202,7 +218,21 @@ updateRoutes.post('/perform', async (c) => {
     return c.json({ error: 'version is required' }, 400);
   }
 
-  const { version } = parsed.data;
+  const { version, skipBackup: skipBackupParam } = parsed.data;
+
+  // Resolve skipBackup: explicit request param > platform setting > default (false)
+  let skipBackup = skipBackupParam;
+  if (!skipBackup) {
+    try {
+      const backupSetting = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, 'updates:backupBeforeUpdate'),
+      });
+      // If the setting is explicitly false, skip backup
+      if (backupSetting?.value === false) {
+        skipBackup = true;
+      }
+    } catch { /* default to not skipping */ }
+  }
 
   // Pre-flight: verify database is accessible
   const dbCheck = await verifyDatabase();
@@ -217,6 +247,7 @@ updateRoutes.post('/perform', async (c) => {
       version,
       () => runMigrations(),
       () => runSeeders(),
+      { skipBackup },
     )
     .catch((err) => {
       logger.error({ err }, 'Update failed');

@@ -364,19 +364,25 @@ adminRoutes.get('/status', async (c) => {
 
   // --- Docker Swarm ---
   let docker: { status: string; nodes: number; managers: number; workers: number } | null = null;
+  let dockerNodeList: any[] = [];
   try {
     const swarm = await dockerService.getSwarmInfo();
-    const dockerNodes = await dockerService.listNodes();
-    const managers = dockerNodes.filter((n: any) => n.Spec?.Role === 'manager').length;
+    dockerNodeList = await dockerService.listNodes();
+    const managers = dockerNodeList.filter((n: any) => n.Spec?.Role === 'manager').length;
     docker = {
       status: 'connected',
-      nodes: dockerNodes.length,
+      nodes: dockerNodeList.length,
       managers,
-      workers: dockerNodes.length - managers,
+      workers: dockerNodeList.length - managers,
     };
   } catch {
     docker = { status: 'disconnected', nodes: 0, managers: 0, workers: 0 };
   }
+
+  // Build a lookup from Docker node ID → Docker node info
+  const dockerNodeMap = new Map<string, any>(
+    dockerNodeList.map((n: any) => [n.ID as string, n]),
+  );
 
   // --- Nodes from DB (paginated) ---
   const nodesPage = Math.max(1, parseInt(c.req.query('nodesPage') ?? '1', 10));
@@ -384,15 +390,29 @@ adminRoutes.get('/status', async (c) => {
   const nodesOffset = (nodesPage - 1) * nodesLimit;
   const allNodes = await db.query.nodes.findMany({ limit: nodesLimit, offset: nodesOffset });
   const fiveMinAgo = new Date(Date.now() - 5 * 60_000);
-  const nodeStatuses = allNodes.map((n) => ({
-    id: n.id,
-    hostname: n.hostname,
-    ipAddress: n.ipAddress,
-    role: n.role,
-    status: n.status,
-    healthy: !!n.lastHeartbeat && new Date(n.lastHeartbeat) > fiveMinAgo,
-    lastHeartbeat: n.lastHeartbeat,
-  }));
+  const nodeStatuses = allNodes.map((n) => {
+    const dockerNode = n.dockerNodeId ? dockerNodeMap.get(n.dockerNodeId) ?? null : null;
+    const dockerState = dockerNode?.Status?.State as string | undefined; // "ready" | "down" | "disconnected"
+    const heartbeatHealthy = !!n.lastHeartbeat && new Date(n.lastHeartbeat) > fiveMinAgo;
+    // Node is healthy if Docker says "ready" OR heartbeat is recent
+    const healthy = dockerState === 'ready' || heartbeatHealthy;
+    // Derive effective status: prefer Docker Swarm state over stale DB status
+    let effectiveStatus = n.status;
+    if (dockerState === 'ready' && n.status === 'offline') {
+      effectiveStatus = 'active';
+    } else if ((dockerState === 'down' || dockerState === 'disconnected') && n.status === 'active') {
+      effectiveStatus = 'offline';
+    }
+    return {
+      id: n.id,
+      hostname: n.hostname,
+      ipAddress: n.ipAddress,
+      role: n.role,
+      status: effectiveStatus,
+      healthy,
+      lastHeartbeat: n.lastHeartbeat,
+    };
+  });
 
   // --- Services breakdown (use counts instead of loading all records) ---
   const statusPage = Math.max(1, parseInt(c.req.query('servicesPage') ?? '1', 10));

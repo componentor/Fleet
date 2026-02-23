@@ -399,6 +399,7 @@ export class UpdateService {
     targetVersion: string,
     runMigrations: () => Promise<{ applied: number }>,
     runSeeders: () => Promise<{ executed: number }>,
+    options?: { skipBackup?: boolean },
   ): Promise<void> {
     // Reset state so UI can see what's happening immediately
     this.state.log = '';
@@ -442,13 +443,13 @@ export class UpdateService {
     await this.persistState();
 
     try {
-      // 0. Pre-update backup (required, 90s hard timeout)
+      // 0. Pre-update backup (controlled by dashboard setting)
       // If the backup fails or times out, the update STOPS. The admin can use
-      // Reset to abort and retry, or set SKIP_UPDATE_BACKUP=1 to bypass.
+      // Reset to abort and retry, or toggle "Create backup before updating" off in Update Settings.
       if (signal.aborted) throw new Error('Update aborted by admin');
-      const skipBackup = process.env['SKIP_UPDATE_BACKUP'] === '1';
+      const skipBackup = options?.skipBackup ?? false;
       if (skipBackup) {
-        this.appendLog('SKIP_UPDATE_BACKUP=1 — skipping pre-update backup.');
+        this.appendLog('Skipping pre-update backup (user opted out).');
       } else {
         this.appendLog('Creating pre-update database backup...');
         await Promise.race([
@@ -639,10 +640,10 @@ export class UpdateService {
       // It gets cleared in recoverFromInterruptedUpdate().
       this.events.emit('update', this.state);
 
-      // Refresh the notification cache
+      // Refresh the notification cache (use cleanVersion without 'v' prefix)
       this.cachedNotification = {
         available: false,
-        current: targetVersion,
+        current: cleanVersion,
         latest: this.cachedNotification.latest,
         checkedAt: new Date().toISOString(),
       };

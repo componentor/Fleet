@@ -38,6 +38,9 @@ const updateState = ref<any>({ status: 'idle' })
 // DB status
 const dbStatus = ref<any>(null)
 
+// Backup toggle (loaded from platform settings, default: true)
+const backupBeforeUpdate = ref(true)
+
 const statusLabels: Record<string, string> = {
   'checking': 'Checking for updates...',
   'backing-up': 'Creating pre-update backup...',
@@ -80,6 +83,7 @@ async function fetchAll() {
     ])
     includeRcReleases.value = settingsData.includeRcReleases ?? false
     autoCheckEnabled.value = settingsData.autoCheckEnabled ?? true
+    backupBeforeUpdate.value = settingsData.backupBeforeUpdate !== false
     updateState.value = statusData
     releases.value = releasesData.releases ?? []
     rcEnabled.value = releasesData.rcEnabled ?? false
@@ -115,7 +119,8 @@ async function checkForUpdates() {
 }
 
 async function performUpdate(version: string) {
-  if (!confirm(`Are you sure you want to update to ${version}? This will perform a rolling update.`)) return
+  const backupNote = backupBeforeUpdate.value ? '' : '\n\nWARNING: Pre-update backup is DISABLED in settings.'
+  if (!confirm(`Are you sure you want to update to ${version}? This will perform a rolling update.${backupNote}`)) return
   updating.value = true
   error.value = ''
   try {
@@ -199,6 +204,7 @@ async function saveSettings() {
     await api.patch('/updates/settings', {
       includeRcReleases: includeRcReleases.value,
       autoCheckEnabled: autoCheckEnabled.value,
+      backupBeforeUpdate: backupBeforeUpdate.value,
     })
     success.value = 'Update settings saved'
     setTimeout(() => { success.value = '' }, 3000)
@@ -228,7 +234,12 @@ function startPolling() {
       }
       if (state.status === 'completed' || state.status === 'failed') {
         stopPolling()
-        await fetchAll()
+        // Use version from the completed status directly (more reliable than notification during API restart)
+        if (state.status === 'completed' && state.currentVersion) {
+          currentVersion.value = state.currentVersion.replace(/^v/, '')
+        }
+        // Delay fetchAll to let the API settle after fleet_api rolling restart
+        setTimeout(() => fetchAll(), 3000)
       }
     } catch { /* ignore — API may be restarting */ }
   }, 2000)
@@ -437,6 +448,13 @@ onUnmounted(() => {
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Update Settings</h2>
         </div>
         <div class="px-6 py-4 space-y-4">
+          <label class="flex items-center gap-3">
+            <input v-model="backupBeforeUpdate" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" @change="saveSettings" />
+            <div>
+              <span class="text-sm text-gray-700 dark:text-gray-300">Create backup before updating</span>
+              <p class="text-xs text-gray-500 dark:text-gray-400">Takes a database backup before each update for safe rollback</p>
+            </div>
+          </label>
           <label class="flex items-center gap-3">
             <input v-model="autoCheckEnabled" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" @change="saveSettings" />
             <span class="text-sm text-gray-700 dark:text-gray-300">Automatically check for updates</span>
