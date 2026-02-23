@@ -2,16 +2,19 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import {
   db,
+  users,
   storageClusters,
   storageNodes,
   storageVolumes,
   storageMigrations,
   eq,
   and,
+  or,
   isNull,
   insertReturning,
   updateReturning,
 } from '@fleet/db';
+import { verify } from 'argon2';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { migrationService } from '../services/storage/migration.service.js';
@@ -101,6 +104,24 @@ const addNodeSchema = z.object({
   }, 'Invalid storage path'),
   capacityGb: z.number().int().optional(),
 });
+
+const passwordConfirmSchema = z.object({
+  password: z.string().min(1),
+});
+
+/** Verify the authenticated user's password. Returns error response or null if valid. */
+async function verifyPassword(c: any): Promise<Response | null> {
+  const { password } = c.req.valid('json');
+  if (!password) return c.json({ error: 'Password confirmation required' }, 400);
+  const user = c.get('user');
+  const dbUser = await db.query.users.findFirst({
+    where: and(eq(users.id, user.userId), isNull(users.deletedAt)),
+  });
+  if (!dbUser?.passwordHash) return c.json({ error: 'Cannot verify identity' }, 400);
+  const valid = await verify(dbUser.passwordHash, password);
+  if (!valid) return c.json({ error: 'Invalid password' }, 403);
+  return null;
+}
 
 const migrateSchema = z.object({
   toProvider: z.enum(['local', 'glusterfs', 'ceph']),
@@ -272,16 +293,16 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
 
   const cluster = await db.query.storageClusters.findFirst();
 
-  // Check for existing node with same hostname + IP (prevents duplicates on retry)
-  const existing = await db.query.storageNodes.findFirst({
+  // Check for existing node with same hostname + IP (exact match = wizard retry, allow upsert)
+  const exactMatch = await db.query.storageNodes.findFirst({
     where: and(
       eq(storageNodes.hostname, data.hostname),
       eq(storageNodes.ipAddress, data.ipAddress),
     ),
   });
 
-  if (existing) {
-    // Update existing node instead of creating a duplicate
+  if (exactMatch) {
+    // Wizard retry — update existing node instead of creating a duplicate
     const [updated] = await updateReturning(
       storageNodes,
       {
@@ -293,9 +314,24 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
         status: 'pending',
         updatedAt: new Date(),
       },
-      eq(storageNodes.id, existing.id),
+      eq(storageNodes.id, exactMatch.id),
     );
     return c.json(updated, 200);
+  }
+
+  // Check for partial match (hostname OR IP already in use by another node)
+  const conflict = await db.query.storageNodes.findFirst({
+    where: or(
+      eq(storageNodes.hostname, data.hostname),
+      eq(storageNodes.ipAddress, data.ipAddress),
+    ),
+  });
+
+  if (conflict) {
+    const reason = conflict.hostname === data.hostname
+      ? `Hostname "${data.hostname}" is already attached (IP: ${conflict.ipAddress})`
+      : `IP address ${data.ipAddress} is already attached (hostname: ${conflict.hostname})`;
+    return c.json({ error: reason }, 409);
   }
 
   const [node] = await insertReturning(storageNodes, {
@@ -317,8 +353,11 @@ const deleteAllNodesRoute = createRoute({
   method: 'delete',
   path: '/nodes',
   tags: ['Storage Admin'],
-  summary: 'Remove all storage nodes',
+  summary: 'Remove all storage nodes (requires password confirmation)',
   security: bearerSecurity,
+  request: {
+    body: jsonBody(passwordConfirmSchema),
+  },
   responses: {
     ...standardErrors,
     200: jsonContent(messageResponseSchema, 'All storage nodes removed'),
@@ -326,32 +365,46 @@ const deleteAllNodesRoute = createRoute({
 });
 
 storageAdmin.openapi(deleteAllNodesRoute, (async (c: any) => {
+  const denied = await verifyPassword(c);
+  if (denied) return denied;
+
   const all = await db.query.storageNodes.findMany();
   if (all.length > 0) {
     for (const node of all) {
       await db.delete(storageNodes).where(eq(storageNodes.id, node.id));
     }
   }
-  return c.json({ message: `Removed ${all.length} storage node(s)` });
+
+  // Also reset the cluster config
+  const cluster = await db.query.storageClusters.findFirst();
+  if (cluster) {
+    await db.delete(storageClusters).where(eq(storageClusters.id, cluster.id));
+  }
+
+  return c.json({ message: `Removed ${all.length} storage node(s) and reset cluster configuration` });
 }) as any);
 
-// DELETE /nodes/:id — Remove a storage node
+// DELETE /nodes/:id — Detach a storage node (requires password confirmation)
 const deleteNodeRoute = createRoute({
   method: 'delete',
   path: '/nodes/{id}',
   tags: ['Storage Admin'],
-  summary: 'Remove a storage node',
+  summary: 'Detach a storage node (requires password confirmation)',
   security: bearerSecurity,
   request: {
     params: idParamSchema,
+    body: jsonBody(passwordConfirmSchema),
   },
   responses: {
     ...standardErrors,
-    200: jsonContent(messageResponseSchema, 'Storage node removed'),
+    200: jsonContent(messageResponseSchema, 'Storage node detached'),
   },
 });
 
 storageAdmin.openapi(deleteNodeRoute, (async (c: any) => {
+  const denied = await verifyPassword(c);
+  if (denied) return denied;
+
   const { id: nodeId } = c.req.valid('param');
   if (!uuidRe.test(nodeId)) return c.json({ error: 'Invalid node ID' }, 400);
 
@@ -378,7 +431,7 @@ storageAdmin.openapi(deleteNodeRoute, (async (c: any) => {
 
   await db.delete(storageNodes).where(eq(storageNodes.id, nodeId));
 
-  return c.json({ message: 'Storage node removed' });
+  return c.json({ message: `Storage node ${node.hostname} detached` });
 }) as any);
 
 // ── Volume Routes ──

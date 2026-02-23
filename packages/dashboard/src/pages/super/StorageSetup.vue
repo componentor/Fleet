@@ -116,7 +116,34 @@ const hasMigratableData = ref(false)
 // Step 6: Verify
 const verifyHealth = ref<any>(null)
 
+// ── Danger Zone ─────────────────────────────────────────────────────────
+const showResetConfirm = ref(false)
+const resetPassword = ref('')
+const resetting = ref(false)
+const detachingNodeId = ref<string | null>(null)
+const detachPassword = ref('')
+const detaching = ref(false)
+const showAttachNode = ref(false)
+const attachNode = ref<StorageNode>({
+  hostname: '',
+  ipAddress: '',
+  role: 'storage',
+  storagePathRoot: '/srv/fleet-storage',
+  capacityGb: null,
+  testStatus: 'pending',
+  testMessage: '',
+})
+const attaching = ref(false)
+
 // ── Computed ─────────────────────────────────────────────────────────────
+
+/** Hostnames and IPs already registered as storage nodes */
+const attachedHostnames = computed(() => new Set((clusterData.value?.nodes ?? []).map((n: any) => n.hostname)))
+const attachedIps = computed(() => new Set((clusterData.value?.nodes ?? []).map((n: any) => n.ipAddress)))
+
+function isNodeAttached(sn: any): boolean {
+  return attachedHostnames.value.has(sn.hostname) || attachedIps.value.has(sn.ipAddress)
+}
 
 const steps = computed(() => [
   { number: 1, label: t('storageSetup.stepChooseMode'), icon: Monitor },
@@ -638,6 +665,78 @@ async function rollbackActiveMigration() {
     error.value = err?.body?.error || t('storageSetup.rollbackFailed')
   }
 }
+
+// ── Danger Zone ─────────────────────────────────────────────────────────
+
+function toggleAttachForm() {
+  showAttachNode.value = !showAttachNode.value
+  if (showAttachNode.value) {
+    fetchSwarmNodes()
+  }
+}
+
+function pickSwarmNodeForAttach(sn: any) {
+  attachNode.value.hostname = sn.hostname
+  attachNode.value.ipAddress = sn.ipAddress
+  attachNode.value.role = 'storage'
+}
+
+async function resetAllNodes() {
+  if (!resetPassword.value) return
+  resetting.value = true
+  error.value = ''
+  try {
+    await api.del('/admin/storage/nodes', { password: resetPassword.value })
+    success.value = t('storageSetup.resetSuccess')
+    showResetConfirm.value = false
+    resetPassword.value = ''
+    await loadCluster()
+  } catch (err: any) {
+    error.value = err?.body?.error || t('storageSetup.resetFailed')
+  } finally {
+    resetting.value = false
+  }
+}
+
+async function detachNode(nodeId: string) {
+  if (!detachPassword.value) return
+  detaching.value = true
+  error.value = ''
+  try {
+    await api.del(`/admin/storage/nodes/${nodeId}`, { password: detachPassword.value })
+    success.value = t('storageSetup.detachSuccess')
+    detachingNodeId.value = null
+    detachPassword.value = ''
+    await loadCluster()
+  } catch (err: any) {
+    error.value = err?.body?.error || t('storageSetup.detachFailed')
+  } finally {
+    detaching.value = false
+  }
+}
+
+async function attachNewNode() {
+  if (!attachNode.value.hostname || !attachNode.value.ipAddress) return
+  attaching.value = true
+  error.value = ''
+  try {
+    await api.post('/admin/storage/nodes', {
+      hostname: attachNode.value.hostname,
+      ipAddress: attachNode.value.ipAddress,
+      role: attachNode.value.role,
+      storagePathRoot: attachNode.value.storagePathRoot,
+      capacityGb: attachNode.value.capacityGb,
+    })
+    success.value = t('storageSetup.attachSuccess')
+    showAttachNode.value = false
+    attachNode.value = { hostname: '', ipAddress: '', role: 'storage', storagePathRoot: '/srv/fleet-storage', capacityGb: null, testStatus: 'pending', testMessage: '' }
+    await loadCluster()
+  } catch (err: any) {
+    error.value = err?.body?.error || t('storageSetup.attachFailed')
+  } finally {
+    attaching.value = false
+  }
+}
 </script>
 
 <template>
@@ -755,6 +854,218 @@ async function rollbackActiveMigration() {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Danger Zone (only when storage is configured and nodes exist) -->
+      <div v-if="isConfigured || clusterData?.nodes?.length" class="bg-white dark:bg-gray-800 rounded-xl border border-red-300 dark:border-red-800 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-t-xl">
+          <h2 class="text-lg font-semibold text-red-700 dark:text-red-400">{{ t('storageSetup.dangerZone') }}</h2>
+        </div>
+        <div class="p-6 space-y-6">
+
+          <!-- Attach Node -->
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('storageSetup.attachNodeTitle') }}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('storageSetup.attachNodeDesc') }}</p>
+            </div>
+            <button
+              @click="toggleAttachForm"
+              class="shrink-0 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors"
+            >
+              <Plus class="w-4 h-4 inline -mt-0.5 mr-1" />
+              {{ t('storageSetup.attachNode') }}
+            </button>
+          </div>
+
+          <!-- Attach Node Form -->
+          <div v-if="showAttachNode" class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
+
+            <!-- Pick from existing swarm nodes -->
+            <div v-if="swarmNodes.length || loadingSwarmNodes" class="space-y-2">
+              <p class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('storageSetup.pickFromSwarm') }}</p>
+              <div v-if="loadingSwarmNodes && !swarmNodes.length" class="flex items-center gap-2 py-3 text-sm text-gray-500 dark:text-gray-400">
+                <Loader2 class="w-4 h-4 animate-spin" />
+                {{ t('storageSetup.loadingNodes') }}
+              </div>
+              <div v-else class="grid grid-cols-1 gap-2">
+                <div
+                  v-for="sn in swarmNodes"
+                  :key="sn.id"
+                  class="flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors"
+                  :class="isNodeAttached(sn)
+                    ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-primary-400 dark:hover:border-primary-600 cursor-pointer hover:bg-primary-50 dark:hover:bg-primary-900/10'"
+                  @click="!isNodeAttached(sn) && pickSwarmNodeForAttach(sn)"
+                >
+                  <Server class="w-4 h-4 text-gray-400 shrink-0" />
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ sn.hostname }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ sn.ipAddress }} &middot; {{ sn.role }}</p>
+                  </div>
+                  <span
+                    v-if="isNodeAttached(sn)"
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+                  >
+                    {{ t('storageSetup.alreadyAttached') }}
+                  </span>
+                  <Plus v-else class="w-4 h-4 text-primary-500 shrink-0" />
+                </div>
+              </div>
+            </div>
+
+            <div v-if="swarmNodes.length" class="relative">
+              <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200 dark:border-gray-700"></div></div>
+              <div class="relative flex justify-center text-xs"><span class="bg-white dark:bg-gray-800 px-2 text-gray-500 dark:text-gray-400">{{ t('storageSetup.manualEntry') }}</span></div>
+            </div>
+
+            <!-- Manual form -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.hostname') }}</label>
+                <input v-model="attachNode.hostname" type="text" placeholder="node-4" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.ipAddress') }}</label>
+                <input v-model="attachNode.ipAddress" type="text" placeholder="10.0.1.4" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.role') }}</label>
+                <select v-model="attachNode.role" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm">
+                  <option value="storage">{{ t('storageSetup.roleStorageOnly') }}</option>
+                  <option value="storage+compute">{{ t('storageSetup.roleStorageCompute') }}</option>
+                  <option value="arbiter">{{ t('storageSetup.roleArbiter') }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('storageSetup.storagePath') }}</label>
+                <input v-model="attachNode.storagePathRoot" type="text" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm" />
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                @click="attachNewNode"
+                :disabled="attaching || !attachNode.hostname || !attachNode.ipAddress"
+                class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="attaching" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+                {{ attaching ? t('common.saving') : t('storageSetup.attachNode') }}
+              </button>
+              <button @click="showAttachNode = false" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                {{ t('common.cancel') }}
+              </button>
+            </div>
+          </div>
+
+          <hr class="border-gray-200 dark:border-gray-700" />
+
+          <!-- Detach Individual Node -->
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('storageSetup.detachNodeTitle') }}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('storageSetup.detachNodeDesc') }}</p>
+            </div>
+          </div>
+
+          <div v-if="clusterData?.nodes?.length" class="space-y-2">
+            <div
+              v-for="node in clusterData.nodes"
+              :key="node.id"
+              class="flex items-center justify-between px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50"
+            >
+              <div class="flex items-center gap-4">
+                <Server class="w-4 h-4 text-gray-400" />
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ node.hostname }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ node.ipAddress }} &middot; {{ node.role }}</p>
+                </div>
+              </div>
+              <button
+                @click="detachingNodeId = node.id; detachPassword = ''"
+                class="px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs font-medium transition-colors"
+              >
+                {{ t('storageSetup.detach') }}
+              </button>
+            </div>
+          </div>
+          <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('storageSetup.noNodesToDetach') }}</p>
+
+          <!-- Detach Confirmation Modal -->
+          <div v-if="detachingNodeId" class="border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
+            <p class="text-sm font-medium text-red-700 dark:text-red-400 mb-2">
+              {{ t('storageSetup.detachConfirmTitle', { hostname: clusterData?.nodes?.find((n: any) => n.id === detachingNodeId)?.hostname }) }}
+            </p>
+            <p class="text-sm text-red-600 dark:text-red-400/80 mb-3">{{ t('storageSetup.detachConfirmDesc') }}</p>
+            <input
+              v-model="detachPassword"
+              type="password"
+              :placeholder="t('settings.confirmPassword')"
+              class="w-full px-3 py-2 rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm mb-3"
+              @keydown.enter="detachNode(detachingNodeId!)"
+            />
+            <div class="flex items-center gap-3">
+              <button
+                @click="detachNode(detachingNodeId!)"
+                :disabled="detaching || !detachPassword"
+                class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="detaching" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+                {{ detaching ? t('storageSetup.detaching') : t('storageSetup.confirmDetach') }}
+              </button>
+              <button @click="detachingNodeId = null; detachPassword = ''" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                {{ t('common.cancel') }}
+              </button>
+            </div>
+          </div>
+
+          <hr class="border-gray-200 dark:border-gray-700" />
+
+          <!-- Reset All Storage -->
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-red-700 dark:text-red-400">{{ t('storageSetup.resetAllTitle') }}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('storageSetup.resetAllDesc') }}</p>
+            </div>
+            <button
+              @click="showResetConfirm = !showResetConfirm; resetPassword = ''"
+              class="shrink-0 px-4 py-2 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors"
+            >
+              {{ t('storageSetup.resetAll') }}
+            </button>
+          </div>
+
+          <!-- Reset Confirmation -->
+          <div v-if="showResetConfirm" class="border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
+            <div class="flex items-start gap-3 mb-3">
+              <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p class="text-sm font-medium text-red-700 dark:text-red-400">{{ t('storageSetup.resetConfirmTitle') }}</p>
+                <p class="text-sm text-red-600 dark:text-red-400/80 mt-1">{{ t('storageSetup.resetConfirmDesc') }}</p>
+              </div>
+            </div>
+            <input
+              v-model="resetPassword"
+              type="password"
+              :placeholder="t('settings.confirmPassword')"
+              class="w-full px-3 py-2 rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm mb-3"
+              @keydown.enter="resetAllNodes"
+            />
+            <div class="flex items-center gap-3">
+              <button
+                @click="resetAllNodes"
+                :disabled="resetting || !resetPassword"
+                class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="resetting" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+                {{ resetting ? t('storageSetup.resettingStorage') : t('storageSetup.confirmReset') }}
+              </button>
+              <button @click="showResetConfirm = false; resetPassword = ''" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                {{ t('common.cancel') }}
+              </button>
+            </div>
+          </div>
+
         </div>
       </div>
 
