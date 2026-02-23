@@ -24,8 +24,8 @@ function getEncryptionKey(): Buffer | null {
 
 const execFileAsync = promisify(execFile);
 
-const BACKUP_DIR = process.env['BACKUP_DIR'] ?? '/var/fleet/backups';
-const NFS_BACKUP_DIR = process.env['NFS_BACKUP_DIR'] ?? '/mnt/nfs/backups';
+const BACKUP_DIR = process.env['BACKUP_DIR'] ?? '/app/data/backups';
+const NFS_BACKUP_DIR = process.env['NFS_BACKUP_DIR'] ?? '/srv/nfs/backups';
 
 export class BackupService {
   /**
