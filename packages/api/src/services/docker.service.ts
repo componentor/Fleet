@@ -394,6 +394,48 @@ export class DockerService {
     });
   }
 
+  /**
+   * Copy data from one Docker volume to another using a temporary Alpine container.
+   * Used when a service changes its volume source to preserve data.
+   */
+  async copyVolumeData(sourceVolume: string, targetVolume: string): Promise<void> {
+    const container = await docker.createContainer({
+      Image: 'alpine:latest',
+      Cmd: ['sh', '-c', 'cp -a /source/. /target/ 2>/dev/null; true'],
+      HostConfig: {
+        Binds: [
+          `${sourceVolume}:/source:ro`,
+          `${targetVolume}:/target`,
+        ],
+      },
+    });
+    try {
+      await container.start();
+      await container.wait();
+    } finally {
+      await container.remove({ force: true }).catch(() => {});
+    }
+  }
+
+  /**
+   * Remove all data from a Docker volume by mounting it and deleting everything.
+   */
+  async cleanVolume(volumeName: string): Promise<void> {
+    const container = await docker.createContainer({
+      Image: 'alpine:latest',
+      Cmd: ['sh', '-c', 'rm -rf /vol/* /vol/.[!.]* /vol/..?* 2>/dev/null; true'],
+      HostConfig: {
+        Binds: [`${volumeName}:/vol`],
+      },
+    });
+    try {
+      await container.start();
+      await container.wait();
+    } finally {
+      await container.remove({ force: true }).catch(() => {});
+    }
+  }
+
   async getServiceLogs(
     dockerServiceId: string,
     opts: { tail?: number; since?: number; follow?: boolean } = {},

@@ -220,6 +220,19 @@ const updateStripeRoute = createRoute({
   },
 });
 
+const testStripeRoute = createRoute({
+  method: 'post',
+  path: '/stripe/test',
+  tags: ['Settings'],
+  summary: 'Test Stripe API connection (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean(), message: z.string(), accountName: z.string().optional() }), 'Stripe test result'),
+    ...standardErrors,
+  },
+});
+
 const updateEmailRoute = createRoute({
   method: 'patch',
   path: '/email',
@@ -233,6 +246,24 @@ const updateEmailRoute = createRoute({
   responses: {
     ...standardErrors,
     200: jsonContent(messageResponseSchema, 'Email configuration updated'),
+  },
+});
+
+const testEmailRoute = createRoute({
+  method: 'post',
+  path: '/email/test',
+  tags: ['Settings'],
+  summary: 'Send a test email (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(z.object({
+      to: z.string().email(),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean(), message: z.string() }), 'Test email result'),
+    ...standardErrors,
   },
 });
 
@@ -553,6 +584,34 @@ settings.openapi(updateStripeRoute, (async (c: any) => {
   return c.json({ message: 'Stripe configuration updated' });
 }) as any);
 
+// POST /stripe/test — test Stripe API connection
+settings.openapi(testStripeRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can test Stripe' }, 403);
+  }
+
+  const encryptedKey = await getSetting('stripe:secretKey');
+  if (!encryptedKey || typeof encryptedKey !== 'string') {
+    return c.json({ success: false, message: 'Stripe secret key is not configured' }, 200);
+  }
+
+  try {
+    const secretKey = decrypt(encryptedKey);
+    const { default: Stripe } = await import('stripe');
+    const stripe = new Stripe(secretKey);
+    const account = await stripe.accounts.retrieve();
+    return c.json({
+      success: true,
+      message: `Connected to Stripe successfully`,
+      accountName: account.settings?.dashboard?.display_name || account.business_profile?.name || account.id,
+    });
+  } catch (err) {
+    logger.warn({ err }, 'Stripe connection test failed');
+    return c.json({ success: false, message: `Stripe connection failed: ${(err as Error).message}` }, 200);
+  }
+}) as any);
+
 // PATCH /email
 settings.openapi(updateEmailRoute, (async (c: any) => {
   const user = c.get('user');
@@ -608,6 +667,30 @@ settings.openapi(updateEmailRoute, (async (c: any) => {
   }
 
   return c.json({ message: 'Account email configuration updated' });
+}) as any);
+
+// POST /email/test — send a test email
+settings.openapi(testEmailRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can send test emails' }, 403);
+  }
+
+  const { to } = c.req.valid('json');
+
+  try {
+    // Reset provider to pick up any recently saved config
+    emailService.resetProvider();
+    const result = await emailService.sendEmail(
+      to,
+      'Fleet Test Email',
+      '<h1>Test Email</h1><p>This is a test email from your Fleet platform. If you received this, your email configuration is working correctly.</p>',
+    );
+    return c.json({ success: true, message: `Test email sent (ID: ${result.messageId})` });
+  } catch (err) {
+    logger.warn({ err, to }, 'Test email failed');
+    return c.json({ success: false, message: `Failed to send test email: ${(err as Error).message}` }, 200);
+  }
 }) as any);
 
 // GET /registrar

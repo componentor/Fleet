@@ -267,11 +267,19 @@ domainPricingRoutes.openapi(syncRoute, (async (c: any) => {
     const provider = await registrarService.getProvider();
     const commonTlds = ['com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai', 'no', 'se', 'dk', 'fi'];
 
-    const results = await provider.searchDomains('test', commonTlds);
+    // Use a random string to avoid hitting premium domain pricing
+    const randomQuery = `fleetpricecheck${Date.now().toString(36)}`;
+    const results = await provider.searchDomains(randomQuery, commonTlds);
     let synced = 0;
+    let skippedPremium = 0;
 
     for (const result of results) {
       if (!result.price) continue;
+      // Skip premium domains — their pricing is not representative of standard TLD rates
+      if (result.premium) {
+        skippedPremium++;
+        continue;
+      }
       const tld = result.domain.split('.').slice(1).join('.');
 
       const existing = await db.query.domainTldPricing.findFirst({
@@ -312,7 +320,10 @@ domainPricingRoutes.openapi(syncRoute, (async (c: any) => {
       synced++;
     }
 
-    return c.json({ message: `Synced ${synced} TLD prices from provider` }, 200);
+    const msg = skippedPremium > 0
+      ? `Synced ${synced} TLD prices from provider (skipped ${skippedPremium} premium TLDs)`
+      : `Synced ${synced} TLD prices from provider`;
+    return c.json({ message: msg }, 200);
   } catch (err) {
     logger.error({ err }, 'Price sync failed');
     return c.json({ error: 'Failed to sync prices' }, 500);

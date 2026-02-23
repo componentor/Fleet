@@ -132,6 +132,8 @@ const domainLoading = ref(false)
 const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
 const accountVolumes = ref<Array<{ name: string; displayName: string; sizeGb: number }>>([])
 const volumeLoading = ref(false)
+const migrationFailures = ref<Array<{ source: string; target: string; mountPath: string; error: string }>>([])
+const migrateRetryLoading = ref(false)
 
 const restartPolicyLabel = computed(() => {
   const condition = service.value?.restartCondition ?? 'on-failure'
@@ -831,18 +833,43 @@ async function saveDomain() {
 
 async function saveVolumes() {
   volumeLoading.value = true
+  migrationFailures.value = []
   try {
     // Filter out incomplete volume entries
     const validVolumes = configVolumes.value.filter(v => v.source && v.target)
-    await api.patch(`/services/${serviceId}`, {
+    const result = await api.patch(`/services/${serviceId}`, {
       volumes: validVolumes,
-    })
+    }) as any
     await fetchService()
-    toast.success('Volume settings saved — redeploy to apply changes')
+    if (result?.migrationFailures?.length) {
+      migrationFailures.value = result.migrationFailures
+      toast.error('Volume saved but data migration failed — you can retry below')
+    } else {
+      toast.success('Volume settings saved')
+    }
   } catch {
     toast.error('Failed to save volume settings')
   } finally {
     volumeLoading.value = false
+  }
+}
+
+async function retryVolumeMigration(failure: { source: string; target: string; mountPath: string }, clean: boolean) {
+  migrateRetryLoading.value = true
+  try {
+    await api.post(`/services/${serviceId}/volume-migrate`, {
+      sourceVolume: failure.source,
+      targetVolume: failure.target,
+      clean,
+    })
+    migrationFailures.value = migrationFailures.value.filter(
+      f => !(f.source === failure.source && f.target === failure.target)
+    )
+    toast.success('Volume data migrated successfully')
+  } catch (err: any) {
+    toast.error(err?.body?.error || 'Volume migration failed')
+  } finally {
+    migrateRetryLoading.value = false
   }
 }
 
@@ -2390,6 +2417,24 @@ onUnmounted(() => {
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+            <!-- Migration failure banner -->
+            <div v-if="migrationFailures.length > 0" class="px-6 py-4 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
+              <p class="text-sm font-medium text-red-800 dark:text-red-300 mb-2">Volume data migration failed</p>
+              <div v-for="(fail, fi) in migrationFailures" :key="fi" class="flex items-center justify-between gap-3 py-2">
+                <div class="text-xs text-red-700 dark:text-red-400">
+                  <span class="font-mono">{{ fail.source }}</span> → <span class="font-mono">{{ fail.target }}</span>
+                  <span class="text-red-500 dark:text-red-500 ml-1">({{ fail.error }})</span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button @click="retryVolumeMigration(fail, false)" :disabled="migrateRetryLoading" class="px-2.5 py-1 rounded text-xs font-medium bg-red-100 dark:bg-red-800 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-700 disabled:opacity-50 transition-colors">
+                    Retry
+                  </button>
+                  <button @click="retryVolumeMigration(fail, true)" :disabled="migrateRetryLoading" class="px-2.5 py-1 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors">
+                    Clean &amp; Retry
+                  </button>
                 </div>
               </div>
             </div>

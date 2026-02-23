@@ -437,6 +437,27 @@ const syncServiceRoute = createRoute({
   },
 });
 
+const volumeMigrateRoute = createRoute({
+  method: 'post',
+  path: '/{id}/volume-migrate',
+  tags: ['Services'],
+  summary: 'Copy data between volumes (with optional clean)',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(z.object({
+      sourceVolume: z.string().min(1),
+      targetVolume: z.string().min(1),
+      clean: z.boolean().default(false),
+    })),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Volume data migrated'),
+    ...standardErrors,
+  },
+});
+
 const getServiceLogsRoute = createRoute({
   method: 'get',
   path: '/{id}/logs',
@@ -997,6 +1018,9 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
   // Build DB update payload (exclude autoDeploy/githubBranch from Docker update)
   const { autoDeploy: _ad, githubBranch: _gb, ...dockerFields } = data;
 
+  // Track volume migration failures to report in the response
+  const migrationFailures: Array<{ source: string; target: string; mountPath: string; error: string }> = [];
+
   // If Docker update is needed, try Docker FIRST to ensure atomicity
   if (svc.dockerServiceId && Object.keys(dockerFields).length > 0) {
     try {
@@ -1018,6 +1042,31 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
           : await allocateIngressPorts(
               dockerFields.ports.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
             );
+      }
+
+      // Volume data migration: copy data when a mount path's source volume changes
+      if (dockerFields.volumes) {
+        const oldVolumes = (svc.volumes as Array<{ source: string; target: string }>) ?? [];
+        const oldByTarget = new Map(oldVolumes.map((v) => [v.target, v.source]));
+
+        for (const newVol of dockerFields.volumes) {
+          const oldSource = oldByTarget.get(newVol.target);
+          if (oldSource && oldSource !== newVol.source) {
+            // Mount path had a different volume before — migrate data
+            try {
+              logger.info({ from: oldSource, to: newVol.source, path: newVol.target }, 'Migrating volume data');
+              await dockerService.copyVolumeData(oldSource, newVol.source);
+            } catch (err) {
+              logger.warn({ err, from: oldSource, to: newVol.source }, 'Volume data migration failed — continuing with empty volume');
+              migrationFailures.push({
+                source: oldSource,
+                target: newVol.source,
+                mountPath: newVol.target,
+                error: (err as Error).message,
+              });
+            }
+          }
+        }
       }
 
       await dockerService.updateService(svc.dockerServiceId, {
@@ -1074,7 +1123,10 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
     resourceId: serviceId,
     resourceName: svc.name,
   });
-  return c.json(updated);
+  return c.json({
+    ...updated,
+    ...(migrationFailures.length > 0 ? { migrationFailures } : {}),
+  });
 }) as any);
 
 // DELETE /:id — destroy service
@@ -1707,6 +1759,47 @@ serviceRoutes.openapi(syncServiceRoute, (async (c: any) => {
   await invalidateCache(`GET:/services:${accountId}`);
 
   return c.json({ status: newStatus, synced: true });
+}) as any);
+
+// POST /:id/volume-migrate — copy data between volumes (with optional clean)
+serviceRoutes.openapi(volumeMigrateRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: serviceId } = c.req.valid('param');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+    columns: { id: true, volumes: true },
+  });
+
+  if (!svc) {
+    return c.json({ error: 'Service not found' }, 404);
+  }
+
+  const data = c.req.valid('json');
+
+  // Verify the volumes are actually related to this service
+  const svcVolumes = (svc.volumes as Array<{ source: string; target: string }>) ?? [];
+  const knownSources = new Set(svcVolumes.map((v) => v.source));
+  if (!knownSources.has(data.sourceVolume) && !knownSources.has(data.targetVolume)) {
+    return c.json({ error: 'Neither volume is attached to this service' }, 400);
+  }
+
+  try {
+    if (data.clean) {
+      logger.info({ volume: data.targetVolume }, 'Cleaning target volume before migration');
+      await dockerService.cleanVolume(data.targetVolume);
+    }
+    logger.info({ from: data.sourceVolume, to: data.targetVolume }, 'Migrating volume data (manual retry)');
+    await dockerService.copyVolumeData(data.sourceVolume, data.targetVolume);
+    return c.json({ message: 'Volume data migrated successfully' });
+  } catch (err) {
+    logger.error({ err, from: data.sourceVolume, to: data.targetVolume }, 'Volume migration failed');
+    return c.json({ error: `Volume migration failed: ${(err as Error).message}` }, 500);
+  }
 }) as any);
 
 // GET /:id/logs — stream service logs

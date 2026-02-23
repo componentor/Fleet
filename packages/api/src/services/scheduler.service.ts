@@ -124,13 +124,13 @@ class SchedulerService {
       },
     );
 
-    // Domain price sync — weekly on Mondays at 3:30 AM UTC
+    // Domain price sync — daily at 3:30 AM UTC
     // Fetches current registrar prices and updates TLD pricing table
     await getMaintenanceQueue().add(
       'domain-price-sync',
       { type: 'domain-price-sync' },
       {
-        repeat: { pattern: '30 3 * * 1' },
+        repeat: { pattern: '30 3 * * *' },
         jobId: 'system:domain-price-sync',
       },
     );

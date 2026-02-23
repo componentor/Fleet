@@ -40,6 +40,8 @@ const stripeWebhookSecret = ref('')
 const stripeConfigured = ref(false)
 const stripeSecretKeyHint = ref('')
 const stripeWebhookSecretHint = ref('')
+const stripeTestLoading = ref(false)
+const stripeTestResult = ref<{ success: boolean; message: string } | null>(null)
 
 // Email settings
 const emailProvider = ref<'smtp' | 'resend'>('smtp')
@@ -52,6 +54,9 @@ const resendApiKey = ref('')
 const resendFrom = ref('')
 const smtpPassHint = ref('')
 const resendApiKeyHint = ref('')
+const emailTestLoading = ref(false)
+const emailTestTo = ref('')
+const emailTestResult = ref<{ success: boolean; message: string } | null>(null)
 
 // GitHub settings
 const githubClientId = ref('')
@@ -309,6 +314,15 @@ function formatCents(cents: number): string {
   return (cents / 100).toFixed(2)
 }
 
+function computeSellPriceLocal(providerPriceCents: number, markupType: string, markupValue: number): number {
+  switch (markupType) {
+    case 'percentage': return Math.ceil(providerPriceCents * (1 + markupValue / 100))
+    case 'fixed_amount': return providerPriceCents + markupValue
+    case 'fixed_price': return markupValue
+    default: return providerPriceCents
+  }
+}
+
 async function saveOneField(fieldKey: string, apiCall: () => Promise<void>, afterSave?: () => Promise<void>) {
   savingField.value = fieldKey
   error.value = ''
@@ -372,6 +386,33 @@ function saveEmailField(key: string, value: any) {
     if (key === 'resendApiKey') resendApiKey.value = ''
     await fetchSettings()
   })
+}
+
+async function testStripeConnection() {
+  stripeTestLoading.value = true
+  stripeTestResult.value = null
+  try {
+    const result = await api.post<{ success: boolean; message: string; accountName?: string }>('/settings/stripe/test', {})
+    stripeTestResult.value = result
+  } catch (err: any) {
+    stripeTestResult.value = { success: false, message: err?.body?.error || err?.message || 'Connection failed' }
+  } finally {
+    stripeTestLoading.value = false
+  }
+}
+
+async function testEmailSend() {
+  if (!emailTestTo.value) return
+  emailTestLoading.value = true
+  emailTestResult.value = null
+  try {
+    const result = await api.post<{ success: boolean; message: string }>('/settings/email/test', { to: emailTestTo.value })
+    emailTestResult.value = result
+  } catch (err: any) {
+    emailTestResult.value = { success: false, message: err?.body?.error || err?.message || 'Failed to send test email' }
+  } finally {
+    emailTestLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -597,6 +638,34 @@ onMounted(() => {
                 </button>
               </div>
             </div>
+
+            <div class="pt-3 border-t border-gray-200 dark:border-gray-700 space-y-4">
+              <div class="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p class="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">Webhook Setup</p>
+                <p class="text-xs text-blue-700 dark:text-blue-400 mb-2">
+                  To receive payment events (subscriptions, invoices, etc.), add a webhook endpoint in your
+                  <a href="https://dashboard.stripe.com/webhooks" target="_blank" class="underline font-medium">Stripe Dashboard</a>:
+                </p>
+                <div class="flex items-center gap-2 mb-2">
+                  <code class="flex-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/40 rounded text-xs font-mono text-blue-900 dark:text-blue-200 select-all break-all">
+                    https://{{ platformDomain || 'your-domain.com' }}/api/v1/billing/webhook
+                  </code>
+                </div>
+                <p class="text-xs text-blue-600 dark:text-blue-400">
+                  Events to listen for: <code class="font-mono">checkout.session.completed</code>, <code class="font-mono">checkout.session.expired</code>, <code class="font-mono">customer.subscription.updated</code>, <code class="font-mono">customer.subscription.deleted</code>, <code class="font-mono">invoice.payment_succeeded</code>, <code class="font-mono">invoice.payment_failed</code>, <code class="font-mono">charge.dispute.created</code>, <code class="font-mono">charge.refunded</code>
+                </p>
+              </div>
+              <div class="flex items-center gap-3">
+                <button @click="testStripeConnection" :disabled="stripeTestLoading || !stripeConfigured" class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
+                  <Loader2 v-if="stripeTestLoading" class="w-4 h-4 animate-spin" />
+                  <RefreshCw v-else class="w-4 h-4" />
+                  Test Connection
+                </button>
+              </div>
+              <div v-if="stripeTestResult" class="p-3 rounded-lg text-sm" :class="stripeTestResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'">
+                {{ stripeTestResult.message }}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -696,6 +765,21 @@ onMounted(() => {
                 </div>
               </div>
             </template>
+
+            <div class="pt-3 border-t border-gray-200 dark:border-gray-700">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Send Test Email</label>
+              <div class="flex items-center gap-2 max-w-lg">
+                <input v-model="emailTestTo" type="email" placeholder="test@example.com" @keydown.enter="testEmailSend" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                <button @click="testEmailSend" :disabled="emailTestLoading || !emailTestTo" class="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
+                  <Loader2 v-if="emailTestLoading" class="w-4 h-4 animate-spin" />
+                  <RefreshCw v-else class="w-4 h-4" />
+                  Send Test
+                </button>
+              </div>
+              <div v-if="emailTestResult" class="mt-2 p-3 rounded-lg text-sm" :class="emailTestResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'">
+                {{ emailTestResult.message }}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -800,6 +884,7 @@ onMounted(() => {
             <div>
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.domainPricing') }}</h2>
               <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.domainPricingDesc') }}</p>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Prices are automatically synced from your registrar daily at 3:30 AM UTC</p>
             </div>
             <button
               @click="syncPrices"
@@ -828,6 +913,7 @@ onMounted(() => {
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.registerPrice') }}</th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Markup</th>
                   <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.renewPrice') }}</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Profit</th>
                   <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('common.enabled') }}</th>
                   <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
                 </tr>
@@ -857,7 +943,14 @@ onMounted(() => {
                     </div>
                   </td>
                   <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
-                    ${{ formatCents(entry.sellRegistrationPrice) }} / ${{ formatCents(entry.sellRenewalPrice) }}
+                    ${{ formatCents(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue)) }} / ${{ formatCents(computeSellPriceLocal(entry.providerRenewalPrice, entry.markupType, entry.markupValue)) }}
+                  </td>
+                  <td class="px-4 py-3 text-sm font-medium whitespace-nowrap"
+                    :class="(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                  >
+                    {{ (computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) >= 0 ? '+' : '' }}${{ formatCents(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) }}
+                    /
+                    {{ (computeSellPriceLocal(entry.providerRenewalPrice, entry.markupType, entry.markupValue) - entry.providerRenewalPrice) >= 0 ? '+' : '' }}${{ formatCents(computeSellPriceLocal(entry.providerRenewalPrice, entry.markupType, entry.markupValue) - entry.providerRenewalPrice) }}
                   </td>
                   <td class="px-4 py-3 text-center">
                     <input

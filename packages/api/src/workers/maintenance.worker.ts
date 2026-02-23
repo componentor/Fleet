@@ -974,11 +974,13 @@ async function syncDomainPrices(): Promise<void> {
     }
 
     const commonTlds = ['com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai', 'no', 'se', 'dk', 'fi'];
-    const results = await provider.searchDomains('test', commonTlds);
+    // Use a random string to avoid hitting premium domain pricing
+    const randomQuery = `fleetpricecheck${Date.now().toString(36)}`;
+    const results = await provider.searchDomains(randomQuery, commonTlds);
     let synced = 0;
 
     for (const result of results) {
-      if (!result.price) continue;
+      if (!result.price || result.premium) continue;
       const tld = result.domain.split('.').slice(1).join('.');
 
       const existing = await db.query.domainTldPricing.findFirst({
