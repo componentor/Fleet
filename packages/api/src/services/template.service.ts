@@ -359,16 +359,20 @@ export class TemplateService {
       try {
         const swarmName = serviceNameMap[svcDef.name]!;
 
+        // Port management: domain services use Traefik, others get auto-allocated ports
+        const svcPorts = svcDef.ports ?? [];
+        const ingressPorts = resolvedDomain
+          ? []
+          : await dockerService.allocateIngressPorts(
+              svcPorts.map((p) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+            );
+
         const result = await dockerService.createService({
           name: swarmName,
           image,
           replicas,
           env: resolvedEnv,
-          ports: (svcDef.ports ?? []).map((p) => ({
-            target: p.target,
-            published: p.published ?? 0,
-            protocol: p.protocol ?? 'tcp',
-          })),
+          ports: ingressPorts,
           volumes: resolvedVolumes,
           labels: {
             'fleet.account-id': accountId,
@@ -391,7 +395,8 @@ export class TemplateService {
           .update(services)
           .set({
             dockerServiceId,
-            status: 'running',
+            status: 'deploying',
+            ports: ingressPorts.length > 0 ? ingressPorts : svcPorts,
             updatedAt: new Date(),
           })
           .where(eq(services.id, svc.id));

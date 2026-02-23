@@ -9,6 +9,16 @@ summary {
   cursor: pointer;
 }
 
+/* Normalize form elements to consistent sizing */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* xterm.js scrollbar — match the terminal dark theme */
 .xterm-viewport::-webkit-scrollbar {
   width: 8px;

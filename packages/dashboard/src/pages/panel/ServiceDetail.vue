@@ -123,6 +123,16 @@ const configUpdateDelay = ref('10s')
 const configRollbackOnFailure = ref(true)
 const configLoading = ref(false)
 
+// Domain settings
+const configDomain = ref('')
+const configSslEnabled = ref(true)
+const domainLoading = ref(false)
+
+// Volume settings
+const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
+const accountVolumes = ref<Array<{ name: string; displayName: string; sizeGb: number }>>([])
+const volumeLoading = ref(false)
+
 const restartPolicyLabel = computed(() => {
   const condition = service.value?.restartCondition ?? 'on-failure'
   if (condition === 'none') return 'Never'
@@ -516,6 +526,15 @@ function logLevelBadgeClass(level: string): string {
 
 const dockerStatus = computed(() => service.value?.dockerStatus ?? null)
 
+const servicePorts = computed(() => {
+  const ports = service.value?.ports as any[] ?? []
+  return ports.map((p: any) => ({
+    target: p.target,
+    published: p.published || null,
+    protocol: p.protocol || 'tcp',
+  }))
+})
+
 const failedTasks = computed(() => {
   if (!dockerStatus.value?.tasks) return []
   return dockerStatus.value.tasks
@@ -690,12 +709,16 @@ async function redeployService() {
   try {
     const result: any = await api.post(`/services/${serviceId}/redeploy`, {})
     await fetchService()
-    // Auto-start deployment tracking and deploy stream
-    startDeploymentPolling()
-    const newDeploymentId = result?.deploymentId
-    if (newDeploymentId) {
-      latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
-      deployStream.start(newDeploymentId)
+    // For image-only redeploys, the deployment completes immediately (no build step).
+    // Only start deploy stream for services with a build source (github/upload).
+    const hasBuildSource = service.value?.sourceType === 'github' || service.value?.sourceType === 'upload'
+    if (hasBuildSource) {
+      startDeploymentPolling()
+      const newDeploymentId = result?.deploymentId
+      if (newDeploymentId) {
+        latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
+        deployStream.start(newDeploymentId)
+      }
     }
   } catch {
     toast.error(t('service.redeployFailed', 'Failed to redeploy service'))
@@ -788,6 +811,47 @@ async function saveConfig() {
   } finally {
     configLoading.value = false
   }
+}
+
+async function saveDomain() {
+  domainLoading.value = true
+  try {
+    await api.patch(`/services/${serviceId}`, {
+      domain: configDomain.value || null,
+      sslEnabled: configSslEnabled.value,
+    })
+    await fetchService()
+    toast.success('Domain settings saved')
+  } catch {
+    toast.error('Failed to save domain settings')
+  } finally {
+    domainLoading.value = false
+  }
+}
+
+async function saveVolumes() {
+  volumeLoading.value = true
+  try {
+    // Filter out incomplete volume entries
+    const validVolumes = configVolumes.value.filter(v => v.source && v.target)
+    await api.patch(`/services/${serviceId}`, {
+      volumes: validVolumes,
+    })
+    await fetchService()
+    toast.success('Volume settings saved — redeploy to apply changes')
+  } catch {
+    toast.error('Failed to save volume settings')
+  } finally {
+    volumeLoading.value = false
+  }
+}
+
+function addVolume() {
+  configVolumes.value.push({ source: '', target: '', readonly: false })
+}
+
+function removeVolume(index: number) {
+  configVolumes.value.splice(index, 1)
 }
 
 async function saveAutoDeploy() {
@@ -947,6 +1011,22 @@ async function onTabChange(tabId: string) {
     configUpdateParallelism.value = service.value.updateParallelism ?? 1
     configUpdateDelay.value = service.value.updateDelay ?? '10s'
     configRollbackOnFailure.value = service.value.rollbackOnFailure ?? true
+    configDomain.value = service.value.domain ?? ''
+    configSslEnabled.value = service.value.sslEnabled ?? true
+    configVolumes.value = ((service.value.volumes as any[]) ?? []).map((v: any) => ({
+      source: v.source ?? '',
+      target: v.target ?? '',
+      readonly: v.readonly ?? false,
+    }))
+    // Fetch account volumes for the dropdown
+    try {
+      const vols = await api.get<any[]>('/storage/volumes')
+      accountVolumes.value = (vols ?? []).map((v: any) => ({
+        name: v.name,
+        displayName: v.name.replace(/^vol-[a-f0-9-]+-/, ''),
+        sizeGb: v.sizeGb ?? 0,
+      }))
+    } catch { /* ignore */ }
   }
   if (tabId === 'backups') fetchServiceBackups()
   if (tabId === 'terminal' && service.value?.status === 'running') {
@@ -1203,8 +1283,8 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Build Output Panel (live during deploy) -->
-          <div v-if="service.status === 'deploying' && latestDeployment" class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
+          <!-- Build Output Panel (only during active builds, not image-only deploys) -->
+          <div v-if="(service.status === 'deploying' || service.status === 'building') && latestDeployment && latestDeployment.status !== 'succeeded' && latestDeployment.status !== 'deploying'" class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
             <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <Code2 class="w-4 h-4 text-gray-400" />
@@ -1254,13 +1334,13 @@ onUnmounted(() => {
           </div>
 
           <!-- Deploying progress -->
-          <div v-if="service.status === 'deploying' && pendingTasks.length > 0 && failedTasks.length === 0" class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-5">
+          <div v-if="service.status === 'deploying' && failedTasks.length === 0" class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-5">
             <div class="flex items-start gap-3">
               <Loader2 class="w-5 h-5 text-yellow-500 dark:text-yellow-400 shrink-0 mt-0.5 animate-spin" />
               <div class="min-w-0 flex-1">
                 <h3 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200">Service is deploying</h3>
                 <p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">Waiting for containers to start...</p>
-                <div class="mt-3 space-y-2">
+                <div v-if="pendingTasks.length > 0" class="mt-3 space-y-2">
                   <div v-for="task in pendingTasks.slice(0, 5)" :key="task.id" class="flex items-center gap-3 text-xs text-yellow-700 dark:text-yellow-300 bg-yellow-100/50 dark:bg-yellow-900/30 rounded-lg px-3 py-2">
                     <span class="font-mono shrink-0">{{ task.id.slice(0, 12) }}</span>
                     <span class="capitalize">{{ task.status }}</span>
@@ -1315,6 +1395,24 @@ onUnmounted(() => {
               <div v-if="service.stoppedAt">
                 <dt class="text-gray-500 dark:text-gray-400">Stopped At</dt>
                 <dd class="text-gray-900 dark:text-white mt-0.5">{{ formatDate(service.stoppedAt) }}</dd>
+              </div>
+              <div v-if="servicePorts.length > 0">
+                <dt class="text-gray-500 dark:text-gray-400">Ports</dt>
+                <dd class="text-gray-900 dark:text-white mt-0.5">
+                  <div v-for="(p, i) in servicePorts" :key="i" class="font-mono text-xs">
+                    <span v-if="p.published" class="text-primary-600 dark:text-primary-400">:{{ p.published }}</span>
+                    <span v-if="p.published"> → </span>
+                    <span>:{{ p.target }}</span>
+                    <span class="text-gray-400 ml-1">/{{ p.protocol || 'tcp' }}</span>
+                  </div>
+                </dd>
+              </div>
+              <div v-if="service.domain">
+                <dt class="text-gray-500 dark:text-gray-400">Routing</dt>
+                <dd class="text-gray-900 dark:text-white mt-0.5 text-xs">
+                  <span class="font-medium text-green-600 dark:text-green-400">Traefik</span>
+                  <span class="text-gray-400"> → :{{ servicePorts[0]?.target || 80 }}</span>
+                </dd>
               </div>
               <div v-if="service.githubRepo">
                 <dt class="text-gray-500 dark:text-gray-400">GitHub Repo</dt>
@@ -1606,7 +1704,7 @@ onUnmounted(() => {
               </template>
               <div v-else-if="isDeployStreaming" class="flex items-center justify-center h-full text-gray-500">
                 <Loader2 class="w-5 h-5 animate-spin mr-2" />
-                Waiting for build output...
+                Waiting for deployment logs...
               </div>
               <div v-else class="flex items-center justify-center h-full text-gray-500">
                 {{ logStream.rawLogs.value.length > 0 ? 'No logs match your filters.' : 'No logs available.' }}
@@ -2193,6 +2291,116 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- Domain Settings -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Domain</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Route a domain to this service via Traefik reverse proxy</p>
+            </div>
+            <div class="p-6 space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Domain Name</label>
+                <input
+                  v-model="configDomain"
+                  type="text"
+                  placeholder="app.example.com"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Traffic will be routed to container port {{ servicePorts[0]?.target || 80 }}. Leave empty to remove domain.
+                </p>
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-gray-700 dark:text-gray-300">SSL / HTTPS</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">Auto-provision Let's Encrypt certificate</p>
+                </div>
+                <button
+                  @click="configSslEnabled = !configSslEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800',
+                    configSslEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      configSslEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+              <button @click="saveDomain" :disabled="domainLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ domainLoading ? 'Saving...' : 'Save Domain' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Volumes -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volumes</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Attach persistent storage volumes to this service</p>
+              </div>
+              <button @click="addVolume" class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors">
+                + Add Volume
+              </button>
+            </div>
+            <div class="p-6">
+              <div v-if="configVolumes.length === 0" class="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
+                No volumes attached. Click "Add Volume" to mount a storage volume.
+              </div>
+              <div v-else class="space-y-3">
+                <div v-for="(vol, idx) in configVolumes" :key="idx" class="flex items-start gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                  <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Volume</label>
+                      <select
+                        v-model="vol.source"
+                        class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="">Select volume...</option>
+                        <option v-for="av in accountVolumes" :key="av.name" :value="av.name">
+                          {{ av.displayName }} ({{ av.sizeGb }}GB)
+                        </option>
+                        <option v-if="vol.source && !accountVolumes.find(v => v.name === vol.source)" :value="vol.source">
+                          {{ vol.source }}
+                        </option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Mount Path</label>
+                      <input
+                        v-model="vol.target"
+                        type="text"
+                        placeholder="/var/data"
+                        class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2 mt-5">
+                    <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                      <input type="checkbox" v-model="vol.readonly" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+                      RO
+                    </label>
+                    <button @click="removeVolume(idx)" class="p-1 text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors" title="Remove">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <p class="text-xs text-gray-500 dark:text-gray-400">Service will need a redeploy after changing volumes</p>
+              <button @click="saveVolumes" :disabled="volumeLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ volumeLoading ? 'Saving...' : 'Save Volumes' }}
+              </button>
+            </div>
+          </div>
+
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Service Configuration</h3>
@@ -2208,7 +2416,7 @@ onUnmounted(() => {
                 <!-- Restart Condition -->
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Restart Policy</label>
-                  <select v-model="configRestartCondition" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+                  <select v-model="configRestartCondition" class="w-full min-w-0 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
                     <option value="none">Never</option>
                     <option value="on-failure">On Failure</option>
                     <option value="any">Always</option>

@@ -51,6 +51,7 @@ function buildTraefikLabels(
   serviceName: string,
   domain: string | null,
   sslEnabled: boolean,
+  targetPort: number = 80,
 ): Record<string, string> {
   if (!domain) return { 'traefik.enable': 'false' };
 
@@ -60,7 +61,7 @@ function buildTraefikLabels(
     'traefik.enable': 'true',
     [`traefik.http.routers.${routerName}.rule`]: `Host(\`${domain}\`)`,
     [`traefik.http.routers.${routerName}.entrypoints`]: 'websecure',
-    [`traefik.http.services.${routerName}.loadbalancer.server.port`]: '80',
+    [`traefik.http.services.${routerName}.loadbalancer.server.port`]: String(targetPort),
   };
 
   if (sslEnabled) {
@@ -69,6 +70,13 @@ function buildTraefikLabels(
   }
 
   return labels;
+}
+
+/** Convenience wrapper for port allocation */
+async function allocateIngressPorts(
+  targetPorts: Array<{ target: number; protocol: string }>,
+): Promise<Array<{ target: number; published: number; protocol: string }>> {
+  return dockerService.allocateIngressPorts(targetPorts);
 }
 
 // ── Schemas ──
@@ -126,6 +134,11 @@ const updateServiceSchema = z.object({
     target: z.number().int().min(1).max(65535),
     published: z.number().int().min(1).max(65535).optional(),
     protocol: z.enum(['tcp', 'udp']).default('tcp'),
+  })).optional(),
+  volumes: z.array(z.object({
+    source: z.string(),
+    target: z.string(),
+    readonly: z.boolean().default(false),
   })).optional(),
   domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
   sslEnabled: z.boolean().optional(),
@@ -599,12 +612,13 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
           updateFields['dockerServiceId'] = null;
         } else {
           const tasks = tasksByService.get(svc.dockerServiceId!) ?? { running: 0, failed: 0, total: 0 };
-          if (svc.status === 'running' && tasks.running === 0 && tasks.failed > 0) {
-            newStatus = 'failed';
-          } else if (svc.status === 'deploying' && tasks.running > 0) {
+          if (tasks.running > 0 && svc.status !== 'running') {
             newStatus = 'running';
-          } else if (svc.status === 'deploying' && tasks.running === 0 && tasks.failed > 0) {
+          } else if (tasks.running === 0 && tasks.failed > 0) {
             newStatus = 'failed';
+          } else if (svc.status === 'running' && tasks.running === 0 && tasks.total > 0) {
+            // Tasks exist but none running or failed — stuck in intermediate state
+            newStatus = 'deploying';
           }
         }
 
@@ -647,25 +661,9 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     return c.json({ error: `Service limit reached (${SERVICE_QUOTA}). Please delete unused services or contact support.` }, 429);
   }
 
-  // Check for port collisions with other accounts' services
-  if (data.ports.some((p: any) => p.published)) {
-    const publishedPorts = data.ports.filter((p: any) => p.published).map((p: any) => p.published!);
-    // Only fetch services from OTHER accounts (not the full table)
-    const otherServices = await db.query.services.findMany({
-      where: and(not(eq(services.accountId, accountId)), isNull(services.deletedAt)),
-      columns: { id: true, ports: true },
-    });
-    for (const existing of otherServices) {
-      const existingPorts = (existing.ports as any[])?.map((p: any) => p.published).filter(Boolean) ?? [];
-      for (const port of publishedPorts) {
-        if (existingPorts.includes(port)) {
-          return c.json({ error: `Port ${port} is already in use by another service` }, 409);
-        }
-      }
-    }
-  }
-
-  const traefikLabels = buildTraefikLabels(data.name, data.domain ?? null, data.sslEnabled);
+  // Determine target port for Traefik and port allocation
+  const primaryTargetPort = data.ports?.[0]?.target ?? 80;
+  const traefikLabels = buildTraefikLabels(data.name, data.domain ?? null, data.sslEnabled, primaryTargetPort);
 
   // Build constraints
   const constraints = [...data.placementConstraints];
@@ -734,16 +732,20 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     const swarmServiceName = `fleet-${accountId}-${data.name}`;
     const storageLimitMb = await getContainerDiskLimit(accountId);
 
+    // Port management: domain services use Traefik (no ingress ports),
+    // non-domain services get auto-allocated published ports
+    const ingressPorts = data.domain
+      ? []
+      : await allocateIngressPorts(
+          data.ports.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+        );
+
     const result = await dockerService.createService({
       name: swarmServiceName,
       image: data.image,
       replicas: data.replicas,
       env: data.env,
-      ports: data.ports.map((p: any) => ({
-        target: p.target,
-        published: p.published ?? 0,
-        protocol: p.protocol,
-      })),
+      ports: ingressPorts,
       volumes: data.volumes.map((v: any) => ({
         source: v.source,
         target: v.target,
@@ -768,11 +770,12 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       .set({
         dockerServiceId: result.id,
         status: 'deploying',
+        ports: ingressPorts.length > 0 ? ingressPorts : data.ports,
         updatedAt: new Date(),
       })
       .where(eq(services.id, svc.id));
 
-    const response: Record<string, unknown> = { ...svc, dockerServiceId: result.id, status: 'deploying' };
+    const response: Record<string, unknown> = { ...svc, dockerServiceId: result.id, status: 'deploying', ports: ingressPorts.length > 0 ? ingressPorts : data.ports };
     if (webhookWarning) response.warning = webhookWarning;
     eventService.log({
       ...eventContext(c),
@@ -830,12 +833,13 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
       };
 
       // Auto-correct status drift
-      if (svc.status === 'running' && runningTasks === 0 && failedTasks > 0) {
-        correctedStatus = 'failed';
-      } else if (svc.status === 'deploying' && runningTasks > 0) {
+      if (runningTasks > 0 && svc.status !== 'running') {
         correctedStatus = 'running';
-      } else if (svc.status === 'deploying' && runningTasks === 0 && failedTasks > 0) {
+      } else if (runningTasks === 0 && failedTasks > 0) {
         correctedStatus = 'failed';
+      } else if (svc.status === 'running' && runningTasks === 0 && tasks.length > 0) {
+        // Tasks exist but none running or failed — stuck in intermediate state
+        correctedStatus = 'deploying';
       }
     } catch {
       // Docker service doesn't exist anymore — correct the DB
@@ -906,6 +910,12 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
       orderBy: (d: any, { desc }: any) => desc(d.createdAt),
     });
 
+    // Task state breakdown for debugging
+    const taskStates: Record<string, number> = {};
+    for (const t of tasks) {
+      taskStates[t.status] = (taskStates[t.status] || 0) + 1;
+    }
+
     return c.json({
       containers: containerStats.filter((s) => s.stats).map((s) => ({
         containerId: s.containerId,
@@ -916,6 +926,14 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
         running: runningTasks.length,
         total: tasks.length,
       },
+      taskStates,
+      tasks: tasks.map((t) => ({
+        id: t.id.slice(0, 12),
+        status: t.status,
+        desiredState: t.desiredState,
+        message: t.message,
+        error: t.error,
+      })),
     });
   } catch (err) {
     logger.error({ err }, 'Failed to fetch service stats');
@@ -982,11 +1000,25 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
   // If Docker update is needed, try Docker FIRST to ensure atomicity
   if (svc.dockerServiceId && Object.keys(dockerFields).length > 0) {
     try {
+      const effectiveDomain = dockerFields.domain !== undefined ? dockerFields.domain : (svc.domain ?? null);
+      const effectivePorts = dockerFields.ports ?? (svc.ports as any[]) ?? [];
+      const primaryTargetPort = effectivePorts[0]?.target ?? 80;
       const traefikLabels = buildTraefikLabels(
         dockerFields.name ?? svc.name,
-        dockerFields.domain !== undefined ? dockerFields.domain : (svc.domain ?? null),
+        effectiveDomain,
         dockerFields.sslEnabled ?? svc.sslEnabled ?? true,
+        primaryTargetPort,
       );
+
+      // Port management: re-allocate if ports changed
+      let updatedPorts: Array<{ target: number; published: number; protocol: string }> | undefined;
+      if (dockerFields.ports) {
+        updatedPorts = effectiveDomain
+          ? []
+          : await allocateIngressPorts(
+              dockerFields.ports.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+            );
+      }
 
       await dockerService.updateService(svc.dockerServiceId, {
         image: dockerFields.image,
@@ -998,10 +1030,11 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
           'fleet.service-id': serviceId,
         },
         constraints: dockerFields.placementConstraints ?? (svc.placementConstraints as string[]) ?? [],
-        ports: dockerFields.ports?.map((p: any) => ({
-          target: p.target,
-          published: p.published ?? 0,
-          protocol: p.protocol,
+        ports: updatedPorts,
+        volumes: dockerFields.volumes?.map((v: any) => ({
+          source: v.source,
+          target: v.target,
+          readonly: v.readonly ?? false,
         })),
         healthCheck: dockerFields.healthCheck ?? undefined,
         updateParallelism: dockerFields.updateParallelism,
@@ -1278,7 +1311,9 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
     const swarmServiceName = `fleet-${accountId}-${svc!.name}`;
-    const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true);
+    const svcPorts = (svc!.ports as any[]) ?? [];
+    const primaryTargetPort = svcPorts[0]?.target ?? 80;
+    const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true, primaryTargetPort);
     const constraints = [...((svc!.placementConstraints as string[]) ?? [])];
     if (svc!.nodeConstraint) {
       constraints.push(`node.id == ${svc!.nodeConstraint}`);
@@ -1286,16 +1321,19 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
 
     const storageLimitMb = await getContainerDiskLimit(accountId!);
 
+    // Port management: domain services use Traefik, others get auto-allocated ports
+    const ingressPorts = svc!.domain
+      ? []
+      : await allocateIngressPorts(
+          svcPorts.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+        );
+
     const result = await dockerService.createService({
       name: swarmServiceName,
       image: svc!.image,
       replicas: svc!.replicas ?? 1,
       env: (svc!.env as Record<string, string>) ?? {},
-      ports: ((svc!.ports as any[]) ?? []).map((p: any) => ({
-        target: p.target,
-        published: p.published ?? 0,
-        protocol: p.protocol ?? 'tcp',
-      })),
+      ports: ingressPorts,
       volumes: ((svc!.volumes as any[]) ?? []).map((v: any) => ({
         source: v.source,
         target: v.target,
@@ -1314,6 +1352,11 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       networkId,
       storageLimitMb,
     });
+
+    // Save allocated ports back to DB
+    if (ingressPorts.length > 0) {
+      await db.update(services).set({ ports: ingressPorts }).where(eq(services.id, serviceId));
+    }
 
     return result.id;
   }
@@ -1348,7 +1391,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
 
     await db
       .update(services)
-      .set({ status: 'running', updatedAt: new Date() })
+      .set({ status: 'deploying', updatedAt: new Date() })
       .where(eq(services.id, serviceId));
   } catch (err) {
     logger.error({ err }, 'Redeployment failed');
@@ -1523,8 +1566,10 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
       const networkId = await dockerService.ensureNetwork(networkName);
 
       const swarmServiceName = `fleet-${accountId}-${svc.name}`;
+      const svcPorts = (svc.ports as any[]) ?? [];
+      const primaryTargetPort = svcPorts[0]?.target ?? 80;
 
-      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true);
+      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort);
 
       const constraints = [...((svc.placementConstraints as string[]) ?? [])];
       if (svc.nodeConstraint) {
@@ -1533,16 +1578,19 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
 
       const storageLimitMb = await getContainerDiskLimit(accountId);
 
+      // Port management: domain services use Traefik, others get auto-allocated ports
+      const ingressPorts = svc.domain
+        ? []
+        : await allocateIngressPorts(
+            svcPorts.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+          );
+
       const result = await dockerService.createService({
         name: swarmServiceName,
         image: svc.image,
         replicas: svc.replicas ?? 1,
         env: (svc.env as Record<string, string>) ?? {},
-        ports: ((svc.ports as any[]) ?? []).map((p: any) => ({
-          target: p.target,
-          published: p.published ?? 0,
-          protocol: p.protocol ?? 'tcp',
-        })),
+        ports: ingressPorts,
         volumes: ((svc.volumes as any[]) ?? []).map((v: any) => ({
           source: v.source,
           target: v.target,

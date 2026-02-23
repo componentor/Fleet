@@ -266,6 +266,24 @@ export class DockerService {
       };
     }
 
+    if (opts.volumes) {
+      const driver = storageManager.volumes.getDockerVolumeDriver();
+      spec.TaskTemplate.ContainerSpec.Mounts = opts.volumes.map((v) => {
+        const driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+        return {
+          Source: v.source,
+          Target: v.target,
+          Type: 'volume' as const,
+          ReadOnly: v.readonly ?? false,
+          VolumeOptions: driver !== 'local' ? {
+            NoCopy: false,
+            Labels: {},
+            DriverConfig: { Name: driver, Options: driverOpts },
+          } : undefined,
+        };
+      });
+    }
+
     if (opts.restartCondition !== undefined || opts.restartMaxAttempts !== undefined || opts.restartDelay !== undefined) {
       const existing = spec.TaskTemplate.RestartPolicy ?? {};
       spec.TaskTemplate.RestartPolicy = {
@@ -334,6 +352,46 @@ export class DockerService {
 
   async listTasks(filters?: Record<string, string[]>) {
     return docker.listTasks({ filters });
+  }
+
+  /**
+   * Get all published ingress ports currently in use across all Swarm services.
+   */
+  async getUsedIngressPorts(): Promise<Set<number>> {
+    const services = await docker.listServices();
+    const ports = new Set<number>();
+    for (const svc of services) {
+      const endpoint = (svc as any).Endpoint;
+      if (endpoint?.Ports) {
+        for (const p of endpoint.Ports) {
+          if (p.PublishedPort) ports.add(p.PublishedPort);
+        }
+      }
+    }
+    return ports;
+  }
+
+  /**
+   * Auto-allocate free published ports for services that need external access.
+   * Range: 30000-39999. Services with a domain should NOT use this.
+   */
+  async allocateIngressPorts(
+    targetPorts: Array<{ target: number; protocol: string }>,
+  ): Promise<Array<{ target: number; published: number; protocol: string }>> {
+    if (targetPorts.length === 0) return [];
+    const usedPorts = await this.getUsedIngressPorts();
+    let nextPort = 30000;
+
+    return targetPorts.map((p) => {
+      while (usedPorts.has(nextPort) && nextPort <= 39999) {
+        nextPort++;
+      }
+      if (nextPort > 39999) {
+        throw new Error('No free ports available in range 30000-39999');
+      }
+      const published = nextPort++;
+      return { target: p.target, published, protocol: p.protocol };
+    });
   }
 
   async getServiceLogs(
