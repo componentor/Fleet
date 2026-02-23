@@ -69,6 +69,15 @@ interface LockValue {
 
 // fleet_api is LAST so the orchestrating process survives to update all other services first
 const FLEET_SERVICES = ['fleet_dashboard', 'fleet_ssh-gateway', 'fleet_agent', 'fleet_api'] as const;
+/** Stringify errors including AggregateError inner causes */
+function errorToString(err: unknown): string {
+  if (err instanceof AggregateError) {
+    const inner = err.errors.map(e => e instanceof Error ? e.message : String(e)).join('; ')
+    return `${err.message}: [${inner}]`
+  }
+  if (err instanceof Error) return err.message
+  return String(err)
+}
 
 export class UpdateService {
   private state: UpdateState = {
@@ -332,7 +341,7 @@ export class UpdateService {
         this.appendLog('Recovery rollback completed successfully.');
       } catch (err) {
         logger.error({ err }, 'Recovery rollback failed — manual intervention may be needed');
-        this.appendLog(`Recovery rollback FAILED: ${String(err)}`);
+        this.appendLog(`Recovery rollback FAILED: ${errorToString(err)}`);
       }
     } else {
       this.appendLog('Recovery: no services were updated before crash — no rollback needed.');
@@ -384,7 +393,7 @@ export class UpdateService {
       return this.cachedNotification;
     } catch (err) {
       this.state.status = 'idle';
-      this.appendLog(`Failed to check for updates: ${String(err)}`);
+      this.appendLog(`Failed to check for updates: ${errorToString(err)}`);
       throw err;
     }
   }
@@ -526,8 +535,8 @@ export class UpdateService {
         const result = await runMigrations();
         this.appendLog(`Migrations completed: ${result.applied} migration(s) applied.`);
       } catch (err) {
-        this.appendLog(`Migration FAILED (rolled back): ${String(err)}`);
-        throw new Error(`Migration failed — database was NOT modified: ${String(err)}`);
+        this.appendLog(`Migration FAILED (rolled back): ${errorToString(err)}`);
+        throw new Error(`Migration failed — database was NOT modified: ${errorToString(err)}`);
       }
 
       // 5. Verify database health after migrations, before updating services
@@ -559,7 +568,7 @@ export class UpdateService {
           }
         } catch (updateErr) {
           // Partial failure — roll back already-updated services
-          this.appendLog(`Service ${serviceName} failed: ${String(updateErr)}`);
+          this.appendLog(`Service ${serviceName} failed: ${errorToString(updateErr)}`);
           if (this.state.servicesUpdated.length > 0) {
             this.appendLog(`Rolling back ${this.state.servicesUpdated.length} already-updated service(s)...`);
             this.state.status = 'rolling-back';
@@ -567,7 +576,7 @@ export class UpdateService {
             await this.rollbackServices([...this.state.servicesUpdated]);
           }
           throw new Error(
-            `Update failed at ${serviceName} — rolled back ${this.state.servicesUpdated.length} service(s): ${String(updateErr)}`,
+            `Update failed at ${serviceName} — rolled back ${this.state.servicesUpdated.length} service(s): ${errorToString(updateErr)}`,
           );
         }
       }
@@ -580,7 +589,7 @@ export class UpdateService {
         const result = await runSeeders();
         this.appendLog(`Seeders completed: ${result.executed} seeder(s) executed.`);
       } catch (err) {
-        this.appendLog(`Seeder warning: ${String(err)} (non-fatal)`);
+        this.appendLog(`Seeder warning: ${errorToString(err)} (non-fatal)`);
       }
 
       // 8. Verify non-API services are healthy — auto-rollback on failure
@@ -590,20 +599,20 @@ export class UpdateService {
       try {
         await this.verifyServiceHealth(nonApiServices);
       } catch (healthErr) {
-        this.appendLog(`Health check FAILED: ${String(healthErr)}`);
+        this.appendLog(`Health check FAILED: ${errorToString(healthErr)}`);
         this.appendLog('Initiating automatic rollback due to health check failure...');
         try {
           await this.rollback(true); // skipLock — we already hold it from performUpdate
-          throw new Error(`Update rolled back automatically — health check failed: ${String(healthErr)}`);
+          throw new Error(`Update rolled back automatically — health check failed: ${errorToString(healthErr)}`);
         } catch (rollbackErr) {
-          if (String(rollbackErr).includes('rolled back automatically')) {
+          if (errorToString(rollbackErr).includes('rolled back automatically')) {
             throw rollbackErr;
           }
-          this.appendLog(`Automatic rollback also failed: ${String(rollbackErr)}`);
+          this.appendLog(`Automatic rollback also failed: ${errorToString(rollbackErr)}`);
           throw new Error(
             `CRITICAL: Health check failed AND rollback failed. Manual intervention required.\n` +
-            `Health error: ${String(healthErr)}\n` +
-            `Rollback error: ${String(rollbackErr)}\n` +
+            `Health error: ${errorToString(healthErr)}\n` +
+            `Rollback error: ${errorToString(rollbackErr)}\n` +
             (this.state.preUpdateBackupId ? `Pre-update backup: ${this.state.preUpdateBackupId}` : 'No backup available.'),
           );
         }
@@ -628,7 +637,7 @@ export class UpdateService {
           { value: cleanVersion, updatedAt: new Date() },
         );
       } catch (err) {
-        this.appendLog(`Warning: Could not persist version to DB: ${String(err)}`);
+        this.appendLog(`Warning: Could not persist version to DB: ${errorToString(err)}`);
       }
 
       await this.persistState();
@@ -669,7 +678,7 @@ export class UpdateService {
       } catch (err) {
         // Non-fatal: all other services are already on the new version and the
         // update is persisted as completed. Admin can manually redeploy fleet_api.
-        this.appendLog(`Warning: Could not update fleet_api automatically: ${String(err)}`);
+        this.appendLog(`Warning: Could not update fleet_api automatically: ${errorToString(err)}`);
         this.appendLog('All other services are updated. Redeploy fleet_api manually via SSH if needed.');
       }
     } catch (err) {
@@ -678,7 +687,7 @@ export class UpdateService {
         logger.info('Update aborted by admin reset — stopping gracefully');
         return;
       }
-      this.appendLog(`Update failed: ${String(err)}`);
+      this.appendLog(`Update failed: ${errorToString(err)}`);
       this.state.status = 'failed';
       this.state.finishedAt = new Date();
       await this.persistState();
@@ -731,7 +740,7 @@ export class UpdateService {
     } catch (err) {
       this.state.status = 'failed';
       this.state.finishedAt = new Date();
-      this.appendLog(`Rollback failed: ${String(err)}`);
+      this.appendLog(`Rollback failed: ${errorToString(err)}`);
       this.events.emit('update', this.state);
       throw err;
     } finally {
@@ -774,7 +783,7 @@ export class UpdateService {
         await this.waitForServiceConvergence(dockerSvcId, serviceName);
         this.appendLog(`  ${serviceName}: rolled back successfully.`);
       } catch (err) {
-        this.appendLog(`  ${serviceName}: rollback FAILED: ${String(err)}`);
+        this.appendLog(`  ${serviceName}: rollback FAILED: ${errorToString(err)}`);
       }
     }
   }
@@ -1156,7 +1165,7 @@ export class UpdateService {
           this.appendLog(`  ${serviceName}: ${currentImage}`);
         }
       } catch (err) {
-        this.appendLog(`  Warning: could not snapshot ${serviceName}: ${String(err)}`);
+        this.appendLog(`  Warning: could not snapshot ${serviceName}: ${errorToString(err)}`);
       }
     }
   }
@@ -1218,7 +1227,7 @@ export class UpdateService {
       if (err instanceof Error && err.message.includes('digest mismatch')) {
         throw err; // Re-throw digest mismatches — these are critical
       }
-      this.appendLog(`  Warning: could not verify digest for ${serviceName}: ${String(err)}`);
+      this.appendLog(`  Warning: could not verify digest for ${serviceName}: ${errorToString(err)}`);
     }
   }
 
@@ -1256,7 +1265,7 @@ export class UpdateService {
 
       await this.waitForServiceConvergence(dockerSvcId, serviceName);
     } catch (err) {
-      throw new Error(`Failed to update ${serviceName}: ${String(err)}`);
+      throw new Error(`Failed to update ${serviceName}: ${errorToString(err)}`);
     }
   }
 
@@ -1323,7 +1332,7 @@ export class UpdateService {
         if (err instanceof Error && err.message.includes('no running tasks')) {
           throw err;
         }
-        this.appendLog(`  Warning: could not verify ${serviceName}: ${String(err)}`);
+        this.appendLog(`  Warning: could not verify ${serviceName}: ${errorToString(err)}`);
       }
     }
   }

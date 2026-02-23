@@ -686,7 +686,7 @@ async function resetAllNodes() {
   resetting.value = true
   error.value = ''
   try {
-    await api.del('/admin/storage/nodes', { password: resetPassword.value })
+    await api.post('/admin/storage/nodes/reset', { password: resetPassword.value })
     success.value = t('storageSetup.resetSuccess')
     showResetConfirm.value = false
     resetPassword.value = ''
@@ -703,7 +703,7 @@ async function detachNode(nodeId: string) {
   detaching.value = true
   error.value = ''
   try {
-    await api.del(`/admin/storage/nodes/${nodeId}`, { password: detachPassword.value })
+    await api.post(`/admin/storage/nodes/${nodeId}/detach`, { password: detachPassword.value })
     success.value = t('storageSetup.detachSuccess')
     detachingNodeId.value = null
     detachPassword.value = ''

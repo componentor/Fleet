@@ -117,9 +117,12 @@ async function verifyPassword(c: any): Promise<Response | null> {
   const dbUser = await db.query.users.findFirst({
     where: and(eq(users.id, user.userId), isNull(users.deletedAt)),
   });
-  if (!dbUser?.passwordHash) return c.json({ error: 'Cannot verify identity' }, 400);
+  if (!dbUser?.passwordHash) return c.json({ error: 'No password set on your account. Please set a password in Account Settings first.' }, 400);
   const valid = await verify(dbUser.passwordHash, password);
-  if (!valid) return c.json({ error: 'Invalid password' }, 403);
+  if (!valid) {
+    logger.warn({ userId: user.userId }, 'Password verification failed for storage admin action');
+    return c.json({ error: 'Invalid password' }, 403);
+  }
   return null;
 }
 
@@ -348,10 +351,10 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
   return c.json(node, 201);
 }) as any);
 
-// DELETE /nodes — Remove all storage nodes (cleanup/reset)
-const deleteAllNodesRoute = createRoute({
-  method: 'delete',
-  path: '/nodes',
+// POST /nodes/reset — Remove all storage nodes (cleanup/reset)
+const resetAllNodesRoute = createRoute({
+  method: 'post',
+  path: '/nodes/reset',
   tags: ['Storage Admin'],
   summary: 'Remove all storage nodes (requires password confirmation)',
   security: bearerSecurity,
@@ -364,7 +367,7 @@ const deleteAllNodesRoute = createRoute({
   },
 });
 
-storageAdmin.openapi(deleteAllNodesRoute, (async (c: any) => {
+storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
   const denied = await verifyPassword(c);
   if (denied) return denied;
 
@@ -384,10 +387,10 @@ storageAdmin.openapi(deleteAllNodesRoute, (async (c: any) => {
   return c.json({ message: `Removed ${all.length} storage node(s) and reset cluster configuration` });
 }) as any);
 
-// DELETE /nodes/:id — Detach a storage node (requires password confirmation)
-const deleteNodeRoute = createRoute({
-  method: 'delete',
-  path: '/nodes/{id}',
+// POST /nodes/:id/detach — Detach a storage node (requires password confirmation)
+const detachNodeRoute = createRoute({
+  method: 'post',
+  path: '/nodes/{id}/detach',
   tags: ['Storage Admin'],
   summary: 'Detach a storage node (requires password confirmation)',
   security: bearerSecurity,
@@ -401,7 +404,7 @@ const deleteNodeRoute = createRoute({
   },
 });
 
-storageAdmin.openapi(deleteNodeRoute, (async (c: any) => {
+storageAdmin.openapi(detachNodeRoute, (async (c: any) => {
   const denied = await verifyPassword(c);
   if (denied) return denied;
 
