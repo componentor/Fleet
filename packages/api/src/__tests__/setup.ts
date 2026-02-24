@@ -188,6 +188,8 @@ sqlite.exec(`
     provider_renewal_price INTEGER NOT NULL,
     markup_type TEXT NOT NULL DEFAULT 'percentage',
     markup_value INTEGER NOT NULL DEFAULT 20,
+    renewal_markup_type TEXT,
+    renewal_markup_value INTEGER,
     sell_registration_price INTEGER NOT NULL,
     sell_renewal_price INTEGER NOT NULL,
     enabled INTEGER DEFAULT 1,
