@@ -248,6 +248,7 @@ export class TemplateService {
     options?: {
       composeOverride?: string;
       imageOverrides?: Record<string, string>;
+      domainOverrides?: Record<string, string>;
       resourceOverrides?: Record<string, { replicas?: number; cpuLimit?: number; memoryLimit?: number }>;
       volumeOverrides?: Record<string, { mode: 'create' | 'existing'; sizeGb?: number; existingVolumeName?: string }>;
     },
@@ -319,32 +320,43 @@ export class TemplateService {
     // paths exist on the host when Docker tries to start containers.
     const hasStorageProvider = storageManager.volumes.isReady();
     if (hasStorageProvider) {
+      // Collect volumes that need creation and their sizes
+      const volumesToCreate: Array<{ dockerName: string; displayName: string; sizeGb: number }> = [];
       for (const volName of parsed.volumes ?? []) {
         const override = options?.volumeOverrides?.[volName];
-
-        // User chose an existing volume — skip creation
         if (override?.mode === 'existing') continue;
 
         const dockerVolName = `${swarmNamePrefix}-${volName}`;
-        const sizeGb = override?.sizeGb ?? 5;
-
-        try {
-          const existing = await db.query.storageVolumes.findFirst({
-            where: and(
-              eq(storageVolumes.name, dockerVolName),
-              eq(storageVolumes.accountId, accountId),
-              isNull(storageVolumes.deletedAt),
-            ),
+        const existing = await db.query.storageVolumes.findFirst({
+          where: and(
+            eq(storageVolumes.name, dockerVolName),
+            eq(storageVolumes.accountId, accountId),
+            isNull(storageVolumes.deletedAt),
+          ),
+        });
+        if (!existing) {
+          volumesToCreate.push({
+            dockerName: dockerVolName,
+            displayName: volName,
+            sizeGb: override?.sizeGb ?? 5,
           });
-          if (!existing) {
-            await storageManager.createVolume(accountId, dockerVolName, volName, sizeGb);
+        }
+      }
+
+      // Single quota check for total requested storage
+      if (volumesToCreate.length > 0) {
+        const totalRequestedGb = volumesToCreate.reduce((sum, v) => sum + v.sizeGb, 0);
+        await storageManager.enforceStorageQuota(accountId, totalRequestedGb);
+
+        for (const vol of volumesToCreate) {
+          try {
+            await storageManager.createVolume(
+              accountId, vol.dockerName, vol.displayName, vol.sizeGb,
+              undefined, undefined, { skipQuotaCheck: true },
+            );
+          } catch (err) {
+            logger.warn({ err, volume: vol.dockerName }, 'Failed to create storage volume for template');
           }
-        } catch (err) {
-          // Surface quota errors to the caller so the user sees a clear message
-          if ((err as Error).message?.includes('quota exceeded')) {
-            throw err;
-          }
-          logger.warn({ err, volume: dockerVolName }, 'Failed to create storage volume for template');
         }
       }
     }

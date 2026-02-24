@@ -267,9 +267,12 @@ class StorageManager {
     sizeGb: number,
     nodeId?: string,
     region?: string | null,
+    opts?: { skipQuotaCheck?: boolean },
   ): Promise<VolumeResult> {
-    // Check account storage quota
-    await this.enforceStorageQuota(accountId, sizeGb);
+    // Check account storage quota (can be skipped when caller already did a batch check)
+    if (!opts?.skipQuotaCheck) {
+      await this.enforceStorageQuota(accountId, sizeGb);
+    }
 
     // Resolve cluster
     const cluster = this.getClusterForRegion(region ?? null) ?? this.getDefaultCluster();
@@ -515,7 +518,7 @@ class StorageManager {
     return { volumeProvider, objectProvider };
   }
 
-  private async enforceStorageQuota(accountId: string, requestedGb: number): Promise<void> {
+  async enforceStorageQuota(accountId: string, requestedGb: number): Promise<void> {
     const [currentUsage, limit] = await Promise.all([
       this.getAccountStorageUsage(accountId),
       this.getAccountStorageLimit(accountId),
