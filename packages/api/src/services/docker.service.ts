@@ -121,11 +121,24 @@ export class DockerService {
 
       for (const v of volumes) {
         if (storageManager.volumes.getHostMountPath?.(v.source)) {
-          try {
-            await storageManager.volumes.ensureVolume(v.source);
-          } catch (err) {
-            logger.error({ err, volume: v.source }, 'Failed to ensure volume directory on distributed storage — bind mount will fail');
-            throw err;
+          // Retry up to 3 times with brief delays to allow for distributed FS replication
+          let lastErr: Error | null = null;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              await storageManager.volumes.ensureVolume(v.source);
+              lastErr = null;
+              break;
+            } catch (err) {
+              lastErr = err as Error;
+              if (attempt < 2) {
+                logger.warn({ err, volume: v.source, attempt: attempt + 1 }, 'Volume ensure failed, retrying...');
+                await new Promise(r => setTimeout(r, 1000));
+              }
+            }
+          }
+          if (lastErr) {
+            logger.error({ err: lastErr, volume: v.source }, 'Failed to ensure volume directory on distributed storage — bind mount will fail');
+            throw lastErr;
           }
         }
       }

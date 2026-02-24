@@ -323,7 +323,7 @@ async function fetchStorageData() {
       displayName: v.displayName ?? v.name,
       sizeGb: v.sizeGb ?? 0,
     }))
-    storageQuota.value = quota
+    storageQuota.value = { usedGb: Number(quota.usedGb) || 0, limitGb: Number(quota.limitGb) || 0 }
   } catch {}
 }
 

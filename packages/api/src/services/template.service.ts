@@ -355,7 +355,12 @@ export class TemplateService {
               undefined, undefined, { skipQuotaCheck: true },
             );
           } catch (err) {
-            logger.warn({ err, volume: vol.dockerName }, 'Failed to create storage volume for template');
+            // Surface volume creation errors — silent failures cause bind mount errors later
+            if ((err as Error).message?.includes('quota exceeded')) {
+              throw err;
+            }
+            logger.error({ err, volume: vol.dockerName }, 'Failed to create storage volume for template — service may fail to start');
+            throw new Error(`Failed to create volume "${vol.displayName}": ${(err as Error).message}`);
           }
         }
       }
