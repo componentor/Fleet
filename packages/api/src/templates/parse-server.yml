@@ -35,7 +35,7 @@ services:
       PARSE_SERVER_APPLICATION_ID: "{{PARSE_APP_ID}}"
       PARSE_SERVER_MASTER_KEY: "{{PARSE_MASTER_KEY}}"
       PARSE_SERVER_DATABASE_URI: "mongodb://root:{{MONGO_INITDB_ROOT_PASSWORD}}@{{service:parse-db}}:27017/parse?authSource=admin"
-      PARSE_SERVER_URL: "http://localhost:1337/parse"
+      PARSE_SERVER_URL: "http://{{service:parse-server}}:1337/parse"
       PARSE_SERVER_MOUNT_PATH: "/parse"
     volumes:
       - source: parse_files
