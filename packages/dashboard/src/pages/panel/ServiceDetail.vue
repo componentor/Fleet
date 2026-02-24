@@ -135,6 +135,23 @@ const volumeLoading = ref(false)
 const migrationFailures = ref<Array<{ source: string; target: string; mountPath: string; error: string }>>([])
 const migrateRetryLoading = ref(false)
 
+/** Get the volume driver info for a given volume source from Docker status */
+function getVolumeDriver(source: string): { driver: string; type: string | null } | null {
+  const drivers = (service.value as any)?.dockerStatus?.volumeDrivers
+  if (!drivers) return null
+  const match = drivers.find((d: any) => d.source === source)
+  if (!match) return null
+  return { driver: match.driver, type: match.driverType }
+}
+
+/** Human-readable label for the volume driver */
+function volumeDriverLabel(source: string): string {
+  const info = getVolumeDriver(source)
+  if (!info) return ''
+  if (info.type) return info.type
+  return info.driver
+}
+
 const restartPolicyLabel = computed(() => {
   const condition = service.value?.restartCondition ?? 'on-failure'
   if (condition === 'none') return 'Never'
@@ -1299,6 +1316,21 @@ onUnmounted(() => {
                 {{ restartPolicyLabel }}
               </p>
             </div>
+            <div v-if="(service.volumes as any[])?.length" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Storage</p>
+              <div class="flex items-center gap-2">
+                <p class="text-lg font-bold text-gray-900 dark:text-white">{{ (service.volumes as any[]).length }} vol{{ (service.volumes as any[]).length !== 1 ? 's' : '' }}</p>
+                <span
+                  v-if="(service as any).dockerStatus?.volumeDrivers?.length"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                  :class="(service as any).dockerStatus.volumeDrivers[0].driverType
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                    : 'bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300'"
+                >
+                  {{ (service as any).dockerStatus.volumeDrivers[0].driverType || (service as any).dockerStatus.volumeDrivers[0].driver }}
+                </span>
+              </div>
+            </div>
           </div>
 
           <!-- Success banner -->
@@ -2434,6 +2466,15 @@ onUnmounted(() => {
                           {{ vol.source }}
                         </option>
                       </select>
+                      <span
+                        v-if="vol.source && volumeDriverLabel(vol.source)"
+                        class="inline-flex items-center mt-1.5 px-2 py-0.5 rounded text-[10px] font-medium"
+                        :class="volumeDriverLabel(vol.source) === 'local'
+                          ? 'bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                          : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'"
+                      >
+                        {{ volumeDriverLabel(vol.source) }}
+                      </span>
                     </div>
                     <div>
                       <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Mount Path</label>

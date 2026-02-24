@@ -845,12 +845,24 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
       const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
       const runningTasks = tasks.filter((t) => t.status === 'running').length;
       const failedTasks = tasks.filter((t) => t.status === 'failed' || t.status === 'rejected').length;
+      // Extract volume mount driver info from Docker service spec
+      const mounts = (info.Spec?.TaskTemplate as any)?.ContainerSpec?.Mounts ?? [];
+      const volumeDrivers = mounts
+        .filter((m: any) => m.Type === 'volume')
+        .map((m: any) => ({
+          source: m.Source,
+          target: m.Target,
+          driver: m.VolumeOptions?.DriverConfig?.Name ?? 'local',
+          driverType: m.VolumeOptions?.DriverConfig?.Options?.type ?? null,
+        }));
+
       dockerStatus = {
         createdAt: info.CreatedAt,
         updatedAt: info.UpdatedAt,
         runningTasks,
         desiredTasks: svc.replicas ?? 1,
         tasks,
+        volumeDrivers,
       };
 
       // Auto-correct status drift
