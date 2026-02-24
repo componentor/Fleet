@@ -14,7 +14,8 @@ function applyBranding() {
   // Set document title
   document.title = brandTitle.value || 'Fleet'
 
-  // Set favicon
+  // Set favicon — override the default SVG when custom branding is set,
+  // otherwise leave the default <link> from index.html intact.
   let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
   if (brandFaviconUrl.value) {
     if (!link) {
@@ -22,9 +23,8 @@ function applyBranding() {
       link.rel = 'icon'
       document.head.appendChild(link)
     }
+    link.type = ''
     link.href = `${BASE_URL}${brandFaviconUrl.value}`
-  } else if (link) {
-    link.remove()
   }
 }
 
