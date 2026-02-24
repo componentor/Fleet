@@ -3,6 +3,9 @@ import { resolve as resolvePath } from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
+import { logger } from './logger.js';
+
+const PLATFORM_CERTS_VOLUME = 'fleet-platform-certs';
 
 const docker = new Dockerode({ socketPath: '/var/run/docker.sock', version: 'v1.45' });
 
@@ -1030,6 +1033,284 @@ export class DockerService {
     return {
       success: results.every((r) => r.status === 'complete'),
       results,
+    };
+  }
+
+  /**
+   * Run a shell command on the local host via a temporary container with chroot.
+   * Used to execute host-level CLI tools (e.g. gluster) from within the API container.
+   */
+  async runOnLocalHost(command: string, opts?: { timeoutMs?: number }): Promise<{
+    exitCode: number;
+    stdout: string;
+  }> {
+    const timeout = opts?.timeoutMs ?? 60_000;
+    const container = await docker.createContainer({
+      Image: 'alpine:latest',
+      Cmd: ['sh', '-c', `chroot /host sh -c '${command.replace(/'/g, "'\\''")}'`],
+      HostConfig: {
+        Binds: ['/:/host'],
+      },
+    });
+
+    try {
+      await container.start();
+
+      // Attach to get stdout
+      const logStream = await container.logs({ follow: true, stdout: true, stderr: true });
+      let output = '';
+      if (Buffer.isBuffer(logStream)) {
+        output = logStream.toString();
+      } else {
+        const chunks: Buffer[] = [];
+        const collectPromise = new Promise<void>((resolve) => {
+          (logStream as NodeJS.ReadableStream).on('data', (chunk: Buffer) => chunks.push(chunk));
+          (logStream as NodeJS.ReadableStream).on('end', resolve);
+        });
+        const timeoutPromise = new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out')), timeout),
+        );
+        await Promise.race([collectPromise, timeoutPromise]);
+        output = Buffer.concat(chunks).toString();
+      }
+
+      const result = await container.wait();
+      return { exitCode: result.StatusCode, stdout: output };
+    } finally {
+      await container.remove({ force: true }).catch(() => {});
+    }
+  }
+
+  /**
+   * Get the current platform volume mode by inspecting the Traefik service mounts.
+   * Returns 'distributed' if certs mount uses a non-local driver, otherwise 'local'.
+   */
+  async getPlatformVolumeMode(): Promise<'local' | 'distributed'> {
+    try {
+      const services = await docker.listServices({ filters: { name: ['fleet_traefik'] } });
+      const svc = services.find((s: any) => s.Spec?.Name === 'fleet_traefik');
+      if (!svc) return 'local';
+
+      const mounts: any[] = (svc as any).Spec?.TaskTemplate?.ContainerSpec?.Mounts ?? [];
+      const certMount = mounts.find((m: any) => m.Target === '/certs');
+      if (!certMount) return 'local';
+
+      // Check if mount uses distributed driver options (type=glusterfs or type=ceph in options)
+      const opts = certMount.VolumeOptions?.DriverConfig?.Options ?? {};
+      if (opts.type === 'glusterfs' || opts.type === 'ceph') return 'distributed';
+
+      return 'local';
+    } catch {
+      return 'local';
+    }
+  }
+
+  /**
+   * Switch platform service volumes (Traefik certs) between local and distributed storage.
+   *
+   * - distributed: Creates a GlusterFS/Ceph volume for certs, migrates data, updates Traefik mounts
+   * - local: Ensures /opt/fleet/certs exists on all nodes, migrates data back, restores bind-mount volume
+   */
+  async updatePlatformVolumeMounts(mode: 'distributed' | 'local'): Promise<{
+    applied: boolean;
+    message: string;
+  }> {
+    // Find fleet_traefik service
+    const services = await docker.listServices({ filters: { name: ['fleet_traefik'] } });
+    const svc = services.find((s: any) => s.Spec?.Name === 'fleet_traefik') as any;
+    if (!svc) {
+      return { applied: false, message: 'fleet_traefik service not found' };
+    }
+
+    const spec = svc.Spec;
+    const mounts: any[] = spec.TaskTemplate?.ContainerSpec?.Mounts ?? [];
+    const certMountIdx = mounts.findIndex((m: any) => m.Target === '/certs');
+
+    if (certMountIdx === -1) {
+      return { applied: false, message: 'No /certs mount found on fleet_traefik' };
+    }
+
+    const currentMount = mounts[certMountIdx];
+    const currentOpts = currentMount.VolumeOptions?.DriverConfig?.Options ?? {};
+    const isCurrentlyDistributed = currentOpts.type === 'glusterfs' || currentOpts.type === 'ceph';
+
+    if (mode === 'distributed') {
+      if (isCurrentlyDistributed) {
+        return { applied: false, message: 'Platform volumes already using distributed storage' };
+      }
+
+      // Check if distributed storage is ready
+      let driverOpts: Record<string, string>;
+      try {
+        if (!storageManager.volumes.isReady()) {
+          return { applied: false, message: 'Distributed storage not ready' };
+        }
+        driverOpts = storageManager.volumes.getDockerVolumeOptions(PLATFORM_CERTS_VOLUME);
+        if (Object.keys(driverOpts).length === 0) {
+          return { applied: false, message: 'No driver options available for distributed volume' };
+        }
+      } catch {
+        return { applied: false, message: 'Storage manager not initialized' };
+      }
+
+      // Create the GlusterFS/Ceph volume on the host (idempotent)
+      const provider = storageManager.config?.provider;
+      if (provider === 'glusterfs') {
+        const config = storageManager.config!.config;
+        const nodes = config.nodes as Array<{ hostname: string; ip: string; brickPath: string }>;
+        const replicaCount = config.replicaCount ?? storageManager.config!.replicationFactor;
+
+        if (nodes && nodes.length >= replicaCount) {
+          const bricks = nodes
+            .slice(0, replicaCount)
+            .map((n: any) => `${n.ip}:${n.brickPath}/${PLATFORM_CERTS_VOLUME}`)
+            .join(' ');
+          const transport = config.transport ?? 'tcp';
+
+          // Create and start volume (skip if already exists)
+          const createCmd = [
+            `gluster volume info ${PLATFORM_CERTS_VOLUME} >/dev/null 2>&1`,
+            `|| (gluster volume create ${PLATFORM_CERTS_VOLUME} replica ${replicaCount} transport ${transport} ${bricks} force`,
+            `&& gluster volume start ${PLATFORM_CERTS_VOLUME})`,
+          ].join(' ');
+
+          const result = await this.runOnLocalHost(createCmd, { timeoutMs: 30_000 });
+          if (result.exitCode !== 0) {
+            logger.warn({ exitCode: result.exitCode, stdout: result.stdout }, 'GlusterFS platform volume creation may have failed');
+          } else {
+            logger.info('GlusterFS platform certs volume created/verified');
+          }
+        }
+      }
+      // Ceph volumes are created via RBD — the driver options handle mount-time creation
+
+      // Copy certs from old bind-mount volume to new distributed volume
+      try {
+        const driver = storageManager.volumes.getDockerVolumeDriver();
+        // Create a temp container that mounts both volumes and copies data
+        const copyContainer = await docker.createContainer({
+          Image: 'alpine:latest',
+          Cmd: ['sh', '-c', 'cp -a /old-certs/. /new-certs/ 2>/dev/null; true'],
+          HostConfig: {
+            Mounts: [
+              {
+                Type: 'volume' as const,
+                Source: 'fleet_fleet_certs',
+                Target: '/old-certs',
+                ReadOnly: true,
+              },
+              {
+                Type: 'volume' as const,
+                Source: PLATFORM_CERTS_VOLUME,
+                Target: '/new-certs',
+                ReadOnly: false,
+                VolumeOptions: {
+                  DriverConfig: { Name: driver, Options: driverOpts },
+                },
+              },
+            ] as any,
+          },
+        });
+        try {
+          await copyContainer.start();
+          await copyContainer.wait();
+          logger.info('Copied certs from local volume to distributed volume');
+        } finally {
+          await copyContainer.remove({ force: true }).catch(() => {});
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to copy certs to distributed volume — Traefik will re-issue certificates');
+      }
+
+      // Update the Traefik service mount
+      const driver = storageManager.volumes.getDockerVolumeDriver();
+      mounts[certMountIdx] = {
+        Source: PLATFORM_CERTS_VOLUME,
+        Target: '/certs',
+        Type: 'volume' as const,
+        ReadOnly: false,
+        VolumeOptions: {
+          NoCopy: false,
+          Labels: {},
+          DriverConfig: { Name: driver, Options: driverOpts },
+        },
+      };
+    } else {
+      // mode === 'local'
+      if (!isCurrentlyDistributed) {
+        // Already local, but ensure directories exist on all nodes
+        await this.runOnAllNodes('mkdir -p /opt/fleet/certs', { timeoutMs: 30_000 }).catch(() => {});
+        return { applied: true, message: 'Platform volumes already local, ensured directories on all nodes' };
+      }
+
+      // Ensure /opt/fleet/certs exists on all manager nodes
+      await this.runOnAllNodes('mkdir -p /opt/fleet/certs', { timeoutMs: 30_000 });
+
+      // Copy certs from distributed volume back to local
+      try {
+        const currentDriverOpts = currentMount.VolumeOptions?.DriverConfig?.Options ?? {};
+        const currentDriverName = currentMount.VolumeOptions?.DriverConfig?.Name ?? 'local';
+        const copyContainer = await docker.createContainer({
+          Image: 'alpine:latest',
+          Cmd: ['sh', '-c', 'cp -a /dist-certs/. /local-certs/ 2>/dev/null; true'],
+          HostConfig: {
+            Mounts: [
+              {
+                Type: 'volume' as const,
+                Source: currentMount.Source ?? PLATFORM_CERTS_VOLUME,
+                Target: '/dist-certs',
+                ReadOnly: true,
+                VolumeOptions: {
+                  DriverConfig: { Name: currentDriverName, Options: currentDriverOpts },
+                },
+              },
+              {
+                Type: 'bind' as const,
+                Source: '/opt/fleet/certs',
+                Target: '/local-certs',
+                ReadOnly: false,
+              },
+            ] as any,
+          },
+        });
+        try {
+          await copyContainer.start();
+          await copyContainer.wait();
+          logger.info('Copied certs from distributed volume to local directory');
+        } finally {
+          await copyContainer.remove({ force: true }).catch(() => {});
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to copy certs from distributed volume — Traefik will re-issue certificates');
+      }
+
+      // Restore original bind-mount volume
+      mounts[certMountIdx] = {
+        Source: 'fleet_fleet_certs',
+        Target: '/certs',
+        Type: 'volume' as const,
+        ReadOnly: false,
+      };
+    }
+
+    // Apply the updated spec to the service
+    spec.TaskTemplate.ContainerSpec.Mounts = mounts;
+    const dockerSvc = docker.getService(svc.ID);
+    await dockerSvc.update({
+      ...spec,
+      version: svc.Version?.Index,
+      TaskTemplate: {
+        ...spec.TaskTemplate,
+        ForceUpdate: ((spec.TaskTemplate as any).ForceUpdate ?? 0) + 1,
+      },
+    } as any);
+
+    logger.info({ mode }, 'Platform volume mounts updated for fleet_traefik');
+    return {
+      applied: true,
+      message: mode === 'distributed'
+        ? 'Platform volumes switched to distributed storage — Traefik will redeploy on all manager nodes'
+        : 'Platform volumes switched to local storage — ensured directories on all nodes',
     };
   }
 }

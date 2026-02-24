@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, Plus, Loader2, Info } from 'lucide-vue-next'
+import { HardDrive, Plus, Loader2, Info, FolderOpen } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
+import FileExplorer from '@/components/FileExplorer.vue'
 
 const { t } = useI18n()
 const api = useApi()
@@ -16,6 +17,7 @@ const newName = ref('')
 const newSize = ref(1)
 const creating = ref(false)
 const error = ref('')
+const browsingVolumeName = ref<string | null>(null)
 const maxStorageGb = ref<number | null>(null)
 const storageCentsPerGbMonth = ref<number>(0)
 
@@ -202,18 +204,54 @@ onMounted(() => {
               <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white font-mono">{{ volume.name }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ volume.driver || 'local' }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(volume.createdAt) }}</td>
-              <td v-if="canWrite" class="px-6 py-4 text-right">
-                <button
-                  @click="deleteVolume(volume.name)"
-                  class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                >
-                  {{ t('storagePage.delete') }}
-                </button>
+              <td class="px-6 py-4 text-right">
+                <div class="flex items-center justify-end gap-3">
+                  <button
+                    @click="browsingVolumeName = volume.name"
+                    class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    <FolderOpen class="w-3.5 h-3.5" />
+                    Browse
+                  </button>
+                  <button
+                    v-if="canWrite"
+                    @click="deleteVolume(volume.name)"
+                    class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                  >
+                    {{ t('storagePage.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <!-- Volume File Browser Modal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="browsingVolumeName" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" @click="browsingVolumeName = null"></div>
+          <div class="relative w-full max-w-6xl max-h-[90vh] bg-white dark:bg-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between shrink-0">
+              <div class="flex items-center gap-3">
+                <FolderOpen class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <div>
+                  <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volume Browser</h3>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-mono">{{ browsingVolumeName }}</p>
+                </div>
+              </div>
+              <button @click="browsingVolumeName = null" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6">
+              <FileExplorer :volumeName="browsingVolumeName" />
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

@@ -35,8 +35,16 @@ interface FileEntry {
 }
 
 const props = defineProps<{
-  serviceId: string
+  serviceId?: string
+  volumeName?: string
 }>()
+
+const isVolumeMode = computed(() => !!props.volumeName)
+const apiBase = computed(() =>
+  isVolumeMode.value
+    ? `/volume-files/${props.volumeName}`
+    : `/files/${props.serviceId}`
+)
 
 const { t } = useI18n()
 const api = useApi()
@@ -107,7 +115,7 @@ async function fetchEntries() {
   error.value = ''
   try {
     const data = await api.get<{ entries: FileEntry[]; currentPath: string }>(
-      `/files/${props.serviceId}/list?path=${encodeURIComponent(currentPath.value)}`
+      `${apiBase.value}/list?path=${encodeURIComponent(currentPath.value)}`
     )
     entries.value = data.entries
   } catch (err: any) {
@@ -146,7 +154,7 @@ async function openFile(entry: FileEntry) {
     : `${currentPath.value.replace(/^\//, '')}/${entry.name}`
   try {
     const data = await api.get<{ content: string; path: string; size: number; modified: string }>(
-      `/files/${props.serviceId}/read?path=${encodeURIComponent(filePath)}`
+      `${apiBase.value}/read?path=${encodeURIComponent(filePath)}`
     )
     editingFile.value = { path: filePath, content: data.content, modified: data.modified }
   } catch (err: any) {
@@ -158,7 +166,7 @@ async function saveFile() {
   if (!editingFile.value) return
   saving.value = true
   try {
-    await api.put(`/files/${props.serviceId}/write`, {
+    await api.put(`${apiBase.value}/write`, {
       path: editingFile.value.path,
       content: editingFile.value.content,
     })
@@ -178,9 +186,9 @@ async function createEntry() {
     : `${currentPath.value.replace(/^\//, '')}/${newName.value.trim()}`
   try {
     if (showNewDialog.value === 'folder') {
-      await api.post(`/files/${props.serviceId}/mkdir`, { path })
+      await api.post(`${apiBase.value}/mkdir`, { path })
     } else {
-      await api.put(`/files/${props.serviceId}/write`, { path, content: '' })
+      await api.put(`${apiBase.value}/write`, { path, content: '' })
     }
     showNewDialog.value = null
     newName.value = ''
@@ -196,7 +204,7 @@ async function deleteEntry(entry: FileEntry) {
     ? entry.name
     : `${currentPath.value.replace(/^\//, '')}/${entry.name}`
   try {
-    await api.del(`/files/${props.serviceId}/delete`, { path })
+    await api.del(`${apiBase.value}/delete`, { path })
     await fetchEntries()
   } catch (err: any) {
     error.value = err?.body?.error || 'Failed to delete'
@@ -209,7 +217,7 @@ async function downloadFile(entry: FileEntry) {
     : `${currentPath.value.replace(/^\//, '')}/${entry.name}`
   try {
     const blob = await api.downloadBlob(
-      `/files/${props.serviceId}/download?path=${encodeURIComponent(path)}`
+      `${apiBase.value}/download?path=${encodeURIComponent(path)}`
     )
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -225,7 +233,7 @@ async function downloadFile(entry: FileEntry) {
 async function downloadArchive(format: 'zip' | 'tar') {
   try {
     const blob = await api.downloadBlob(
-      `/files/${props.serviceId}/download-archive?format=${format}`
+      `${apiBase.value}/download-archive?format=${format}`
     )
     const ext = format === 'zip' ? 'zip' : 'tar.gz'
     const url = URL.createObjectURL(blob)
@@ -252,7 +260,7 @@ async function handleFileUpload(e: Event) {
       const formData = new FormData()
       formData.append('file', files[i]!)
       formData.append('path', basePath)
-      await api.upload(`/files/${props.serviceId}/upload`, formData)
+      await api.upload(`${apiBase.value}/upload`, formData)
     }
     await fetchEntries()
   } catch (err: any) {
@@ -295,7 +303,7 @@ async function handleDrop(e: DragEvent) {
       formData.append('file', file)
       const uploadPath = basePath ? `${basePath}/${relativePath}` : relativePath
       formData.append('path', uploadPath)
-      await api.upload(`/files/${props.serviceId}/upload`, formData)
+      await api.upload(`${apiBase.value}/upload`, formData)
     }
 
     await fetchEntries()
@@ -387,7 +395,7 @@ watch(currentPath, () => fetchEntries())
 
 onMounted(() => {
   fetchEntries()
-  fetchPlatformDomain()
+  if (!isVolumeMode.value) fetchPlatformDomain()
 })
 </script>
 
@@ -549,6 +557,7 @@ onMounted(() => {
             <input type="file" class="hidden" @change="handleFileUpload" :disabled="uploading" multiple />
           </label>
           <button
+            v-if="!isVolumeMode"
             @click="showSftpInfo = !showSftpInfo"
             :class="[
               'inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors',
@@ -587,7 +596,7 @@ onMounted(() => {
     </div>
 
     <!-- SFTP Connection Info -->
-    <div v-if="showSftpInfo" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-4 p-4">
+    <div v-if="showSftpInfo && !isVolumeMode" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-4 p-4">
       <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">SFTP Connection</h4>
       <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Connect via any SFTP client (FileZilla, WinSCP, Cyberduck, or command line). Use your API key as the password.</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -770,8 +779,8 @@ onMounted(() => {
 
     </div><!-- end drag-and-drop wrapper -->
 
-    <!-- Rebuild Section -->
-    <div class="mt-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+    <!-- Rebuild Section (upload mode only) -->
+    <div v-if="!isVolumeMode" class="mt-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
       <button
         @click="showRebuild = !showRebuild"
         class="w-full px-6 py-4 flex items-center justify-between text-left"

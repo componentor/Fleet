@@ -146,6 +146,21 @@ try {
   // Swarm may not be initialized yet
 }
 
+// Ensure platform volumes (Traefik certs) match the configured storage provider.
+// This handles cases where docker stack deploy reverts volume config, or a node restart.
+try {
+  const { storageManager } = await import('./services/storage/storage-manager.js')
+  const { dockerService } = await import('./services/docker.service.js')
+  const expectedMode = storageManager.isVolumeDistributed ? 'distributed' : 'local'
+  const currentMode = await dockerService.getPlatformVolumeMode()
+  if (expectedMode !== currentMode) {
+    logger.info({ expectedMode, currentMode }, 'Platform volume mode mismatch detected — applying correct configuration')
+    await dockerService.updatePlatformVolumeMounts(expectedMode)
+  }
+} catch {
+  // Non-critical — platform volume check can fail if Swarm or storage not ready
+}
+
 server = serve({
   fetch: app.fetch,
   port,

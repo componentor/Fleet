@@ -134,6 +134,7 @@ const accountVolumes = ref<Array<{ name: string; displayName: string; sizeGb: nu
 const volumeLoading = ref(false)
 const migrationFailures = ref<Array<{ source: string; target: string; mountPath: string; error: string }>>([])
 const migrateRetryLoading = ref(false)
+const browsingVolumeName = ref<string | null>(null)
 
 /** Get the volume driver info for a given volume source from Docker status */
 function getVolumeDriver(source: string): { driver: string; type: string | null } | null {
@@ -2487,6 +2488,9 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <div class="flex items-center gap-2 mt-5">
+                    <button v-if="vol.source" @click="browsingVolumeName = vol.source" class="p-1 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors" title="Browse files">
+                      <FolderOpen class="w-4 h-4" />
+                    </button>
                     <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
                       <input type="checkbox" v-model="vol.readonly" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
                       RO
@@ -2523,6 +2527,32 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
+
+          <!-- Volume File Browser Modal -->
+          <Teleport to="body">
+            <Transition name="modal">
+              <div v-if="browsingVolumeName" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" @click="browsingVolumeName = null"></div>
+                <div class="relative w-full max-w-6xl max-h-[90vh] bg-white dark:bg-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+                  <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between shrink-0">
+                    <div class="flex items-center gap-3">
+                      <FolderOpen class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                      <div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volume Browser</h3>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-mono">{{ browsingVolumeName }}</p>
+                      </div>
+                    </div>
+                    <button @click="browsingVolumeName = null" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                  <div class="flex-1 overflow-y-auto p-6">
+                    <FileExplorer :volumeName="browsingVolumeName" />
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </Teleport>
 
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">

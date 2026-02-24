@@ -151,6 +151,7 @@ storageAdmin.openapi(getClusterRoute, (async (c: any) => {
   const cluster = await db.query.storageClusters.findFirst();
   const health = await storageManager.getHealth();
   const nodes = await db.query.storageNodes.findMany();
+  const platformVolumeMode = await dockerService.getPlatformVolumeMode();
 
   return c.json({
     cluster: cluster ?? {
@@ -161,6 +162,7 @@ storageAdmin.openapi(getClusterRoute, (async (c: any) => {
     },
     health,
     nodes,
+    platformVolumeMode,
   });
 }) as any);
 
@@ -253,6 +255,18 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       }).where(eq(storageClusters.id, cluster.id));
     }
 
+    // Auto-apply platform volume configuration (switch Traefik certs to distributed/local)
+    let platformVolumes: { mode: string; applied: boolean; message: string } | undefined;
+    try {
+      const volumeMode = storageManager.isVolumeDistributed ? 'distributed' : 'local';
+      const result = await dockerService.updatePlatformVolumeMounts(volumeMode);
+      platformVolumes = { mode: volumeMode, ...result };
+      logger.info({ platformVolumes }, 'Platform volumes updated after storage cluster config');
+    } catch (err) {
+      logger.warn({ err }, 'Failed to update platform volumes after storage cluster config');
+      platformVolumes = { mode: 'unknown', applied: false, message: `Failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
     return c.json({
       message: 'Storage cluster configured',
       status: 'healthy',
@@ -261,6 +275,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
         packages: prerequisites.map((p) => p.package),
         results: prereqResult.results,
       } : undefined,
+      platformVolumes,
     });
   } catch (err) {
     // Mark as error
@@ -425,6 +440,15 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
   const cluster = await db.query.storageClusters.findFirst();
   if (cluster) {
     await db.delete(storageClusters).where(eq(storageClusters.id, cluster.id));
+  }
+
+  // Switch platform volumes back to local
+  try {
+    await storageManager.reload();
+    await dockerService.updatePlatformVolumeMounts('local');
+    logger.info('Platform volumes switched back to local after storage reset');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to switch platform volumes to local after storage reset');
   }
 
   return c.json({ message: `Removed ${all.length} storage node(s) and reset cluster configuration` });
@@ -631,6 +655,39 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
     repaired,
     failed,
   });
+}) as any);
+
+// ── Platform Volumes ──
+
+// POST /platform-volumes/apply — Apply platform volume configuration (switch Traefik certs between local/distributed)
+const applyPlatformVolumesRoute = createRoute({
+  method: 'post',
+  path: '/platform-volumes/apply',
+  tags: ['Storage Admin'],
+  summary: 'Apply platform volume configuration to infrastructure services (e.g., Traefik certs)',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Platform volume configuration applied'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(applyPlatformVolumesRoute, (async (c: any) => {
+  try {
+    const mode = storageManager.isVolumeDistributed ? 'distributed' : 'local';
+    const result = await dockerService.updatePlatformVolumeMounts(mode);
+    const currentMode = await dockerService.getPlatformVolumeMode();
+
+    return c.json({
+      mode,
+      currentMode,
+      ...result,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.error({ err }, 'Failed to apply platform volume configuration');
+    return c.json({ error: `Failed to apply platform volumes: ${detail}` }, 500);
+  }
 }) as any);
 
 // ── Prerequisites Routes ──

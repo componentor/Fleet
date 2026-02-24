@@ -52,6 +52,11 @@ class StorageManager {
     return this.clusterConfig?.provider !== 'local' || this.clusterConfig?.objectProvider !== 'local';
   }
 
+  /** Whether the volume provider specifically is distributed (affects platform volumes). */
+  get isVolumeDistributed(): boolean {
+    return !!this.clusterConfig && this.clusterConfig.provider !== 'local';
+  }
+
   async initialize(): Promise<void> {
     if (this.initialized) return;
 

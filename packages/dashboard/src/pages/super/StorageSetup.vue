@@ -68,6 +68,23 @@ const newNode = ref<StorageNode>({
   testMessage: '',
 })
 
+// Install prerequisites
+const installingPrereqs = ref(false)
+const prereqInstallResult = ref<any>(null)
+
+async function installPrerequisites() {
+  installingPrereqs.value = true
+  prereqInstallResult.value = null
+  try {
+    const result = await api.post('/admin/storage/prerequisites/install', {})
+    prereqInstallResult.value = result
+  } catch (err: any) {
+    prereqInstallResult.value = { success: false, error: err?.body?.error || 'Failed to install dependencies' }
+  } finally {
+    installingPrereqs.value = false
+  }
+}
+
 // Step 3: Config
 const replicationFactor = ref(3)
 const minioEndpoint = ref('')
@@ -804,7 +821,7 @@ async function attachNewNode() {
     <!-- Current Status (when not in wizard mode) -->
     <template v-if="!showWizard && !loading">
       <!-- Cluster Overview -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
           <div class="flex items-center gap-3 mb-3">
             <Database class="w-5 h-5 text-primary-600 dark:text-primary-400" />
@@ -822,6 +839,19 @@ async function attachNewNode() {
           </div>
           <p class="text-lg font-semibold text-gray-900 dark:text-white capitalize">
             {{ clusterData?.cluster?.objectProvider ?? 'local' }}
+          </p>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+          <div class="flex items-center gap-3 mb-3">
+            <Network class="w-5 h-5" :class="clusterData?.platformVolumeMode === 'distributed' ? 'text-green-600 dark:text-green-400' : 'text-gray-400'" />
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">Manager Storage</h3>
+          </div>
+          <p class="text-lg font-semibold capitalize" :class="clusterData?.platformVolumeMode === 'distributed' ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'">
+            {{ clusterData?.platformVolumeMode === 'distributed' ? 'Global' : 'Local' }}
+          </p>
+          <p v-if="clusterData?.cluster?.provider !== 'local' && clusterData?.platformVolumeMode !== 'distributed'" class="text-xs text-yellow-600 mt-1">
+            Platform volumes not yet migrated
           </p>
         </div>
 
@@ -1851,6 +1881,48 @@ async function attachNewNode() {
             <Plus class="w-4 h-4" />
             {{ t('storageSetup.addManualNode') }}
           </button>
+
+          <!-- Install Client Dependencies -->
+          <div class="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 space-y-3">
+            <div class="flex items-center gap-3">
+              <Settings class="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <div>
+                <p class="text-sm font-semibold text-blue-800 dark:text-blue-200">Install Client Dependencies on Swarm Nodes</p>
+                <p class="text-xs text-blue-600/80 dark:text-blue-400/70 mt-0.5">
+                  Automatically install {{ selectedVolumeProvider === 'glusterfs' ? 'glusterfs-client' : 'ceph-common' }} on all Docker Swarm nodes so they can mount distributed volumes.
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                @click="installPrerequisites"
+                :disabled="installingPrereqs"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="installingPrereqs" class="w-4 h-4 animate-spin" />
+                <Settings v-else class="w-4 h-4" />
+                {{ installingPrereqs ? 'Installing...' : 'Install Now' }}
+              </button>
+              <span class="text-xs text-blue-600/70 dark:text-blue-400/60">This will also run automatically during initialization (Step 4)</span>
+            </div>
+            <!-- Install result -->
+            <div v-if="prereqInstallResult" class="space-y-2">
+              <div v-if="prereqInstallResult.error" class="flex items-center gap-2 text-xs text-red-600 dark:text-red-400">
+                <AlertTriangle class="w-3.5 h-3.5 shrink-0" />
+                {{ prereqInstallResult.error }}
+              </div>
+              <template v-else>
+                <div v-for="(node, i) in (prereqInstallResult.results || [])" :key="i" class="flex items-center gap-2 text-xs">
+                  <CheckCircle2 v-if="node.success" class="w-3.5 h-3.5 text-green-500 shrink-0" />
+                  <AlertTriangle v-else class="w-3.5 h-3.5 text-red-500 shrink-0" />
+                  <span class="font-medium text-gray-900 dark:text-white">{{ node.nodeId || node.hostname || `Node ${i + 1}` }}</span>
+                  <span :class="node.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+                    {{ node.success ? 'Installed successfully' : (node.error || 'Failed') }}
+                  </span>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2121,6 +2193,14 @@ async function attachNewNode() {
               </span>
             </div>
             <div v-if="verifyHealth?.nodes?.length"><span class="font-medium text-gray-900 dark:text-white">{{ t('storageSetup.nodes') }}:</span> {{ verifyHealth.nodes.length }}</div>
+            <div>
+              <span class="font-medium text-gray-900 dark:text-white">Manager Storage:</span>
+              <span v-if="verifyHealth?.platformVolumeMode === 'distributed'" class="ml-1 text-green-600">Global ({{ verifyHealth?.cluster?.provider }})</span>
+              <span v-else class="ml-1" :class="verifyHealth?.cluster?.provider !== 'local' ? 'text-yellow-600' : 'text-gray-600 dark:text-gray-400'">
+                Local
+                <span v-if="verifyHealth?.cluster?.provider !== 'local'" class="text-xs"> — platform volumes not yet migrated</span>
+              </span>
+            </div>
           </div>
         </div>
       </div>
