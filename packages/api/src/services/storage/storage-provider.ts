@@ -66,6 +66,13 @@ export interface VolumeStorageProvider {
   getHostMountPath?(name: string): string | null;
 
   /**
+   * Ensure a volume's host path exists and is accessible.
+   * Called before Docker service create/update to prevent bind mount failures.
+   * Providers that don't use host-level mounts can omit this.
+   */
+  ensureVolume?(name: string): Promise<void>;
+
+  /**
    * Whether the storage cluster is operational and can serve volumes.
    * When false, docker.service.ts will fall back to plain local volumes.
    */

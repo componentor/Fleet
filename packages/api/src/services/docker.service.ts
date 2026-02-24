@@ -109,9 +109,31 @@ export class DockerService {
     }
   }
 
+  /**
+   * Ensure all volume host paths exist before Docker tries to bind-mount them.
+   * For GlusterFS this runs `mkdir -p` via a temp container on the FUSE mount.
+   */
+  private async ensureVolumeMounts(volumes: { source: string; target: string; readonly?: boolean }[]): Promise<void> {
+    try {
+      if (!storageManager.volumes.isReady()) return;
+      if (!storageManager.volumes.ensureVolume) return;
+
+      for (const v of volumes) {
+        if (storageManager.volumes.getHostMountPath?.(v.source)) {
+          await storageManager.volumes.ensureVolume(v.source);
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to pre-ensure volume mounts — proceeding with deployment');
+    }
+  }
+
   async createService(opts: CreateSwarmServiceOptions): Promise<{ id: string }> {
     // Validate volume mounts — block dangerous host paths
     this.validateVolumeMounts(opts.volumes);
+
+    // Ensure volume directories exist before Docker tries to bind-mount them
+    await this.ensureVolumeMounts(opts.volumes);
 
     const envArray = Object.entries(opts.env).map(([k, v]) => `${k}=${v}`);
 
@@ -249,6 +271,7 @@ export class DockerService {
     // Validate volume mounts if volumes are being updated (defense-in-depth)
     if (opts.volumes) {
       this.validateVolumeMounts(opts.volumes);
+      await this.ensureVolumeMounts(opts.volumes);
     }
 
     const service = docker.getService(dockerServiceId);

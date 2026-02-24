@@ -81,6 +81,13 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
     };
   }
 
+  async ensureVolume(name: string): Promise<void> {
+    if (!this.nfsAvailable) return;
+    validateVolumeName(name);
+    const volumePath = `${NFS_BASE_PATH}/${name}`;
+    await mkdir(volumePath, { recursive: true });
+  }
+
   async deleteVolume(name: string): Promise<void> {
     validateVolumeName(name);
 

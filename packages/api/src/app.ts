@@ -141,6 +141,32 @@ app.onError(async (err, c) => {
     userId = user?.userId ?? null;
   } catch { /* not authenticated */ }
 
+  // Collect request headers (skip sensitive ones)
+  const sensitiveHeaders = new Set(['authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization']);
+  const headers: Record<string, string> = {};
+  c.req.raw.headers.forEach((value, key) => {
+    if (!sensitiveHeaders.has(key.toLowerCase())) {
+      headers[key] = value;
+    }
+  });
+
+  // Collect request body (redact sensitive fields)
+  const sensitiveBodyKeys = new Set(['password', 'token', 'secret', 'apiKey', 'api_key', 'accessToken', 'access_token', 'refreshToken', 'refresh_token', 'currentPassword', 'newPassword', 'confirmPassword']);
+  let body: unknown = null;
+  try {
+    const ct = c.req.header('content-type') ?? '';
+    if (ct.includes('json')) {
+      const raw = await c.req.json().catch(() => null);
+      if (raw && typeof raw === 'object') {
+        body = Object.fromEntries(
+          Object.entries(raw as Record<string, unknown>).map(([k, v]) =>
+            sensitiveBodyKeys.has(k) ? [k, '[REDACTED]'] : [k, v],
+          ),
+        );
+      }
+    }
+  } catch { /* body already consumed or not parseable */ }
+
   // Fire-and-forget: write to error_log table
   db.insert(errorLog)
     .values({
@@ -153,6 +179,7 @@ app.onError(async (err, c) => {
       userId,
       ip,
       userAgent: c.req.header('user-agent') ?? null,
+      metadata: { headers, ...(body ? { body } : {}) },
     })
     .catch((dbErr) => logger.error({ dbErr }, 'Failed to write error to error_log table'));
 

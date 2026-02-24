@@ -133,6 +133,15 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   }
 
   /**
+   * Ensure the volume subdirectory exists on the GlusterFS mount.
+   * Idempotent — safe to call on every deploy.
+   */
+  async ensureVolume(name: string): Promise<void> {
+    validateVolumeName(name);
+    await this.runOnHostMount(['mkdir', '-p', `/vol/${name}`]);
+  }
+
+  /**
    * Delete a service volume subdirectory.
    */
   async deleteVolume(name: string): Promise<void> {

@@ -8,6 +8,8 @@ import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const storage = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
@@ -160,13 +162,11 @@ storage.openapi(getVolumeRoute, (async (c: any) => {
   }
 
   // Look up volume in DB by id, name, or displayName (dashboard may pass any of these)
+  const nameMatch = or(eq(storageVolumes.name, volumeId), eq(storageVolumes.displayName, volumeId));
+  const idMatch = UUID_RE.test(volumeId) ? or(eq(storageVolumes.id, volumeId), nameMatch) : nameMatch;
   const dbVolume = await db.query.storageVolumes.findFirst({
     where: and(
-      or(
-        eq(storageVolumes.id, volumeId),
-        eq(storageVolumes.name, volumeId),
-        eq(storageVolumes.displayName, volumeId),
-      ),
+      idMatch,
       eq(storageVolumes.accountId, accountId),
       isNull(storageVolumes.deletedAt),
     ),
@@ -222,13 +222,11 @@ storage.openapi(deleteVolumeRoute, (async (c: any) => {
   }
 
   // Look up volume in DB by id, name, or displayName (dashboard may pass any of these)
+  const delNameMatch = or(eq(storageVolumes.name, volumeId), eq(storageVolumes.displayName, volumeId));
+  const delIdMatch = UUID_RE.test(volumeId) ? or(eq(storageVolumes.id, volumeId), delNameMatch) : delNameMatch;
   const dbVolume = await db.query.storageVolumes.findFirst({
     where: and(
-      or(
-        eq(storageVolumes.id, volumeId),
-        eq(storageVolumes.name, volumeId),
-        eq(storageVolumes.displayName, volumeId),
-      ),
+      delIdMatch,
       eq(storageVolumes.accountId, accountId),
       isNull(storageVolumes.deletedAt),
     ),

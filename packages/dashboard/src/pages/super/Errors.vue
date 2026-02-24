@@ -252,7 +252,15 @@ onUnmounted(() => {
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">{{ truncate(err.message) }}</td>
-                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">{{ err.path ?? '--' }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">
+                  <span v-if="err.method" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold mr-1.5" :class="{
+                    'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300': err.method === 'GET',
+                    'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300': err.method === 'POST',
+                    'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300': err.method === 'PATCH' || err.method === 'PUT',
+                    'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': err.method === 'DELETE',
+                    'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300': !['GET','POST','PATCH','PUT','DELETE'].includes(err.method),
+                  }">{{ err.method }}</span>{{ err.path ?? '--' }}
+                </td>
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ err.statusCode ?? '--' }}</td>
                 <td class="px-6 py-4">
                   <CheckCircle v-if="err.resolved" class="w-5 h-5 text-green-500" />
@@ -289,10 +297,29 @@ onUnmounted(() => {
                       <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ err.stack }}</pre>
                     </div>
 
-                    <!-- Metadata -->
-                    <div v-if="err.metadata">
+                    <!-- HTTP Headers -->
+                    <div v-if="err.metadata?.headers && Object.keys(err.metadata.headers).length > 0">
+                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">HTTP Headers</h4>
+                      <div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
+                        <table class="text-xs font-mono">
+                          <tr v-for="(value, key) in err.metadata.headers" :key="key" class="align-top">
+                            <td class="pr-3 py-0.5 text-gray-500 dark:text-gray-400 whitespace-nowrap select-all">{{ key }}</td>
+                            <td class="py-0.5 text-gray-800 dark:text-gray-200 break-all select-all">{{ value }}</td>
+                          </tr>
+                        </table>
+                      </div>
+                    </div>
+
+                    <!-- Request Body -->
+                    <div v-if="err.metadata?.body && Object.keys(err.metadata.body).length > 0">
+                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Request Body</h4>
+                      <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(err.metadata.body) }}</pre>
+                    </div>
+
+                    <!-- Metadata (excluding headers and body which are shown above) -->
+                    <div v-if="err.metadata && Object.keys(err.metadata).filter(k => k !== 'headers' && k !== 'body').length > 0">
                       <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.metadata') }}</h4>
-                      <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(err.metadata) }}</pre>
+                      <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(Object.fromEntries(Object.entries(err.metadata).filter(([k]) => k !== 'headers' && k !== 'body'))) }}</pre>
                     </div>
 
                     <!-- Additional info -->
