@@ -46,12 +46,12 @@ services:
     domain: "{{WORDPRESS_DOMAIN}}"
 
   - name: wordpress-db
-    image: mariadb:11
+    image: mysql:8.4
     env:
-      MARIADB_ROOT_PASSWORD: "{{MYSQL_ROOT_PASSWORD}}"
-      MARIADB_DATABASE: "{{MYSQL_DATABASE}}"
-      MARIADB_USER: "{{MYSQL_USER}}"
-      MARIADB_PASSWORD: "{{MYSQL_PASSWORD}}"
+      MYSQL_ROOT_PASSWORD: "{{MYSQL_ROOT_PASSWORD}}"
+      MYSQL_DATABASE: "{{MYSQL_DATABASE}}"
+      MYSQL_USER: "{{MYSQL_USER}}"
+      MYSQL_PASSWORD: "{{MYSQL_PASSWORD}}"
     volumes:
       - source: wordpress_db_data
         target: /var/lib/mysql

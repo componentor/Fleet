@@ -62,8 +62,7 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
     await execFile('mkdir', ['-p', volumePath]);
-    await execFile('chown', ['nobody:nogroup', volumePath]).catch(() => {});
-    await execFile('chmod', ['0770', volumePath]).catch(() => {});
+    await execFile('chmod', ['777', volumePath]).catch(() => {});
 
     // Add to NFS exports
     const exportLine = `${volumePath} ${NFS_ALLOWED_NETWORK}(rw,sync,no_subtree_check,root_squash)`;

@@ -121,7 +121,8 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
 
     // Create subdirectory via temporary Docker container that bind-mounts the
     // host's GlusterFS mount point. Creating on one node replicates to all via GlusterFS.
-    await this.runOnHostMount(['mkdir', '-p', `/vol/${name}`]);
+    // chmod 777 so containers running as non-root (e.g. MySQL uid 999) can write.
+    await this.runOnHostMount(['sh', '-c', `mkdir -p /vol/${name} && chmod 777 /vol/${name}`]);
     logger.info({ name, hostPath }, 'GlusterFS service volume subdirectory created');
 
     return {
@@ -138,7 +139,7 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
    */
   async ensureVolume(name: string): Promise<void> {
     validateVolumeName(name);
-    await this.runOnHostMount(['mkdir', '-p', `/vol/${name}`]);
+    await this.runOnHostMount(['sh', '-c', `mkdir -p /vol/${name} && chmod 777 /vol/${name}`]);
   }
 
   /**
