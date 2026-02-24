@@ -6,12 +6,15 @@ import {
   ArrowLeft, ArrowRight, Rocket, Loader2, CheckCircle2,
   Eye, EyeOff, Copy, RefreshCw, AlertTriangle, Database,
   Server, Globe, Shield, Cpu, HardDrive, Check, ExternalLink,
-  Package, Info, ChevronDown,
+  Package, Info, ChevronDown, Link,
 } from 'lucide-vue-next'
+import DomainPicker from '@/components/DomainPicker.vue'
+import { useDomainPicker } from '@/composables/useDomainPicker'
 
 const props = defineProps<{ slug: string }>()
 const api = useApi()
 const router = useRouter()
+const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 
 // ── Step management ──
 const currentStep = ref(1)
@@ -32,6 +35,7 @@ const templateError = ref('')
 const config = ref<Record<string, string>>({})
 const showPassword = ref<Record<string, boolean>>({})
 const copied = ref<Record<string, boolean>>({})
+const serviceDomains = ref<Record<string, string>>({})
 
 // ── Step 3: Storage ──
 const volumeConfigs = ref<Record<string, { mode: 'create' | 'existing'; sizeGb: number; existingVolumeName: string }>>({})
@@ -74,6 +78,10 @@ const securityVariables = computed(() => {
 
 const serviceDefinitions = computed(() => {
   return template.value?.serviceDefinitions ?? []
+})
+
+const webFacingServices = computed(() => {
+  return serviceDefinitions.value.filter((svc: any) => (svc.ports?.length ?? 0) > 0)
 })
 
 const templateVolumes = computed(() => {
@@ -262,15 +270,18 @@ async function fetchTemplate() {
     }
     config.value = cfg
 
-    // Pre-fill service resources and image versions
+    // Pre-fill service resources, image versions, and domain defaults
     const resources: Record<string, { replicas: number; cpuLimit: number; memoryLimit: number }> = {}
+    const domains: Record<string, string> = {}
     for (const svc of (details.serviceDefinitions ?? [])) {
       resources[svc.name] = { replicas: 1, cpuLimit: 0, memoryLimit: 0 }
+      domains[svc.name] = ''
       imageVersions.value[svc.name] = svc.image
       // Fetch available tags in parallel (fire-and-forget)
       fetchImageTags(svc.name, svc.image)
     }
     serviceResources.value = resources
+    serviceDomains.value = domains
 
     // Initialize volume configs with defaults
     const volConfigs: Record<string, { mode: 'create' | 'existing'; sizeGb: number; existingVolumeName: string }> = {}
@@ -390,12 +401,19 @@ async function executeDeploy() {
       }
     }
 
+    // Build domain overrides for services where user assigned a domain
+    const domainOverrides: Record<string, string> = {}
+    for (const [name, domain] of Object.entries(serviceDomains.value)) {
+      if (domain.trim()) domainOverrides[name] = domain.trim()
+    }
+
     const result = await api.post<any>('/marketplace/deploy', {
       slug: props.slug,
       config: deployConfig,
       ...(Object.keys(imageOverrides).length > 0 ? { imageOverrides } : {}),
       ...(Object.keys(resourceOverrides).length > 0 ? { resourceOverrides } : {}),
       ...(Object.keys(volOverrides).length > 0 ? { volumeOverrides: volOverrides } : {}),
+      ...(Object.keys(domainOverrides).length > 0 ? { domainOverrides } : {}),
     })
 
     stackId.value = result.stackId
@@ -446,6 +464,7 @@ function goToServiceDetail(serviceId: string) {
 onMounted(() => {
   fetchTemplate()
   fetchLimitsAndPricing()
+  fetchAccountDomains()
 })
 
 onUnmounted(() => {
@@ -660,6 +679,28 @@ onUnmounted(() => {
                 :placeholder="v.default ?? ''"
               />
               <p v-if="v.required !== false && !config[v.name]?.trim()" class="mt-1 text-xs text-red-500">This field is required</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Domain Configuration -->
+        <div v-if="webFacingServices.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Link class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Domain Configuration</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Optionally assign domains to your services. You can also configure this later.</p>
+          </div>
+          <div class="p-6 space-y-4">
+            <div v-for="svc in webFacingServices" :key="svc.name">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                {{ svc.name }}
+              </label>
+              <DomainPicker
+                v-model="serviceDomains[svc.name]"
+                placeholder="Leave empty for no domain"
+              />
             </div>
           </div>
         </div>

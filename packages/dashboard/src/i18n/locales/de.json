@@ -290,6 +290,20 @@
     "customNsWarning": "Die Verwendung eigener Nameserver bedeutet, dass in Fleet verwaltete DNS-Einträge für diese Domain nicht aufgelöst werden.",
     "registeredThroughFleet": "Über Fleet registriert"
   },
+  "domainPicker": {
+    "title": "Domain-Konfiguration",
+    "description": "Optional eine Domain zuweisen, um Datenverkehr an Ihren Dienst weiterzuleiten.",
+    "placeholder": "Domain auswählen oder eigene eingeben",
+    "purchased": "Gekaufte Domains",
+    "external": "Externe Domains (BYOD)",
+    "subdomain": "Geteilte Subdomains",
+    "customDomain": "Eigene Domain eingeben...",
+    "inUseBy": "Verwendet von {service}",
+    "pending": "Verifizierung ausstehend",
+    "noDomains": "Keine Domains verfügbar",
+    "noDomainsHint": "Registrieren Sie zuerst eine Domain auf der Domains-Seite oder geben Sie eine eigene ein.",
+    "searchPlaceholder": "Domains filtern..."
+  },
   "storage": {
     "title": "Speicher",
     "volumes": "Volumes",

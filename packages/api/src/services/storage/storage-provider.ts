@@ -10,6 +10,7 @@
 
 export interface VolumeInfo {
   name: string;
+  displayName?: string;
   path: string;
   sizeGb: number;
   usedGb: number;

@@ -290,6 +290,20 @@
     "customNsWarning": "使用自定义域名服务器意味着在 Fleet 中管理的 DNS 记录将不会解析此域名。",
     "registeredThroughFleet": "通过 Fleet 注册"
   },
+  "domainPicker": {
+    "title": "域名配置",
+    "description": "可选择分配域名以将流量路由到您的服务。",
+    "placeholder": "选择域名或输入自定义域名",
+    "purchased": "已购买的域名",
+    "external": "外部域名 (BYOD)",
+    "subdomain": "共享子域名",
+    "customDomain": "输入自定义域名...",
+    "inUseBy": "正在被 {service} 使用",
+    "pending": "等待验证",
+    "noDomains": "没有可用的域名",
+    "noDomainsHint": "请先在域名页面注册域名，或输入自定义域名。",
+    "searchPlaceholder": "筛选域名..."
+  },
   "storage": {
     "title": "存储",
     "volumes": "存储卷",

@@ -58,6 +58,7 @@ const deploySchema = z.object({
   config: z.record(z.string(), z.string()).default({}),
   composeOverride: z.string().optional(),
   imageOverrides: z.record(z.string(), z.string().min(1)).optional(),
+  domainOverrides: z.record(z.string(), z.string().min(1)).optional(),
   resourceOverrides: z.record(z.string(), z.object({
     replicas: z.number().int().min(0).max(100).optional(),
     cpuLimit: z.number().int().min(0).optional(),
@@ -278,12 +279,13 @@ marketplace.openapi(deployRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { slug, config, composeOverride, imageOverrides, resourceOverrides, volumeOverrides } = c.req.valid('json');
+  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides } = c.req.valid('json');
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
       composeOverride,
       imageOverrides,
+      domainOverrides,
       resourceOverrides,
       volumeOverrides,
     });

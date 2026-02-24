@@ -290,6 +290,20 @@
     "customNsWarning": "Bruk av egne navneservere betyr at DNS-poster administrert i Fleet ikke vil fungere for dette domenet.",
     "registeredThroughFleet": "Registrert gjennom Fleet"
   },
+  "domainPicker": {
+    "title": "Domenekonfigurasjon",
+    "description": "Valgfritt tildel et domene for å rute trafikk til tjenesten din.",
+    "placeholder": "Velg et domene eller skriv inn et egendefinert",
+    "purchased": "Kjøpte domener",
+    "external": "Eksterne domener (BYOD)",
+    "subdomain": "Delte underdomener",
+    "customDomain": "Skriv inn et egendefinert domene...",
+    "inUseBy": "I bruk av {service}",
+    "pending": "Venter på verifisering",
+    "noDomains": "Ingen domener tilgjengelig",
+    "noDomainsHint": "Registrer et domene på Domener-siden først, eller skriv inn et egendefinert.",
+    "searchPlaceholder": "Filtrer domener..."
+  },
   "storage": {
     "title": "Lagring",
     "volumes": "Volumer",

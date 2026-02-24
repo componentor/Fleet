@@ -290,6 +290,20 @@
     "customNsWarning": "Using custom nameservers means DNS records managed in Fleet won't resolve for this domain.",
     "registeredThroughFleet": "Registered through Fleet"
   },
+  "domainPicker": {
+    "title": "Domain Configuration",
+    "description": "Optionally assign a domain to route traffic to your service.",
+    "placeholder": "Select a domain or type a custom one",
+    "purchased": "Purchased Domains",
+    "external": "External Domains (BYOD)",
+    "subdomain": "Shared Subdomains",
+    "customDomain": "Type a custom domain...",
+    "inUseBy": "In use by {service}",
+    "pending": "Pending verification",
+    "noDomains": "No domains available",
+    "noDomainsHint": "Register a domain in the Domains page first, or type a custom one.",
+    "searchPlaceholder": "Filter domains..."
+  },
   "storage": {
     "title": "Storage",
     "volumes": "Volumes",

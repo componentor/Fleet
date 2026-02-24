@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin } from 'lucide-vue-next'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
+import DomainPicker from '@/components/DomainPicker.vue'
 import { useServicesStore } from '@/stores/services'
+import { useDomainPicker } from '@/composables/useDomainPicker'
 import { useApi, ApiError } from '@/composables/useApi'
 import { useLogStream } from '@/composables/useLogStream'
 import { useDeployStream } from '@/composables/useDeployStream'
@@ -22,6 +24,7 @@ const { t } = useI18n()
 const serviceId = route.params.id as string
 const logStream = useLogStream()
 const deployStream = useDeployStream()
+const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 
 const activeTab = ref('overview')
 const tabs = computed(() => {
@@ -1144,6 +1147,7 @@ async function onTabChange(tabId: string) {
 }
 
 onMounted(async () => {
+  fetchAccountDomains()
   await fetchService()
   // Start stats polling if we're on the overview tab and service is running
   if (activeTab.value === 'overview' && service.value?.status === 'running') {
@@ -2435,11 +2439,10 @@ onUnmounted(() => {
             <div class="p-6 space-y-4">
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Domain Name</label>
-                <input
+                <DomainPicker
                   v-model="configDomain"
-                  type="text"
                   placeholder="app.example.com"
-                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  :exclude-service-id="serviceId"
                 />
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Traffic will be routed to container port {{ servicePorts[0]?.target || 80 }}. Leave empty to remove domain.

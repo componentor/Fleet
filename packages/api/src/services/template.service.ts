@@ -379,8 +379,9 @@ export class TemplateService {
         }
       }
 
-      // Resolve domain
-      const resolvedDomain = svcDef.domain ? interpolate(svcDef.domain) : null;
+      // Resolve domain — user override takes precedence over template default
+      const resolvedDomain = options?.domainOverrides?.[svcDef.name]
+        ?? (svcDef.domain ? interpolate(svcDef.domain) : null);
 
       // Resolve volumes — use existing volume name or prefix with account to isolate
       const resolvedVolumes = (svcDef.volumes ?? []).map((v) => {
