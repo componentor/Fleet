@@ -18,6 +18,8 @@ import { processDeploymentInline, type DeploymentJobData } from '../workers/depl
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Get the container disk size limit for an account (in MB).
  * Returns the account-specific override, or the global default, or undefined (no limit).
@@ -212,15 +214,15 @@ const dockerfileContentSchema = z.object({
 }).openapi('DockerfileContentRequest');
 
 const idParamSchema = z.object({
-  id: z.string().openapi({ description: 'Service ID' }),
+  id: z.string().uuid().openapi({ description: 'Service ID' }),
 });
 
 const serviceIdParamSchema = z.object({
-  serviceId: z.string().openapi({ description: 'Service ID' }),
+  serviceId: z.string().uuid().openapi({ description: 'Service ID' }),
 });
 
 const stackIdParamSchema = z.object({
-  stackId: z.string().openapi({ description: 'Stack ID' }),
+  stackId: z.string().uuid().openapi({ description: 'Stack ID' }),
 });
 
 const logsQuerySchema = z.object({
@@ -312,6 +314,9 @@ const createServiceRoute = createRoute({
     429: jsonContent(errorResponseSchema, 'Service quota reached'),
   },
 });
+
+// Note: /regions is registered as a plain .get() handler (not openapi) to guarantee
+// it matches before the /{id} parameterized routes in Hono's router.
 
 const getServiceRoute = createRoute({
   method: 'get',
@@ -711,6 +716,34 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
   return c.json(enriched);
 }) as any);
 
+// GET /regions — list available regions with active nodes
+// Registered as plain .get() to guarantee matching before /{id} parameterized routes
+serviceRoutes.get('/regions', async (c: any) => {
+  const locations = await db.query.locationMultipliers.findMany();
+
+  const activeNodes = await db.query.nodes.findMany({
+    where: and(eq(nodes.status, 'active'), not(isNull(nodes.location))),
+    columns: { location: true },
+  });
+
+  const nodeCounts = new Map<string, number>();
+  for (const node of activeNodes) {
+    if (node.location) {
+      nodeCounts.set(node.location, (nodeCounts.get(node.location) ?? 0) + 1);
+    }
+  }
+
+  const regions = locations
+    .filter((loc: any) => nodeCounts.has(loc.locationKey))
+    .map((loc: any) => ({
+      key: loc.locationKey,
+      label: loc.label,
+      nodeCount: nodeCounts.get(loc.locationKey) ?? 0,
+    }));
+
+  return c.json(regions);
+});
+
 // POST / — deploy a new service
 serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
@@ -904,6 +937,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   }
 }) as any);
 
+
 // GET /:id — service details
 serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
@@ -911,6 +945,10 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
+  }
+
+  if (!UUID_RE.test(serviceId)) {
+    return c.json({ error: 'Service not found' }, 404);
   }
 
   const svc = await db.query.services.findFirst({
@@ -2329,52 +2367,6 @@ serviceRoutes.openapi(updateDockerfileRoute, (async (c: any) => {
   }
 
   return c.json({ message: 'Dockerfile updated' });
-}) as any);
-
-// GET /regions — list available regions with active nodes
-const listRegionsRoute = createRoute({
-  method: 'get',
-  path: '/regions',
-  tags: ['Services'],
-  summary: 'List available deployment regions',
-  security: bearerSecurity,
-  responses: {
-    200: jsonContent(z.array(z.object({
-      key: z.string(),
-      label: z.string(),
-      nodeCount: z.number(),
-    })), 'Available regions with active nodes'),
-    ...standardErrors,
-  },
-});
-
-serviceRoutes.openapi(listRegionsRoute, (async (c: any) => {
-  // Get all defined regions from billing location multipliers
-  const locations = await db.query.locationMultipliers.findMany();
-
-  // Get active node counts per location
-  const activeNodes = await db.query.nodes.findMany({
-    where: and(eq(nodes.status, 'active'), not(isNull(nodes.location))),
-    columns: { location: true },
-  });
-
-  const nodeCounts = new Map<string, number>();
-  for (const node of activeNodes) {
-    if (node.location) {
-      nodeCounts.set(node.location, (nodeCounts.get(node.location) ?? 0) + 1);
-    }
-  }
-
-  // Only return regions that have at least one active node
-  const regions = locations
-    .filter((loc) => nodeCounts.has(loc.locationKey))
-    .map((loc) => ({
-      key: loc.locationKey,
-      label: loc.label,
-      nodeCount: nodeCounts.get(loc.locationKey) ?? 0,
-    }));
-
-  return c.json(regions);
 }) as any);
 
 export default serviceRoutes;
