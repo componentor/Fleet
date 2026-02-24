@@ -203,8 +203,15 @@ storage.openapi(getVolumeRoute, (async (c: any) => {
   try {
     const cluster = dbVolume.clusterId ? storageManager.getCluster(dbVolume.clusterId) : undefined;
     const provider = cluster?.volumeProvider ?? storageManager.volumes;
-    const volume = await provider.getVolumeInfo(dbVolume.name);
-    return c.json(volume);
+    const live = await provider.getVolumeInfo(dbVolume.name);
+    // Use DB-tracked sizeGb when available (provider reports entire NFS filesystem size)
+    const allocatedGb = (dbVolume.sizeGb != null && dbVolume.sizeGb > 0) ? dbVolume.sizeGb : live.sizeGb;
+    return c.json({
+      ...live,
+      sizeGb: allocatedGb,
+      availableGb: allocatedGb - live.usedGb,
+      displayName: dbVolume.displayName ?? dbVolume.name,
+    });
   } catch (err) {
     logger.error({ err }, 'Failed to get volume info');
     // Return DB data as fallback if provider query fails

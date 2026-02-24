@@ -354,9 +354,11 @@ class StorageManager {
         // Use the DB-tracked sizeGb as the authoritative allocation size.
         // Provider's sizeGb comes from `df` which reports the entire
         // filesystem (NFS/GlusterFS), not the per-volume allocation.
-        const allocatedGb = v.sizeGb || live.sizeGb;
+        // Use nullish check — `||` would treat sizeGb=0 as falsy.
+        const allocatedGb = (v.sizeGb != null && v.sizeGb > 0) ? v.sizeGb : live.sizeGb;
         results.push({
           ...live,
+          displayName: v.displayName ?? v.name,
           sizeGb: allocatedGb,
           availableGb: Math.max(0, allocatedGb - live.usedGb),
           replicaCount: v.replicaCount ?? 1,
