@@ -73,10 +73,22 @@ const deployError = ref('')
 const overallStatus = ref('')
 
 // ── Computed: Variable groups ──
+const domainVariableNames = computed(() => {
+  const names = new Set<string>()
+  for (const svc of (template.value?.serviceDefinitions ?? [])) {
+    const d = (svc as any).domain as string | undefined
+    if (d) {
+      const match = d.match(/\{\{(\w+)\}\}/)
+      if (match) names.add(match[1])
+    }
+  }
+  return names
+})
+
 const appVariables = computed(() => {
   if (!template.value?.variables) return []
   return (template.value.variables as any[]).filter(
-    (v: any) => v.type !== 'password' && !v.generate
+    (v: any) => v.type !== 'password' && !v.generate && !domainVariableNames.value.has(v.name)
   )
 })
 
@@ -557,6 +569,20 @@ async function executeDeploy() {
     const domainOverrides: Record<string, string> = {}
     for (const [name, domain] of Object.entries(serviceDomains.value)) {
       if (domain.trim()) domainOverrides[name] = domain.trim()
+    }
+
+    // Inject domain picker values into config for domain variables that are also
+    // used in env var interpolation (e.g. GHOST_URL is used in both domain: and env:)
+    for (const svc of serviceDefinitions.value) {
+      const d = (svc as any).domain as string | undefined
+      if (!d) continue
+      const match = d.match(/\{\{(\w+)\}\}/)
+      if (!match) continue
+      const varName = match[1]!
+      const pickerDomain = serviceDomains.value[svc.name]?.trim()
+      if (pickerDomain && !deployConfig[varName]) {
+        deployConfig[varName] = pickerDomain
+      }
     }
 
     const result = await api.post<any>('/marketplace/deploy', {
