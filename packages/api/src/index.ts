@@ -197,6 +197,7 @@ try {
 
       // Rebuild mounts with data migration
       const newMounts: any[] = []
+      let mountChanged = false
       for (const mount of mounts) {
         if (mount.Source === '/var/run/docker.sock' || (mount.Type === 'bind' && !mount.Source?.startsWith('/mnt/fleet-volumes/'))) {
           newMounts.push(mount)
@@ -205,17 +206,41 @@ try {
         if (useHostMount && mount.Type === 'volume') {
           const volumeName = mount.Source
           const hostPath = storageManager.volumes.getHostMountPath!(volumeName) ?? volumeName
-          try { await storageManager.volumes.createVolume(volumeName, 0) } catch { /* may exist */ }
-          try { await dockerService.copyVolumeData(volumeName, hostPath) } catch { /* best effort — old volume preserved */ }
-          newMounts.push({ Source: hostPath, Target: mount.Target, Type: 'bind', ReadOnly: mount.ReadOnly ?? false })
+          // Only convert to bind mount if the directory is successfully created
+          let volumeReady = false
+          try {
+            await storageManager.volumes.createVolume(volumeName, 0)
+            volumeReady = true
+          } catch {
+            // createVolume throws if volume already exists — that's fine
+            // Check if the volume is accessible by running ensureVolume
+            try {
+              if (storageManager.volumes.ensureVolume) {
+                await storageManager.volumes.ensureVolume(volumeName)
+                volumeReady = true
+              }
+            } catch (ensureErr) {
+              logger.warn({ err: ensureErr, volumeName }, 'Volume directory not available on distributed storage — keeping Docker volume mount')
+            }
+          }
+          if (volumeReady) {
+            try { await dockerService.copyVolumeData(volumeName, hostPath) } catch { /* best effort — old volume preserved */ }
+            newMounts.push({ Source: hostPath, Target: mount.Target, Type: 'bind', ReadOnly: mount.ReadOnly ?? false })
+            mountChanged = true
+          } else {
+            // Keep original Docker volume mount — don't break the service
+            newMounts.push(mount)
+          }
         } else if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
           const volumeName = mount.Source.split('/').pop()!
           try { await dockerService.copyVolumeData(mount.Source, volumeName) } catch { /* best effort */ }
           newMounts.push({ Source: volumeName, Target: mount.Target, Type: 'volume', ReadOnly: mount.ReadOnly ?? false })
+          mountChanged = true
         } else {
           newMounts.push(mount)
         }
       }
+      if (!mountChanged) continue
 
       try {
         const dockerSvc = dockerService.getDockerClient().getService(svc.ID)

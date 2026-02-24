@@ -246,98 +246,84 @@ export class NamecomProvider implements RegistrarProvider {
   }
 
   async listTldPricing(): Promise<TldPriceEntry[]> {
-    // Use the Name.com search endpoint to get pricing for common TLDs
-    // The v4 API doesn't have a dedicated TLD pricing list endpoint,
-    // so we query checkAvailability with a random string for known TLDs
-    // and also try to paginate the v4 domains:getTldList if available
-    const coreBaseUrl = this.baseUrl.replace('/v4', '/core/v1');
-    const auth = Buffer.from(`${this.username}:${this.apiToken}`).toString('base64');
+    // Name.com v4 API has no dedicated TLD pricing endpoint.
+    // Use checkAvailability with a random query to fetch pricing for known TLDs.
+    return this.listTldPricingFallback();
+  }
+
+  private async listTldPricingFallback(): Promise<TldPriceEntry[]> {
+    // Fallback: query TLDs via checkAvailability in batches
+    const commonTlds = [
+      // Generic
+      'com', 'net', 'org', 'info', 'biz', 'xyz', 'co', 'me', 'pro', 'name',
+      // Tech
+      'io', 'dev', 'app', 'tech', 'ai', 'cloud', 'digital', 'software', 'systems',
+      'network', 'codes', 'computer', 'engineering', 'host', 'hosting', 'email',
+      // Business
+      'company', 'agency', 'consulting', 'services', 'solutions', 'group',
+      'ventures', 'capital', 'enterprises', 'industries', 'partners', 'holdings',
+      'management', 'financial', 'investments', 'markets', 'trading', 'business',
+      // E-commerce
+      'store', 'shop', 'buy', 'sale', 'deals', 'bargains', 'market',
+      // Web / Online
+      'online', 'site', 'website', 'web', 'blog', 'page', 'click', 'link',
+      // Creative
+      'design', 'studio', 'art', 'media', 'video', 'photos', 'gallery', 'graphics',
+      // Community
+      'club', 'community', 'social', 'chat', 'forum', 'team', 'zone', 'life',
+      'world', 'live', 'today', 'news', 'press', 'events',
+      // Country codes
+      'us', 'uk', 'ca', 'de', 'fr', 'nl', 'se', 'no', 'dk', 'fi', 'eu',
+      'es', 'it', 'pt', 'at', 'ch', 'be', 'ie', 'pl', 'cz', 'in', 'jp',
+      'au', 'nz', 'mx', 'br', 'ar', 'cl', 'tv', 'cc', 'ws', 'fm', 'gg',
+      'la', 'ly', 'to', 'vc', 'sc', 'ac', 'sh', 'im',
+      // Other popular
+      'space', 'fun', 'icu', 'top', 'vip', 'win', 'bid', 'trade',
+      'games', 'game', 'gg', 'lol', 'wtf', 'ninja', 'rocks', 'cool',
+      'guru', 'expert', 'academy', 'education', 'institute', 'university',
+      'health', 'fitness', 'yoga', 'diet', 'bio',
+      'construction', 'builders', 'contractors', 'plumbing', 'repair',
+      'realty', 'property', 'house', 'homes', 'land', 'estate',
+      'restaurant', 'recipes', 'kitchen', 'pizza', 'coffee', 'bar', 'pub',
+      'travel', 'flights', 'holiday', 'vacations', 'tours', 'cruises',
+    ];
+    // De-duplicate
+    const tlds = [...new Set(commonTlds)];
+    const randomQuery = `fleetpricecheck${Date.now().toString(36)}`;
     const results: TldPriceEntry[] = [];
+    const BATCH_SIZE = 20;
 
-    let page = 1;
-    while (true) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30_000);
+    for (let i = 0; i < tlds.length; i += BATCH_SIZE) {
+      const batch = tlds.slice(i, i + BATCH_SIZE);
+      const domainNames = batch.map((tld) => `${randomQuery}.${tld}`);
+
       try {
-        const res = await fetch(`${coreBaseUrl}/tldpricing?perPage=100&page=${page}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/json',
-          },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!res.ok) {
-          // If Core API is not available, fall back to checking common TLDs
-          if (page === 1) {
-            return this.listTldPricingFallback();
-          }
-          break;
-        }
-
-        const data = await res.json() as {
-          tldpricing?: Array<{
-            tld: string;
-            registrationPrice?: number;
+        const data = await this.request<{
+          results: Array<{
+            domainName: string;
+            purchasable: boolean;
+            premium: boolean;
+            purchasePrice?: number;
             renewalPrice?: number;
           }>;
-          nextPage?: number;
-          lastPage?: number;
-        };
+        }>('POST', '/domains:checkAvailability', { domainNames });
 
-        for (const p of data.tldpricing ?? []) {
-          if (p.registrationPrice != null) {
+        for (const r of data.results ?? []) {
+          if (r.purchasePrice != null) {
             results.push({
-              tld: p.tld.replace(/^\./, ''),
-              registration: p.registrationPrice,
-              renewal: p.renewalPrice ?? p.registrationPrice,
+              tld: r.domainName.split('.').slice(1).join('.'),
+              registration: r.purchasePrice,
+              renewal: r.renewalPrice ?? r.purchasePrice,
               currency: 'USD',
             });
           }
         }
-
-        if (!data.nextPage || page >= (data.lastPage ?? page)) break;
-        page++;
-      } catch {
-        clearTimeout(timeout);
-        if (page === 1) return this.listTldPricingFallback();
-        break;
+      } catch (err) {
+        logger.warn({ err, batch }, 'Name.com TLD pricing batch failed, skipping');
       }
     }
 
     return results;
-  }
-
-  private async listTldPricingFallback(): Promise<TldPriceEntry[]> {
-    // Fallback: query common TLDs via checkAvailability
-    const commonTlds = [
-      'com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai',
-      'info', 'biz', 'us', 'uk', 'ca', 'de', 'fr', 'nl', 'se', 'no',
-      'dk', 'fi', 'eu', 'tech', 'online', 'site', 'store', 'club', 'pro',
-    ];
-    const randomQuery = `fleetpricecheck${Date.now().toString(36)}`;
-    const domainNames = commonTlds.map((tld) => `${randomQuery}.${tld}`);
-
-    const data = await this.request<{
-      results: Array<{
-        domainName: string;
-        purchasable: boolean;
-        premium: boolean;
-        purchasePrice?: number;
-        renewalPrice?: number;
-      }>;
-    }>('POST', '/domains:checkAvailability', { domainNames });
-
-    return (data.results ?? [])
-      .filter((r) => r.purchasePrice != null && !r.premium)
-      .map((r) => ({
-        tld: r.domainName.split('.').slice(1).join('.'),
-        registration: r.purchasePrice!,
-        renewal: r.renewalPrice ?? r.purchasePrice!,
-        currency: 'USD',
-      }));
   }
 
   async renewDomain(

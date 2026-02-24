@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, Plus, Loader2, Info, FolderOpen } from 'lucide-vue-next'
+import { HardDrive, Plus, Loader2, Info, FolderOpen, RefreshCw } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import FileExplorer from '@/components/FileExplorer.vue'
@@ -12,6 +12,7 @@ const { canWrite } = useRole()
 
 const volumes = ref<any[]>([])
 const loading = ref(true)
+const refreshing = ref(false)
 const showCreate = ref(false)
 const newName = ref('')
 const newSize = ref(1)
@@ -20,16 +21,23 @@ const error = ref('')
 const browsingVolumeName = ref<string | null>(null)
 const maxStorageGb = ref<number | null>(null)
 const storageCentsPerGbMonth = ref<number>(0)
+let syncInterval: ReturnType<typeof setInterval> | null = null
 
-async function fetchVolumes() {
-  loading.value = true
+async function fetchVolumes(silent = false) {
+  if (!silent) loading.value = true
+  else refreshing.value = true
   try {
     volumes.value = await api.get<any[]>('/storage/volumes')
   } catch {
-    volumes.value = []
+    if (!silent) volumes.value = []
   } finally {
     loading.value = false
+    refreshing.value = false
   }
+}
+
+async function refresh() {
+  await fetchVolumes(true)
 }
 
 async function createVolume() {
@@ -96,6 +104,11 @@ function formatDate(ts: any) {
 onMounted(() => {
   fetchVolumes()
   fetchLimitsAndPricing()
+  syncInterval = setInterval(() => fetchVolumes(true), 30_000)
+})
+
+onBeforeUnmount(() => {
+  if (syncInterval) clearInterval(syncInterval)
 })
 </script>
 
@@ -106,14 +119,23 @@ onMounted(() => {
         <HardDrive class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('storage.title') }}</h1>
       </div>
-      <button
-        v-if="canWrite"
-        @click="showCreate = true"
-        class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
-      >
-        <Plus class="w-4 h-4" />
-        {{ t('storage.createVolume') }}
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          @click="refresh"
+          :disabled="refreshing"
+          class="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-750 disabled:opacity-50"
+        >
+          <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': refreshing }" />
+        </button>
+        <button
+          v-if="canWrite"
+          @click="showCreate = true"
+          class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+        >
+          <Plus class="w-4 h-4" />
+          {{ t('storage.createVolume') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -186,13 +208,14 @@ onMounted(() => {
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.name') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.driver') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Services</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.created') }}</th>
               <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="volumes.length === 0">
-              <td colspan="4" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+              <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 {{ t('storagePage.noVolumes') }}
               </td>
             </tr>
@@ -203,6 +226,15 @@ onMounted(() => {
             >
               <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white font-mono">{{ volume.name }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ volume.driver || 'local' }}</td>
+              <td class="px-6 py-4 text-sm">
+                <span
+                  v-if="volume.serviceCount > 0"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
+                >
+                  {{ volume.serviceCount }}
+                </span>
+                <span v-else class="text-gray-400 dark:text-gray-500">0</span>
+              </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(volume.createdAt) }}</td>
               <td class="px-6 py-4 text-right">
                 <div class="flex items-center justify-end gap-3">

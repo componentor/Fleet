@@ -1296,7 +1296,7 @@ export class UpdateService {
       await dockerService.updateService(dockerSvcId, { image: newImage });
       this.appendLog(`  ${serviceName} update initiated (rolling, start-first).`);
 
-      await this.waitForServiceConvergence(dockerSvcId, serviceName);
+      await this.waitForServiceConvergence(dockerSvcId, serviceName, 180_000, newImage);
     } catch (err) {
       throw new Error(`Failed to update ${serviceName}: ${errorToString(err)}`);
     }
@@ -1306,11 +1306,65 @@ export class UpdateService {
     dockerServiceId: string,
     serviceName: string,
     timeoutMs = 180_000,
+    expectedImage?: string,
   ): Promise<void> {
     const startTime = Date.now();
 
+    // Phase 1: Wait for Docker to acknowledge the update has started.
+    // Immediately after updateService(), the old tasks are still "running" with
+    // no pending tasks — checking now would falsely report convergence.
+    let updateStarted = false;
     while (Date.now() - startTime < timeoutMs) {
       try {
+        const info = await dockerService.inspectService(dockerServiceId);
+        const updateState = (info as any).UpdateStatus?.State as string | undefined;
+
+        if (updateState === 'updating') {
+          updateStarted = true;
+          this.appendLog(`  ${serviceName}: Docker update in progress...`);
+          break;
+        }
+
+        // If Docker already marked it completed (very fast update), skip to verification
+        if (updateState === 'completed') {
+          updateStarted = true;
+          this.appendLog(`  ${serviceName}: Docker update completed quickly.`);
+          break;
+        }
+
+        // No UpdateStatus yet — Docker hasn't started the rolling update.
+        // Also check if the spec image already matches (update may be instant for single replicas)
+        if (expectedImage) {
+          const specImage = (info as any).Spec?.TaskTemplate?.ContainerSpec?.Image as string | undefined;
+          if (specImage?.includes(expectedImage.split('@')[0]!)) {
+            // Spec is updated, wait a bit longer for Docker to schedule tasks
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            updateStarted = true;
+            break;
+          }
+        }
+      } catch {
+        // Transient error — retry
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    if (!updateStarted) {
+      throw new Error(`${serviceName}: Docker did not start the update within ${timeoutMs / 1000}s`);
+    }
+
+    // Phase 2: Wait for running tasks to converge on the new image.
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        // Check Docker's UpdateStatus first
+        const info = await dockerService.inspectService(dockerServiceId);
+        const updateState = (info as any).UpdateStatus?.State as string | undefined;
+
+        if (updateState === 'paused' || updateState === 'rollback_started') {
+          throw new Error(`${serviceName}: Docker update ${updateState} — task may have failed`);
+        }
+
         const tasks = await dockerService.getServiceTasks(dockerServiceId);
         const running = tasks.filter((t) => t.status === 'running' && t.desiredState === 'running');
         const pending = tasks.filter(
@@ -1318,19 +1372,26 @@ export class UpdateService {
         );
         const failed = tasks.filter((t) => t.status === 'failed' && t.desiredState === 'running');
 
-        if (pending.length === 0 && running.length > 0) {
-          this.appendLog(`  ${serviceName} converged (${running.length} replicas running).`);
-          return;
-        }
-
         // If all desired tasks have failed, don't keep waiting
         if (failed.length > 0 && running.length === 0 && pending.length === 0) {
           throw new Error(`${serviceName}: all tasks failed to start`);
         }
 
-        this.appendLog(`  ${serviceName}: ${running.length} running, ${pending.length} pending, ${failed.length} failed...`);
+        // Docker says completed and no pending tasks — we're done
+        if (updateState === 'completed' && pending.length === 0 && running.length > 0) {
+          this.appendLog(`  ${serviceName} converged (${running.length} replicas running).`);
+          return;
+        }
+
+        // No pending and running > 0 — but only trust this if Docker is no longer 'updating'
+        if (updateState !== 'updating' && pending.length === 0 && running.length > 0) {
+          this.appendLog(`  ${serviceName} converged (${running.length} replicas running).`);
+          return;
+        }
+
+        this.appendLog(`  ${serviceName}: ${running.length} running, ${pending.length} pending, ${failed.length} failed (update: ${updateState ?? 'unknown'})...`);
       } catch (err) {
-        if (err instanceof Error && err.message.includes('all tasks failed')) {
+        if (err instanceof Error && (err.message.includes('all tasks failed') || err.message.includes('update paused') || err.message.includes('rollback_started'))) {
           throw err;
         }
         // Ignore transient errors during convergence

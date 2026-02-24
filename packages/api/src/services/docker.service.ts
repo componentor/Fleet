@@ -120,11 +120,17 @@ export class DockerService {
 
       for (const v of volumes) {
         if (storageManager.volumes.getHostMountPath?.(v.source)) {
-          await storageManager.volumes.ensureVolume(v.source);
+          try {
+            await storageManager.volumes.ensureVolume(v.source);
+          } catch (err) {
+            logger.error({ err, volume: v.source }, 'Failed to ensure volume directory on distributed storage — bind mount will fail');
+            throw err;
+          }
         }
       }
     } catch (err) {
-      logger.warn({ err }, 'Failed to pre-ensure volume mounts — proceeding with deployment');
+      // Re-throw so createService/updateService can handle it
+      throw new Error(`Volume preparation failed: ${(err as Error).message}`);
     }
   }
 

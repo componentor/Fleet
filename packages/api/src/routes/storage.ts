@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, storageVolumes, eq, and, or, isNull } from '@fleet/db';
+import { db, storageVolumes, services, eq, and, or, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { storageManager } from '../services/storage/storage-manager.js';
@@ -41,8 +41,31 @@ storage.openapi(listVolumesRoute, (async (c: any) => {
   }
 
   try {
-    const volumes = await storageManager.listAccountVolumes(accountId);
-    return c.json(volumes);
+    const [volumes, accountServices] = await Promise.all([
+      storageManager.listAccountVolumes(accountId),
+      db.select({ volumes: services.volumes })
+        .from(services)
+        .where(and(eq(services.accountId, accountId), isNull(services.deletedAt))),
+    ]);
+
+    // Count how many services reference each volume by name
+    const volumeServiceCount = new Map<string, number>();
+    for (const svc of accountServices) {
+      const vols = svc.volumes as Array<{ source: string }> | null;
+      if (!Array.isArray(vols)) continue;
+      const seen = new Set<string>();
+      for (const v of vols) {
+        if (v.source && !seen.has(v.source)) {
+          seen.add(v.source);
+          volumeServiceCount.set(v.source, (volumeServiceCount.get(v.source) ?? 0) + 1);
+        }
+      }
+    }
+
+    return c.json(volumes.map((v) => ({
+      ...v,
+      serviceCount: volumeServiceCount.get(v.name) ?? 0,
+    })));
   } catch (err) {
     logger.error({ err }, 'Failed to list volumes');
     return c.json({ error: 'Failed to list volumes' }, 500);

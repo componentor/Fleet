@@ -7,7 +7,6 @@ import { dockerService } from '../services/docker.service.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
-import { cache, invalidateCache } from '../middleware/cache.js';
 import { buildService } from '../services/build.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
@@ -290,7 +289,6 @@ const listServicesRoute = createRoute({
   tags: ['Services'],
   summary: 'List services for the current account',
   security: bearerSecurity,
-  middleware: [cache(30)] as const,
   responses: {
     200: jsonContent(z.array(z.any()), 'List of services'),
     ...standardErrors,
@@ -1293,7 +1291,6 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
     updatedAt: new Date(),
   }, and(eq(services.id, serviceId), eq(services.accountId, accountId))!);
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
@@ -1393,7 +1390,6 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   // Soft-delete the service (keep deployment history)
   await db.update(services).set({ deletedAt: new Date(), status: 'deleted' }).where(eq(services.id, serviceId));
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
@@ -1432,8 +1428,7 @@ serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
       image: svc.image,
     });
 
-    await invalidateCache(`GET:/services:${accountId}`);
-
+  
     eventService.log({
       ...eventContext(c),
       eventType: EventTypes.SERVICE_RESTARTED,
@@ -1696,7 +1691,6 @@ serviceRoutes.openapi(stopServiceRoute, (async (c: any) => {
     .set({ status: 'stopped', stoppedAt: new Date(), updatedAt: new Date() })
     .where(eq(services.id, serviceId));
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
@@ -1758,7 +1752,6 @@ serviceRoutes.openapi(cancelDeployRoute, (async (c: any) => {
     .set({ status: svc.dockerServiceId ? 'running' : 'stopped', updatedAt: new Date() })
     .where(eq(services.id, serviceId));
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
@@ -1848,8 +1841,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
         .set({ dockerServiceId: result.id, status: 'deploying', stoppedAt: null, updatedAt: new Date() })
         .where(eq(services.id, serviceId));
 
-      await invalidateCache(`GET:/services:${accountId}`);
-
+    
       eventService.log({
         ...eventContext(c),
         eventType: EventTypes.SERVICE_STARTED,
@@ -1876,7 +1868,6 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
     .set({ status: 'deploying', stoppedAt: null, updatedAt: new Date() })
     .where(eq(services.id, serviceId));
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
@@ -1937,7 +1928,6 @@ serviceRoutes.openapi(syncServiceRoute, (async (c: any) => {
 
   updateFields['status'] = newStatus;
   await db.update(services).set(updateFields).where(eq(services.id, svc.id));
-  await invalidateCache(`GET:/services:${accountId}`);
 
   return c.json({ status: newStatus, synced: true });
 }) as any);
@@ -2147,7 +2137,6 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
     });
   }
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
@@ -2196,7 +2185,6 @@ serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
     }
   }
 
-  await invalidateCache(`GET:/services:${accountId}`);
 
   eventService.log({
     ...eventContext(c),
