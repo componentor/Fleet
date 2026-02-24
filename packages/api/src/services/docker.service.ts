@@ -590,6 +590,11 @@ export class DockerService {
     await this.updateService(dockerServiceId, { replicas });
   }
 
+  async inspectContainer(containerId: string): Promise<any> {
+    const container = docker.getContainer(containerId);
+    return container.inspect();
+  }
+
   /**
    * Get cumulative network rx/tx bytes for a running container.
    * Uses Docker stats API with stream=false (one-shot).

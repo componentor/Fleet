@@ -337,7 +337,7 @@ export class TemplateService {
       const primaryVolName = group.volumes[0]!;
       const dockerVolName = (group.mode === 'existing' && group.existingVolumeName)
         ? group.existingVolumeName
-        : `${swarmNamePrefix}-${primaryVolName}`;
+        : `${swarmNamePrefix}-${primaryVolName}-${stackShort}`;
 
       for (const volName of group.volumes) {
         volumeResolutionMap.set(volName, dockerVolName);
@@ -378,7 +378,7 @@ export class TemplateService {
           // Individual volume — use volumeOverrides as before
           const override = options?.volumeOverrides?.[volName];
           if (override?.mode === 'existing') continue;
-          dockerVolName = `${swarmNamePrefix}-${volName}`;
+          dockerVolName = `${swarmNamePrefix}-${volName}-${stackShort}`;
           volumeMode = override?.mode ?? 'create';
           volumeSizeGb = override?.sizeGb ?? 5;
         }
@@ -460,7 +460,7 @@ export class TemplateService {
         const override = options?.volumeOverrides?.[v.source];
         const source = (override?.mode === 'existing' && override.existingVolumeName)
           ? override.existingVolumeName
-          : `${swarmNamePrefix}-${v.source}`;
+          : `${swarmNamePrefix}-${v.source}-${stackShort}`;
         return { source, target: v.target, readonly: v.readonly ?? false };
       });
 

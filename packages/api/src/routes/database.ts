@@ -270,14 +270,23 @@ async function getDbContainer(accountId: string, serviceId: string) {
   const engine = detectEngine(svc.image);
   if (!engine) return null;
 
-  const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
-  const running = tasks.find((t: any) => t.status === 'running' && t.containerStatus?.containerId);
-  if (!running) return null;
+  // Try up to 2 times — container may have been replaced between task listing and exec
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+    const running = tasks.find((t: any) => t.status === 'running' && t.containerStatus?.containerId);
+    if (!running) return null;
 
-  const containerId = (running as any).containerStatus.containerId;
-  const info = extractCredentials(engine, (svc.env as Record<string, string>) ?? {});
-
-  return { svc, engine, containerId, info };
+    const containerId = (running as any).containerStatus.containerId;
+    try {
+      await dockerService.inspectContainer(containerId);
+      const info = extractCredentials(engine, (svc.env as Record<string, string>) ?? {});
+      return { svc, engine, containerId, info };
+    } catch {
+      // Container gone — brief wait then retry with fresh task list
+      if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  return null;
 }
 
 // ── Schemas ──
