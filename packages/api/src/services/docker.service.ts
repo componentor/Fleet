@@ -1037,6 +1037,48 @@ export class DockerService {
   }
 
   /**
+   * Remove a Docker volume by name on ALL Swarm nodes.
+   * Uses a global one-shot service with Docker socket mounted so it can call `docker volume rm`.
+   * Silently ignores nodes where the volume doesn't exist.
+   */
+  async removeDockerVolumeOnAllNodes(volumeName: string): Promise<void> {
+    const serviceName = `fleet-vol-cleanup-${Date.now().toString(36)}`;
+    const svc = await docker.createService({
+      Name: serviceName,
+      Labels: { 'fleet.internal': 'true', 'fleet.one-shot': 'true' },
+      TaskTemplate: {
+        ContainerSpec: {
+          Image: 'docker:cli',
+          Mounts: [{
+            Type: 'bind' as const,
+            Source: '/var/run/docker.sock',
+            Target: '/var/run/docker.sock',
+            ReadOnly: false,
+          }],
+          Args: ['sh', '-c', `docker volume rm ${volumeName} 2>/dev/null || true`],
+        },
+        RestartPolicy: { Condition: 'none' as const, MaxAttempts: 0 },
+      },
+      Mode: { Global: {} },
+    } as any);
+
+    // Wait for all tasks to complete
+    const deadline = Date.now() + 60_000;
+    const svcId = typeof svc.id === 'string' ? svc.id : (svc as any).ID;
+    while (Date.now() < deadline) {
+      const tasks = await docker.listTasks({ filters: { service: [serviceName] } });
+      const allDone = tasks.length > 0 && tasks.every(
+        (t: any) => t.Status?.State === 'complete' || t.Status?.State === 'failed' || t.Status?.State === 'rejected',
+      );
+      if (allDone) break;
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+
+    // Clean up
+    try { await docker.getService(svcId).remove(); } catch { /* ignore */ }
+  }
+
+  /**
    * Run a shell command on the local host via a temporary container with chroot.
    * Used to execute host-level CLI tools (e.g. gluster) from within the API container.
    */
@@ -1083,7 +1125,7 @@ export class DockerService {
 
   /**
    * Get the current platform volume mode by inspecting the Traefik service mounts.
-   * Returns 'distributed' if certs mount uses a non-local driver, otherwise 'local'.
+   * Returns 'distributed' if certs mount uses a GlusterFS/Ceph bind mount, otherwise 'local'.
    */
   async getPlatformVolumeMode(): Promise<'local' | 'distributed'> {
     try {
@@ -1095,9 +1137,8 @@ export class DockerService {
       const certMount = mounts.find((m: any) => m.Target === '/certs');
       if (!certMount) return 'local';
 
-      // Check if mount uses distributed driver options (type=glusterfs or type=ceph in options)
-      const opts = certMount.VolumeOptions?.DriverConfig?.Options ?? {};
-      if (opts.type === 'glusterfs' || opts.type === 'ceph') return 'distributed';
+      // Distributed mode uses a bind mount to /mnt/fleet-platform-certs (host-level GlusterFS/Ceph mount)
+      if (certMount.Type === 'bind' && certMount.Source === '/mnt/fleet-platform-certs') return 'distributed';
 
       return 'local';
     } catch {
@@ -1106,15 +1147,85 @@ export class DockerService {
   }
 
   /**
+   * Run a privileged command on ALL Swarm nodes using Docker-in-Docker with nsenter.
+   * This enters the host's mount/PID/network namespace, allowing host-level operations
+   * like mounting filesystems and managing systemd services — things that regular
+   * chroot-based runOnAllNodes cannot do.
+   */
+  async runOnAllNodesPrivileged(command: string, opts?: { timeoutMs?: number }): Promise<{
+    success: boolean;
+    results: Array<{ nodeId: string; status: string; error?: string }>;
+  }> {
+    const timeout = opts?.timeoutMs ?? 120_000;
+    const serviceName = `fleet-priv-cmd-${Date.now().toString(36)}`;
+
+    // Escape single quotes in command for shell nesting
+    const escapedCmd = command.replace(/'/g, "'\\''");
+
+    const svc = await docker.createService({
+      Name: serviceName,
+      Labels: { 'fleet.internal': 'true', 'fleet.one-shot': 'true' },
+      TaskTemplate: {
+        ContainerSpec: {
+          Image: 'docker:cli',
+          Mounts: [{
+            Type: 'bind' as const,
+            Source: '/var/run/docker.sock',
+            Target: '/var/run/docker.sock',
+            ReadOnly: false,
+          }],
+          Args: ['sh', '-c', `docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -u -i -n -- sh -c '${escapedCmd}'`],
+        },
+        RestartPolicy: { Condition: 'none' as const, MaxAttempts: 0 },
+        Resources: { Limits: { MemoryBytes: 512 * 1024 * 1024 } },
+      },
+      Mode: { Global: {} },
+    } as any);
+
+    const svcId = typeof svc.id === 'string' ? svc.id : (svc as any).ID;
+    const deadline = Date.now() + timeout;
+
+    while (Date.now() < deadline) {
+      const tasks = await docker.listTasks({ filters: { service: [serviceName] } });
+      const allDone = tasks.length > 0 && tasks.every(
+        (t: any) => t.Status?.State === 'complete' || t.Status?.State === 'failed' || t.Status?.State === 'rejected',
+      );
+      if (allDone) {
+        const results = tasks.map((t: any) => ({
+          nodeId: t.NodeID,
+          status: t.Status?.State,
+          error: t.Status?.Err,
+        }));
+        const success = tasks.every((t: any) => t.Status?.State === 'complete');
+        try { await docker.getService(svcId).remove(); } catch { /* ignore */ }
+        return { success, results };
+      }
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+
+    // Timeout — clean up
+    try { await docker.getService(svcId).remove(); } catch { /* ignore */ }
+    return { success: false, results: [{ nodeId: 'unknown', status: 'timeout', error: 'Timed out waiting for tasks' }] };
+  }
+
+  /**
    * Switch platform service volumes (Traefik certs) between local and distributed storage.
    *
-   * - distributed: Creates a GlusterFS/Ceph volume for certs, migrates data, updates Traefik mounts
-   * - local: Ensures /opt/fleet/certs exists on all nodes, migrates data back, restores bind-mount volume
+   * Approach: GlusterFS FUSE mounts require a persistent userspace process that Docker containers
+   * cannot manage (the process dies when the container exits). Instead, we:
+   * 1. Create the GlusterFS volume on the cluster (idempotent)
+   * 2. Use nsenter + systemd to create a persistent host-level FUSE mount on all nodes
+   * 3. Bind-mount the host path into Docker (no Docker volume driver needed)
+   *
+   * - distributed: Mounts GlusterFS at /mnt/fleet-platform-certs on all nodes via systemd, binds into Traefik
+   * - local: Stops systemd mount, ensures /opt/fleet/certs on all nodes, restores original volume
    */
   async updatePlatformVolumeMounts(mode: 'distributed' | 'local'): Promise<{
     applied: boolean;
     message: string;
   }> {
+    const MOUNT_PATH = '/mnt/fleet-platform-certs';
+
     // Find fleet_traefik service
     const services = await docker.listServices({ filters: { name: ['fleet_traefik'] } });
     const svc = services.find((s: any) => s.Spec?.Name === 'fleet_traefik') as any;
@@ -1131,8 +1242,7 @@ export class DockerService {
     }
 
     const currentMount = mounts[certMountIdx];
-    const currentOpts = currentMount.VolumeOptions?.DriverConfig?.Options ?? {};
-    const isCurrentlyDistributed = currentOpts.type === 'glusterfs' || currentOpts.type === 'ceph';
+    const isCurrentlyDistributed = currentMount.Type === 'bind' && currentMount.Source === MOUNT_PATH;
 
     if (mode === 'distributed') {
       if (isCurrentlyDistributed) {
@@ -1140,21 +1250,17 @@ export class DockerService {
       }
 
       // Check if distributed storage is ready
-      let driverOpts: Record<string, string>;
       try {
         if (!storageManager.volumes.isReady()) {
           return { applied: false, message: 'Distributed storage not ready' };
-        }
-        driverOpts = storageManager.volumes.getDockerVolumeOptions(PLATFORM_CERTS_VOLUME);
-        if (Object.keys(driverOpts).length === 0) {
-          return { applied: false, message: 'No driver options available for distributed volume' };
         }
       } catch {
         return { applied: false, message: 'Storage manager not initialized' };
       }
 
-      // Create the GlusterFS/Ceph volume on the host (idempotent)
       const provider = storageManager.config?.provider;
+
+      // Create the GlusterFS volume on the cluster (idempotent)
       if (provider === 'glusterfs') {
         const config = storageManager.config!.config;
         const nodes = config.nodes as Array<{ hostname: string; ip: string; brickPath: string }>;
@@ -1166,12 +1272,12 @@ export class DockerService {
             .map((n: any) => `${n.ip}:${n.brickPath}/${PLATFORM_CERTS_VOLUME}`)
             .join(' ');
           const transport = config.transport ?? 'tcp';
+          const gluster = '/usr/sbin/gluster';
 
-          // Create and start volume (skip if already exists)
           const createCmd = [
-            `gluster volume info ${PLATFORM_CERTS_VOLUME} >/dev/null 2>&1`,
-            `|| (gluster volume create ${PLATFORM_CERTS_VOLUME} replica ${replicaCount} transport ${transport} ${bricks} force`,
-            `&& gluster volume start ${PLATFORM_CERTS_VOLUME})`,
+            `${gluster} volume info ${PLATFORM_CERTS_VOLUME} >/dev/null 2>&1`,
+            `|| (${gluster} volume create ${PLATFORM_CERTS_VOLUME} replica ${replicaCount} transport ${transport} ${bricks} force`,
+            `&& ${gluster} volume start ${PLATFORM_CERTS_VOLUME})`,
           ].join(' ');
 
           const result = await this.runOnLocalHost(createCmd, { timeoutMs: 30_000 });
@@ -1181,108 +1287,167 @@ export class DockerService {
             logger.info('GlusterFS platform certs volume created/verified');
           }
         }
-      }
-      // Ceph volumes are created via RBD — the driver options handle mount-time creation
 
-      // Copy certs from old bind-mount volume to new distributed volume
-      try {
-        const driver = storageManager.volumes.getDockerVolumeDriver();
-        // Create a temp container that mounts both volumes and copies data
-        const copyContainer = await docker.createContainer({
-          Image: 'alpine:latest',
-          Cmd: ['sh', '-c', 'cp -a /old-certs/. /new-certs/ 2>/dev/null; true'],
-          HostConfig: {
-            Mounts: [
-              {
-                Type: 'volume' as const,
-                Source: 'fleet_fleet_certs',
-                Target: '/old-certs',
-                ReadOnly: true,
-              },
-              {
-                Type: 'volume' as const,
-                Source: PLATFORM_CERTS_VOLUME,
-                Target: '/new-certs',
-                ReadOnly: false,
-                VolumeOptions: {
-                  DriverConfig: { Name: driver, Options: driverOpts },
-                },
-              },
-            ] as any,
-          },
-        });
-        try {
-          await copyContainer.start();
-          await copyContainer.wait();
-          logger.info('Copied certs from local volume to distributed volume');
-        } finally {
-          await copyContainer.remove({ force: true }).catch(() => {});
+        // Copy certs from local to GlusterFS before switching the mount
+        // We mount GlusterFS temporarily, copy, then let the systemd service handle the persistent mount
+        const firstNodeIp = (config.nodes as any[])?.[0]?.ip;
+        if (firstNodeIp) {
+          try {
+            const copyResult = await this.runOnLocalHost(
+              `mkdir -p ${MOUNT_PATH} && mount -t glusterfs ${firstNodeIp}:/${PLATFORM_CERTS_VOLUME} ${MOUNT_PATH} && ` +
+              `cp -a /opt/fleet/certs/. ${MOUNT_PATH}/ 2>/dev/null; ` +
+              `umount ${MOUNT_PATH} 2>/dev/null; true`,
+              { timeoutMs: 30_000 },
+            );
+            if (copyResult.exitCode === 0) {
+              logger.info('Copied certs from local to GlusterFS volume');
+            }
+          } catch (err) {
+            logger.warn({ err }, 'Failed to copy certs to GlusterFS — Traefik will re-issue certificates');
+          }
         }
-      } catch (err) {
-        logger.warn({ err }, 'Failed to copy certs to distributed volume — Traefik will re-issue certificates');
+
+        // Create systemd mount service and mount GlusterFS on ALL nodes via nsenter
+        // nsenter enters the host's mount namespace so the FUSE process is managed by
+        // the host's systemd, not a container (which would kill it on exit)
+        const mountCmd = [
+          `umount -l ${MOUNT_PATH} 2>/dev/null || true`,
+          `mkdir -p ${MOUNT_PATH}`,
+          // Write systemd service unit
+          `cat > /etc/systemd/system/fleet-gluster-certs.service << 'SYSTEMD_EOF'`,
+          `[Unit]`,
+          `Description=GlusterFS Platform Certs Mount`,
+          `After=network-online.target glusterd.service`,
+          `Wants=network-online.target`,
+          ``,
+          `[Service]`,
+          `Type=forking`,
+          `ExecStart=/bin/mount -t glusterfs ${firstNodeIp}:/${PLATFORM_CERTS_VOLUME} ${MOUNT_PATH}`,
+          `ExecStop=/bin/umount ${MOUNT_PATH}`,
+          `RemainAfterExit=yes`,
+          `Restart=on-failure`,
+          `RestartSec=10`,
+          ``,
+          `[Install]`,
+          `WantedBy=multi-user.target`,
+          `SYSTEMD_EOF`,
+          `systemctl daemon-reload`,
+          `systemctl enable fleet-gluster-certs.service`,
+          `systemctl start fleet-gluster-certs.service`,
+          `sleep 2`,
+          `ls ${MOUNT_PATH}/`,
+        ].join('\n');
+
+        const mountResult = await this.runOnAllNodesPrivileged(mountCmd, { timeoutMs: 120_000 });
+        if (!mountResult.success) {
+          logger.warn({ results: mountResult.results }, 'GlusterFS mount failed on some nodes');
+          return { applied: false, message: 'Failed to mount GlusterFS on all nodes' };
+        }
+        logger.info('GlusterFS platform certs mounted on all nodes via systemd');
+      } else if (provider === 'ceph') {
+        // Ceph uses CephFS (distributed filesystem) for shared platform volumes.
+        // CephFS is a kernel mount (not FUSE), so it's more stable than GlusterFS.
+        const config = storageManager.config!.config;
+        const monitors = config.monitors as string;
+        const user = config.user ?? 'admin';
+        const keyring = config.keyring ?? '/etc/ceph/ceph.client.admin.keyring';
+        const cephfsPath = `/fleet-platform-certs`;
+
+        if (!monitors) {
+          return { applied: false, message: 'Ceph monitors not configured' };
+        }
+
+        // Ensure CephFS directory exists using ceph-fuse temporarily on local host
+        try {
+          const mkdirCmd = `ceph fs subvolumegroup create cephfs fleet 2>/dev/null || true; ` +
+            `mkdir -p /tmp/cephfs-tmp && mount -t ceph ${monitors}:/ /tmp/cephfs-tmp -o name=${user},secretfile=${keyring} && ` +
+            `mkdir -p /tmp/cephfs-tmp${cephfsPath} && ` +
+            `cp -a /opt/fleet/certs/. /tmp/cephfs-tmp${cephfsPath}/ 2>/dev/null; ` +
+            `umount /tmp/cephfs-tmp 2>/dev/null; rmdir /tmp/cephfs-tmp 2>/dev/null; true`;
+          await this.runOnLocalHost(mkdirCmd, { timeoutMs: 30_000 });
+          logger.info('CephFS platform certs directory created and certs copied');
+        } catch (err) {
+          logger.warn({ err }, 'Failed to prepare CephFS directory — Traefik will re-issue certificates');
+        }
+
+        // Create systemd mount service on ALL nodes via nsenter
+        // CephFS is a kernel mount (Type=oneshot, not forking like GlusterFS FUSE)
+        const mountCmd = [
+          `umount -l ${MOUNT_PATH} 2>/dev/null || true`,
+          `mkdir -p ${MOUNT_PATH}`,
+          `cat > /etc/systemd/system/fleet-platform-certs.service << 'SYSTEMD_EOF'`,
+          `[Unit]`,
+          `Description=CephFS Platform Certs Mount`,
+          `After=network-online.target`,
+          `Wants=network-online.target`,
+          ``,
+          `[Service]`,
+          `Type=oneshot`,
+          `ExecStart=/bin/mount -t ceph ${monitors}:${cephfsPath} ${MOUNT_PATH} -o name=${user},secretfile=${keyring},_netdev`,
+          `ExecStop=/bin/umount ${MOUNT_PATH}`,
+          `RemainAfterExit=yes`,
+          ``,
+          `[Install]`,
+          `WantedBy=multi-user.target`,
+          `SYSTEMD_EOF`,
+          `systemctl daemon-reload`,
+          `systemctl enable fleet-platform-certs.service`,
+          `systemctl start fleet-platform-certs.service`,
+          `sleep 1`,
+          `ls ${MOUNT_PATH}/`,
+        ].join('\n');
+
+        const mountResult = await this.runOnAllNodesPrivileged(mountCmd, { timeoutMs: 120_000 });
+        if (!mountResult.success) {
+          logger.warn({ results: mountResult.results }, 'CephFS mount failed on some nodes');
+          return { applied: false, message: 'Failed to mount CephFS on all nodes' };
+        }
+        logger.info('CephFS platform certs mounted on all nodes via systemd');
       }
 
-      // Update the Traefik service mount
-      const driver = storageManager.volumes.getDockerVolumeDriver();
+      // Update Traefik mount to bind from host distributed mount path
       mounts[certMountIdx] = {
-        Source: PLATFORM_CERTS_VOLUME,
+        Source: MOUNT_PATH,
         Target: '/certs',
-        Type: 'volume' as const,
+        Type: 'bind' as const,
         ReadOnly: false,
-        VolumeOptions: {
-          NoCopy: false,
-          Labels: {},
-          DriverConfig: { Name: driver, Options: driverOpts },
-        },
       };
     } else {
       // mode === 'local'
       if (!isCurrentlyDistributed) {
-        // Already local, but ensure directories exist on all nodes
         await this.runOnAllNodes('mkdir -p /opt/fleet/certs', { timeoutMs: 30_000 }).catch(() => {});
         return { applied: true, message: 'Platform volumes already local, ensured directories on all nodes' };
       }
 
-      // Ensure /opt/fleet/certs exists on all manager nodes
-      await this.runOnAllNodes('mkdir -p /opt/fleet/certs', { timeoutMs: 30_000 });
-
-      // Copy certs from distributed volume back to local
+      // Copy certs from distributed mount back to local directory
       try {
-        const currentDriverOpts = currentMount.VolumeOptions?.DriverConfig?.Options ?? {};
-        const currentDriverName = currentMount.VolumeOptions?.DriverConfig?.Name ?? 'local';
-        const copyContainer = await docker.createContainer({
-          Image: 'alpine:latest',
-          Cmd: ['sh', '-c', 'cp -a /dist-certs/. /local-certs/ 2>/dev/null; true'],
-          HostConfig: {
-            Mounts: [
-              {
-                Type: 'volume' as const,
-                Source: currentMount.Source ?? PLATFORM_CERTS_VOLUME,
-                Target: '/dist-certs',
-                ReadOnly: true,
-                VolumeOptions: {
-                  DriverConfig: { Name: currentDriverName, Options: currentDriverOpts },
-                },
-              },
-              {
-                Type: 'bind' as const,
-                Source: '/opt/fleet/certs',
-                Target: '/local-certs',
-                ReadOnly: false,
-              },
-            ] as any,
-          },
-        });
-        try {
-          await copyContainer.start();
-          await copyContainer.wait();
-          logger.info('Copied certs from distributed volume to local directory');
-        } finally {
-          await copyContainer.remove({ force: true }).catch(() => {});
-        }
+        await this.runOnAllNodes(
+          `cp -a ${MOUNT_PATH}/. /opt/fleet/certs/ 2>/dev/null || true`,
+          { timeoutMs: 30_000 },
+        );
+        logger.info('Copied certs from distributed mount to local directory');
       } catch (err) {
-        logger.warn({ err }, 'Failed to copy certs from distributed volume — Traefik will re-issue certificates');
+        logger.warn({ err }, 'Failed to copy certs from distributed mount — Traefik will re-issue certificates');
       }
+
+      // Stop and disable the systemd mount service on all nodes (handle both GlusterFS and Ceph service names)
+      try {
+        await this.runOnAllNodesPrivileged(
+          'for svc in fleet-gluster-certs fleet-platform-certs; do ' +
+          '  systemctl stop $svc.service 2>/dev/null || true; ' +
+          '  systemctl disable $svc.service 2>/dev/null || true; ' +
+          '  rm -f /etc/systemd/system/$svc.service; ' +
+          'done; ' +
+          'systemctl daemon-reload',
+          { timeoutMs: 60_000 },
+        );
+        logger.info('Disabled platform certs mount on all nodes');
+      } catch (err) {
+        logger.warn({ err }, 'Failed to disable systemd mount on some nodes');
+      }
+
+      // Ensure /opt/fleet/certs exists on all nodes
+      await this.runOnAllNodes('mkdir -p /opt/fleet/certs', { timeoutMs: 30_000 });
 
       // Restore original bind-mount volume
       mounts[certMountIdx] = {

@@ -197,6 +197,10 @@ install_glusterfs() {
   systemctl enable glusterd
   systemctl start glusterd
 
+  # Load FUSE kernel module (required for GlusterFS volume mounts in Docker)
+  modprobe fuse 2>/dev/null || warn "Could not load fuse kernel module (may need reboot)"
+  echo "fuse" > /etc/modules-load.d/fuse.conf 2>/dev/null || true
+
   # Create brick directory
   mkdir -p "${DATA_PATH}/glusterfs/brick1"
   chmod 755 "${DATA_PATH}/glusterfs/brick1"

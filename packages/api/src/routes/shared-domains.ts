@@ -34,25 +34,7 @@ const RESERVED_SUBDOMAINS = new Set([
 // Subdomain format: lowercase alphanumeric + hyphens, 1-63 chars, can't start/end with hyphen
 const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
-function buildTraefikLabels(
-  serviceName: string,
-  domain: string | null,
-  sslEnabled: boolean,
-): Record<string, string> {
-  if (!domain) return { 'traefik.enable': 'false' };
-  const routerName = serviceName.replace(/[^a-zA-Z0-9]/g, '-');
-  const labels: Record<string, string> = {
-    'traefik.enable': 'true',
-    [`traefik.http.routers.${routerName}.rule`]: `Host(\`${domain}\`)`,
-    [`traefik.http.routers.${routerName}.entrypoints`]: 'websecure',
-    [`traefik.http.services.${routerName}.loadbalancer.server.port`]: '80',
-  };
-  if (sslEnabled) {
-    labels[`traefik.http.routers.${routerName}.tls`] = 'true';
-    labels[`traefik.http.routers.${routerName}.tls.certresolver`] = 'letsencrypt';
-  }
-  return labels;
-}
+import { buildTraefikLabels } from '../services/traefik.js';
 
 // ─── Shared Domains Routes ────────────────────────────────────────────
 

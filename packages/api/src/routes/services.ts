@@ -47,30 +47,7 @@ const serviceRoutes = new OpenAPIHono<{
 serviceRoutes.use('*', authMiddleware);
 serviceRoutes.use('*', tenantMiddleware);
 
-function buildTraefikLabels(
-  serviceName: string,
-  domain: string | null,
-  sslEnabled: boolean,
-  targetPort: number = 80,
-): Record<string, string> {
-  if (!domain) return { 'traefik.enable': 'false' };
-
-  const routerName = serviceName.replace(/[^a-zA-Z0-9]/g, '-');
-
-  const labels: Record<string, string> = {
-    'traefik.enable': 'true',
-    [`traefik.http.routers.${routerName}.rule`]: `Host(\`${domain}\`)`,
-    [`traefik.http.routers.${routerName}.entrypoints`]: 'websecure',
-    [`traefik.http.services.${routerName}.loadbalancer.server.port`]: String(targetPort),
-  };
-
-  if (sslEnabled) {
-    labels[`traefik.http.routers.${routerName}.tls`] = 'true';
-    labels[`traefik.http.routers.${routerName}.tls.certresolver`] = 'letsencrypt';
-  }
-
-  return labels;
-}
+import { buildTraefikLabels } from '../services/traefik.js';
 
 /** Convenience wrapper for port allocation */
 async function allocateIngressPorts(

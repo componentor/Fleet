@@ -3,8 +3,9 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { db, appTemplates, services, insertReturning, updateReturning, deleteReturning, eq, and, or } from '@fleet/db';
+import { db, appTemplates, services, storageVolumes, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
 import { dockerService } from './docker.service.js';
+import { buildTraefikLabels } from './traefik.js';
 import { logger } from './logger.js';
 
 // Resolve the templates directory relative to this file
@@ -274,13 +275,15 @@ export class TemplateService {
       }
     }
 
-    // Build a map of service names to their Swarm service names for cross-references
+    // Build a map of service names to their Swarm service names for cross-references.
+    // Include a short stack suffix so deploying the same template multiple times
+    // produces unique Docker service names (e.g. fleet-{account}-wordpress-a1b2c3d4).
     const swarmNamePrefix = `fleet-${accountId}`;
-    // Docker Desktop grouping — com.docker.compose.project groups all services from this template
-    const stackNamespace = `${swarmNamePrefix}-${slug}`;
+    const stackShort = stackId.substring(0, 8);
+    const stackNamespace = `${swarmNamePrefix}-${slug}-${stackShort}`;
     const serviceNameMap: Record<string, string> = {};
     for (const svcDef of parsed.services) {
-      serviceNameMap[svcDef.name] = `${swarmNamePrefix}-${svcDef.name}`;
+      serviceNameMap[svcDef.name] = `${swarmNamePrefix}-${svcDef.name}-${stackShort}`;
     }
 
     // Helper to interpolate {{variable}} and {{service:name}} placeholders
@@ -346,6 +349,7 @@ export class TemplateService {
         sslEnabled: true,
         status: 'deploying',
         stackId,
+        sourceType: 'marketplace',
         cpuLimit,
         memoryLimit,
       });
@@ -367,6 +371,10 @@ export class TemplateService {
               svcPorts.map((p) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
             );
 
+        // Build Traefik routing labels for domain services
+        const primaryPort = svcDef.ports?.[0]?.target ?? 80;
+        const traefikLabels = buildTraefikLabels(swarmName, resolvedDomain, true, primaryPort);
+
         const result = await dockerService.createService({
           name: swarmName,
           image,
@@ -381,6 +389,7 @@ export class TemplateService {
             'fleet.stack-id': stackId,
             'com.docker.compose.project': stackNamespace,
             'com.docker.compose.service': svcDef.name,
+            ...traefikLabels,
           },
           constraints: [],
           networkId,
@@ -413,6 +422,32 @@ export class TemplateService {
         name: svcDef.name,
         dockerServiceId,
       });
+    }
+
+    // Track template volumes in the storageVolumes table so they appear in the
+    // Storage page and can be browsed via the volume file explorer.
+    for (const volName of parsed.volumes ?? []) {
+      const dockerVolName = `${swarmNamePrefix}-${volName}`;
+      try {
+        const existing = await db.query.storageVolumes.findFirst({
+          where: and(
+            eq(storageVolumes.name, dockerVolName),
+            eq(storageVolumes.accountId, accountId),
+            isNull(storageVolumes.deletedAt),
+          ),
+        });
+        if (!existing) {
+          await db.insert(storageVolumes).values({
+            accountId,
+            name: dockerVolName,
+            displayName: volName,
+            sizeGb: 0,
+            status: 'ready',
+          });
+        }
+      } catch (err) {
+        logger.warn({ err, volume: dockerVolName }, 'Failed to create storageVolumes record for template volume');
+      }
     }
 
     return { services: createdServices, stackId };

@@ -177,6 +177,19 @@ install_nfs_client() {
   log "NFS client installed"
 }
 
+# ─── Load FUSE kernel module ─────────────────────────────────────────
+load_fuse() {
+  if lsmod | grep -q fuse; then
+    log "FUSE kernel module already loaded"
+    return
+  fi
+
+  log "Loading FUSE kernel module..."
+  modprobe fuse 2>/dev/null || warn "Could not load fuse kernel module (may need reboot)"
+  echo "fuse" > /etc/modules-load.d/fuse.conf 2>/dev/null || true
+  log "FUSE kernel module loaded (persisted for reboot)"
+}
+
 # ─── Start temporary setup wizard ─────────────────────────────────────
 start_wizard() {
   log "Starting temporary setup wizard on port 80..."
@@ -240,6 +253,7 @@ main() {
   install_docker
   configure_docker
   install_nfs_client
+  load_fuse
   start_wizard
   configure_nfs_mount
 

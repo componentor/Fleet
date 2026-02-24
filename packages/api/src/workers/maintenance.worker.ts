@@ -172,6 +172,8 @@ async function syncServiceStatus(): Promise<void> {
       markFailed.push(svc.id);
     } else if (svc.status === 'deploying' && tasks.running > 0) {
       markRunning.push(svc.id);
+    } else if (svc.status === 'deploying' && tasks.running === 0 && tasks.failed > 0) {
+      markFailed.push(svc.id);
     }
   }
 

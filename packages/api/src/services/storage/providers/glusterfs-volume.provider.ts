@@ -240,6 +240,12 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   getPrerequisites(): StoragePrerequisite[] {
     return [
       {
+        package: 'fuse',
+        description: 'FUSE kernel module (required for GlusterFS volume mounts)',
+        checkCommand: 'lsmod | grep -q fuse',
+        installCommand: 'modprobe fuse && echo fuse > /etc/modules-load.d/fuse.conf',
+      },
+      {
         package: 'glusterfs-server',
         description: 'GlusterFS server daemon',
         checkCommand: 'which glusterd',
