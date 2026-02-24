@@ -79,7 +79,7 @@ const domainVariableNames = computed(() => {
     const d = (svc as any).domain as string | undefined
     if (d) {
       const match = d.match(/\{\{(\w+)\}\}/)
-      if (match) names.add(match[1])
+      if (match?.[1]) names.add(match[1])
     }
   }
   return names
