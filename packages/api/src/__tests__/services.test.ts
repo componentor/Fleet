@@ -22,8 +22,8 @@ describe('Services', () => {
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(body.name).toBe('my-app');
-    // In test environment without Docker, the service is created but stays stopped
-    expect(body.status).toBe('stopped');
+    // Docker is mocked to succeed, so the service stays in 'deploying' status
+    expect(body.status).toBe('deploying');
   });
 
   it('GET /api/v1/services -- lists services', async () => {

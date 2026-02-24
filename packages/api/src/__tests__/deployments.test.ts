@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import './setup.js';
 import { app } from '../app.js';
 import { createTestUser } from './setup.js';
+import { db, services, eq } from '@fleet/db';
 
-// Helper to create a test service
+// Helper to create a test service and mark it as running (so redeploy doesn't 409)
 async function createTestService(token: string, accountId: string) {
   const res = await app.request('/api/v1/services', {
     method: 'POST',
@@ -17,7 +18,11 @@ async function createTestService(token: string, accountId: string) {
       image: 'nginx:latest',
     }),
   });
-  return res.json() as Promise<any>;
+  const svc = await res.json() as any;
+  // Service is created with status 'deploying' — transition to 'running'
+  // so that redeploy (which rejects 'deploying') can proceed.
+  await db.update(services).set({ status: 'running' }).where(eq(services.id, svc.id));
+  return { ...svc, status: 'running' };
 }
 
 describe('Deployments', () => {
