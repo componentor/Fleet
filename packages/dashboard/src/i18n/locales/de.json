@@ -304,6 +304,16 @@
     "noDomainsHint": "Registrieren Sie zuerst eine Domain auf der Domains-Seite oder geben Sie eine eigene ein.",
     "searchPlaceholder": "Domains filtern..."
   },
+  "volumeSharing": {
+    "separateVolumes": "Getrennte Volumes",
+    "sharedVolume": "Gemeinsames Volume",
+    "volumeStrategy": "Volume-Strategie:",
+    "linkWith": "Verknüpfen mit",
+    "unlink": "Trennen",
+    "sharedVolumeLabel": "Gemeinsames Volume",
+    "allServicesShare": "Alle Dienste teilen sich ein einzelnes Speicher-Volume",
+    "storage": "Speicher:"
+  },
   "storage": {
     "title": "Speicher",
     "volumes": "Volumes",

@@ -6,7 +6,7 @@ import {
   ArrowLeft, ArrowRight, Rocket, Loader2, CheckCircle2,
   Eye, EyeOff, Copy, RefreshCw, AlertTriangle, Database,
   Server, Globe, Shield, Cpu, HardDrive, Check, ExternalLink,
-  Package, Info, ChevronDown, Link,
+  Package, Info, ChevronDown, Link, Link2, X,
 } from 'lucide-vue-next'
 import DomainPicker from '@/components/DomainPicker.vue'
 import { useDomainPicker } from '@/composables/useDomainPicker'
@@ -41,6 +41,17 @@ const serviceDomains = ref<Record<string, string>>({})
 const volumeConfigs = ref<Record<string, { mode: 'create' | 'existing'; sizeGb: number; existingVolumeName: string }>>({})
 const existingVolumes = ref<Array<{ name: string; displayName: string; sizeGb: number }>>([])
 const storageQuota = ref<{ usedGb: number; limitGb: number } | null>(null)
+
+// Volume sharing
+const quickDeployVolumeStrategy = ref<'shared' | 'split'>('shared')
+const volumeShareGroups = ref<Record<string, {
+  volumeNames: string[]
+  mode: 'create' | 'existing'
+  sizeGb: number
+  existingVolumeName: string
+}>>({})
+const volumeGroupMembership = ref<Record<string, string>>({})
+const linkDropdownOpen = ref<string | null>(null)
 
 // ── Step 4: Resources ──
 const serviceResources = ref<Record<string, { replicas: number; cpuLimit: number; memoryLimit: number }>>({})
@@ -106,10 +117,29 @@ const visibleSteps = computed(() => {
   return steps.filter((s) => s.number !== 3)
 })
 
+const groupedVolumeNames = computed(() => {
+  const s = new Set<string>()
+  for (const group of Object.values(volumeShareGroups.value)) {
+    for (const vn of group.volumeNames) s.add(vn)
+  }
+  return s
+})
+
+const ungroupedVolumes = computed(() =>
+  templateVolumes.value.filter(v => !groupedVolumeNames.value.has(v.name))
+)
+
 const totalNewStorageGb = computed(() => {
   let total = 0
-  for (const cfg of Object.values(volumeConfigs.value)) {
-    if (cfg.mode === 'create') total += cfg.sizeGb
+  // Grouped volumes — one size per group
+  for (const group of Object.values(volumeShareGroups.value)) {
+    if (group.mode === 'create') total += group.sizeGb
+  }
+  // Ungrouped volumes — individual sizes
+  for (const [name, cfg] of Object.entries(volumeConfigs.value)) {
+    if (!groupedVolumeNames.value.has(name) && cfg.mode === 'create') {
+      total += cfg.sizeGb
+    }
   }
   return total
 })
@@ -139,7 +169,14 @@ const canProceed = computed(() => {
   }
   if (currentStep.value === 3) {
     if (isOverQuota.value) return false
-    for (const cfg of Object.values(volumeConfigs.value)) {
+    // Validate grouped volume configs
+    for (const group of Object.values(volumeShareGroups.value)) {
+      if (group.mode === 'existing' && !group.existingVolumeName) return false
+      if (group.mode === 'create' && group.sizeGb < 1) return false
+    }
+    // Validate ungrouped volume configs
+    for (const [name, cfg] of Object.entries(volumeConfigs.value)) {
+      if (groupedVolumeNames.value.has(name)) continue
       if (cfg.mode === 'existing' && !cfg.existingVolumeName) return false
       if (cfg.mode === 'create' && cfg.sizeGb < 1) return false
     }
@@ -157,9 +194,107 @@ const isSimpleTemplate = computed(() => {
 })
 
 async function quickDeploy() {
+  // Apply volume strategy before deploying
+  if (quickDeployVolumeStrategy.value === 'shared' && templateVolumes.value.length >= 2) {
+    setAllShared(true)
+  }
   // Skip straight to deploy with default/generated config
   currentStep.value = 5
   await executeDeploy()
+}
+
+// ── Volume sharing helpers ──
+function setAllShared(shared: boolean) {
+  volumeShareGroups.value = {}
+  volumeGroupMembership.value = {}
+
+  if (shared && templateVolumes.value.length >= 2) {
+    const groupId = crypto.randomUUID()
+    const allNames = templateVolumes.value.map(v => v.name)
+    const maxSize = Math.max(...allNames.map(n => volumeConfigs.value[n]?.sizeGb ?? 5))
+    volumeShareGroups.value[groupId] = {
+      volumeNames: allNames,
+      mode: 'create',
+      sizeGb: maxSize,
+      existingVolumeName: '',
+    }
+    for (const n of allNames) {
+      volumeGroupMembership.value[n] = groupId
+    }
+  }
+}
+
+function linkVolumes(volumeA: string, volumeB: string) {
+  const groupIdA = volumeGroupMembership.value[volumeA]
+  const groupIdB = volumeGroupMembership.value[volumeB]
+
+  if (groupIdA && groupIdB && groupIdA === groupIdB) return
+
+  if (groupIdA && !groupIdB) {
+    volumeShareGroups.value[groupIdA]!.volumeNames.push(volumeB)
+    volumeShareGroups.value[groupIdA]!.sizeGb = Math.max(
+      volumeShareGroups.value[groupIdA]!.sizeGb,
+      volumeConfigs.value[volumeB]?.sizeGb ?? 5,
+    )
+    volumeGroupMembership.value[volumeB] = groupIdA
+  } else if (!groupIdA && groupIdB) {
+    volumeShareGroups.value[groupIdB]!.volumeNames.push(volumeA)
+    volumeShareGroups.value[groupIdB]!.sizeGb = Math.max(
+      volumeShareGroups.value[groupIdB]!.sizeGb,
+      volumeConfigs.value[volumeA]?.sizeGb ?? 5,
+    )
+    volumeGroupMembership.value[volumeA] = groupIdB
+  } else if (groupIdA && groupIdB) {
+    const bMembers = volumeShareGroups.value[groupIdB]!.volumeNames
+    volumeShareGroups.value[groupIdA]!.volumeNames.push(...bMembers)
+    volumeShareGroups.value[groupIdA]!.sizeGb = Math.max(
+      volumeShareGroups.value[groupIdA]!.sizeGb,
+      volumeShareGroups.value[groupIdB]!.sizeGb,
+    )
+    for (const m of bMembers) volumeGroupMembership.value[m] = groupIdA
+    delete volumeShareGroups.value[groupIdB]
+  } else {
+    const groupId = crypto.randomUUID()
+    const sizeA = volumeConfigs.value[volumeA]?.sizeGb ?? 5
+    const sizeB = volumeConfigs.value[volumeB]?.sizeGb ?? 5
+    volumeShareGroups.value[groupId] = {
+      volumeNames: [volumeA, volumeB],
+      mode: volumeConfigs.value[volumeA]?.mode ?? 'create',
+      sizeGb: Math.max(sizeA, sizeB),
+      existingVolumeName: '',
+    }
+    volumeGroupMembership.value[volumeA] = groupId
+    volumeGroupMembership.value[volumeB] = groupId
+  }
+  linkDropdownOpen.value = null
+}
+
+function unlinkVolume(volumeName: string) {
+  const groupId = volumeGroupMembership.value[volumeName]
+  if (!groupId) return
+
+  const group = volumeShareGroups.value[groupId]!
+  group.volumeNames = group.volumeNames.filter(n => n !== volumeName)
+  delete volumeGroupMembership.value[volumeName]
+
+  if (group.volumeNames.length <= 1) {
+    const remaining = group.volumeNames[0]
+    if (remaining) delete volumeGroupMembership.value[remaining]
+    delete volumeShareGroups.value[groupId]
+  }
+}
+
+function allServicesForGroup(group: { volumeNames: string[] }) {
+  const svcs: Array<{ name: string; target: string; volume: string }> = []
+  for (const vn of group.volumeNames) {
+    const vol = templateVolumes.value.find(v => v.name === vn)
+    if (vol) {
+      for (const svc of vol.usedBy) {
+        svcs.push({ name: svc.name, target: svc.target, volume: vn })
+      }
+    }
+  }
+  return svcs
 }
 
 // ── Cost estimate ──
@@ -390,9 +525,26 @@ async function executeDeploy() {
       }
     }
 
-    // Build volume overrides from user storage choices
+    // Build volume groups for shared volumes
+    const volGroups: Array<{
+      name: string; volumes: string[];
+      mode: 'create' | 'existing'; sizeGb?: number; existingVolumeName?: string
+    }> = []
+    for (const group of Object.values(volumeShareGroups.value)) {
+      volGroups.push({
+        name: group.volumeNames[0]!,
+        volumes: group.volumeNames,
+        mode: group.mode,
+        ...(group.mode === 'create' ? { sizeGb: group.sizeGb } : {}),
+        ...(group.mode === 'existing' && group.existingVolumeName
+          ? { existingVolumeName: group.existingVolumeName } : {}),
+      })
+    }
+
+    // Build volume overrides — only for ungrouped volumes
     const volOverrides: Record<string, any> = {}
     for (const [name, cfg] of Object.entries(volumeConfigs.value)) {
+      if (groupedVolumeNames.value.has(name)) continue
       volOverrides[name] = { mode: cfg.mode }
       if (cfg.mode === 'create') {
         volOverrides[name].sizeGb = cfg.sizeGb
@@ -413,6 +565,7 @@ async function executeDeploy() {
       ...(Object.keys(imageOverrides).length > 0 ? { imageOverrides } : {}),
       ...(Object.keys(resourceOverrides).length > 0 ? { resourceOverrides } : {}),
       ...(Object.keys(volOverrides).length > 0 ? { volumeOverrides: volOverrides } : {}),
+      ...(volGroups.length > 0 ? { volumeGroups: volGroups } : {}),
       ...(Object.keys(domainOverrides).length > 0 ? { domainOverrides } : {}),
     })
 
@@ -635,6 +788,34 @@ onUnmounted(() => {
                   {{ deploying ? 'Deploying...' : 'Quick Deploy' }}
                 </button>
               </div>
+              <!-- Quick deploy volume strategy -->
+              <div v-if="templateVolumes.length >= 2" class="mt-3 pt-3 border-t border-green-200 dark:border-green-800 flex items-center gap-3">
+                <span class="text-xs font-medium text-green-800 dark:text-green-200">Storage:</span>
+                <div class="flex gap-1.5">
+                  <button
+                    @click="quickDeployVolumeStrategy = 'shared'"
+                    :class="[
+                      'px-2.5 py-1 rounded text-xs font-medium transition-colors',
+                      quickDeployVolumeStrategy === 'shared'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
+                    ]"
+                  >
+                    Shared volume
+                  </button>
+                  <button
+                    @click="quickDeployVolumeStrategy = 'split'"
+                    :class="[
+                      'px-2.5 py-1 rounded text-xs font-medium transition-colors',
+                      quickDeployVolumeStrategy === 'split'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
+                    ]"
+                  >
+                    Separate volumes
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -840,14 +1021,155 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Volume cards -->
-            <div v-for="vol in templateVolumes" :key="vol.name" class="p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750">
+            <!-- Volume sharing toggle (when 2+ volumes) -->
+            <div v-if="templateVolumes.length >= 2" class="flex items-center gap-3">
+              <span class="text-xs font-medium text-gray-600 dark:text-gray-400">Volume strategy:</span>
+              <div class="flex gap-1.5">
+                <button
+                  @click="setAllShared(false)"
+                  :class="[
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    Object.keys(volumeShareGroups).length === 0
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  ]"
+                >
+                  Separate volumes
+                </button>
+                <button
+                  @click="setAllShared(true)"
+                  :class="[
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    Object.keys(volumeShareGroups).length > 0 && ungroupedVolumes.length === 0
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  ]"
+                >
+                  Shared volume
+                </button>
+              </div>
+            </div>
+
+            <!-- Grouped volume cards -->
+            <div v-for="(group, groupId) in volumeShareGroups" :key="groupId"
+              class="p-4 rounded-lg border-l-4 border-l-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <Link2 class="w-4 h-4 text-blue-500" />
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white">Shared Volume</p>
+                  </div>
+                  <div class="mt-1.5 space-y-1">
+                    <div v-for="svc in allServicesForGroup(group)" :key="svc.name + svc.volume"
+                      class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                      <span class="font-medium text-gray-700 dark:text-gray-300">{{ svc.name }}</span>
+                      <span class="text-gray-400">→</span>
+                      <span class="font-mono">{{ svc.target }}</span>
+                      <span class="text-gray-300 dark:text-gray-600">({{ svc.volume }})</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Members list with unlink -->
+              <div class="flex flex-wrap gap-1.5 mb-3">
+                <span v-for="vn in group.volumeNames" :key="vn"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                  {{ vn }}
+                  <button v-if="group.volumeNames.length > 1" @click="unlinkVolume(vn)"
+                    class="ml-0.5 p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+                    title="Unlink">
+                    <X class="w-2.5 h-2.5" />
+                  </button>
+                </span>
+              </div>
+
+              <!-- Mode toggle -->
+              <div class="flex gap-2 mb-3">
+                <button
+                  @click="group.mode = 'create'"
+                  :class="[
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    group.mode === 'create'
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  ]"
+                >
+                  Create New
+                </button>
+                <button
+                  @click="group.mode = 'existing'"
+                  :disabled="existingVolumes.length === 0"
+                  :class="[
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    group.mode === 'existing'
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600',
+                    existingVolumes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                  ]"
+                >
+                  Use Existing{{ existingVolumes.length === 0 ? ' (none available)' : '' }}
+                </button>
+              </div>
+
+              <!-- Create New: size input -->
+              <div v-if="group.mode === 'create'" class="flex items-center gap-3">
+                <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Size (GB)</label>
+                <input
+                  v-model.number="group.sizeGb"
+                  type="number"
+                  min="1"
+                  :max="storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000"
+                  class="w-24 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <span class="text-xs text-gray-400">
+                  {{ storageQuota ? `(max ${Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb))} GB available)` : '' }}
+                </span>
+              </div>
+
+              <!-- Use Existing: dropdown -->
+              <div v-if="group.mode === 'existing'">
+                <select
+                  v-model="group.existingVolumeName"
+                  class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                >
+                  <option value="">Select a volume...</option>
+                  <option v-for="ev in existingVolumes" :key="ev.name" :value="ev.name">
+                    {{ ev.displayName }} ({{ ev.sizeGb }} GB)
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Ungrouped volume cards -->
+            <div v-for="vol in ungroupedVolumes" :key="vol.name" class="p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750">
               <div class="flex items-center justify-between mb-3">
                 <div>
                   <p class="text-sm font-semibold text-gray-900 dark:text-white font-mono">{{ vol.name }}</p>
                   <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                     Used by: <span v-for="(svc, i) in vol.usedBy" :key="svc.name">{{ i > 0 ? ', ' : '' }}<span class="font-medium">{{ svc.name }}</span> ({{ svc.target }})</span>
                   </p>
+                </div>
+                <!-- Link button (only when other ungrouped volumes exist) -->
+                <div v-if="ungroupedVolumes.length >= 2" class="relative">
+                  <button
+                    @click.stop="linkDropdownOpen = linkDropdownOpen === vol.name ? null : vol.name"
+                    class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                    title="Link with another volume"
+                  >
+                    <Link2 class="w-4 h-4" />
+                  </button>
+                  <!-- Link dropdown -->
+                  <div v-if="linkDropdownOpen === vol.name"
+                    class="absolute right-0 top-full mt-1 z-10 w-48 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1">
+                    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Link with</p>
+                    <button v-for="other in ungroupedVolumes.filter(v => v.name !== vol.name)" :key="other.name"
+                      @click="linkVolumes(vol.name, other.name)"
+                      class="w-full px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-mono transition-colors"
+                    >
+                      {{ other.name }}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1013,7 +1335,25 @@ onUnmounted(() => {
               <div v-if="hasVolumes">
                 <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Storage</h3>
                 <div class="space-y-1.5">
-                  <div v-for="vol in templateVolumes" :key="vol.name" class="flex items-center justify-between py-1.5">
+                  <!-- Grouped (shared) volumes -->
+                  <div v-for="(group, groupId) in volumeShareGroups" :key="groupId"
+                    class="py-2 px-3 rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <Link2 class="w-3.5 h-3.5 text-blue-500" />
+                        <span class="text-xs font-medium text-blue-700 dark:text-blue-300">Shared volume</span>
+                        <span class="text-xs text-blue-600 dark:text-blue-400 font-mono">
+                          ({{ group.volumeNames.join(', ') }})
+                        </span>
+                      </div>
+                      <span class="text-sm text-gray-900 dark:text-white">
+                        <template v-if="group.mode === 'create'">New · {{ group.sizeGb }} GB</template>
+                        <template v-else>Existing · {{ existingVolumes.find(v => v.name === group.existingVolumeName)?.displayName || group.existingVolumeName }}</template>
+                      </span>
+                    </div>
+                  </div>
+                  <!-- Ungrouped volumes -->
+                  <div v-for="vol in ungroupedVolumes" :key="vol.name" class="flex items-center justify-between py-1.5">
                     <span class="text-sm text-gray-600 dark:text-gray-400 font-mono">{{ vol.name }}</span>
                     <span class="text-sm text-gray-900 dark:text-white">
                       <template v-if="volumeConfigs[vol.name]?.mode === 'create'">

@@ -304,6 +304,16 @@
     "noDomainsHint": "请先在域名页面注册域名，或输入自定义域名。",
     "searchPlaceholder": "筛选域名..."
   },
+  "volumeSharing": {
+    "separateVolumes": "独立存储卷",
+    "sharedVolume": "共享存储卷",
+    "volumeStrategy": "存储策略：",
+    "linkWith": "关联至",
+    "unlink": "取消关联",
+    "sharedVolumeLabel": "共享存储卷",
+    "allServicesShare": "所有服务将共享一个存储卷",
+    "storage": "存储："
+  },
   "storage": {
     "title": "存储",
     "volumes": "存储卷",

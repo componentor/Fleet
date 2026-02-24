@@ -304,6 +304,16 @@
     "noDomainsHint": "Register a domain in the Domains page first, or type a custom one.",
     "searchPlaceholder": "Filter domains..."
   },
+  "volumeSharing": {
+    "separateVolumes": "Separate volumes",
+    "sharedVolume": "Shared volume",
+    "volumeStrategy": "Volume strategy:",
+    "linkWith": "Link with",
+    "unlink": "Unlink",
+    "sharedVolumeLabel": "Shared Volume",
+    "allServicesShare": "All services will share a single storage volume",
+    "storage": "Storage:"
+  },
   "storage": {
     "title": "Storage",
     "volumes": "Volumes",

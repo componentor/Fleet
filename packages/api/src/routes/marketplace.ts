@@ -69,6 +69,13 @@ const deploySchema = z.object({
     sizeGb: z.number().int().min(1).max(1000).optional(),
     existingVolumeName: z.string().min(1).optional(),
   })).optional(),
+  volumeGroups: z.array(z.object({
+    name: z.string().min(1),
+    volumes: z.array(z.string().min(1)),
+    mode: z.enum(['create', 'existing']),
+    sizeGb: z.number().int().min(1).max(1000).optional(),
+    existingVolumeName: z.string().min(1).optional(),
+  })).optional(),
 }).openapi('MarketplaceDeploy');
 
 const createTemplateSchema = z.object({
@@ -279,7 +286,7 @@ marketplace.openapi(deployRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides } = c.req.valid('json');
+  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides, volumeGroups } = c.req.valid('json');
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
@@ -288,6 +295,7 @@ marketplace.openapi(deployRoute, (async (c: any) => {
       domainOverrides,
       resourceOverrides,
       volumeOverrides,
+      volumeGroups,
     });
     return c.json(result, 201);
   } catch (err) {

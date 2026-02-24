@@ -304,6 +304,16 @@
     "noDomainsHint": "Registrer et domene på Domener-siden først, eller skriv inn et egendefinert.",
     "searchPlaceholder": "Filtrer domener..."
   },
+  "volumeSharing": {
+    "separateVolumes": "Separate volumer",
+    "sharedVolume": "Delt volum",
+    "volumeStrategy": "Volumstrategi:",
+    "linkWith": "Koble med",
+    "unlink": "Koble fra",
+    "sharedVolumeLabel": "Delt volum",
+    "allServicesShare": "Alle tjenester deler ett lagringsvolum",
+    "storage": "Lagring:"
+  },
   "storage": {
     "title": "Lagring",
     "volumes": "Volumer",

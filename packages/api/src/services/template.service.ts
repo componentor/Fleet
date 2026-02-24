@@ -251,6 +251,13 @@ export class TemplateService {
       domainOverrides?: Record<string, string>;
       resourceOverrides?: Record<string, { replicas?: number; cpuLimit?: number; memoryLimit?: number }>;
       volumeOverrides?: Record<string, { mode: 'create' | 'existing'; sizeGb?: number; existingVolumeName?: string }>;
+      volumeGroups?: Array<{
+        name: string;
+        volumes: string[];
+        mode: 'create' | 'existing';
+        sizeGb?: number;
+        existingVolumeName?: string;
+      }>;
     },
   ): Promise<{
     services: Array<{ id: string; name: string; dockerServiceId: string | null }>;
@@ -316,17 +323,66 @@ export class TemplateService {
     const networkId = await dockerService.ensureNetwork(networkName);
     const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
 
+    // Build volume resolution map from volumeGroups so grouped template volumes
+    // resolve to the same physical Docker volume name.
+    const volumeResolutionMap = new Map<string, string>();
+    const groupVolumeConfigs = new Map<string, {
+      mode: 'create' | 'existing';
+      sizeGb?: number;
+      existingVolumeName?: string;
+    }>();
+
+    for (const group of options?.volumeGroups ?? []) {
+      if (group.volumes.length === 0) continue;
+      const primaryVolName = group.volumes[0]!;
+      const dockerVolName = (group.mode === 'existing' && group.existingVolumeName)
+        ? group.existingVolumeName
+        : `${swarmNamePrefix}-${primaryVolName}`;
+
+      for (const volName of group.volumes) {
+        volumeResolutionMap.set(volName, dockerVolName);
+      }
+      groupVolumeConfigs.set(primaryVolName, {
+        mode: group.mode,
+        sizeGb: group.sizeGb,
+        existingVolumeName: group.existingVolumeName,
+      });
+    }
+
     // Create template volumes BEFORE deploying services so that bind-mount
     // paths exist on the host when Docker tries to start containers.
     const hasStorageProvider = storageManager.volumes.isReady();
     if (hasStorageProvider) {
       // Collect volumes that need creation and their sizes
       const volumesToCreate: Array<{ dockerName: string; displayName: string; sizeGb: number }> = [];
-      for (const volName of parsed.volumes ?? []) {
-        const override = options?.volumeOverrides?.[volName];
-        if (override?.mode === 'existing') continue;
+      const createdDockerVolumes = new Set<string>();
 
-        const dockerVolName = `${swarmNamePrefix}-${volName}`;
+      for (const volName of parsed.volumes ?? []) {
+        let dockerVolName: string;
+        let volumeMode: 'create' | 'existing';
+        let volumeSizeGb: number;
+
+        if (volumeResolutionMap.has(volName)) {
+          // This volume is part of a group — use the shared Docker volume name
+          dockerVolName = volumeResolutionMap.get(volName)!;
+          if (createdDockerVolumes.has(dockerVolName)) continue; // already handled by group primary
+
+          const groupConfig = groupVolumeConfigs.get(volName);
+          volumeMode = groupConfig?.mode ?? 'create';
+          volumeSizeGb = groupConfig?.sizeGb ?? 5;
+          if (volumeMode === 'existing') {
+            createdDockerVolumes.add(dockerVolName);
+            continue;
+          }
+        } else {
+          // Individual volume — use volumeOverrides as before
+          const override = options?.volumeOverrides?.[volName];
+          if (override?.mode === 'existing') continue;
+          dockerVolName = `${swarmNamePrefix}-${volName}`;
+          volumeMode = override?.mode ?? 'create';
+          volumeSizeGb = override?.sizeGb ?? 5;
+        }
+
         const existing = await db.query.storageVolumes.findFirst({
           where: and(
             eq(storageVolumes.name, dockerVolName),
@@ -338,9 +394,10 @@ export class TemplateService {
           volumesToCreate.push({
             dockerName: dockerVolName,
             displayName: volName,
-            sizeGb: override?.sizeGb ?? 5,
+            sizeGb: volumeSizeGb,
           });
         }
+        createdDockerVolumes.add(dockerVolName);
       }
 
       // Single quota check for total requested storage
@@ -388,8 +445,12 @@ export class TemplateService {
       const resolvedDomain = options?.domainOverrides?.[svcDef.name]
         ?? (svcDef.domain ? interpolate(svcDef.domain) : null);
 
-      // Resolve volumes — use existing volume name or prefix with account to isolate
+      // Resolve volumes — grouped volumes share a physical volume, others use overrides
       const resolvedVolumes = (svcDef.volumes ?? []).map((v) => {
+        // Check volume groups first
+        if (volumeResolutionMap.has(v.source)) {
+          return { source: volumeResolutionMap.get(v.source)!, target: v.target, readonly: v.readonly ?? false };
+        }
         const override = options?.volumeOverrides?.[v.source];
         const source = (override?.mode === 'existing' && override.existingVolumeName)
           ? override.existingVolumeName
