@@ -1242,7 +1242,22 @@
       "stripePaymentMethodsDesc": "启用快捷支付方式，让您的客户可以通过 Apple Pay、Google Pay 和 Stripe Link 更快地付款。",
       "stripeStep1": "在 Stripe 控制台中前往 设置 > 支付方式",
       "stripeStep2": "启用 Apple Pay、Google Pay，以及可选的 Link（Stripe 快捷结账）",
-      "stripeStep3": "对于 Apple Pay，需要在 设置 > 支付方式 > Apple Pay 下通过添加 Stripe 域名验证文件来验证您的域名"
+      "stripeStep3": "对于 Apple Pay，需要在 设置 > 支付方式 > Apple Pay 下通过添加 Stripe 域名验证文件来验证您的域名",
+      "dataLifecycle": "数据生命周期",
+      "dataLifecycleDesc": "配置账户数据的自动暂停、删除和永久清除。",
+      "suspensionSettings": "暂停设置",
+      "autoSuspend": "自动暂停逾期付款的账户",
+      "suspensionGraceDays": "逾期多少天后暂停",
+      "suspensionWarningDays": "暂停前提前警告天数",
+      "deletionSettings": "删除设置",
+      "autoDelete": "自动计划删除已暂停的账户",
+      "deletionGraceDays": "暂停后多少天删除",
+      "deletionWarningDays": "删除前提前警告天数",
+      "volumeDeletion": "删除账户时同时删除存储卷",
+      "permanentPurge": "永久清除",
+      "purgeEnabled": "在保留期后永久删除软删除的数据",
+      "purgeRetentionDays": "永久删除前的保留天数",
+      "saveLifecycle": "保存生命周期配置"
     },
     "errors": {
       "title": "错误",

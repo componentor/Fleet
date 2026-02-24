@@ -2,11 +2,14 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import {
   db,
+  accounts,
   billingPlans,
   pricingConfig,
   locationMultipliers,
   billingConfig,
   subscriptions,
+  services,
+  userAccounts,
   resourceLimits,
   accountBillingOverrides,
   insertReturning,
@@ -16,9 +19,15 @@ import {
   eq,
   and,
   isNull,
+  isNotNull,
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { stripeSyncService } from '../services/stripe-sync.service.js';
+import { dockerService } from '../services/docker.service.js';
+import { notificationService } from '../services/notification.service.js';
+import { eventService, EventTypes } from '../services/event.service.js';
+import { emailService } from '../services/email.service.js';
+import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
@@ -771,6 +780,248 @@ billingAdmin.openapi(createMeteredPricesRoute, (async (c: any) => {
     logger.error({ err }, 'Failed to create metered prices');
     return c.json({ error: 'Failed to create metered prices' }, 500);
   }
+}) as any);
+
+// ── Route definitions ── Account Suspension Management ──
+
+const suspendAccountSchema = z.object({
+  scheduleDeletionDays: z.number().int().min(0).optional(),
+}).openapi('SuspendAccountRequest');
+
+const unsuspendAccountRoute = createRoute({
+  method: 'post',
+  path: '/accounts/{accountId}/unsuspend',
+  tags: ['Billing Admin'],
+  summary: 'Manually unsuspend an account',
+  security: bearerSecurity,
+  request: {
+    params: accountIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Account unsuspended'),
+    ...standardErrors,
+  },
+});
+
+const suspendAccountRoute = createRoute({
+  method: 'post',
+  path: '/accounts/{accountId}/suspend',
+  tags: ['Billing Admin'],
+  summary: 'Manually suspend an account',
+  security: bearerSecurity,
+  request: {
+    params: accountIdParamSchema,
+    body: jsonBody(suspendAccountSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Account suspended'),
+    ...standardErrors,
+  },
+});
+
+const updateGracePeriodSchema = z.object({
+  scheduledDeletionAt: z.string().datetime().nullable(),
+}).openapi('UpdateGracePeriodRequest');
+
+const updateGracePeriodRoute = createRoute({
+  method: 'patch',
+  path: '/accounts/{accountId}/grace-period',
+  tags: ['Billing Admin'],
+  summary: 'Update or cancel scheduled account deletion',
+  security: bearerSecurity,
+  request: {
+    params: accountIdParamSchema,
+    body: jsonBody(updateGracePeriodSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Grace period updated'),
+    ...standardErrors,
+  },
+});
+
+// ── Handlers ── Account Suspension Management ──
+
+async function queueAdminEmail(templateSlug: string, to: string, variables: Record<string, string>, accountId: string): Promise<void> {
+  const data = { templateSlug, to, variables, accountId };
+  if (isQueueAvailable()) {
+    await getEmailQueue().add('send-email', data);
+  } else {
+    emailService.sendTemplateEmail(templateSlug, to, variables, accountId)
+      .catch((err: unknown) => logger.error({ err }, `Failed to send ${templateSlug} email`));
+  }
+}
+
+// POST /accounts/:accountId/suspend
+billingAdmin.openapi(suspendAccountRoute, (async (c: any) => {
+  const { accountId } = c.req.valid('param');
+  const { scheduleDeletionDays } = c.req.valid('json');
+  const user = c.get('user');
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+  if (account.status === 'suspended') return c.json({ error: 'Account is already suspended' }, 400);
+
+  const now = new Date();
+  const updateFields: Record<string, any> = {
+    status: 'suspended',
+    suspendedAt: now,
+    updatedAt: now,
+  };
+  if (scheduleDeletionDays !== undefined && scheduleDeletionDays > 0) {
+    updateFields.scheduledDeletionAt = new Date(now.getTime() + scheduleDeletionDays * 24 * 60 * 60 * 1000);
+  }
+  await db.update(accounts).set(updateFields).where(eq(accounts.id, accountId));
+
+  // Suspend running services
+  const accountServices = await db.query.services.findMany({
+    where: and(eq(services.accountId, accountId), isNull(services.deletedAt), isNotNull(services.dockerServiceId)),
+    columns: { id: true, dockerServiceId: true },
+  });
+  for (const svc of accountServices) {
+    try {
+      if (svc.dockerServiceId) {
+        await dockerService.scaleService(svc.dockerServiceId, 0);
+        await db.update(services).set({ status: 'suspended', updatedAt: now }).where(eq(services.id, svc.id));
+      }
+    } catch (err) {
+      logger.error({ err, serviceId: svc.id }, 'Failed to suspend service during admin suspension');
+    }
+  }
+
+  // Email owners + notification
+  const appUrl = process.env['APP_URL'] ?? '';
+  const ownerMembers = await db.query.userAccounts.findMany({
+    where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+    with: { user: true },
+  });
+  for (const m of ownerMembers) {
+    if (m.user?.email) {
+      await queueAdminEmail('account-suspended', m.user.email, {
+        accountName: account.name ?? 'Your account',
+        deletionDays: scheduleDeletionDays ? String(scheduleDeletionDays) : 'N/A',
+        billingUrl: `${appUrl}/panel/billing`,
+      }, accountId);
+    }
+  }
+
+  try {
+    await notificationService.create(accountId, {
+      type: 'billing',
+      title: 'Account suspended',
+      message: 'Your account has been suspended by an administrator.',
+    });
+  } catch { /* not critical */ }
+
+  eventService.log({
+    userId: user.userId,
+    accountId,
+    eventType: EventTypes.ACCOUNT_SUSPENDED,
+    description: `Account manually suspended by admin`,
+    resourceType: 'account',
+    resourceId: accountId,
+    resourceName: account.name ?? undefined,
+    actorEmail: user.email,
+    source: 'user',
+  });
+
+  return c.json({ message: 'Account suspended', servicesSuspended: accountServices.length });
+}) as any);
+
+// POST /accounts/:accountId/unsuspend
+billingAdmin.openapi(unsuspendAccountRoute, (async (c: any) => {
+  const { accountId } = c.req.valid('param');
+  const user = c.get('user');
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+  if (account.status !== 'suspended') return c.json({ error: 'Account is not suspended' }, 400);
+
+  await db.update(accounts).set({
+    status: 'active',
+    suspendedAt: null,
+    scheduledDeletionAt: null,
+    updatedAt: new Date(),
+  }).where(eq(accounts.id, accountId));
+
+  // Clear pastDueSince on subscriptions
+  await db.update(subscriptions).set({
+    pastDueSince: null,
+    updatedAt: new Date(),
+  }).where(eq(subscriptions.accountId, accountId));
+
+  // Email owners + notification
+  const appUrl = process.env['APP_URL'] ?? '';
+  const ownerMembers = await db.query.userAccounts.findMany({
+    where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+    with: { user: true },
+  });
+  for (const m of ownerMembers) {
+    if (m.user?.email) {
+      await queueAdminEmail('account-reactivated', m.user.email, {
+        accountName: account.name ?? 'Your account',
+        dashboardUrl: `${appUrl}/panel`,
+      }, accountId);
+    }
+  }
+
+  try {
+    await notificationService.create(accountId, {
+      type: 'billing',
+      title: 'Account reactivated',
+      message: 'Your account has been reactivated by an administrator. You can now restart your services.',
+    });
+  } catch { /* not critical */ }
+
+  eventService.log({
+    userId: user.userId,
+    accountId,
+    eventType: EventTypes.ACCOUNT_REACTIVATED,
+    description: `Account manually unsuspended by admin`,
+    resourceType: 'account',
+    resourceId: accountId,
+    resourceName: account.name ?? undefined,
+    actorEmail: user.email,
+    source: 'user',
+  });
+
+  return c.json({ message: 'Account unsuspended — services remain stopped until manually restarted' });
+}) as any);
+
+// PATCH /accounts/:accountId/grace-period
+billingAdmin.openapi(updateGracePeriodRoute, (async (c: any) => {
+  const { accountId } = c.req.valid('param');
+  const { scheduledDeletionAt } = c.req.valid('json');
+  const user = c.get('user');
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+
+  await db.update(accounts).set({
+    scheduledDeletionAt: scheduledDeletionAt ? new Date(scheduledDeletionAt) : null,
+    updatedAt: new Date(),
+  }).where(eq(accounts.id, accountId));
+
+  eventService.log({
+    userId: user.userId,
+    accountId,
+    eventType: EventTypes.ACCOUNT_DELETION_SCHEDULED,
+    description: scheduledDeletionAt
+      ? `Scheduled deletion updated to ${scheduledDeletionAt}`
+      : 'Scheduled deletion cancelled',
+    resourceType: 'account',
+    resourceId: accountId,
+    resourceName: account.name ?? undefined,
+    actorEmail: user.email,
+    source: 'user',
+  });
+
+  return c.json({ message: scheduledDeletionAt ? `Deletion scheduled for ${scheduledDeletionAt}` : 'Scheduled deletion cancelled' });
 }) as any);
 
 export default billingAdmin;

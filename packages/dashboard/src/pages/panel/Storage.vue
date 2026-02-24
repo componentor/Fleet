@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, Plus, Loader2, Info, FolderOpen, RefreshCw } from 'lucide-vue-next'
+import { HardDrive, Plus, Loader2, Info, FolderOpen, RefreshCw, MapPin } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import FileExplorer from '@/components/FileExplorer.vue'
@@ -21,6 +21,8 @@ const error = ref('')
 const browsingVolumeName = ref<string | null>(null)
 const maxStorageGb = ref<number | null>(null)
 const storageCentsPerGbMonth = ref<number>(0)
+const regions = ref<Array<{ key: string; label: string; nodeCount: number }>>([])
+const selectedRegion = ref<string | null>(null)
 let syncInterval: ReturnType<typeof setInterval> | null = null
 
 async function fetchVolumes(silent = false) {
@@ -40,6 +42,14 @@ async function refresh() {
   await fetchVolumes(true)
 }
 
+async function fetchRegions() {
+  try {
+    regions.value = await api.get<any[]>('/services/regions')
+  } catch {
+    regions.value = []
+  }
+}
+
 async function createVolume() {
   if (!newName.value) return
   creating.value = true
@@ -48,9 +58,11 @@ async function createVolume() {
     await api.post('/storage/volumes', {
       name: newName.value,
       sizeGb: newSize.value,
+      region: selectedRegion.value || undefined,
     })
     newName.value = ''
     newSize.value = 1
+    selectedRegion.value = null
     showCreate.value = false
     await fetchVolumes()
   } catch (err: any) {
@@ -96,6 +108,12 @@ async function deleteVolume(volumeId: string) {
   }
 }
 
+function regionLabel(key: string | null | undefined) {
+  if (!key) return '--'
+  const r = regions.value.find((r) => r.key === key)
+  return r ? r.label : key
+}
+
 function formatDate(ts: any) {
   if (!ts) return '--'
   return new Date(ts).toLocaleDateString()
@@ -104,6 +122,7 @@ function formatDate(ts: any) {
 onMounted(() => {
   fetchVolumes()
   fetchLimitsAndPricing()
+  fetchRegions()
   syncInterval = setInterval(() => fetchVolumes(true), 30_000)
 })
 
@@ -186,6 +205,21 @@ onBeforeUnmount(() => {
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             />
           </div>
+          <div v-if="regions.length > 1" class="w-48">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <span class="inline-flex items-center gap-1.5">
+                <MapPin class="w-3.5 h-3.5" />
+                Region
+              </span>
+            </label>
+            <select
+              v-model="selectedRegion"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            >
+              <option :value="null">Auto</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
           <button type="submit" :disabled="creating" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
             {{ creating ? t('storagePage.creating') : t('storagePage.create') }}
           </button>
@@ -208,6 +242,7 @@ onBeforeUnmount(() => {
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.name') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.driver') }}</th>
+              <th v-if="regions.length > 1" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Region</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Services</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.created') }}</th>
               <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.actions') }}</th>
@@ -215,7 +250,7 @@ onBeforeUnmount(() => {
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="volumes.length === 0">
-              <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+              <td :colspan="regions.length > 1 ? 6 : 5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 {{ t('storagePage.noVolumes') }}
               </td>
             </tr>
@@ -226,6 +261,9 @@ onBeforeUnmount(() => {
             >
               <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white font-mono">{{ volume.name }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ volume.driver || 'local' }}</td>
+              <td v-if="regions.length > 1" class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                {{ regionLabel(volume.region) }}
+              </td>
               <td class="px-6 py-4 text-sm">
                 <span
                   v-if="volume.serviceCount > 0"

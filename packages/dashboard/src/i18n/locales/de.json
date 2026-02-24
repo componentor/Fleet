@@ -1242,7 +1242,22 @@
       "stripePaymentMethodsDesc": "Aktivieren Sie Express-Zahlungsmethoden, damit Ihre Kunden schneller mit Apple Pay, Google Pay und Stripe Link bezahlen können.",
       "stripeStep1": "Gehen Sie zu Einstellungen > Zahlungsmethoden in Ihrem Stripe-Dashboard",
       "stripeStep2": "Aktivieren Sie Apple Pay, Google Pay und optional Link (Stripes Schnellkauf)",
-      "stripeStep3": "Für Apple Pay: Verifizieren Sie Ihre Domain unter Einstellungen > Zahlungsmethoden > Apple Pay, indem Sie die Stripe-Domain-Verifizierungsdatei hinzufügen"
+      "stripeStep3": "Für Apple Pay: Verifizieren Sie Ihre Domain unter Einstellungen > Zahlungsmethoden > Apple Pay, indem Sie die Stripe-Domain-Verifizierungsdatei hinzufügen",
+      "dataLifecycle": "Datenlebenszyklus",
+      "dataLifecycleDesc": "Konfigurieren Sie automatische Sperrung, Löschung und permanente Bereinigung von Kontodaten.",
+      "suspensionSettings": "Sperrung",
+      "autoSuspend": "Konten mit überfälligen Zahlungen automatisch sperren",
+      "suspensionGraceDays": "Tage überfällig vor Sperrung",
+      "suspensionWarningDays": "Warntage vor Sperrung",
+      "deletionSettings": "Löschung",
+      "autoDelete": "Löschung gesperrter Konten automatisch planen",
+      "deletionGraceDays": "Tage nach Sperrung vor Löschung",
+      "deletionWarningDays": "Warntage vor Löschung",
+      "volumeDeletion": "Speichervolumen bei Kontolöschung löschen",
+      "permanentPurge": "Permanente Bereinigung",
+      "purgeEnabled": "Weich gelöschte Daten nach Aufbewahrungsfrist permanent entfernen",
+      "purgeRetentionDays": "Tage vor permanenter Entfernung",
+      "saveLifecycle": "Lebenszyklus-Konfiguration speichern"
     },
     "errors": {
       "title": "Fehler",

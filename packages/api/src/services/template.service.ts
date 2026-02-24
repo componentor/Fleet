@@ -249,6 +249,7 @@ export class TemplateService {
       composeOverride?: string;
       imageOverrides?: Record<string, string>;
       resourceOverrides?: Record<string, { replicas?: number; cpuLimit?: number; memoryLimit?: number }>;
+      volumeOverrides?: Record<string, { mode: 'create' | 'existing'; sizeGb?: number; existingVolumeName?: string }>;
     },
   ): Promise<{
     services: Array<{ id: string; name: string; dockerServiceId: string | null }>;
@@ -312,6 +313,7 @@ export class TemplateService {
     // Create overlay network so services can resolve each other via DNS
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
+    const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
 
     const createdServices: Array<{
       id: string;
@@ -334,12 +336,14 @@ export class TemplateService {
       // Resolve domain
       const resolvedDomain = svcDef.domain ? interpolate(svcDef.domain) : null;
 
-      // Resolve volumes — prefix with account to isolate
-      const resolvedVolumes = (svcDef.volumes ?? []).map((v) => ({
-        source: `${swarmNamePrefix}-${v.source}`,
-        target: v.target,
-        readonly: v.readonly ?? false,
-      }));
+      // Resolve volumes — use existing volume name or prefix with account to isolate
+      const resolvedVolumes = (svcDef.volumes ?? []).map((v) => {
+        const override = options?.volumeOverrides?.[v.source];
+        const source = (override?.mode === 'existing' && override.existingVolumeName)
+          ? override.existingVolumeName
+          : `${swarmNamePrefix}-${v.source}`;
+        return { source, target: v.target, readonly: v.readonly ?? false };
+      });
 
       // Apply per-service resource overrides if provided (override > template > null → docker.service defaults)
       const overrides = options?.resourceOverrides?.[svcDef.name];
@@ -403,7 +407,7 @@ export class TemplateService {
             ...traefikLabels,
           },
           constraints: [],
-          networkId,
+          networkIds: resolvedDomain ? [networkId, publicNetId] : [networkId],
           updateParallelism: 1,
           updateDelay: '10s',
           rollbackOnFailure: true,
@@ -447,14 +451,20 @@ export class TemplateService {
       });
     }
 
-    // Track template volumes in the storageVolumes table so they appear in the
-    // Storage page and can be browsed via the volume file explorer.
-    // Only track when a storage provider is actually managing volumes (NFS, GlusterFS, Ceph).
-    // Plain Docker volumes (no NFS) are ephemeral container volumes — no need to track.
+    // Create template volumes through the storage manager so they are
+    // quota-checked, properly provisioned on the backing provider (NFS/GlusterFS),
+    // and tracked in the storageVolumes table.
     const hasStorageProvider = storageManager.volumes.isReady();
     if (hasStorageProvider) {
       for (const volName of parsed.volumes ?? []) {
+        const override = options?.volumeOverrides?.[volName];
+
+        // User chose an existing volume — skip creation
+        if (override?.mode === 'existing') continue;
+
         const dockerVolName = `${swarmNamePrefix}-${volName}`;
+        const sizeGb = override?.sizeGb ?? 5;
+
         try {
           const existing = await db.query.storageVolumes.findFirst({
             where: and(
@@ -464,17 +474,14 @@ export class TemplateService {
             ),
           });
           if (!existing) {
-            await db.insert(storageVolumes).values({
-              accountId,
-              name: dockerVolName,
-              displayName: volName,
-              sizeGb: 0,
-              provider: storageManager.volumes.name,
-              status: 'ready',
-            });
+            await storageManager.createVolume(accountId, dockerVolName, volName, sizeGb);
           }
         } catch (err) {
-          logger.warn({ err, volume: dockerVolName }, 'Failed to create storageVolumes record for template volume');
+          // Surface quota errors to the caller so the user sees a clear message
+          if ((err as Error).message?.includes('quota exceeded')) {
+            throw err;
+          }
+          logger.warn({ err, volume: dockerVolName }, 'Failed to create storage volume for template');
         }
       }
     }

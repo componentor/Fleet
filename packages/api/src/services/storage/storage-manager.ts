@@ -348,12 +348,20 @@ class StorageManager {
         : undefined;
       const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
 
+      const region = cluster?.region ?? null;
       try {
         const live = await provider.getVolumeInfo(v.name);
+        // Use the DB-tracked sizeGb as the authoritative allocation size.
+        // Provider's sizeGb comes from `df` which reports the entire
+        // filesystem (NFS/GlusterFS), not the per-volume allocation.
+        const allocatedGb = v.sizeGb || live.sizeGb;
         results.push({
           ...live,
+          sizeGb: allocatedGb,
+          availableGb: Math.max(0, allocatedGb - live.usedGb),
           replicaCount: v.replicaCount ?? 1,
           status: v.status,
+          region,
         });
       } catch {
         results.push({
@@ -364,6 +372,7 @@ class StorageManager {
           availableGb: v.sizeGb - (v.usedGb ?? 0),
           replicaCount: v.replicaCount ?? 1,
           status: v.status,
+          region,
         });
       }
     }

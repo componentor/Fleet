@@ -1242,7 +1242,22 @@
       "stripePaymentMethodsDesc": "Aktiver hurtigbetalingsmetoder slik at kundene dine kan betale raskere med Apple Pay, Google Pay og Stripe Link.",
       "stripeStep1": "Gå til Innstillinger > Betalingsmetoder i Stripe-dashbordet",
       "stripeStep2": "Aktiver Apple Pay, Google Pay, og eventuelt Link (Stripes hurtigbetaling)",
-      "stripeStep3": "For Apple Pay, verifiser domenet ditt under Innstillinger > Betalingsmetoder > Apple Pay ved å legge til Stripes domenebekreftelsesfil"
+      "stripeStep3": "For Apple Pay, verifiser domenet ditt under Innstillinger > Betalingsmetoder > Apple Pay ved å legge til Stripes domenebekreftelsesfil",
+      "dataLifecycle": "Datalivssyklus",
+      "dataLifecycleDesc": "Konfigurer automatisk suspensjon, sletting og permanent fjerning av kontodata.",
+      "suspensionSettings": "Suspensjon",
+      "autoSuspend": "Suspender kontoer med utestående betalinger automatisk",
+      "suspensionGraceDays": "Dager forfalt før suspensjon",
+      "suspensionWarningDays": "Varseldager før suspensjon",
+      "deletionSettings": "Sletting",
+      "autoDelete": "Planlegg sletting av suspenderte kontoer automatisk",
+      "deletionGraceDays": "Dager etter suspensjon før sletting",
+      "deletionWarningDays": "Varseldager før sletting",
+      "volumeDeletion": "Slett lagringsvolumer når kontoen slettes",
+      "permanentPurge": "Permanent fjerning",
+      "purgeEnabled": "Fjern myk-slettede data permanent etter oppbevaringsperioden",
+      "purgeRetentionDays": "Dager før permanent fjerning",
+      "saveLifecycle": "Lagre livssykluskonfigurasjon"
     },
     "errors": {
       "title": "Feil",

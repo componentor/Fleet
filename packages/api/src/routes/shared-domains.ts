@@ -629,15 +629,21 @@ async function assignDomainToService(serviceId: string, accountId: string, domai
       eq(services.id, serviceId),
     );
 
-    // Update Docker Traefik labels if service is deployed
+    // Update Docker Traefik labels and attach public network if service is deployed
     if (svc.dockerServiceId) {
       const labels = buildTraefikLabels(svc.name, domain, true);
+
+      // Attach to Traefik's public network so it can route traffic to this service
+      const accountNetId = await dockerService.ensureNetwork(`fleet-account-${accountId}`);
+      const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+
       await dockerService.updateService(svc.dockerServiceId, {
         labels: {
           ...labels,
           'fleet.account-id': accountId,
           'fleet.service-id': serviceId,
         },
+        networkIds: [accountNetId, publicNetId],
       });
     }
 
@@ -662,12 +668,17 @@ async function clearServiceDomain(serviceId: string) {
 
     if (svc.dockerServiceId) {
       const labels = buildTraefikLabels(svc.name, null, false);
+
+      // Remove from Traefik public network since domain is being cleared
+      const accountNetId = await dockerService.ensureNetwork(`fleet-account-${svc.accountId}`);
+
       await dockerService.updateService(svc.dockerServiceId, {
         labels: {
           ...labels,
           'fleet.account-id': svc.accountId,
           'fleet.service-id': serviceId,
         },
+        networkIds: [accountNetId],
       });
     }
 

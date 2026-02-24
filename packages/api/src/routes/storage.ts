@@ -119,6 +119,7 @@ const createVolumeSchema = z.object({
     ),
   sizeGb: z.number().int().min(1).max(1000),
   nodeId: z.string().uuid().optional(),
+  region: z.string().max(50).nullable().optional(),
 });
 
 const createVolumeRoute = createRoute({
@@ -143,13 +144,13 @@ storage.openapi(createVolumeRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { name, sizeGb, nodeId } = c.req.valid('json');
+  const { name, sizeGb, nodeId, region } = c.req.valid('json');
 
   // Use full accountId in volume name for collision-free isolation
   const volumeName = `vol-${accountId}-${name}`;
 
   try {
-    const volume = await storageManager.createVolume(accountId, volumeName, name, sizeGb, nodeId);
+    const volume = await storageManager.createVolume(accountId, volumeName, name, sizeGb, nodeId, region ?? null);
     return c.json(volume, 201);
   } catch (err: any) {
     if (err?.message?.includes('quota exceeded')) {

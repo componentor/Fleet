@@ -1246,7 +1246,22 @@
       "stripePaymentMethodsDesc": "Enable express payment methods so your customers can pay faster with Apple Pay, Google Pay, and Stripe Link.",
       "stripeStep1": "Go to Settings > Payment methods in your Stripe Dashboard",
       "stripeStep2": "Enable Apple Pay, Google Pay, and optionally Link (Stripe's fast checkout)",
-      "stripeStep3": "For Apple Pay, verify your domain under Settings > Payment methods > Apple Pay by adding the Stripe domain verification file"
+      "stripeStep3": "For Apple Pay, verify your domain under Settings > Payment methods > Apple Pay by adding the Stripe domain verification file",
+      "dataLifecycle": "Data Lifecycle",
+      "dataLifecycleDesc": "Configure automatic suspension, deletion, and permanent purge of account data.",
+      "suspensionSettings": "Suspension",
+      "autoSuspend": "Automatically suspend accounts with overdue payments",
+      "suspensionGraceDays": "Days past due before suspension",
+      "suspensionWarningDays": "Warning days before suspension",
+      "deletionSettings": "Deletion",
+      "autoDelete": "Automatically schedule deletion of suspended accounts",
+      "deletionGraceDays": "Days after suspension before deletion",
+      "deletionWarningDays": "Warning days before deletion",
+      "volumeDeletion": "Delete storage volumes when account is deleted",
+      "permanentPurge": "Permanent Purge",
+      "purgeEnabled": "Permanently remove soft-deleted data after retention period",
+      "purgeRetentionDays": "Days before permanent removal",
+      "saveLifecycle": "Save Lifecycle Config"
     },
     "errors": {
       "title": "Errors",

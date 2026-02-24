@@ -105,6 +105,15 @@ export const billingConfig = pgTable('billing_config', {
   allowedCycles: jsonb('allowed_cycles').default(['monthly', 'yearly']),
   cycleDiscounts: jsonb('cycle_discounts').default({}),
   trialDays: integer('trial_days').default(0),
+  suspensionGraceDays: integer('suspension_grace_days').default(7),
+  deletionGraceDays: integer('deletion_grace_days').default(14),
+  autoSuspendEnabled: boolean('auto_suspend_enabled').default(true),
+  autoDeleteEnabled: boolean('auto_delete_enabled').default(false),
+  suspensionWarningDays: integer('suspension_warning_days').default(2),
+  deletionWarningDays: integer('deletion_warning_days').default(7),
+  volumeDeletionEnabled: boolean('volume_deletion_enabled').default(true),
+  purgeEnabled: boolean('purge_enabled').default(true),
+  purgeRetentionDays: integer('purge_retention_days').default(30),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

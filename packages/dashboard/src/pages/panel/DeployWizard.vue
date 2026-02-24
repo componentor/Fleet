@@ -18,8 +18,9 @@ const currentStep = ref(1)
 const steps = [
   { number: 1, label: 'Overview', icon: Package },
   { number: 2, label: 'Configure', icon: Shield },
-  { number: 3, label: 'Resources', icon: Cpu },
-  { number: 4, label: 'Deploy', icon: Rocket },
+  { number: 3, label: 'Storage', icon: HardDrive },
+  { number: 4, label: 'Resources', icon: Cpu },
+  { number: 5, label: 'Deploy', icon: Rocket },
 ]
 
 // ── Template data ──
@@ -32,7 +33,12 @@ const config = ref<Record<string, string>>({})
 const showPassword = ref<Record<string, boolean>>({})
 const copied = ref<Record<string, boolean>>({})
 
-// ── Step 3: Resources ──
+// ── Step 3: Storage ──
+const volumeConfigs = ref<Record<string, { mode: 'create' | 'existing'; sizeGb: number; existingVolumeName: string }>>({})
+const existingVolumes = ref<Array<{ name: string; displayName: string; sizeGb: number }>>([])
+const storageQuota = ref<{ usedGb: number; limitGb: number } | null>(null)
+
+// ── Step 4: Resources ──
 const serviceResources = ref<Record<string, { replicas: number; cpuLimit: number; memoryLimit: number }>>({})
 const resourceLimits = ref<any>(null)
 const pricingConfig = ref<any>(null)
@@ -42,7 +48,7 @@ const imageVersions = ref<Record<string, string>>({})
 const availableTags = ref<Record<string, string[]>>({})
 const tagsLoading = ref<Record<string, boolean>>({})
 
-// ── Step 4/5: Deploy & Progress ──
+// ── Step 5: Deploy & Progress ──
 const deploying = ref(false)
 const deployed = ref(false)
 const stackId = ref('')
@@ -70,6 +76,46 @@ const serviceDefinitions = computed(() => {
   return template.value?.serviceDefinitions ?? []
 })
 
+const templateVolumes = computed(() => {
+  if (!template.value) return []
+  const vols: string[] = template.value.volumes ?? []
+  const svcs: any[] = template.value.serviceDefinitions ?? []
+  return vols.map((volName) => {
+    const usedBy = svcs
+      .filter((s) => (s.volumes ?? []).some((v: any) => v.source === volName))
+      .map((s) => ({
+        name: s.name,
+        target: (s.volumes ?? []).find((v: any) => v.source === volName)?.target ?? '',
+      }))
+    return { name: volName, usedBy }
+  })
+})
+
+const hasVolumes = computed(() => templateVolumes.value.length > 0)
+
+const visibleSteps = computed(() => {
+  if (hasVolumes.value) return steps
+  return steps.filter((s) => s.number !== 3)
+})
+
+const totalNewStorageGb = computed(() => {
+  let total = 0
+  for (const cfg of Object.values(volumeConfigs.value)) {
+    if (cfg.mode === 'create') total += cfg.sizeGb
+  }
+  return total
+})
+
+const remainingAfterDeploy = computed(() => {
+  if (!storageQuota.value) return null
+  return storageQuota.value.limitGb - storageQuota.value.usedGb - totalNewStorageGb.value
+})
+
+const isOverQuota = computed(() => {
+  if (remainingAfterDeploy.value === null) return false
+  return remainingAfterDeploy.value < 0
+})
+
 // ── Computed: Validation ──
 const canProceed = computed(() => {
   if (currentStep.value === 1) return !!template.value
@@ -80,6 +126,14 @@ const canProceed = computed(() => {
       if (v.required !== false && !v.generate && !config.value[v.name]?.trim()) {
         return false
       }
+    }
+    return true
+  }
+  if (currentStep.value === 3) {
+    if (isOverQuota.value) return false
+    for (const cfg of Object.values(volumeConfigs.value)) {
+      if (cfg.mode === 'existing' && !cfg.existingVolumeName) return false
+      if (cfg.mode === 'create' && cfg.sizeGb < 1) return false
     }
     return true
   }
@@ -96,7 +150,7 @@ const isSimpleTemplate = computed(() => {
 
 async function quickDeploy() {
   // Skip straight to deploy with default/generated config
-  currentStep.value = 4
+  currentStep.value = 5
   await executeDeploy()
 }
 
@@ -217,6 +271,18 @@ async function fetchTemplate() {
       fetchImageTags(svc.name, svc.image)
     }
     serviceResources.value = resources
+
+    // Initialize volume configs with defaults
+    const volConfigs: Record<string, { mode: 'create' | 'existing'; sizeGb: number; existingVolumeName: string }> = {}
+    for (const volName of (details.volumes ?? [])) {
+      volConfigs[volName] = { mode: 'create', sizeGb: 5, existingVolumeName: '' }
+    }
+    volumeConfigs.value = volConfigs
+
+    // Pre-fetch storage data so it's ready by step 3
+    if ((details.volumes ?? []).length > 0) {
+      fetchStorageData()
+    }
   } catch (err: any) {
     templateError.value = err?.message ?? 'Failed to load template'
   } finally {
@@ -235,16 +301,48 @@ async function fetchLimitsAndPricing() {
   } catch {}
 }
 
+async function fetchStorageData() {
+  try {
+    const [volumes, quota] = await Promise.all([
+      api.get<any[]>('/storage/volumes'),
+      api.get<{ usedGb: number; limitGb: number }>('/storage/volumes/quota'),
+    ])
+    existingVolumes.value = (volumes ?? []).map((v: any) => ({
+      name: v.name,
+      displayName: v.displayName ?? v.name,
+      sizeGb: v.sizeGb ?? 0,
+    }))
+    storageQuota.value = quota
+  } catch {}
+}
+
+async function openBillingPortal() {
+  try {
+    const result = await api.post<{ url: string }>('/billing/portal', {
+      returnUrl: window.location.href,
+    })
+    window.location.href = result.url
+  } catch {}
+}
+
 // ── Navigation ──
 function nextStep() {
-  if (currentStep.value < 4) {
+  if (currentStep.value < 5) {
     currentStep.value++
+    // Auto-skip storage step when template has no volumes
+    if (currentStep.value === 3 && !hasVolumes.value) {
+      currentStep.value++
+    }
   }
 }
 
 function prevStep() {
   if (currentStep.value > 1) {
     currentStep.value--
+    // Auto-skip storage step when template has no volumes
+    if (currentStep.value === 3 && !hasVolumes.value) {
+      currentStep.value--
+    }
   }
 }
 
@@ -281,11 +379,23 @@ async function executeDeploy() {
       }
     }
 
+    // Build volume overrides from user storage choices
+    const volOverrides: Record<string, any> = {}
+    for (const [name, cfg] of Object.entries(volumeConfigs.value)) {
+      volOverrides[name] = { mode: cfg.mode }
+      if (cfg.mode === 'create') {
+        volOverrides[name].sizeGb = cfg.sizeGb
+      } else if (cfg.mode === 'existing' && cfg.existingVolumeName) {
+        volOverrides[name].existingVolumeName = cfg.existingVolumeName
+      }
+    }
+
     const result = await api.post<any>('/marketplace/deploy', {
       slug: props.slug,
       config: deployConfig,
       ...(Object.keys(imageOverrides).length > 0 ? { imageOverrides } : {}),
       ...(Object.keys(resourceOverrides).length > 0 ? { resourceOverrides } : {}),
+      ...(Object.keys(volOverrides).length > 0 ? { volumeOverrides: volOverrides } : {}),
     })
 
     stackId.value = result.stackId
@@ -378,7 +488,7 @@ onUnmounted(() => {
       <!-- Step indicator -->
       <div class="mb-10" v-if="!deployed">
         <div class="flex items-center justify-between">
-          <template v-for="(step, index) in steps" :key="step.number">
+          <template v-for="(step, index) in visibleSteps" :key="step.number">
             <div class="flex items-center gap-2">
               <div
                 :class="[
@@ -412,7 +522,7 @@ onUnmounted(() => {
               </span>
             </div>
             <div
-              v-if="index < steps.length - 1"
+              v-if="index < visibleSteps.length - 1"
               :class="[
                 'flex-1 h-0.5 mx-4 transition-colors duration-300',
                 currentStep > step.number
@@ -626,8 +736,141 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Step 3: Resources -->
+      <!-- Step 3: Storage -->
       <div v-if="currentStep === 3 && !deployed" class="space-y-6">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <HardDrive class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage Configuration</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure volumes for persistent data. Create new volumes or attach existing ones.</p>
+          </div>
+
+          <div class="p-6 space-y-5">
+            <!-- Storage quota bar -->
+            <div v-if="storageQuota" class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-medium text-gray-600 dark:text-gray-400">Storage Usage</span>
+                <span class="text-xs font-mono text-gray-500 dark:text-gray-400">
+                  {{ storageQuota.usedGb.toFixed(1) }} + {{ totalNewStorageGb }} GB new / {{ storageQuota.limitGb }} GB limit
+                </span>
+              </div>
+              <div class="w-full h-2.5 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+                <div class="h-full rounded-full flex">
+                  <div
+                    class="h-full bg-primary-500 transition-all"
+                    :style="{ width: Math.min(100, (storageQuota.usedGb / storageQuota.limitGb) * 100) + '%' }"
+                  ></div>
+                  <div
+                    :class="[
+                      'h-full transition-all',
+                      isOverQuota ? 'bg-red-500' : 'bg-primary-300 dark:bg-primary-700'
+                    ]"
+                    :style="{ width: Math.min(100 - (storageQuota.usedGb / storageQuota.limitGb) * 100, (totalNewStorageGb / storageQuota.limitGb) * 100) + '%' }"
+                  ></div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between mt-1.5">
+                <span class="text-xs text-gray-400">
+                  {{ remainingAfterDeploy !== null ? (remainingAfterDeploy >= 0 ? remainingAfterDeploy.toFixed(1) + ' GB remaining' : 'Over limit by ' + Math.abs(remainingAfterDeploy).toFixed(1) + ' GB') : '' }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Over-quota warning -->
+            <div v-if="isOverQuota" class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <div class="flex items-start gap-3">
+                <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                <div class="flex-1">
+                  <p class="text-sm font-medium text-red-800 dark:text-red-300">Storage quota exceeded</p>
+                  <p class="text-xs text-red-600 dark:text-red-400 mt-1">
+                    Reduce volume sizes, use existing volumes, or upgrade your plan to continue.
+                  </p>
+                </div>
+                <button
+                  @click="openBillingPortal"
+                  class="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium transition-colors"
+                >
+                  <ExternalLink class="w-3 h-3" />
+                  Upgrade Plan
+                </button>
+              </div>
+            </div>
+
+            <!-- Volume cards -->
+            <div v-for="vol in templateVolumes" :key="vol.name" class="p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <p class="text-sm font-semibold text-gray-900 dark:text-white font-mono">{{ vol.name }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Used by: <span v-for="(svc, i) in vol.usedBy" :key="svc.name">{{ i > 0 ? ', ' : '' }}<span class="font-medium">{{ svc.name }}</span> ({{ svc.target }})</span>
+                  </p>
+                </div>
+              </div>
+
+              <!-- Mode toggle -->
+              <div class="flex gap-2 mb-3">
+                <button
+                  @click="volumeConfigs[vol.name]!.mode = 'create'"
+                  :class="[
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    volumeConfigs[vol.name]?.mode === 'create'
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  ]"
+                >
+                  Create New
+                </button>
+                <button
+                  @click="volumeConfigs[vol.name]!.mode = 'existing'"
+                  :disabled="existingVolumes.length === 0"
+                  :class="[
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    volumeConfigs[vol.name]?.mode === 'existing'
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600',
+                    existingVolumes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                  ]"
+                >
+                  Use Existing{{ existingVolumes.length === 0 ? ' (none available)' : '' }}
+                </button>
+              </div>
+
+              <!-- Create New: size input -->
+              <div v-if="volumeConfigs[vol.name]?.mode === 'create'" class="flex items-center gap-3">
+                <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Size (GB)</label>
+                <input
+                  v-model.number="volumeConfigs[vol.name]!.sizeGb"
+                  type="number"
+                  min="1"
+                  :max="storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000"
+                  class="w-24 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <span class="text-xs text-gray-400">
+                  {{ storageQuota ? `(max ${Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb))} GB available)` : '' }}
+                </span>
+              </div>
+
+              <!-- Use Existing: dropdown -->
+              <div v-if="volumeConfigs[vol.name]?.mode === 'existing'">
+                <select
+                  v-model="volumeConfigs[vol.name]!.existingVolumeName"
+                  class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                >
+                  <option value="">Select a volume...</option>
+                  <option v-for="ev in existingVolumes" :key="ev.name" :value="ev.name">
+                    {{ ev.displayName }} ({{ ev.sizeGb }} GB)
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: Resources -->
+      <div v-if="currentStep === 4 && !deployed" class="space-y-6">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
@@ -689,8 +932,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Step 4: Review & Deploy / Progress -->
-      <div v-if="currentStep === 4" class="space-y-6">
+      <!-- Step 5: Review & Deploy / Progress -->
+      <div v-if="currentStep === 5" class="space-y-6">
         <!-- Deploy error -->
         <div v-if="deployError" class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
           <div class="flex items-start gap-2">
@@ -719,6 +962,24 @@ onUnmounted(() => {
                     <span class="text-sm font-medium text-gray-900 dark:text-white">{{ svc.name }}</span>
                     <span class="text-xs font-mono ml-auto" :class="imageVersions[svc.name] && imageVersions[svc.name] !== svc.image ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'">
                       {{ imageVersions[svc.name] || svc.image }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Storage summary -->
+              <div v-if="hasVolumes">
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Storage</h3>
+                <div class="space-y-1.5">
+                  <div v-for="vol in templateVolumes" :key="vol.name" class="flex items-center justify-between py-1.5">
+                    <span class="text-sm text-gray-600 dark:text-gray-400 font-mono">{{ vol.name }}</span>
+                    <span class="text-sm text-gray-900 dark:text-white">
+                      <template v-if="volumeConfigs[vol.name]?.mode === 'create'">
+                        New · {{ volumeConfigs[vol.name]!.sizeGb }} GB
+                      </template>
+                      <template v-else>
+                        Existing · {{ existingVolumes.find(v => v.name === volumeConfigs[vol.name]?.existingVolumeName)?.displayName || volumeConfigs[vol.name]!.existingVolumeName }}
+                      </template>
                     </span>
                   </div>
                 </div>
@@ -867,8 +1128,8 @@ onUnmounted(() => {
         </template>
       </div>
 
-      <!-- Navigation (steps 1-3) -->
-      <div v-if="!deployed && currentStep < 4" class="flex items-center justify-between mt-8">
+      <!-- Navigation (steps 1-4) -->
+      <div v-if="!deployed && currentStep < 5" class="flex items-center justify-between mt-8">
         <button
           @click="prevStep"
           :disabled="currentStep === 1"
@@ -882,13 +1143,13 @@ onUnmounted(() => {
           :disabled="!canProceed"
           class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          {{ currentStep === 3 ? 'Review & Deploy' : 'Continue' }}
+          {{ currentStep === 4 ? 'Review & Deploy' : 'Continue' }}
           <ArrowRight class="w-4 h-4" />
         </button>
       </div>
 
-      <!-- Step 4 back button (before deploy) -->
-      <div v-if="currentStep === 4 && !deployed && !deploying" class="flex items-center justify-between mt-8">
+      <!-- Step 5 back button (before deploy) -->
+      <div v-if="currentStep === 5 && !deployed && !deploying" class="flex items-center justify-between mt-8">
         <button
           @click="prevStep"
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"

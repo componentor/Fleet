@@ -135,6 +135,17 @@ class SchedulerService {
       },
     );
 
+    // Data purge — daily at 2 AM UTC
+    // Permanently removes soft-deleted records past their retention period
+    await getMaintenanceQueue().add(
+      'data-purge',
+      { type: 'data-purge' },
+      {
+        repeat: { pattern: '0 2 * * *' },
+        jobId: 'system:data-purge',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -145,7 +156,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 12 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 13 system jobs (BullMQ)`,
     );
   }
 

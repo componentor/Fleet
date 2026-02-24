@@ -25,6 +25,7 @@ export const accounts = pgTable('accounts', {
   status: varchar('status').default('active'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  suspendedAt: timestamp('suspended_at'),
   scheduledDeletionAt: timestamp('scheduled_deletion_at'),
   deletedAt: timestamp('deleted_at'),
 }, (table) => [

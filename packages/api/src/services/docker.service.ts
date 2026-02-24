@@ -30,6 +30,7 @@ export interface CreateSwarmServiceOptions {
   updateDelay: string;
   rollbackOnFailure: boolean;
   networkId?: string;
+  networkIds?: string[];
   readOnly?: boolean;
   user?: string;
   /** Max container writable layer size in MB (e.g. 10240 = 10 GB). Requires overlay2 + xfs pquota. */
@@ -235,9 +236,11 @@ export class DockerService {
         Placement: {
           Constraints: opts.constraints,
         },
-        Networks: opts.networkId
-          ? [{ Target: opts.networkId }]
-          : undefined,
+        Networks: opts.networkIds?.length
+          ? opts.networkIds.map((id) => ({ Target: id }))
+          : opts.networkId
+            ? [{ Target: opts.networkId }]
+            : undefined,
       },
       Mode: {
         Replicated: {
@@ -398,6 +401,10 @@ export class DockerService {
         ...(opts.updateDelay !== undefined ? { Delay: parseDelay(opts.updateDelay) } : {}),
         ...(opts.rollbackOnFailure !== undefined ? { FailureAction: opts.rollbackOnFailure ? 'rollback' : 'pause' } : {}),
       };
+    }
+
+    if (opts.networkIds?.length) {
+      spec.TaskTemplate.Networks = opts.networkIds.map((id) => ({ Target: id }));
     }
 
     await service.update({ version, ...spec });

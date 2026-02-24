@@ -288,6 +288,47 @@ ${metaBox('Last Status', '{{lastStatus}}')}
 ${btn('{{dashboardUrl}}', 'View Dashboard')}`,
     variables: ['serviceName', 'lastStatus', 'dashboardUrl'],
   },
+  'suspension-warning': {
+    subject: 'Action required: Your account will be suspended soon',
+    bodyHtml: `${infoBox('amber', 'Suspension Warning')}
+<p ${S.p}>Your account <strong>{{accountName}}</strong> will be suspended in <strong>{{daysRemaining}} day(s)</strong> due to an unpaid balance.</p>
+<p ${S.p}>Please update your payment method to avoid service interruption. All services will be stopped when suspended.</p>
+${btn('{{billingUrl}}', 'Update Payment Method')}`,
+    variables: ['accountName', 'daysRemaining', 'billingUrl'],
+  },
+  'account-suspended': {
+    subject: 'Your account has been suspended',
+    bodyHtml: `${infoBox('red', 'Account Suspended')}
+<p ${S.p}>Your account <strong>{{accountName}}</strong> has been suspended due to unpaid balance. All services have been stopped.</p>
+<p ${S.p}>Your data will be retained for <strong>{{deletionDays}} day(s)</strong>. Please update your payment method to reactivate your account.</p>
+${btn('{{billingUrl}}', 'Reactivate Account')}`,
+    variables: ['accountName', 'deletionDays', 'billingUrl'],
+  },
+  'deletion-warning': {
+    subject: 'Action required: Your account will be permanently deleted',
+    bodyHtml: `${infoBox('red', 'Deletion Warning')}
+<p ${S.p}>Your account <strong>{{accountName}}</strong> is scheduled for permanent deletion in <strong>{{daysRemaining}} day(s)</strong>.</p>
+<p ${S.p}>All services, data, and storage volumes will be permanently removed. This action cannot be undone.</p>
+<p ${S.p}>To prevent this, please update your payment method immediately.</p>
+${btn('{{billingUrl}}', 'Update Payment Method')}`,
+    variables: ['accountName', 'daysRemaining', 'billingUrl'],
+  },
+  'account-deleted': {
+    subject: 'Your account has been permanently deleted',
+    bodyHtml: `${infoBox('red', 'Account Deleted')}
+<p ${S.p}>Your account <strong>{{accountName}}</strong> has been permanently deleted due to prolonged non-payment.</p>
+<p ${S.p}>All services, data, and storage volumes have been removed. This action cannot be reversed.</p>
+<p ${S.muted}>If you believe this is an error, please contact support.</p>`,
+    variables: ['accountName'],
+  },
+  'account-reactivated': {
+    subject: 'Your account has been reactivated',
+    bodyHtml: `${infoBox('green', 'Account Reactivated')}
+<p ${S.p}>Great news! Your account <strong>{{accountName}}</strong> has been reactivated after successful payment.</p>
+<p ${S.p}>Your services are ready to be restarted. Please visit your dashboard to start them.</p>
+${btn('{{dashboardUrl}}', 'Go to Dashboard')}`,
+    variables: ['accountName', 'dashboardUrl'],
+  },
 };
 
 // Per-recipient rate limiting: max emails per time window

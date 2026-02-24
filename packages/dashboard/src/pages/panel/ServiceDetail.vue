@@ -2529,7 +2529,7 @@ onUnmounted(() => {
                     <button v-if="vol.source" @click="browsingVolumeName = vol.source" class="p-1 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors" title="Browse files">
                       <FolderOpen class="w-4 h-4" />
                     </button>
-                    <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                    <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer" title="Read-Only — mount this volume without write permission">
                       <input type="checkbox" v-model="vol.readonly" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
                       RO
                     </label>

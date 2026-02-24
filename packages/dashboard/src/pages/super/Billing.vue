@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink } from 'lucide-vue-next'
+import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -22,6 +22,18 @@ const allowUserChoice = ref(false)
 const allowedCycles = ref<string[]>(['monthly', 'yearly'])
 const trialDays = ref(0)
 const cycleDiscounts = ref<Record<string, { type: string; value: number }>>({})
+
+// ─── Data Lifecycle ──────────────────────────────────────────
+const suspensionGraceDays = ref(7)
+const deletionGraceDays = ref(14)
+const autoSuspendEnabled = ref(true)
+const autoDeleteEnabled = ref(false)
+const suspensionWarningDays = ref(2)
+const deletionWarningDays = ref(7)
+const volumeDeletionEnabled = ref(true)
+const purgeEnabled = ref(true)
+const purgeRetentionDays = ref(30)
+const savingLifecycle = ref(false)
 
 // ─── Plans ───────────────────────────────────────────────────
 const plans = ref<any[]>([])
@@ -140,6 +152,15 @@ async function fetchAll() {
     allowedCycles.value = configData.allowedCycles ?? ['monthly', 'yearly']
     cycleDiscounts.value = configData.cycleDiscounts ?? {}
     trialDays.value = configData.trialDays ?? 0
+    suspensionGraceDays.value = configData.suspensionGraceDays ?? 7
+    deletionGraceDays.value = configData.deletionGraceDays ?? 14
+    autoSuspendEnabled.value = configData.autoSuspendEnabled ?? true
+    autoDeleteEnabled.value = configData.autoDeleteEnabled ?? false
+    suspensionWarningDays.value = configData.suspensionWarningDays ?? 2
+    deletionWarningDays.value = configData.deletionWarningDays ?? 7
+    volumeDeletionEnabled.value = configData.volumeDeletionEnabled ?? true
+    purgeEnabled.value = configData.purgeEnabled ?? true
+    purgeRetentionDays.value = configData.purgeRetentionDays ?? 30
 
     plans.value = plansData
     pricing.value = { ...pricing.value, ...pricingData }
@@ -170,6 +191,29 @@ async function saveBillingConfig() {
     error.value = err?.body?.error || 'Failed to save billing config'
   } finally {
     savingConfig.value = false
+  }
+}
+
+async function saveLifecycleConfig() {
+  savingLifecycle.value = true
+  error.value = ''
+  try {
+    await api.patch('/billing/config', {
+      suspensionGraceDays: suspensionGraceDays.value,
+      deletionGraceDays: deletionGraceDays.value,
+      autoSuspendEnabled: autoSuspendEnabled.value,
+      autoDeleteEnabled: autoDeleteEnabled.value,
+      suspensionWarningDays: suspensionWarningDays.value,
+      deletionWarningDays: deletionWarningDays.value,
+      volumeDeletionEnabled: volumeDeletionEnabled.value,
+      purgeEnabled: purgeEnabled.value,
+      purgeRetentionDays: purgeRetentionDays.value,
+    })
+    showSuccess('Lifecycle configuration saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save lifecycle config'
+  } finally {
+    savingLifecycle.value = false
   }
 }
 
@@ -387,6 +431,87 @@ onMounted(() => { fetchAll() })
               <Loader2 v-if="savingConfig" class="w-4 h-4 animate-spin" />
               <Save v-else class="w-4 h-4" />
               {{ savingConfig ? t('common.saving') : t('super.billing.saveBillingConfig') }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Section: Data Lifecycle -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Clock class="w-5 h-5 text-amber-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.dataLifecycle') }}</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.dataLifecycleDesc') }}</p>
+        </div>
+        <form @submit.prevent="saveLifecycleConfig" class="p-6 space-y-6">
+          <!-- Suspension subsection -->
+          <div>
+            <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">{{ t('super.billing.suspensionSettings') }}</h3>
+            <div class="space-y-4">
+              <label class="flex items-center gap-3">
+                <input type="checkbox" v-model="autoSuspendEnabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('super.billing.autoSuspend') }}</span>
+              </label>
+              <div v-if="autoSuspendEnabled" class="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-8">
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.suspensionGraceDays') }}</label>
+                  <input v-model.number="suspensionGraceDays" type="number" min="1" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.suspensionWarningDays') }}</label>
+                  <input v-model.number="suspensionWarningDays" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deletion subsection -->
+          <div>
+            <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">{{ t('super.billing.deletionSettings') }}</h3>
+            <div class="space-y-4">
+              <label class="flex items-center gap-3">
+                <input type="checkbox" v-model="autoDeleteEnabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('super.billing.autoDelete') }}</span>
+              </label>
+              <div v-if="autoDeleteEnabled" class="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-8">
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.deletionGraceDays') }}</label>
+                  <input v-model.number="deletionGraceDays" type="number" min="1" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.deletionWarningDays') }}</label>
+                  <input v-model.number="deletionWarningDays" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+              <label class="flex items-center gap-3 pl-8" v-if="autoDeleteEnabled">
+                <input type="checkbox" v-model="volumeDeletionEnabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('super.billing.volumeDeletion') }}</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Permanent purge subsection -->
+          <div>
+            <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">{{ t('super.billing.permanentPurge') }}</h3>
+            <div class="space-y-4">
+              <label class="flex items-center gap-3">
+                <input type="checkbox" v-model="purgeEnabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('super.billing.purgeEnabled') }}</span>
+              </label>
+              <div v-if="purgeEnabled" class="pl-8">
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.purgeRetentionDays') }}</label>
+                <input v-model.number="purgeRetentionDays" type="number" min="1" class="w-32 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button type="submit" :disabled="savingLifecycle" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingLifecycle" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ savingLifecycle ? t('common.saving') : t('super.billing.saveLifecycle') }}
             </button>
           </div>
         </form>

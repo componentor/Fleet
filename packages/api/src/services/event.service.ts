@@ -47,6 +47,9 @@ export const EventTypes = {
   // Accounts
   ACCOUNT_CREATED: 'account.created',
   ACCOUNT_UPDATED: 'account.updated',
+  ACCOUNT_SUSPENDED: 'account.suspended',
+  ACCOUNT_REACTIVATED: 'account.reactivated',
+  ACCOUNT_DELETED: 'account.deleted',
   ACCOUNT_DELETION_SCHEDULED: 'account.deletion_scheduled',
   ACCOUNT_IMPERSONATED: 'account.impersonated',
 

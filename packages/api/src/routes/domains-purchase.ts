@@ -223,27 +223,32 @@ domainPurchase.openapi(checkoutRoute, (async (c: any) => {
     return c.json({ error: 'Account not found' }, 404);
   }
 
-  let stripeCustomerId = account.stripeCustomerId;
-  if (!stripeCustomerId) {
-    const user = c.get('user');
-    const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
-    stripeCustomerId = customer.id;
-    await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+  try {
+    let stripeCustomerId = account.stripeCustomerId;
+    if (!stripeCustomerId) {
+      const user = c.get('user');
+      const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+      stripeCustomerId = customer.id;
+      await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+    }
+
+    // Create Stripe checkout session
+    const session = await stripeService.createDomainCheckoutSession(
+      stripeCustomerId,
+      domain,
+      priceInCents,
+      pricing.currency,
+      years,
+      accountId,
+      successUrl,
+      cancelUrl,
+    );
+
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    logger.error({ err, domain, accountId, priceInCents }, 'Domain checkout failed');
+    return c.json({ error: err?.message || 'Failed to create checkout session' }, 500);
   }
-
-  // Create Stripe checkout session
-  const session = await stripeService.createDomainCheckoutSession(
-    stripeCustomerId,
-    domain,
-    priceInCents,
-    pricing.currency,
-    years,
-    accountId,
-    successUrl,
-    cancelUrl,
-  );
-
-  return c.json({ url: session.url });
 }) as any);
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,28 @@
 import Stripe from 'stripe';
+import { db, platformSettings, eq } from '@fleet/db';
+import { decrypt } from './crypto.service.js';
 
 let _stripe: Stripe | null = null;
 
-function getStripe(): Stripe {
+async function getStripe(): Promise<Stripe> {
   if (!_stripe) {
-    const key = process.env['STRIPE_SECRET_KEY'];
+    // 1. Prefer env var
+    let key = process.env['STRIPE_SECRET_KEY'];
+
+    // 2. Fall back to DB-stored key (set via admin settings UI)
+    if (!key) {
+      const row = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, 'stripe:secretKey'),
+      });
+      if (row?.value && typeof row.value === 'string' && row.value.length > 0) {
+        try {
+          key = decrypt(row.value);
+        } catch {
+          // Decryption failed — key was stored without encryption or is corrupt
+        }
+      }
+    }
+
     if (!key) {
       throw new Error('STRIPE_SECRET_KEY is not configured. Set it in your environment or admin settings.');
     }
@@ -21,7 +39,7 @@ export class StripeService {
     email: string,
     name: string,
   ): Promise<Stripe.Customer> {
-    return getStripe().customers.create({ email, name });
+    return (await getStripe()).customers.create({ email, name });
   }
 
   /**
@@ -33,7 +51,7 @@ export class StripeService {
     successUrl: string,
     cancelUrl: string,
   ): Promise<Stripe.Checkout.Session> {
-    return getStripe().checkout.sessions.create({
+    return (await getStripe()).checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
@@ -49,7 +67,7 @@ export class StripeService {
     customerId: string,
     returnUrl: string,
   ): Promise<Stripe.BillingPortal.Session> {
-    return getStripe().billingPortal.sessions.create({
+    return (await getStripe()).billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl,
     });
@@ -61,7 +79,7 @@ export class StripeService {
   async getSubscription(
     subscriptionId: string,
   ): Promise<Stripe.Subscription> {
-    return getStripe().subscriptions.retrieve(subscriptionId);
+    return (await getStripe()).subscriptions.retrieve(subscriptionId);
   }
 
   /**
@@ -70,7 +88,7 @@ export class StripeService {
   async cancelSubscription(
     subscriptionId: string,
   ): Promise<Stripe.Subscription> {
-    return getStripe().subscriptions.cancel(subscriptionId);
+    return (await getStripe()).subscriptions.cancel(subscriptionId);
   }
 
   /**
@@ -80,7 +98,7 @@ export class StripeService {
     subscriptionItemId: string,
     quantity: number,
   ): Promise<Stripe.Billing.MeterEvent | Stripe.UsageRecord> {
-    return getStripe().subscriptionItems.createUsageRecord(subscriptionItemId, {
+    return (await getStripe()).subscriptionItems.createUsageRecord(subscriptionItemId, {
       quantity,
       timestamp: Math.floor(Date.now() / 1000),
       action: 'set',
@@ -94,7 +112,7 @@ export class StripeService {
     customerId: string,
     limit = 20,
   ): Promise<Stripe.ApiList<Stripe.Invoice>> {
-    return getStripe().invoices.list({ customer: customerId, limit });
+    return (await getStripe()).invoices.list({ customer: customerId, limit });
   }
 
   /**
@@ -121,7 +139,7 @@ export class StripeService {
       metadata['registrationId'] = registrationId;
     }
 
-    return getStripe().checkout.sessions.create({
+    return (await getStripe()).checkout.sessions.create({
       customer: customerId,
       mode: 'payment',
       payment_intent_data: {
@@ -154,7 +172,7 @@ export class StripeService {
     description?: string,
     metadata?: Record<string, string>,
   ): Promise<Stripe.Product> {
-    return getStripe().products.create({
+    return (await getStripe()).products.create({
       name,
       description,
       metadata,
@@ -168,7 +186,7 @@ export class StripeService {
     productId: string,
     data: { name?: string; description?: string; metadata?: Record<string, string> },
   ): Promise<Stripe.Product> {
-    return getStripe().products.update(productId, data);
+    return (await getStripe()).products.update(productId, data);
   }
 
   /**
@@ -181,7 +199,7 @@ export class StripeService {
     recurring?: { interval: 'day' | 'week' | 'month' | 'year'; interval_count?: number; usage_type?: 'licensed' | 'metered' },
     metadata?: Record<string, string>,
   ): Promise<Stripe.Price> {
-    return getStripe().prices.create({
+    return (await getStripe()).prices.create({
       product: productId,
       unit_amount: unitAmount,
       currency,
@@ -194,7 +212,7 @@ export class StripeService {
    * List prices for a Product.
    */
   async listPrices(productId: string): Promise<Stripe.ApiList<Stripe.Price>> {
-    return getStripe().prices.list({ product: productId, active: true, limit: 100 });
+    return (await getStripe()).prices.list({ product: productId, active: true, limit: 100 });
   }
 
   /**
@@ -204,7 +222,7 @@ export class StripeService {
     subscriptionId: string,
     params: Stripe.SubscriptionUpdateParams,
   ): Promise<Stripe.Subscription> {
-    return getStripe().subscriptions.update(subscriptionId, params);
+    return (await getStripe()).subscriptions.update(subscriptionId, params);
   }
 
   /**
@@ -213,7 +231,7 @@ export class StripeService {
   async cancelSubscriptionAtPeriodEnd(
     subscriptionId: string,
   ): Promise<Stripe.Subscription> {
-    return getStripe().subscriptions.update(subscriptionId, {
+    return (await getStripe()).subscriptions.update(subscriptionId, {
       cancel_at_period_end: true,
     });
   }
@@ -229,7 +247,7 @@ export class StripeService {
     cancelUrl: string,
     mode: 'subscription' | 'payment' = 'subscription',
   ): Promise<Stripe.Checkout.Session> {
-    return getStripe().checkout.sessions.create({
+    return (await getStripe()).checkout.sessions.create({
       customer: customerId,
       mode,
       line_items: lineItems,
@@ -246,7 +264,7 @@ export class StripeService {
   async listPaymentMethods(
     customerId: string,
   ): Promise<Stripe.ApiList<Stripe.PaymentMethod>> {
-    return getStripe().paymentMethods.list({ customer: customerId, type: 'card' });
+    return (await getStripe()).paymentMethods.list({ customer: customerId, type: 'card' });
   }
 
   /**
@@ -255,7 +273,7 @@ export class StripeService {
   async getDefaultPaymentMethod(
     customerId: string,
   ): Promise<string | null> {
-    const customer = await getStripe().customers.retrieve(customerId) as Stripe.Customer;
+    const customer = await (await getStripe()).customers.retrieve(customerId) as Stripe.Customer;
     if (customer.deleted) return null;
     const defaultPm = customer.invoice_settings?.default_payment_method;
     return typeof defaultPm === 'string' ? defaultPm : defaultPm?.id ?? null;
@@ -268,7 +286,7 @@ export class StripeService {
     customerId: string,
     paymentMethodId: string,
   ): Promise<void> {
-    await getStripe().customers.update(customerId, {
+    await (await getStripe()).customers.update(customerId, {
       invoice_settings: { default_payment_method: paymentMethodId },
     });
   }
@@ -279,7 +297,7 @@ export class StripeService {
   async createSetupIntent(
     customerId: string,
   ): Promise<Stripe.SetupIntent> {
-    return getStripe().setupIntents.create({
+    return (await getStripe()).setupIntents.create({
       customer: customerId,
       automatic_payment_methods: { enabled: true },
     });
@@ -291,14 +309,14 @@ export class StripeService {
   async detachPaymentMethod(
     paymentMethodId: string,
   ): Promise<Stripe.PaymentMethod> {
-    return getStripe().paymentMethods.detach(paymentMethodId);
+    return (await getStripe()).paymentMethods.detach(paymentMethodId);
   }
 
   /**
    * Capture a previously authorized payment intent (e.g., after domain registration succeeds).
    */
   async capturePaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
-    return getStripe().paymentIntents.capture(paymentIntentId);
+    return (await getStripe()).paymentIntents.capture(paymentIntentId);
   }
 
   /**
@@ -306,7 +324,7 @@ export class StripeService {
    * Releases the hold on the customer's card — no charge, no refund fees.
    */
   async cancelPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
-    return getStripe().paymentIntents.cancel(paymentIntentId);
+    return (await getStripe()).paymentIntents.cancel(paymentIntentId);
   }
 
   /**
@@ -323,7 +341,7 @@ export class StripeService {
     accountId: string,
     registrationId: string,
   ): Promise<Stripe.Invoice> {
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Create an invoice item (automatically attached to the next invoice)
     await stripe.invoiceItems.create({
@@ -367,7 +385,7 @@ export class StripeService {
     customerId: string,
     registrationId: string,
   ): Promise<Stripe.Invoice | null> {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     // Search for recent invoices with matching metadata
     const invoices = await stripe.invoices.list({
       customer: customerId,
@@ -395,7 +413,7 @@ export class StripeService {
     email: string,
     metadata: Record<string, string>,
   ): Promise<Stripe.Account> {
-    return getStripe().accounts.create({
+    return (await getStripe()).accounts.create({
       type: 'express',
       email,
       metadata,
@@ -413,7 +431,7 @@ export class StripeService {
     refreshUrl: string,
     returnUrl: string,
   ): Promise<Stripe.AccountLink> {
-    return getStripe().accountLinks.create({
+    return (await getStripe()).accountLinks.create({
       account: connectAccountId,
       refresh_url: refreshUrl,
       return_url: returnUrl,
@@ -427,7 +445,7 @@ export class StripeService {
   async getConnectAccount(
     connectAccountId: string,
   ): Promise<Stripe.Account> {
-    return getStripe().accounts.retrieve(connectAccountId);
+    return (await getStripe()).accounts.retrieve(connectAccountId);
   }
 
   /**
@@ -443,7 +461,7 @@ export class StripeService {
     connectAccountId: string;
     applicationFeeAmount: number;
   }): Promise<Stripe.Checkout.Session> {
-    return getStripe().checkout.sessions.create({
+    return (await getStripe()).checkout.sessions.create({
       customer: params.customerId,
       mode: 'payment',
       line_items: params.lineItems,
@@ -462,15 +480,27 @@ export class StripeService {
   /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */
-  constructWebhookEvent(
+  async constructWebhookEvent(
     payload: string | Buffer,
     signature: string,
-  ): Stripe.Event {
-    const webhookSecret = process.env['STRIPE_WEBHOOK_SECRET'];
+  ): Promise<Stripe.Event> {
+    let webhookSecret = process.env['STRIPE_WEBHOOK_SECRET'];
+
     if (!webhookSecret) {
-      throw new Error('STRIPE_WEBHOOK_SECRET environment variable is not set');
+      const row = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, 'stripe:webhookSecret'),
+      });
+      if (row?.value && typeof row.value === 'string' && row.value.length > 0) {
+        try {
+          webhookSecret = decrypt(row.value);
+        } catch { /* decryption failed */ }
+      }
     }
-    return getStripe().webhooks.constructEvent(payload, signature, webhookSecret);
+
+    if (!webhookSecret) {
+      throw new Error('STRIPE_WEBHOOK_SECRET is not configured. Set it in your environment or admin settings.');
+    }
+    return (await getStripe()).webhooks.constructEvent(payload, signature, webhookSecret);
   }
 }
 

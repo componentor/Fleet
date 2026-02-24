@@ -17,6 +17,7 @@ export interface VolumeInfo {
   replicaCount?: number;
   status?: string;
   nodeId?: string;
+  region?: string | null;
 }
 
 export interface VolumeResult {

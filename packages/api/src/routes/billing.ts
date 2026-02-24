@@ -109,6 +109,15 @@ const billingConfigSchema = z.object({
     }),
   ).optional(),
   trialDays: z.number().int().min(0).optional(),
+  suspensionGraceDays: z.number().int().min(1).optional(),
+  deletionGraceDays: z.number().int().min(1).optional(),
+  autoSuspendEnabled: z.boolean().optional(),
+  autoDeleteEnabled: z.boolean().optional(),
+  suspensionWarningDays: z.number().int().min(0).optional(),
+  deletionWarningDays: z.number().int().min(0).optional(),
+  volumeDeletionEnabled: z.boolean().optional(),
+  purgeEnabled: z.boolean().optional(),
+  purgeRetentionDays: z.number().int().min(1).optional(),
 }).openapi('BillingConfigRequest');
 
 const slugParamSchema = z.object({
@@ -1058,7 +1067,7 @@ billing.post('/webhook', async (c) => {
 
   let event;
   try {
-    event = stripeService.constructWebhookEvent(rawBody, signature);
+    event = await stripeService.constructWebhookEvent(rawBody, signature);
   } catch (err) {
     logger.error({ err }, 'Webhook signature verification failed');
     return c.json({ error: 'Invalid signature' }, 400);
@@ -1455,9 +1464,67 @@ billing.post('/webhook', async (c) => {
             currentPeriodStart: invoice.period_start ? new Date(invoice.period_start * 1000) : undefined,
             currentPeriodEnd: invoice.period_end ? new Date(invoice.period_end * 1000) : undefined,
             status: 'active',
+            pastDueSince: null,
             updatedAt: new Date(),
           })
           .where(eq(subscriptions.stripeSubscriptionId, invoice.subscription));
+
+        // Auto-reactivate suspended account on successful payment
+        const sub = await db.query.subscriptions.findFirst({
+          where: eq(subscriptions.stripeSubscriptionId, invoice.subscription),
+        });
+        if (sub) {
+          const account = await db.query.accounts.findFirst({
+            where: and(eq(accounts.id, sub.accountId), isNull(accounts.deletedAt)),
+          });
+          if (account && account.status === 'suspended') {
+            await db.update(accounts).set({
+              status: 'active',
+              suspendedAt: null,
+              scheduledDeletionAt: null,
+              updatedAt: new Date(),
+            }).where(eq(accounts.id, account.id));
+
+            // Send reactivation email + notification
+            const appUrl = process.env['APP_URL'] ?? '';
+            const ownerMembers = await db.query.userAccounts.findMany({
+              where: and(eq(userAccounts.accountId, account.id), eq(userAccounts.role, 'owner')),
+              with: { user: true },
+            });
+            for (const m of ownerMembers) {
+              if (m.user?.email) {
+                await queueEmail({
+                  templateSlug: 'account-reactivated',
+                  to: m.user.email,
+                  variables: { accountName: account.name ?? 'Your account', dashboardUrl: `${appUrl}/panel` },
+                  accountId: account.id,
+                });
+              }
+            }
+
+            try {
+              const { notificationService } = await import('../services/notification.service.js');
+              await notificationService.create(account.id, {
+                type: 'billing',
+                title: 'Account reactivated',
+                message: 'Your payment was received and your account has been reactivated. You can now restart your services.',
+              });
+            } catch { /* notification failure is not critical */ }
+
+            const { eventService, EventTypes } = await import('../services/event.service.js');
+            eventService.log({
+              accountId: account.id,
+              eventType: EventTypes.ACCOUNT_REACTIVATED,
+              description: 'Account reactivated after successful payment',
+              resourceType: 'account',
+              resourceId: account.id,
+              resourceName: account.name ?? undefined,
+              source: 'system',
+            });
+
+            logger.info({ accountId: account.id }, 'Account auto-reactivated after successful payment');
+          }
+        }
       }
       break;
     }

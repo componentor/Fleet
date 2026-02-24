@@ -63,6 +63,11 @@ const deploySchema = z.object({
     cpuLimit: z.number().int().min(0).optional(),
     memoryLimit: z.number().int().min(0).optional(),
   })).optional(),
+  volumeOverrides: z.record(z.string(), z.object({
+    mode: z.enum(['create', 'existing']),
+    sizeGb: z.number().int().min(1).max(1000).optional(),
+    existingVolumeName: z.string().min(1).optional(),
+  })).optional(),
 }).openapi('MarketplaceDeploy');
 
 const createTemplateSchema = z.object({
@@ -273,13 +278,14 @@ marketplace.openapi(deployRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { slug, config, composeOverride, imageOverrides, resourceOverrides } = c.req.valid('json');
+  const { slug, config, composeOverride, imageOverrides, resourceOverrides, volumeOverrides } = c.req.valid('json');
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
       composeOverride,
       imageOverrides,
       resourceOverrides,
+      volumeOverrides,
     });
     return c.json(result, 201);
   } catch (err) {
@@ -290,6 +296,9 @@ marketplace.openapi(deployRoute, (async (c: any) => {
     }
     if (message.includes('Missing required variable')) {
       return c.json({ error: 'Missing required template variables' }, 400);
+    }
+    if (message.includes('quota exceeded')) {
+      return c.json({ error: message }, 403);
     }
 
     logger.error({ err }, 'Template deployment failed');

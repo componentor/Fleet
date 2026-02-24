@@ -32,6 +32,7 @@ sqlite.exec(`
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
     scheduled_deletion_at INTEGER,
+    suspended_at INTEGER,
     deleted_at INTEGER
   );
 
@@ -259,6 +260,15 @@ sqlite.exec(`
     allowed_cycles TEXT DEFAULT '["monthly","yearly"]',
     cycle_discounts TEXT DEFAULT '{}',
     trial_days INTEGER DEFAULT 0,
+    suspension_grace_days INTEGER DEFAULT 7,
+    deletion_grace_days INTEGER DEFAULT 14,
+    auto_suspend_enabled INTEGER DEFAULT 1,
+    auto_delete_enabled INTEGER DEFAULT 0,
+    suspension_warning_days INTEGER DEFAULT 2,
+    deletion_warning_days INTEGER DEFAULT 7,
+    volume_deletion_enabled INTEGER DEFAULT 1,
+    purge_enabled INTEGER DEFAULT 1,
+    purge_retention_days INTEGER DEFAULT 30,
     updated_at INTEGER DEFAULT (unixepoch())
   );
 

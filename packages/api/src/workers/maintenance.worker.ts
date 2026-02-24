@@ -1,9 +1,11 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backupSchedules, accounts, services, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, eq, and, lt, like, isNull, isNotNull, inArray, safeTransaction, updateReturning } from '@fleet/db';
+import { db, nodes, deployments, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, eq, and, lt, like, isNull, isNotNull, inArray, safeTransaction, updateReturning } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
 import { dockerService } from '../services/docker.service.js';
+import { eventService, EventTypes } from '../services/event.service.js';
+import { getValkey } from '../services/valkey.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 
 interface HealthCheckData {
@@ -64,6 +66,10 @@ interface DomainPriceSyncData {
   type: 'domain-price-sync';
 }
 
+interface DataPurgeData {
+  type: 'data-purge';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -78,7 +84,8 @@ type MaintenanceJobData =
   | StorageHealthCheckData
   | StorageMigrationData
   | DomainExpiryCheckData
-  | DomainPriceSyncData;
+  | DomainPriceSyncData
+  | DataPurgeData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -294,10 +301,21 @@ async function executeScheduledDeletions(): Promise<void> {
 
   if (pendingAccounts.length === 0) return;
 
+  // Load config for volume deletion setting
+  const config = await db.query.billingConfig.findFirst();
+  const volumeDeletionEnabled = config?.volumeDeletionEnabled ?? true;
+
   logger.info(`Processing ${pendingAccounts.length} scheduled account deletion(s)`);
 
   for (const account of pendingAccounts) {
     try {
+      // Collect owner emails before deletion (we need them for the post-deletion email)
+      const ownerMembers = await db.query.userAccounts.findMany({
+        where: and(eq(userAccounts.accountId, account.id), eq(userAccounts.role, 'owner')),
+        with: { user: true },
+      });
+      const ownerEmails = ownerMembers.filter((m) => m.user?.email).map((m) => m.user!.email!);
+
       // Find all services for this account and remove from Docker Swarm
       const accountServices = await db.query.services.findMany({
         where: and(eq(services.accountId, account.id), isNull(services.deletedAt)),
@@ -311,12 +329,28 @@ async function executeScheduledDeletions(): Promise<void> {
             logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during account deletion');
           }
         }
-        // Soft-delete the service
         await db.update(services).set({
           deletedAt: new Date(),
           status: 'deleted',
           updatedAt: new Date(),
         }).where(eq(services.id, svc.id));
+      }
+
+      // Soft-delete storage volumes if enabled
+      if (volumeDeletionEnabled) {
+        const accountVolumes = await db.query.storageVolumes.findMany({
+          where: and(eq(storageVolumes.accountId, account.id), isNull(storageVolumes.deletedAt)),
+        });
+        for (const vol of accountVolumes) {
+          await db.update(storageVolumes).set({
+            status: 'deleting',
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(storageVolumes.id, vol.id));
+        }
+        if (accountVolumes.length > 0) {
+          logger.info({ accountId: account.id, volumeCount: accountVolumes.length }, 'Marked storage volumes for deletion');
+        }
       }
 
       // Also handle descendants
@@ -342,6 +376,20 @@ async function executeScheduledDeletions(): Promise<void> {
             updatedAt: new Date(),
           }).where(eq(services.id, svc.id));
         }
+
+        // Soft-delete descendant volumes
+        if (volumeDeletionEnabled) {
+          const descVolumes = await db.query.storageVolumes.findMany({
+            where: and(eq(storageVolumes.accountId, desc.id), isNull(storageVolumes.deletedAt)),
+          });
+          for (const vol of descVolumes) {
+            await db.update(storageVolumes).set({
+              status: 'deleting',
+              deletedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(storageVolumes.id, vol.id));
+          }
+        }
       }
 
       // Soft-delete the accounts and remove user-account links
@@ -358,6 +406,29 @@ async function executeScheduledDeletions(): Promise<void> {
         }
       });
 
+      // Post-deletion email + event
+      const { emailService } = await import('../services/email.service.js');
+      const { getEmailQueue, isQueueAvailable } = await import('../services/queue.service.js');
+      for (const email of ownerEmails) {
+        const data = { templateSlug: 'account-deleted', to: email, variables: { accountName: account.name ?? 'Your account' }, accountId: account.id };
+        if (isQueueAvailable()) {
+          await getEmailQueue().add('send-email', data);
+        } else {
+          emailService.sendTemplateEmail('account-deleted', email, { accountName: account.name ?? 'Your account' }, account.id)
+            .catch((err: unknown) => logger.error({ err }, 'Failed to send account-deleted email'));
+        }
+      }
+
+      eventService.log({
+        accountId: account.id,
+        eventType: EventTypes.ACCOUNT_DELETED,
+        description: `Account permanently deleted after scheduled deletion`,
+        resourceType: 'account',
+        resourceId: account.id,
+        resourceName: account.name ?? undefined,
+        source: 'system',
+      });
+
       logger.info(`Account ${account.id} (${account.name}) permanently deleted after grace period`);
     } catch (err) {
       logger.error({ err, accountId: account.id }, 'Failed to execute scheduled account deletion');
@@ -371,52 +442,205 @@ async function executeScheduledDeletions(): Promise<void> {
   }
 }
 
-async function enforceBillingGracePeriod(): Promise<void> {
-  const GRACE_DAYS = 7;
-  const graceCutoff = new Date(Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000);
+/**
+ * Check if a billing warning email should be sent (Valkey-based dedup).
+ * Returns true if the warning should be sent (not yet sent or dedup expired).
+ */
+async function shouldSendBillingWarning(accountId: string, templateSlug: string): Promise<boolean> {
+  try {
+    const valkey = await getValkey();
+    if (!valkey) return true; // No Valkey = no dedup, always send
+    const key = `fleet:billing:warned:${accountId}:${templateSlug}`;
+    const result = await valkey.set(key, '1', 'EX', 48 * 60 * 60, 'NX');
+    return result === 'OK'; // NX returns OK if key didn't exist
+  } catch {
+    return true; // On error, send the email anyway
+  }
+}
 
-  // Find subscriptions that have been past_due for longer than the grace period
+/**
+ * Send a billing-related email + in-app notification to all account owners.
+ */
+async function notifyAccountOwners(
+  accountId: string,
+  templateSlug: string,
+  variables: Record<string, string>,
+  notificationOpts?: { title: string; message: string },
+): Promise<void> {
+  const { emailService } = await import('../services/email.service.js');
+  const { getEmailQueue, isQueueAvailable } = await import('../services/queue.service.js');
+
+  const members = await db.query.userAccounts.findMany({
+    where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+    with: { user: true },
+  });
+
+  for (const m of members) {
+    const email = m.user?.email;
+    if (!email) continue;
+    const data = { templateSlug, to: email, variables, accountId };
+    if (isQueueAvailable()) {
+      await getEmailQueue().add('send-email', data);
+    } else {
+      emailService.sendTemplateEmail(templateSlug, email, variables, accountId)
+        .catch((err: unknown) => logger.error({ err }, `Failed to send ${templateSlug} email`));
+    }
+  }
+
+  if (notificationOpts) {
+    try {
+      await notificationService.create(accountId, {
+        type: 'billing',
+        title: notificationOpts.title,
+        message: notificationOpts.message,
+      });
+    } catch { /* notification failure is not critical */ }
+  }
+}
+
+/**
+ * Configurable 3-phase billing grace period enforcement.
+ *
+ * Phase 1: Suspension warning — send email N days before suspension
+ * Phase 2: Suspend account — scale services to 0, optionally schedule deletion
+ * Phase 3: Deletion warning — send email N days before scheduled deletion
+ */
+async function enforceBillingGracePeriod(): Promise<void> {
+  // Load config from DB (single row)
+  const config = await db.query.billingConfig.findFirst();
+  const suspensionGraceDays = config?.suspensionGraceDays ?? 7;
+  const deletionGraceDays = config?.deletionGraceDays ?? 14;
+  const autoSuspendEnabled = config?.autoSuspendEnabled ?? true;
+  const autoDeleteEnabled = config?.autoDeleteEnabled ?? false;
+  const suspensionWarningDays = config?.suspensionWarningDays ?? 2;
+  const deletionWarningDays = config?.deletionWarningDays ?? 7;
+  const appUrl = process.env['APP_URL'] ?? '';
+
+  const now = Date.now();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // ── Phase 1 & 2: Handle past_due subscriptions ──
+
   const overdueSubscriptions = await db.query.subscriptions.findMany({
-    where: and(
-      eq(subscriptions.status, 'past_due'),
-    ),
+    where: eq(subscriptions.status, 'past_due'),
   });
 
   for (const sub of overdueSubscriptions) {
-    // Use pastDueSince if available, otherwise fall back to updatedAt
     const pastDueDate = sub.pastDueSince
       ? new Date(sub.pastDueSince)
       : sub.updatedAt ? new Date(sub.updatedAt) : null;
-    if (!pastDueDate || pastDueDate > graceCutoff) continue;
+    if (!pastDueDate) continue;
 
-    // Suspend the account and stop all running services
-    try {
-      await db.update(accounts).set({
-        status: 'suspended',
-        updatedAt: new Date(),
-      }).where(eq(accounts.id, sub.accountId));
+    const daysPastDue = Math.floor((now - pastDueDate.getTime()) / DAY_MS);
 
-      // Stop all running Docker services for this account
-      const accountServices = await db.query.services.findMany({
-        where: and(eq(services.accountId, sub.accountId), isNull(services.deletedAt), isNotNull(services.dockerServiceId)),
-        columns: { id: true, name: true, dockerServiceId: true },
-      });
-      for (const svc of accountServices) {
-        try {
-          if (svc.dockerServiceId) {
-            await dockerService.scaleService(svc.dockerServiceId, 0);
-            await db.update(services).set({ status: 'suspended', updatedAt: new Date() }).where(eq(services.id, svc.id));
-          }
-        } catch (svcErr) {
-          logger.error({ err: svcErr, serviceId: svc.id }, 'Failed to suspend service for billing');
-        }
+    // Look up the account
+    const account = await db.query.accounts.findFirst({
+      where: and(eq(accounts.id, sub.accountId), isNull(accounts.deletedAt)),
+    });
+    if (!account || account.status === 'deleted') continue;
+
+    // Phase 1: Suspension warning
+    const warningThreshold = suspensionGraceDays - suspensionWarningDays;
+    if (daysPastDue >= warningThreshold && daysPastDue < suspensionGraceDays && account.status === 'active') {
+      if (await shouldSendBillingWarning(sub.accountId, 'suspension-warning')) {
+        const daysRemaining = suspensionGraceDays - daysPastDue;
+        await notifyAccountOwners(sub.accountId, 'suspension-warning', {
+          accountName: account.name ?? 'Your account',
+          daysRemaining: String(daysRemaining),
+          billingUrl: `${appUrl}/panel/billing`,
+        }, {
+          title: 'Payment overdue — suspension imminent',
+          message: `Your account will be suspended in ${daysRemaining} day(s) if payment is not received.`,
+        });
+        logger.info({ accountId: sub.accountId, daysPastDue, daysRemaining }, 'Sent suspension warning email');
       }
+    }
 
-      logger.info({ accountId: sub.accountId, subscriptionId: sub.id, servicesSuspended: accountServices.length },
-        'Account suspended due to billing grace period expiry');
-    } catch (err) {
-      logger.error({ err, accountId: sub.accountId },
-        'Failed to suspend account for billing grace period');
+    // Phase 2: Suspend account
+    if (daysPastDue >= suspensionGraceDays && autoSuspendEnabled && account.status === 'active') {
+      try {
+        const updateFields: Record<string, any> = {
+          status: 'suspended',
+          suspendedAt: new Date(),
+          updatedAt: new Date(),
+        };
+        if (autoDeleteEnabled) {
+          updateFields.scheduledDeletionAt = new Date(now + deletionGraceDays * DAY_MS);
+        }
+        await db.update(accounts).set(updateFields).where(eq(accounts.id, sub.accountId));
+
+        // Scale all services to 0
+        const accountServices = await db.query.services.findMany({
+          where: and(eq(services.accountId, sub.accountId), isNull(services.deletedAt), isNotNull(services.dockerServiceId)),
+          columns: { id: true, name: true, dockerServiceId: true },
+        });
+        for (const svc of accountServices) {
+          try {
+            if (svc.dockerServiceId) {
+              await dockerService.scaleService(svc.dockerServiceId, 0);
+              await db.update(services).set({ status: 'suspended', updatedAt: new Date() }).where(eq(services.id, svc.id));
+            }
+          } catch (svcErr) {
+            logger.error({ err: svcErr, serviceId: svc.id }, 'Failed to suspend service for billing');
+          }
+        }
+
+        // Email + notification
+        await notifyAccountOwners(sub.accountId, 'account-suspended', {
+          accountName: account.name ?? 'Your account',
+          deletionDays: autoDeleteEnabled ? String(deletionGraceDays) : 'N/A',
+          billingUrl: `${appUrl}/panel/billing`,
+        }, {
+          title: 'Account suspended',
+          message: 'Your account has been suspended due to non-payment. Update your billing to restore service.',
+        });
+
+        eventService.log({
+          accountId: sub.accountId,
+          eventType: EventTypes.ACCOUNT_SUSPENDED,
+          description: `Account suspended after ${daysPastDue} days past due`,
+          resourceType: 'account',
+          resourceId: sub.accountId,
+          resourceName: account.name ?? undefined,
+          source: 'system',
+        });
+
+        logger.info({ accountId: sub.accountId, subscriptionId: sub.id, servicesSuspended: accountServices.length, scheduledDeletion: autoDeleteEnabled },
+          'Account suspended due to billing grace period expiry');
+      } catch (err) {
+        logger.error({ err, accountId: sub.accountId }, 'Failed to suspend account for billing grace period');
+      }
+    }
+  }
+
+  // ── Phase 3: Deletion warnings for already-suspended accounts ──
+
+  if (!autoDeleteEnabled) return;
+
+  const suspendedAccounts = await db.query.accounts.findMany({
+    where: and(
+      eq(accounts.status, 'suspended'),
+      isNotNull(accounts.scheduledDeletionAt),
+      isNull(accounts.deletedAt),
+    ),
+  });
+
+  for (const account of suspendedAccounts) {
+    if (!account.scheduledDeletionAt) continue;
+    const daysUntilDeletion = Math.ceil((new Date(account.scheduledDeletionAt).getTime() - now) / DAY_MS);
+
+    if (daysUntilDeletion <= deletionWarningDays && daysUntilDeletion > 0) {
+      if (await shouldSendBillingWarning(account.id, 'deletion-warning')) {
+        await notifyAccountOwners(account.id, 'deletion-warning', {
+          accountName: account.name ?? 'Your account',
+          daysRemaining: String(daysUntilDeletion),
+          billingUrl: `${appUrl}/panel/billing`,
+        }, {
+          title: 'Account scheduled for deletion',
+          message: `Your account will be permanently deleted in ${daysUntilDeletion} day(s). Update your billing to prevent data loss.`,
+        });
+        logger.info({ accountId: account.id, daysUntilDeletion }, 'Sent deletion warning email');
+      }
     }
   }
 }
@@ -1035,6 +1259,80 @@ async function pruneDeadContainers(): Promise<void> {
   }
 }
 
+async function executeDataPurge(): Promise<void> {
+  try {
+    // Load purge config
+    const [config] = await db.select().from(billingConfig).limit(1);
+    if (!config?.purgeEnabled) {
+      logger.info('Data purge skipped — purge is disabled');
+      return;
+    }
+
+    const retentionDays = config.purgeRetentionDays ?? 30;
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+    let volumesPurged = 0;
+    let servicesPurged = 0;
+    let accountsPurged = 0;
+    let usersPurged = 0;
+
+    // 1. Hard-purge storage volumes (must happen BEFORE accounts cascade-delete removes DB rows)
+    //    We need to clean up files on disk first, then delete the DB rows.
+    const expiredVolumes = await db.select()
+      .from(storageVolumes)
+      .where(and(isNotNull(storageVolumes.deletedAt), lt(storageVolumes.deletedAt, cutoff)));
+
+    if (expiredVolumes.length > 0) {
+      const { storageManager } = await import('../services/storage/storage-manager.js');
+      for (const vol of expiredVolumes) {
+        try {
+          // Access the cluster-specific volume provider, fall back to default
+          const cluster = vol.clusterId ? storageManager.getCluster(vol.clusterId) : null;
+          const provider = cluster?.volumeProvider ?? storageManager.volumes;
+          if (provider) {
+            await provider.deleteVolume(vol.name);
+          }
+        } catch (err) {
+          // Log but continue — don't let one volume failure block the rest
+          logger.warn({ err, volumeId: vol.id, name: vol.name }, 'Failed to delete volume files during purge');
+        }
+        await db.delete(storageVolumes).where(eq(storageVolumes.id, vol.id));
+        volumesPurged++;
+      }
+    }
+
+    // 2. Hard-purge services where deletedAt < cutoff
+    const deletedServices = await db.delete(services)
+      .where(and(isNotNull(services.deletedAt), lt(services.deletedAt, cutoff)))
+      .returning({ id: services.id });
+    servicesPurged = deletedServices.length;
+
+    // 3. Hard-purge accounts where deletedAt < cutoff
+    //    FK cascades handle subscriptions, user_accounts, backups, dns_zones, notifications, api_keys, etc.
+    const deletedAccounts = await db.delete(accounts)
+      .where(and(isNotNull(accounts.deletedAt), lt(accounts.deletedAt, cutoff)))
+      .returning({ id: accounts.id });
+    accountsPurged = deletedAccounts.length;
+
+    // 4. Hard-purge users where deletedAt < cutoff
+    //    FK cascades handle user_accounts, oauth_providers, ssh_keys
+    const deletedUsers = await db.delete(users)
+      .where(and(isNotNull(users.deletedAt), lt(users.deletedAt, cutoff)))
+      .returning({ id: users.id });
+    usersPurged = deletedUsers.length;
+
+    const total = volumesPurged + servicesPurged + accountsPurged + usersPurged;
+    if (total > 0) {
+      logger.info(
+        { volumesPurged, servicesPurged, accountsPurged, usersPurged, retentionDays },
+        `Data purge completed: ${total} record(s) permanently removed`,
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, 'Data purge failed');
+  }
+}
+
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
   switch (job.name) {
     case 'health-check':
@@ -1078,6 +1376,9 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'domain-price-sync':
       await syncDomainPrices();
+      break;
+    case 'data-purge':
+      await executeDataPurge();
       break;
   }
 }

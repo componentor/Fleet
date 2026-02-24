@@ -120,6 +120,20 @@
       "when": 1772900000000,
       "tag": "0016_add_renewal_markup_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1773000000000,
+      "tag": "0017_add_billing_grace_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1773100000000,
+      "tag": "0018_add_purge_config",
+      "breakpoints": true
     }
   ]
 }

@@ -100,6 +100,15 @@ export const billingConfig = sqliteTable('billing_config', {
   allowedCycles: text('allowed_cycles', { mode: 'json' }).$default(() => (['monthly', 'yearly'])),
   cycleDiscounts: text('cycle_discounts', { mode: 'json' }).$default(() => ({})),
   trialDays: integer('trial_days').default(0),
+  suspensionGraceDays: integer('suspension_grace_days').default(7),
+  deletionGraceDays: integer('deletion_grace_days').default(14),
+  autoSuspendEnabled: integer('auto_suspend_enabled', { mode: 'boolean' }).default(true),
+  autoDeleteEnabled: integer('auto_delete_enabled', { mode: 'boolean' }).default(false),
+  suspensionWarningDays: integer('suspension_warning_days').default(2),
+  deletionWarningDays: integer('deletion_warning_days').default(7),
+  volumeDeletionEnabled: integer('volume_deletion_enabled', { mode: 'boolean' }).default(true),
+  purgeEnabled: integer('purge_enabled', { mode: 'boolean' }).default(true),
+  purgeRetentionDays: integer('purge_retention_days').default(30),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 

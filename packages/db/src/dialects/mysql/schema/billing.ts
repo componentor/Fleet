@@ -105,6 +105,15 @@ export const billingConfig = mysqlTable('billing_config', {
   allowedCycles: json('allowed_cycles').$default(() => (['monthly', 'yearly'])),
   cycleDiscounts: json('cycle_discounts').$default(() => ({})),
   trialDays: int('trial_days').default(0),
+  suspensionGraceDays: int('suspension_grace_days').default(7),
+  deletionGraceDays: int('deletion_grace_days').default(14),
+  autoSuspendEnabled: boolean('auto_suspend_enabled').default(true),
+  autoDeleteEnabled: boolean('auto_delete_enabled').default(false),
+  suspensionWarningDays: int('suspension_warning_days').default(2),
+  deletionWarningDays: int('deletion_warning_days').default(7),
+  volumeDeletionEnabled: boolean('volume_deletion_enabled').default(true),
+  purgeEnabled: boolean('purge_enabled').default(true),
+  purgeRetentionDays: int('purge_retention_days').default(30),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

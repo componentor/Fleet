@@ -864,6 +864,13 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
 
+    // Domain services need the Traefik public network for routing
+    const networkIds = [networkId];
+    if (data.domain) {
+      const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+      networkIds.push(publicNetId);
+    }
+
     const accountShort = accountId.replace(/-/g, '').substring(0, 12);
     const swarmServiceName = `fleet-${accountShort}-${data.name}`;
     const storageLimitMb = await getContainerDiskLimit(accountId);
@@ -899,7 +906,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       rollbackOnFailure: data.rollbackOnFailure,
       cpuLimit: data.cpuLimit ?? undefined,
       memoryLimit: data.memoryLimit ?? undefined,
-      networkId,
+      networkIds,
       storageLimitMb,
     });
 
@@ -1244,6 +1251,18 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         effectiveConstraints.push(`node.labels.region == ${effectiveRegion}`);
       }
 
+      // If domain is changing, manage Traefik public network attachment
+      let networkUpdate: string[] | undefined;
+      if (dockerFields.domain !== undefined) {
+        const accountNetId = await dockerService.ensureNetwork(`fleet-account-${accountId}`);
+        if (effectiveDomain) {
+          const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+          networkUpdate = [accountNetId, publicNetId];
+        } else {
+          networkUpdate = [accountNetId];
+        }
+      }
+
       await dockerService.updateService(svc.dockerServiceId, {
         image: dockerFields.image,
         replicas: dockerFields.replicas,
@@ -1269,6 +1288,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         restartCondition: dockerFields.restartCondition,
         restartMaxAttempts: dockerFields.restartMaxAttempts,
         restartDelay: dockerFields.restartDelay,
+        networkIds: networkUpdate,
       });
     } catch (err) {
       logger.error({ err }, 'Docker service update failed — DB not updated');
@@ -1536,6 +1556,14 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
   async function createDockerService() {
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
+
+    // Domain services need the Traefik public network for routing
+    const networkIds = [networkId];
+    if (svc!.domain) {
+      const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+      networkIds.push(publicNetId);
+    }
+
     const accountShort = accountId.replace(/-/g, '').substring(0, 12);
     const swarmServiceName = `fleet-${accountShort}-${svc!.name}`;
     const svcPorts = (svc!.ports as any[]) ?? [];
@@ -1576,7 +1604,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       updateParallelism: svc!.updateParallelism ?? 1,
       updateDelay: svc!.updateDelay ?? '10s',
       rollbackOnFailure: svc!.rollbackOnFailure ?? true,
-      networkId,
+      networkIds,
       storageLimitMb,
     });
 
@@ -1790,6 +1818,13 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
       const networkName = `fleet-account-${accountId}`;
       const networkId = await dockerService.ensureNetwork(networkName);
 
+      // Domain services need the Traefik public network for routing
+      const networkIds = [networkId];
+      if (svc.domain) {
+        const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+        networkIds.push(publicNetId);
+      }
+
       const accountShort = accountId.replace(/-/g, '').substring(0, 12);
       const swarmServiceName = `fleet-${accountShort}-${svc.name}`;
       const svcPorts = (svc.ports as any[]) ?? [];
@@ -1832,7 +1867,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
         updateParallelism: svc.updateParallelism ?? 1,
         updateDelay: svc.updateDelay ?? '10s',
         rollbackOnFailure: svc.rollbackOnFailure ?? true,
-        networkId,
+        networkIds,
         storageLimitMb,
       });
 
