@@ -57,6 +57,12 @@ export interface VolumeStorageProvider {
   /** Driver-specific options for mounting a volume in Docker. */
   getDockerVolumeOptions(name: string): Record<string, string>;
 
+  /**
+   * Whether the storage cluster is operational and can serve volumes.
+   * When false, docker.service.ts will fall back to plain local volumes.
+   */
+  isReady(): boolean;
+
   /** Host packages/tools required on each Swarm node for volumes to mount. */
   getPrerequisites(): StoragePrerequisite[];
 

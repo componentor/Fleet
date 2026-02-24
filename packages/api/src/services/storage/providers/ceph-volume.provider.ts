@@ -134,18 +134,19 @@ export class CephVolumeProvider implements VolumeStorageProvider {
 
     await this.rbd(args);
 
-    // Map the image and create a filesystem
+    // Map the image, create a filesystem, and leave it mapped for Docker
     const device = await this.mapImage(name);
+    await execFile('mkfs', ['-t', this.fsType, device], { timeout: 60_000 });
+    // Leave mapped — Docker's local driver will mount the device directly.
+    // Add to rbdmap so it persists across reboots.
     try {
-      await execFile('mkfs', ['-t', this.fsType, device], { timeout: 60_000 });
-    } finally {
-      await this.unmapImage(name);
-    }
+      await execFile('sh', ['-c', `echo '${this.pool}/${name}' >> /etc/ceph/rbdmap`], { timeout: 5_000 });
+    } catch { /* rbdmap may not exist yet, non-fatal */ }
 
     return {
       name,
       path: `/dev/rbd/${this.pool}/${name}`,
-      driver: 'rbd',
+      driver: 'local',
       driverOptions: this.getDockerVolumeOptions(name),
     };
   }
@@ -234,24 +235,27 @@ export class CephVolumeProvider implements VolumeStorageProvider {
   }
 
   getDockerVolumeDriver(): string {
-    return 'rbd';
+    // Use Docker's built-in 'local' driver with a pre-mapped RBD block device.
+    // Requires ceph-common (kernel rbd module) on each Swarm node and the
+    // RBD image to be mapped via `rbd map` before Docker creates the volume.
+    return 'local';
   }
 
   getDockerVolumeOptions(name: string): Record<string, string> {
-    const opts: Record<string, string> = {
-      pool: this.pool,
-      image: name,
-      fstype: this.fsType,
+    if (!this.monitors) return {};
+
+    // Docker local driver mounts the pre-mapped kernel RBD device.
+    // The RBD image must be mapped on the node (via rbd map or rbdmap service)
+    // before Docker tries to create this volume.
+    return {
+      'type': this.fsType,
+      'device': `/dev/rbd/${this.pool}/${name}`,
+      'o': 'rw',
     };
+  }
 
-    if (this.monitors) {
-      opts['monitors'] = this.monitors;
-    }
-    if (this.keyring) {
-      opts['keyring'] = this.keyring;
-    }
-
-    return opts;
+  isReady(): boolean {
+    return !!this.monitors;
   }
 
   getPrerequisites(): StoragePrerequisite[] {
@@ -260,9 +264,20 @@ export class CephVolumeProvider implements VolumeStorageProvider {
         package: 'ceph-common',
         description: 'Ceph client tools and RBD kernel module (required for Docker volume mounts)',
         checkCommand: 'which rbd',
-        installCommand: 'apt-get install -y ceph-common',
+        installCommand: 'apt-get install -y ceph-common && modprobe rbd && systemctl enable rbdmap',
       },
     ];
+  }
+
+  /**
+   * Get the rbd map command for a volume — used by storage-manager to map
+   * RBD images on all Swarm nodes after volume creation.
+   */
+  getRbdMapCommand(name: string): string {
+    const args = [`rbd map ${this.pool}/${name} --id ${this.user}`];
+    if (this.monitors) args.push(`-m ${this.monitors}`);
+    if (this.keyring) args.push(`--keyring ${this.keyring}`);
+    return args.join(' ');
   }
 
   async getHealth(): Promise<StorageHealth> {

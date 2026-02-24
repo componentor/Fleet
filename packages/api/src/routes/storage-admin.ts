@@ -210,20 +210,41 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
   try {
     await storageManager.reload();
 
-    // Auto-install prerequisites on all Swarm nodes if needed
+    // Auto-install prerequisites on all Swarm nodes if needed — blocks until complete
     const prerequisites = storageManager.volumes.getPrerequisites();
     let prereqResult = null;
     if (prerequisites.length > 0) {
-      logger.info({ packages: prerequisites.map((p) => p.package) }, 'Auto-installing storage prerequisites on all nodes');
+      logger.info({ packages: prerequisites.map((p) => p.package) }, 'Installing storage prerequisites on all nodes (this may take a few minutes)...');
       const installCommands = prerequisites.map((p) => p.installCommand);
       const command = `apt-get update -qq && ${installCommands.join(' && ')}`;
-      prereqResult = await dockerService.runOnAllNodes(command, { timeoutMs: 180_000 });
+      prereqResult = await dockerService.runOnAllNodes(command, { timeoutMs: 300_000 });
+
       if (!prereqResult.success) {
         logger.warn({ results: prereqResult.results }, 'Some nodes failed prerequisite installation');
+        // Mark as degraded — prerequisites are not fully installed
+        const cluster = await db.query.storageClusters.findFirst();
+        if (cluster) {
+          await db.update(storageClusters).set({
+            status: 'degraded',
+            updatedAt: new Date(),
+          }).where(eq(storageClusters.id, cluster.id));
+        }
+
+        return c.json({
+          message: 'Storage cluster configured but prerequisites failed on some nodes',
+          status: 'degraded',
+          prerequisites: {
+            installed: false,
+            packages: prerequisites.map((p) => p.package),
+            results: prereqResult.results,
+          },
+        });
       }
+
+      logger.info('Storage prerequisites installed successfully on all nodes');
     }
 
-    // Mark as healthy if reload succeeds
+    // Mark as healthy — all prerequisites installed
     const cluster = await db.query.storageClusters.findFirst();
     if (cluster) {
       await db.update(storageClusters).set({
@@ -236,7 +257,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       message: 'Storage cluster configured',
       status: 'healthy',
       prerequisites: prereqResult ? {
-        installed: prereqResult.success,
+        installed: true,
         packages: prerequisites.map((p) => p.package),
         results: prereqResult.results,
       } : undefined,

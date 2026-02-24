@@ -130,8 +130,14 @@ export class DockerService {
           Env: envArray,
           Labels: Object.keys(containerLabels).length > 0 ? containerLabels : undefined,
           Mounts: opts.volumes.map((v) => {
-            const driver = storageManager.volumes.getDockerVolumeDriver();
-            const driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+            let driver = 'local';
+            let driverOpts: Record<string, string> = {};
+            try {
+              if (storageManager.volumes.isReady()) {
+                driver = storageManager.volumes.getDockerVolumeDriver();
+                driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+              }
+            } catch { /* storage not initialized — use local */ }
             const hasDriverOpts = Object.keys(driverOpts).length > 0;
             return {
               Source: v.source,
@@ -273,9 +279,15 @@ export class DockerService {
     }
 
     if (opts.volumes) {
-      const driver = storageManager.volumes.getDockerVolumeDriver();
       spec.TaskTemplate.ContainerSpec.Mounts = opts.volumes.map((v) => {
-        const driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+        let driver = 'local';
+        let driverOpts: Record<string, string> = {};
+        try {
+          if (storageManager.volumes.isReady()) {
+            driver = storageManager.volumes.getDockerVolumeDriver();
+            driverOpts = storageManager.volumes.getDockerVolumeOptions(v.source);
+          }
+        } catch { /* storage not initialized — use local */ }
         const hasDriverOpts = Object.keys(driverOpts).length > 0;
         return {
           Source: v.source,

@@ -131,6 +131,10 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
     return {};
   }
 
+  isReady(): boolean {
+    return true;
+  }
+
   getPrerequisites(): StoragePrerequisite[] {
     return [];
   }

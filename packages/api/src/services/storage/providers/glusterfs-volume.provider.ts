@@ -233,6 +233,10 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
     };
   }
 
+  isReady(): boolean {
+    return this.config.nodes.length > 0;
+  }
+
   getPrerequisites(): StoragePrerequisite[] {
     return [
       {
