@@ -112,41 +112,53 @@ export class DockerService {
 
   /**
    * Ensure all volume host paths exist before Docker tries to bind-mount them.
-   * For GlusterFS this runs `mkdir -p` via a temp container on the FUSE mount.
+   *
+   * For distributed storage (GlusterFS) the directories must exist on EVERY
+   * Swarm node, not just the manager, because Docker may schedule the task on
+   * any node.  A single `docker.createContainer` only runs on the manager,
+   * leaving worker nodes with stale FUSE caches or missing directories.
+   *
+   * Fix: use `runOnAllNodes()` to execute `mkdir -p` on every Swarm node via
+   * a global one-shot service.  This refreshes each node's FUSE metadata cache
+   * and guarantees the bind-mount source exists everywhere.
    */
   private async ensureVolumeMounts(volumes: { source: string; target: string; readonly?: boolean }[]): Promise<void> {
     try {
       if (!storageManager.volumes.isReady()) return;
-      if (!storageManager.volumes.ensureVolume) return;
+      if (!storageManager.volumes.getHostMountPath) return;
 
+      // Collect full host paths that need to exist on every node
+      const hostPaths: string[] = [];
       for (const v of volumes) {
-        if (storageManager.volumes.getHostMountPath?.(v.source)) {
-          // Retry with exponential backoff to allow for GlusterFS replication across nodes.
-          // Total max wait: ~30 seconds (1+2+3+4+5+5+5+5 = 30s across 8 attempts).
-          let lastErr: Error | null = null;
-          const maxAttempts = 8;
-          for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            try {
-              await storageManager.volumes.ensureVolume(v.source);
-              lastErr = null;
-              break;
-            } catch (err) {
-              lastErr = err as Error;
-              if (attempt < maxAttempts - 1) {
-                const delay = Math.min((attempt + 1) * 1000, 5000);
-                logger.warn({ err, volume: v.source, attempt: attempt + 1, nextRetryMs: delay }, 'Volume ensure failed, retrying...');
-                await new Promise(r => setTimeout(r, delay));
-              }
-            }
-          }
-          if (lastErr) {
-            logger.error({ err: lastErr, volume: v.source }, 'Failed to ensure volume directory on distributed storage — bind mount will fail');
-            throw lastErr;
-          }
+        const hp = storageManager.volumes.getHostMountPath(v.source);
+        if (hp) hostPaths.push(hp);
+      }
+      if (hostPaths.length === 0) return;
+
+      // Build a single shell command that creates + verifies all directories
+      const cmd = hostPaths
+        .map(p => `mkdir -p "${p}" && chmod 777 "${p}" && stat "${p}" > /dev/null`)
+        .join(' && ');
+
+      logger.info({ volumes: hostPaths }, 'Ensuring volume directories on all Swarm nodes');
+      const result = await this.runOnAllNodes(cmd, { timeoutMs: 30_000 });
+
+      const failed = result.results.filter(r => r.status !== 'complete');
+      if (failed.length > 0) {
+        const details = failed.map(r => `node=${r.nodeId} err=${r.error ?? r.status}`).join('; ');
+        if (!result.success) {
+          // All nodes failed — storage mount is likely broken
+          const mountBase = hostPaths[0]!.substring(0, hostPaths[0]!.lastIndexOf('/'));
+          throw new Error(
+            `Volume directories could not be created on any node. ` +
+            `The distributed storage mount (${mountBase}) may be disconnected. ` +
+            `Try remounting on affected nodes. Details: ${details}`,
+          );
         }
+        logger.warn({ failed: failed.length, total: result.results.length, details },
+          'Volume ensure failed on some nodes — service may fail if scheduled there');
       }
     } catch (err) {
-      // Re-throw so createService/updateService can handle it
       throw new Error(`Volume preparation failed: ${(err as Error).message}`);
     }
   }
