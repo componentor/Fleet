@@ -333,6 +333,61 @@ class StorageManager {
   }
 
   /**
+   * Resize a volume. Expanding checks quota for the delta; shrinking is only
+   * allowed down to the actual used space to prevent data loss.
+   */
+  async resizeVolume(accountId: string, name: string, newSizeGb: number): Promise<void> {
+    const dbVolume = await db.query.storageVolumes.findFirst({
+      where: and(
+        eq(storageVolumes.name, name),
+        eq(storageVolumes.accountId, accountId),
+        isNull(storageVolumes.deletedAt),
+      ),
+    });
+
+    if (!dbVolume) {
+      throw new Error(`Volume "${name}" not found`);
+    }
+
+    const cluster = dbVolume.clusterId
+      ? this.clusters.get(dbVolume.clusterId)
+      : undefined;
+    const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
+
+    // Get live usage to enforce shrink limit
+    let usedGb = 0;
+    try {
+      const live = await provider.getVolumeInfo(name);
+      usedGb = live.usedGb;
+    } catch {
+      // If we can't read live usage, use DB cached value
+      usedGb = dbVolume.usedGb ?? 0;
+    }
+
+    const minSize = Math.max(1, Math.ceil(usedGb));
+    if (newSizeGb < minSize) {
+      throw new Error(
+        `Cannot shrink below used space: ${usedGb} GB in use (minimum ${minSize} GB)`,
+      );
+    }
+
+    // Quota check for expansion
+    const currentSizeGb = dbVolume.sizeGb;
+    if (newSizeGb > currentSizeGb) {
+      const delta = newSizeGb - currentSizeGb;
+      await this.enforceStorageQuota(accountId, delta);
+    }
+
+    // Resize on provider
+    await provider.resizeVolume(name, newSizeGb);
+
+    // Update DB
+    await db.update(storageVolumes)
+      .set({ sizeGb: newSizeGb, updatedAt: new Date() })
+      .where(eq(storageVolumes.id, dbVolume.id));
+  }
+
+  /**
    * List volumes for an account.
    */
   async listAccountVolumes(accountId: string): Promise<VolumeInfo[]> {
@@ -396,7 +451,8 @@ class StorageManager {
         eq(storageVolumes.accountId, accountId),
         isNull(storageVolumes.deletedAt),
       ));
-    return result[0]?.total ?? 0;
+    // coalesce(sum(...)) can return a string in some DB drivers — coerce to number
+    return Number(result[0]?.total) || 0;
   }
 
   /**
@@ -408,13 +464,13 @@ class StorageManager {
     const accountLimit = await db.query.resourceLimits.findFirst({
       where: eq(resourceLimits.accountId, accountId),
     });
-    if (accountLimit?.maxNfsStorageGb) return accountLimit.maxNfsStorageGb;
+    if (accountLimit?.maxNfsStorageGb) return Number(accountLimit.maxNfsStorageGb);
 
     // Fall back to global limit
     const globalLimit = await db.query.resourceLimits.findFirst({
       where: isNull(resourceLimits.accountId),
     });
-    return globalLimit?.maxNfsStorageGb ?? 100; // Default 100 GB
+    return Number(globalLimit?.maxNfsStorageGb) || 100; // Default 100 GB
   }
 
   // ── Health ──────────────────────────────────────────────────────────────

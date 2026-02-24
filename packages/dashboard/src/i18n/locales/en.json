@@ -342,7 +342,16 @@
     "delete": "Delete",
     "confirmDelete": "Delete this volume? All data will be lost.",
     "createFailed": "Failed to create volume",
-    "deleteFailed": "Failed to delete volume"
+    "deleteFailed": "Failed to delete volume",
+    "resize": "Resize",
+    "resizeVolume": "Resize Volume",
+    "currentSize": "Current size",
+    "inUse": "In use",
+    "newSize": "New size",
+    "resizeHint": "Min {min} GB, max {max} GB",
+    "shrinkWarning": "Shrinking a volume cannot be undone. Make sure you have backups.",
+    "resizing": "Resizing...",
+    "resizeFailed": "Failed to resize volume"
   },
   "storageSetup": {
     "title": "Storage",
@@ -1827,6 +1836,7 @@
     "queue": "Queue",
     "status": "Status",
     "created": "Created",
+    "scheduledAt": "Scheduled At",
     "duration": "Duration",
     "actions": "Actions",
     "retry": "Retry",

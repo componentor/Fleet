@@ -87,6 +87,7 @@ function serialiseJob(job: Job, queueShortName: string, status: string) {
       created: job.timestamp ?? null,
       processed: job.processedOn ?? null,
       finished: job.finishedOn ?? null,
+      scheduledAt: (job.opts?.delay && job.timestamp) ? job.timestamp + job.opts.delay : null,
     },
     opts: {
       delay: job.opts?.delay ?? null,
@@ -323,6 +324,7 @@ jobRoutes.openapi(getJobDetailRoute, (async (c: any) => {
       created: job.timestamp ?? null,
       processed: job.processedOn ?? null,
       finished: job.finishedOn ?? null,
+      scheduledAt: (job.opts?.delay && job.timestamp) ? job.timestamp + job.opts.delay : null,
     },
     opts: {
       delay: job.opts?.delay ?? null,

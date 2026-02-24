@@ -229,6 +229,87 @@ storage.openapi(getVolumeRoute, (async (c: any) => {
   }
 }) as any);
 
+// PATCH /volumes/:id — resize a volume
+const resizeVolumeSchema = z.object({
+  sizeGb: z.number().int().min(1).max(1000),
+});
+
+const resizeVolumeRoute = createRoute({
+  method: 'patch',
+  path: '/volumes/{id}',
+  tags: ['Storage'],
+  summary: 'Resize a volume',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string() }),
+    body: jsonBody(resizeVolumeSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Volume resized'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+storage.openapi(resizeVolumeRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: volumeId } = c.req.valid('param');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const { sizeGb } = c.req.valid('json');
+
+  // Look up volume in DB by id, name, or displayName
+  const resizeNameMatch = or(eq(storageVolumes.name, volumeId), eq(storageVolumes.displayName, volumeId));
+  const resizeIdMatch = UUID_RE.test(volumeId) ? or(eq(storageVolumes.id, volumeId), resizeNameMatch) : resizeNameMatch;
+  const dbVolume = await db.query.storageVolumes.findFirst({
+    where: and(
+      resizeIdMatch,
+      eq(storageVolumes.accountId, accountId),
+      isNull(storageVolumes.deletedAt),
+    ),
+  });
+
+  if (!dbVolume) {
+    return c.json({ error: 'Volume not found' }, 404);
+  }
+
+  try {
+    await storageManager.resizeVolume(accountId, dbVolume.name, sizeGb);
+
+    // Return updated volume info
+    const cluster = dbVolume.clusterId ? storageManager.getCluster(dbVolume.clusterId) : undefined;
+    const provider = cluster?.volumeProvider ?? storageManager.volumes;
+    try {
+      const live = await provider.getVolumeInfo(dbVolume.name);
+      return c.json({
+        ...live,
+        sizeGb,
+        availableGb: sizeGb - live.usedGb,
+        displayName: dbVolume.displayName ?? dbVolume.name,
+      });
+    } catch {
+      return c.json({
+        name: dbVolume.name,
+        sizeGb,
+        displayName: dbVolume.displayName ?? dbVolume.name,
+      });
+    }
+  } catch (err: any) {
+    const message = err?.message ?? '';
+    if (message.includes('Cannot shrink')) {
+      return c.json({ error: message }, 400);
+    }
+    if (message.includes('quota exceeded')) {
+      return c.json({ error: message }, 403);
+    }
+    logger.error({ err }, 'Failed to resize volume');
+    return c.json({ error: 'Failed to resize volume' }, 500);
+  }
+}) as any);
+
 // DELETE /volumes/:id — delete a volume
 const deleteVolumeRoute = createRoute({
   method: 'delete',

@@ -136,10 +136,14 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   /**
    * Ensure the volume subdirectory exists on the GlusterFS mount.
    * Idempotent — safe to call on every deploy.
+   * Verifies the directory is actually accessible (not just created) to
+   * catch GlusterFS replication lag before Docker tries to bind-mount.
    */
   async ensureVolume(name: string): Promise<void> {
     validateVolumeName(name);
     await this.runOnHostMount(['sh', '-c', `mkdir -p /vol/${name} && chmod 777 /vol/${name}`]);
+    // Verify directory is accessible — throws if stat fails (replication not done yet)
+    await this.runOnHostMount(['stat', `/vol/${name}`]);
   }
 
   /**

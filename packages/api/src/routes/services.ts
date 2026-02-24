@@ -985,6 +985,18 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
           driverType: m.VolumeOptions?.DriverConfig?.Options?.type ?? null,
         }));
 
+      // Extract network info from Docker service endpoint
+      const virtualIPs: Array<{ networkId: string; addr: string }> = (info.Endpoint?.VirtualIPs ?? [])
+        .map((vip: any) => ({ networkId: vip.NetworkID, addr: vip.Addr }));
+      const networkNames: string[] = [];
+      const specNetworks = (info.Spec?.TaskTemplate as any)?.Networks ?? [];
+      for (const net of specNetworks) {
+        try {
+          const netInfo = await dockerService.inspectNetwork(net.Target);
+          networkNames.push(netInfo.Name);
+        } catch { /* ignore — network may be gone */ }
+      }
+
       dockerStatus = {
         createdAt: info.CreatedAt,
         updatedAt: info.UpdatedAt,
@@ -992,6 +1004,10 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
         desiredTasks: svc.replicas ?? 1,
         tasks,
         volumeDrivers,
+        networks: networkNames.map((name, i) => ({
+          name,
+          virtualIP: virtualIPs[i]?.addr ?? null,
+        })),
       };
 
       // Auto-correct status drift

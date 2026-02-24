@@ -121,18 +121,21 @@ export class DockerService {
 
       for (const v of volumes) {
         if (storageManager.volumes.getHostMountPath?.(v.source)) {
-          // Retry up to 3 times with brief delays to allow for distributed FS replication
+          // Retry with exponential backoff to allow for GlusterFS replication across nodes.
+          // Total max wait: ~30 seconds (1+2+3+4+5+5+5+5 = 30s across 8 attempts).
           let lastErr: Error | null = null;
-          for (let attempt = 0; attempt < 3; attempt++) {
+          const maxAttempts = 8;
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
               await storageManager.volumes.ensureVolume(v.source);
               lastErr = null;
               break;
             } catch (err) {
               lastErr = err as Error;
-              if (attempt < 2) {
-                logger.warn({ err, volume: v.source, attempt: attempt + 1 }, 'Volume ensure failed, retrying...');
-                await new Promise(r => setTimeout(r, 1000));
+              if (attempt < maxAttempts - 1) {
+                const delay = Math.min((attempt + 1) * 1000, 5000);
+                logger.warn({ err, volume: v.source, attempt: attempt + 1, nextRetryMs: delay }, 'Volume ensure failed, retrying...');
+                await new Promise(r => setTimeout(r, delay));
               }
             }
           }
@@ -813,6 +816,11 @@ export class DockerService {
       Labels: labels,
     });
     return network.id;
+  }
+
+  async inspectNetwork(networkId: string): Promise<{ Name: string; Id: string; Driver: string; Scope: string }> {
+    const network = docker.getNetwork(networkId);
+    return network.inspect();
   }
 
   async removeNetwork(networkId: string): Promise<void> {

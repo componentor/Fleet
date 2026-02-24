@@ -421,6 +421,12 @@ export class TemplateService {
           }
         }
       }
+
+      // Brief pause after volume creation to allow GlusterFS to begin replication
+      // before Docker tries to schedule tasks on other nodes.
+      if (volumesToCreate.length > 0) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
     }
 
     const createdServices: Array<{

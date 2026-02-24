@@ -426,6 +426,7 @@ onUnmounted(() => {
                   <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.jobName') }}</th>
                   <th class="px-5 py-3.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.status') }}</th>
                   <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.created') }}</th>
+                  <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.scheduledAt') }}</th>
                   <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.duration') }}</th>
                   <th class="px-5 py-3.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.actions') }}</th>
                 </tr>
@@ -449,6 +450,10 @@ onUnmounted(() => {
                     </span>
                   </td>
                   <td class="px-5 py-3.5 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ formatDate(job.createdAt ?? job.timestamp) }}</td>
+                  <td class="px-5 py-3.5 text-sm whitespace-nowrap">
+                    <span v-if="job.timestamps?.scheduledAt" class="text-amber-600 dark:text-amber-400">{{ formatDate(job.timestamps.scheduledAt) }}</span>
+                    <span v-else class="text-gray-400 dark:text-gray-500">--</span>
+                  </td>
                   <td class="px-5 py-3.5 text-sm text-gray-500 dark:text-gray-400 font-mono">{{ formatDuration(job.duration ?? job.processedTime) }}</td>
                   <td class="px-5 py-3.5 text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">

@@ -1327,9 +1327,19 @@ onUnmounted(() => {
                 <template v-else>{{ service.replicas ?? 1 }}</template>
               </p>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+            <a
+              v-if="service.domain"
+              :href="`${service.sslEnabled ? 'https' : 'http'}://${service.domain}`"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5 block hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all group cursor-pointer"
+            >
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Domain</p>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ service.domain || 'None' }}</p>
+              <p class="text-lg font-bold text-primary-600 dark:text-primary-400 group-hover:underline truncate">{{ service.domain }}</p>
+            </a>
+            <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Domain</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white">None</p>
             </div>
             <div v-if="service.region" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Region</p>
@@ -1560,6 +1570,19 @@ onUnmounted(() => {
               <div v-if="service.githubBranch">
                 <dt class="text-gray-500 dark:text-gray-400">Branch</dt>
                 <dd class="text-gray-900 dark:text-white mt-0.5">{{ service.githubBranch }}</dd>
+              </div>
+              <div v-if="service.dockerServiceId">
+                <dt class="text-gray-500 dark:text-gray-400">Docker Service</dt>
+                <dd class="font-mono text-xs text-gray-900 dark:text-white mt-0.5">{{ service.dockerServiceId }}</dd>
+              </div>
+              <div v-if="(service as any).dockerStatus?.networks?.length">
+                <dt class="text-gray-500 dark:text-gray-400">Networks</dt>
+                <dd class="text-gray-900 dark:text-white mt-0.5">
+                  <div v-for="net in (service as any).dockerStatus.networks" :key="net.name" class="text-xs">
+                    <span class="font-mono">{{ net.name }}</span>
+                    <span v-if="net.virtualIP" class="text-gray-400 ml-1">({{ net.virtualIP }})</span>
+                  </div>
+                </dd>
               </div>
             </dl>
           </div>

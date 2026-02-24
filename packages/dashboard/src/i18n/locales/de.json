@@ -342,7 +342,16 @@
     "delete": "L\u00f6schen",
     "confirmDelete": "Dieses Volume l\u00f6schen? Alle Daten gehen verloren.",
     "createFailed": "Volume konnte nicht erstellt werden",
-    "deleteFailed": "Volume konnte nicht gel\u00f6scht werden"
+    "deleteFailed": "Volume konnte nicht gel\u00f6scht werden",
+    "resize": "Gr\u00f6\u00dfe \u00e4ndern",
+    "resizeVolume": "Volume-Gr\u00f6\u00dfe \u00e4ndern",
+    "currentSize": "Aktuelle Gr\u00f6\u00dfe",
+    "inUse": "Belegt",
+    "newSize": "Neue Gr\u00f6\u00dfe",
+    "resizeHint": "Min {min} GB, Max {max} GB",
+    "shrinkWarning": "Das Verkleinern eines Volumes kann nicht r\u00fcckg\u00e4ngig gemacht werden. Stellen Sie sicher, dass Sie Backups haben.",
+    "resizing": "Wird ge\u00e4ndert...",
+    "resizeFailed": "Volume konnte nicht ge\u00e4ndert werden"
   },
   "storageSetup": {
     "title": "Speicher",
@@ -1823,6 +1832,7 @@
     "queue": "Warteschlange",
     "status": "Status",
     "created": "Erstellt",
+    "scheduledAt": "Geplant für",
     "duration": "Dauer",
     "actions": "Aktionen",
     "retry": "Wiederholen",

@@ -744,6 +744,39 @@ vi.mock('../services/docker.service.js', () => ({
     removeNetwork: vi.fn().mockResolvedValue(undefined),
     waitForServiceTasksGone: vi.fn().mockResolvedValue(undefined),
     removeVolume: vi.fn().mockResolvedValue(undefined),
+    allocateIngressPorts: vi.fn().mockImplementation(
+      async (targets: Array<{ target: number; protocol: string }>) =>
+        targets.map((p, i) => ({ target: p.target, published: 30000 + i, protocol: p.protocol })),
+    ),
+  },
+}));
+
+// ── Mock storage manager ──
+vi.mock('../services/storage/storage-manager.js', () => ({
+  storageManager: {
+    volumes: {
+      isReady: vi.fn().mockReturnValue(true),
+      getHostMountPath: vi.fn().mockReturnValue(null),
+      getDockerVolumeDriver: vi.fn().mockReturnValue('local'),
+      getDockerVolumeOptions: vi.fn().mockReturnValue({}),
+      ensureVolume: vi.fn().mockResolvedValue(undefined),
+    },
+    enforceStorageQuota: vi.fn().mockResolvedValue(undefined),
+    createVolume: vi.fn().mockResolvedValue({
+      name: 'test-vol', path: '/test/vol', driver: 'local', driverOptions: {},
+    }),
+    deleteVolume: vi.fn().mockResolvedValue(undefined),
+    resizeVolume: vi.fn().mockResolvedValue(undefined),
+    listAccountVolumes: vi.fn().mockResolvedValue([]),
+    getAccountStorageUsage: vi.fn().mockResolvedValue(0),
+    getAccountStorageLimit: vi.fn().mockResolvedValue(100),
+    initialize: vi.fn().mockResolvedValue(undefined),
+    getCluster: vi.fn().mockReturnValue(undefined),
+    config: { provider: 'local' },
+    getHealth: vi.fn().mockResolvedValue({
+      volumes: { status: 'healthy', provider: 'local' },
+      objects: { status: 'healthy', provider: 'local' },
+    }),
   },
 }));
 

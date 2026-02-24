@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink, Share2 } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink, Share2, Settings2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
+const router = useRouter()
 const api = useApi()
 const { canWrite } = useRole()
 
@@ -287,6 +289,24 @@ function formatPrice(price: number): string {
   return `$${price.toFixed(2)}`
 }
 
+function goToDomainDetail(d: any) {
+  // External (BYOD) domains use the zone ID
+  if (d.type === 'external') {
+    router.push({ name: 'panel-domain-detail', params: { id: d.id } })
+  }
+  // Purchased domains — find matching zone
+  else if (d.type === 'purchased') {
+    const zone = zones.value.find((z: any) => z.domain === d.domain)
+    if (zone) {
+      router.push({ name: 'panel-domain-detail', params: { id: zone.id } })
+    }
+  }
+}
+
+function openDomainUrl(domain: string) {
+  window.open(`https://${domain}`, '_blank', 'noopener,noreferrer')
+}
+
 onMounted(() => {
   fetchDomains()
   // Check for successful purchase redirect
@@ -361,12 +381,21 @@ onMounted(() => {
                   No domains yet. Add your first domain to get started.
                 </td>
               </tr>
-              <tr v-for="d in allDomains" :key="d.id" class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+              <tr
+                v-for="d in allDomains"
+                :key="d.id"
+                :class="[
+                  'hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors',
+                  (d.type === 'external' || d.type === 'purchased') ? 'cursor-pointer' : '',
+                ]"
+                @click="(d.type === 'external' || d.type === 'purchased') ? goToDomainDetail(d) : undefined"
+              >
                 <td class="px-6 py-4">
                   <div class="flex items-center gap-2">
                     <ShieldCheck v-if="d.verified" class="w-4 h-4 text-green-500 shrink-0" />
                     <Clock v-else class="w-4 h-4 text-yellow-500 shrink-0" />
                     <span class="text-sm font-medium text-gray-900 dark:text-white">{{ d.domain }}</span>
+                    <span v-if="d.status === 'pending' && d.type === 'external'" class="text-xs text-yellow-600 dark:text-yellow-400">— click to configure DNS</span>
                   </div>
                 </td>
                 <td class="px-6 py-4">
@@ -397,20 +426,40 @@ onMounted(() => {
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(d.expiresAt) }}</td>
                 <td v-if="canWrite" class="px-6 py-4 text-right">
-                  <button
-                    v-if="d.type === 'external'"
-                    @click="deleteDomain(d.id)"
-                    class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                  >
-                    Remove
-                  </button>
-                  <button
-                    v-if="d.type === 'subdomain'"
-                    @click="releaseSubdomain(d.id)"
-                    class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                  >
-                    Release
-                  </button>
+                  <div class="flex items-center justify-end gap-2" @click.stop>
+                    <button
+                      v-if="d.status === 'active'"
+                      @click="openDomainUrl(d.domain)"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                      title="Open in new tab"
+                    >
+                      <ExternalLink class="w-3.5 h-3.5" />
+                      Open
+                    </button>
+                    <button
+                      v-if="d.type === 'external' || d.type === 'purchased'"
+                      @click="goToDomainDetail(d)"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      title="Manage DNS"
+                    >
+                      <Settings2 class="w-3.5 h-3.5" />
+                      DNS
+                    </button>
+                    <button
+                      v-if="d.type === 'external'"
+                      @click="deleteDomain(d.id)"
+                      class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                    >
+                      Remove
+                    </button>
+                    <button
+                      v-if="d.type === 'subdomain'"
+                      @click="releaseSubdomain(d.id)"
+                      class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                    >
+                      Release
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>

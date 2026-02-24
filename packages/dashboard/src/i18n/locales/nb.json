@@ -342,7 +342,16 @@
     "delete": "Slett",
     "confirmDelete": "Slette dette volumet? All data g\u00e5r tapt.",
     "createFailed": "Kunne ikke opprette volum",
-    "deleteFailed": "Kunne ikke slette volum"
+    "deleteFailed": "Kunne ikke slette volum",
+    "resize": "Endre st\u00f8rrelse",
+    "resizeVolume": "Endre volumst\u00f8rrelse",
+    "currentSize": "N\u00e5v\u00e6rende st\u00f8rrelse",
+    "inUse": "I bruk",
+    "newSize": "Ny st\u00f8rrelse",
+    "resizeHint": "Min {min} GB, maks {max} GB",
+    "shrinkWarning": "Krymping av et volum kan ikke angres. Sikre at du har sikkerhetskopi.",
+    "resizing": "Endrer st\u00f8rrelse...",
+    "resizeFailed": "Kunne ikke endre volumst\u00f8rrelse"
   },
   "storageSetup": {
     "title": "Lagring",
@@ -1823,6 +1832,7 @@
     "queue": "Kø",
     "status": "Status",
     "created": "Opprettet",
+    "scheduledAt": "Planlagt",
     "duration": "Varighet",
     "actions": "Handlinger",
     "retry": "Prøv på nytt",

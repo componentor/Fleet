@@ -342,7 +342,16 @@
     "delete": "\u5220\u9664",
     "confirmDelete": "\u5220\u9664\u6b64\u5b58\u50a8\u5377\uff1f\u6240\u6709\u6570\u636e\u5c06\u4e22\u5931\u3002",
     "createFailed": "\u521b\u5efa\u5b58\u50a8\u5377\u5931\u8d25",
-    "deleteFailed": "\u5220\u9664\u5b58\u50a8\u5377\u5931\u8d25"
+    "deleteFailed": "\u5220\u9664\u5b58\u50a8\u5377\u5931\u8d25",
+    "resize": "\u8c03\u6574\u5927\u5c0f",
+    "resizeVolume": "\u8c03\u6574\u5b58\u50a8\u5377\u5927\u5c0f",
+    "currentSize": "\u5f53\u524d\u5927\u5c0f",
+    "inUse": "\u5df2\u4f7f\u7528",
+    "newSize": "\u65b0\u5927\u5c0f",
+    "resizeHint": "\u6700\u5c0f {min} GB\uff0c\u6700\u5927 {max} GB",
+    "shrinkWarning": "\u7f29\u5c0f\u5b58\u50a8\u5377\u65e0\u6cd5\u64a4\u9500\u3002\u8bf7\u786e\u4fdd\u5df2\u5907\u4efd\u6570\u636e\u3002",
+    "resizing": "\u8c03\u6574\u4e2d...",
+    "resizeFailed": "\u8c03\u6574\u5b58\u50a8\u5377\u5927\u5c0f\u5931\u8d25"
   },
   "storageSetup": {
     "title": "\u5b58\u50a8",
@@ -1823,6 +1832,7 @@
     "queue": "队列",
     "status": "状态",
     "created": "创建时间",
+    "scheduledAt": "计划执行",
     "duration": "持续时间",
     "actions": "操作",
     "retry": "重试",
