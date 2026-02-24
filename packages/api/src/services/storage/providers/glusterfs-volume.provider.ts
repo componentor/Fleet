@@ -209,14 +209,16 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
       );
       const lines = output.trim().split('\n');
       if (lines[0]) {
+        // du reports actual per-directory usage — this is the correct usedGb
         usedGb = Math.round(parseInt(lines[0], 10) / (1024 * 1024) * 100) / 100;
       }
       if (lines[1]) {
-        const [total, used, avail] = lines[1].split(/\s+/).map(Number);
+        // df reports filesystem-level totals (shared across all volumes).
+        // sizeGb/availableGb are overridden by the caller with DB-tracked values,
+        // but we populate them here as rough defaults.
+        const [total, , avail] = lines[1].split(/\s+/).map(Number);
         if (total) sizeGb = Math.round(total / (1024 * 1024) * 100) / 100;
         if (avail) availableGb = Math.round(avail / (1024 * 1024) * 100) / 100;
-        // If du didn't work, fall back to df used
-        if (usedGb === 0 && used) usedGb = Math.round(used / (1024 * 1024) * 100) / 100;
       }
     } catch {
       // Stats not available

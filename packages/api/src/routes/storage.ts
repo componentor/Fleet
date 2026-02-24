@@ -62,8 +62,10 @@ storage.openapi(listVolumesRoute, (async (c: any) => {
       }
     }
 
+    const provider = storageManager.config?.provider ?? 'local';
     return c.json(volumes.map((v) => ({
       ...v,
+      driver: provider,
       serviceCount: volumeServiceCount.get(v.name) ?? 0,
     })));
   } catch (err) {
