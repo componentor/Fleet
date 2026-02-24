@@ -698,7 +698,8 @@ onUnmounted(() => {
                 {{ svc.name }}
               </label>
               <DomainPicker
-                v-model="serviceDomains[svc.name]"
+                :model-value="serviceDomains[svc.name] ?? ''"
+                @update:model-value="serviceDomains[svc.name] = $event"
                 placeholder="Leave empty for no domain"
               />
             </div>
