@@ -1296,7 +1296,7 @@ export class UpdateService {
       await dockerService.updateService(dockerSvcId, { image: newImage });
       this.appendLog(`  ${serviceName} update initiated (rolling, start-first).`);
 
-      await this.waitForServiceConvergence(dockerSvcId, serviceName, 180_000, newImage);
+      await this.waitForServiceConvergence(dockerSvcId, serviceName, 600_000, newImage);
     } catch (err) {
       throw new Error(`Failed to update ${serviceName}: ${errorToString(err)}`);
     }
@@ -1305,7 +1305,7 @@ export class UpdateService {
   private async waitForServiceConvergence(
     dockerServiceId: string,
     serviceName: string,
-    timeoutMs = 180_000,
+    timeoutMs = 600_000,
     expectedImage?: string,
   ): Promise<void> {
     const startTime = Date.now();
