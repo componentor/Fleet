@@ -368,6 +368,7 @@ onUnmounted(() => {
               <div class="min-w-0">
                 <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ service.name }}</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{{ service.image }}</p>
+                <p v-if="(service as any).lastDeployError" class="text-xs text-red-500 dark:text-red-400 truncate mt-0.5">{{ (service as any).lastDeployError }}</p>
               </div>
             </div>
             <div class="flex items-center gap-3 shrink-0">
@@ -404,6 +405,7 @@ onUnmounted(() => {
               </span>
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400 font-mono mb-2">{{ service.image }}</p>
+            <p v-if="(service as any).lastDeployError" class="text-xs text-red-500 dark:text-red-400 line-clamp-2 mb-2">{{ (service as any).lastDeployError }}</p>
             <div v-if="(service as any).tags?.length" class="flex flex-wrap gap-1 mb-2">
               <span v-for="tag in (service as any).tags" :key="tag" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
                 {{ tag }}

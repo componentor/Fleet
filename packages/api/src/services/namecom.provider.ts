@@ -1,4 +1,4 @@
-import type { RegistrarProvider, DomainSearchResult, DomainContact, DomainInfo } from './registrar.service.js';
+import type { RegistrarProvider, DomainSearchResult, DomainContact, DomainInfo, TldPriceEntry } from './registrar.service.js';
 import { logger } from './logger.js';
 
 const NAMECOM_API_PROD = 'https://api.name.com/v4';
@@ -243,6 +243,101 @@ export class NamecomProvider implements RegistrarProvider {
       const body = await res.text();
       throw new Error(`Name.com setNameservers failed (${res.status}): ${body}`);
     }
+  }
+
+  async listTldPricing(): Promise<TldPriceEntry[]> {
+    // Use the Name.com search endpoint to get pricing for common TLDs
+    // The v4 API doesn't have a dedicated TLD pricing list endpoint,
+    // so we query checkAvailability with a random string for known TLDs
+    // and also try to paginate the v4 domains:getTldList if available
+    const coreBaseUrl = this.baseUrl.replace('/v4', '/core/v1');
+    const auth = Buffer.from(`${this.username}:${this.apiToken}`).toString('base64');
+    const results: TldPriceEntry[] = [];
+
+    let page = 1;
+    while (true) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const res = await fetch(`${coreBaseUrl}/tldpricing?perPage=100&page=${page}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) {
+          // If Core API is not available, fall back to checking common TLDs
+          if (page === 1) {
+            return this.listTldPricingFallback();
+          }
+          break;
+        }
+
+        const data = await res.json() as {
+          tldpricing?: Array<{
+            tld: string;
+            registrationPrice?: number;
+            renewalPrice?: number;
+          }>;
+          nextPage?: number;
+          lastPage?: number;
+        };
+
+        for (const p of data.tldpricing ?? []) {
+          if (p.registrationPrice != null) {
+            results.push({
+              tld: p.tld.replace(/^\./, ''),
+              registration: p.registrationPrice,
+              renewal: p.renewalPrice ?? p.registrationPrice,
+              currency: 'USD',
+            });
+          }
+        }
+
+        if (!data.nextPage || page >= (data.lastPage ?? page)) break;
+        page++;
+      } catch {
+        clearTimeout(timeout);
+        if (page === 1) return this.listTldPricingFallback();
+        break;
+      }
+    }
+
+    return results;
+  }
+
+  private async listTldPricingFallback(): Promise<TldPriceEntry[]> {
+    // Fallback: query common TLDs via checkAvailability
+    const commonTlds = [
+      'com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai',
+      'info', 'biz', 'us', 'uk', 'ca', 'de', 'fr', 'nl', 'se', 'no',
+      'dk', 'fi', 'eu', 'tech', 'online', 'site', 'store', 'club', 'pro',
+    ];
+    const randomQuery = `fleetpricecheck${Date.now().toString(36)}`;
+    const domainNames = commonTlds.map((tld) => `${randomQuery}.${tld}`);
+
+    const data = await this.request<{
+      results: Array<{
+        domainName: string;
+        purchasable: boolean;
+        premium: boolean;
+        purchasePrice?: number;
+        renewalPrice?: number;
+      }>;
+    }>('POST', '/domains:checkAvailability', { domainNames });
+
+    return (data.results ?? [])
+      .filter((r) => r.purchasePrice != null && !r.premium)
+      .map((r) => ({
+        tld: r.domainName.split('.').slice(1).join('.'),
+        registration: r.purchasePrice!,
+        renewal: r.renewalPrice ?? r.purchasePrice!,
+        currency: 'USD',
+      }));
   }
 
   async renewDomain(

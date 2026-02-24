@@ -55,6 +55,8 @@ services:
     volumes:
       - source: wordpress_db_data
         target: /var/lib/mysql
+    resources:
+      memory_limit: 1024
 
 volumes:
   - wordpress_data

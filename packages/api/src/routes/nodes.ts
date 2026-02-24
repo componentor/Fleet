@@ -179,6 +179,7 @@ const registerNodeSchema = z.object({
   role: z.enum(['manager', 'worker']).default('worker'),
   labels: z.record(z.string(), z.string()).default({}),
   nfsServer: z.boolean().default(false),
+  location: z.string().max(50).nullable().optional(),
 });
 
 const updateNodeSchema = z.object({
@@ -187,6 +188,7 @@ const updateNodeSchema = z.object({
   labels: z.record(z.string(), z.string()).optional(),
   nfsServer: z.boolean().optional(),
   dockerNodeId: z.string().optional(),
+  location: z.string().max(50).nullable().optional(),
 });
 
 const nodeIdParamSchema = z.object({
@@ -467,6 +469,7 @@ adminNodeRoutes.openapi(registerNodeRoute, (async (c: any) => {
     role: data.role,
     labels: data.labels,
     nfsServer: data.nfsServer,
+    location: data.location ?? null,
     status: 'active',
   });
 
@@ -519,12 +522,21 @@ adminNodeRoutes.openapi(updateNodeRoute, (async (c: any) => {
     return c.json({ error: 'Node not found' }, 404);
   }
 
-  // Update Docker node if possible
-  if (node.dockerNodeId && (data.role || data.labels)) {
+  // Update Docker node if possible (role, labels, or region change)
+  if (node.dockerNodeId && (data.role || data.labels || data.location !== undefined)) {
     try {
+      // Merge region into Docker labels so placement constraints work
+      const mergedLabels = { ...(data.labels ?? (node.labels as Record<string, string>) ?? {}) };
+      if (data.location !== undefined) {
+        if (data.location) {
+          mergedLabels['region'] = data.location;
+        } else {
+          delete mergedLabels['region'];
+        }
+      }
       await dockerService.updateNode(node.dockerNodeId, {
         role: data.role,
-        labels: data.labels,
+        labels: mergedLabels,
       });
     } catch (err) {
       logger.error({ err }, 'Docker node update failed');

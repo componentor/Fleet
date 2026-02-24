@@ -188,16 +188,12 @@ async function restartStack(stack: StackGroup) {
 }
 
 async function deleteStack(stack: StackGroup) {
-  actionLoading.value = stack.stackId
+  confirmDelete.value = null
   try {
-    await api.del(`/services/stack/${stack.stackId}`)
-    confirmDelete.value = null
-    await store.fetchServices()
+    await store.deleteStack(stack.stackId)
     toast.success(t('stacks.deleteSuccess'))
   } catch {
     toast.error(t('stacks.deleteFailed'))
-  } finally {
-    actionLoading.value = null
   }
 }
 

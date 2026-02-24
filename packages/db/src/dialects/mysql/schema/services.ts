@@ -32,6 +32,7 @@ export const services = mysqlTable('services', {
   sslEnabled: boolean('ssl_enabled').default(true),
   status: varchar('status', { length: 255 }).default('stopped'),
   nodeConstraint: varchar('node_constraint', { length: 255 }),
+  region: varchar('region', { length: 100 }),
   placementConstraints: json('placement_constraints').$default(() => ([])),
   updateParallelism: int('update_parallelism').default(1),
   updateDelay: varchar('update_delay', { length: 255 }).default('10s'),

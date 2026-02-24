@@ -11,6 +11,9 @@ import { nodes } from './nodes';
 
 export const storageClusters = sqliteTable('storage_clusters', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text('name').default('default').notNull(),
+  region: text('region'),
+  scope: text('scope').default('regional').notNull(),
   provider: text('provider').default('local').notNull(),
   objectProvider: text('object_provider').default('local').notNull(),
   status: text('status').default('inactive').notNull(),
@@ -57,6 +60,7 @@ export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
 
 export const storageVolumes = sqliteTable('storage_volumes', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  clusterId: text('cluster_id').references(() => storageClusters.id, { onDelete: 'set null' }),
   accountId: text('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
   displayName: text('display_name'),
@@ -76,6 +80,10 @@ export const storageVolumes = sqliteTable('storage_volumes', {
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({
+  cluster: one(storageClusters, {
+    fields: [storageVolumes.clusterId],
+    references: [storageClusters.id],
+  }),
   account: one(accounts, {
     fields: [storageVolumes.accountId],
     references: [accounts.id],

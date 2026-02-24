@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Server, Plus, RefreshCw, Loader2, Cpu, MemoryStick } from 'lucide-vue-next'
+import { Server, Plus, RefreshCw, Loader2, Cpu, MemoryStick, MapPin, Pencil, Check, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -13,10 +13,15 @@ const showAdd = ref(false)
 const addHostname = ref('')
 const addIp = ref('')
 const addRole = ref<'worker' | 'manager'>('worker')
+const addLocation = ref('')
 const adding = ref(false)
 const error = ref('')
 const joinToken = ref('')
 const nodeMetrics = ref<Record<string, { cpuCount: number; memTotal: number; memUsed: number; memFree: number; memoryPercent: number; containerCount: number }>>({})
+const locations = ref<Array<{ key: string; label: string }>>([])
+const editingRegionNodeId = ref<string | null>(null)
+const editingRegionValue = ref('')
+const savingRegion = ref(false)
 
 function getHealthStatus(node: any): 'green' | 'yellow' | 'red' {
   if (!node.lastHeartbeat) return 'red'
@@ -51,6 +56,13 @@ async function fetchNodeMetrics(nodeId: string) {
   } catch {}
 }
 
+async function fetchLocations() {
+  try {
+    const data = await api.get<any[]>('/billing/admin/locations')
+    locations.value = data.map((l: any) => ({ key: l.locationKey, label: l.label }))
+  } catch {}
+}
+
 async function fetchNodes() {
   loading.value = true
   try {
@@ -66,6 +78,31 @@ async function fetchNodes() {
   }
 }
 
+function startEditRegion(node: any) {
+  editingRegionNodeId.value = node.id
+  editingRegionValue.value = node.location || ''
+}
+
+function cancelEditRegion() {
+  editingRegionNodeId.value = null
+  editingRegionValue.value = ''
+}
+
+async function saveRegion(nodeId: string) {
+  savingRegion.value = true
+  try {
+    await api.patch(`/nodes/${nodeId}`, {
+      location: editingRegionValue.value || null,
+    })
+    editingRegionNodeId.value = null
+    await fetchNodes()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to update region'
+  } finally {
+    savingRegion.value = false
+  }
+}
+
 async function addNode() {
   if (!addHostname.value || !addIp.value) return
   adding.value = true
@@ -76,12 +113,14 @@ async function addNode() {
       hostname: addHostname.value,
       ipAddress: addIp.value,
       role: addRole.value,
+      location: addLocation.value || null,
     })
     if (result.joinToken) {
       joinToken.value = result.joinToken
     }
     addHostname.value = ''
     addIp.value = ''
+    addLocation.value = ''
     showAdd.value = false
     await fetchNodes()
   } catch (err: any) {
@@ -122,6 +161,7 @@ async function removeNode(nodeId: string) {
 
 onMounted(() => {
   fetchNodes()
+  fetchLocations()
 })
 </script>
 
@@ -180,6 +220,13 @@ onMounted(() => {
             <option value="manager">Manager</option>
           </select>
         </div>
+        <div class="w-44">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Region</label>
+          <select v-model="addLocation" class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
+            <option value="">None</option>
+            <option v-for="loc in locations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
+          </select>
+        </div>
         <button type="submit" :disabled="adding" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
           {{ adding ? t('super.nodes.adding') : t('common.add') }}
         </button>
@@ -201,6 +248,7 @@ onMounted(() => {
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.hostname') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.ip') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.role') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Region</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.status') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.resources') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.docker') }}</th>
@@ -209,7 +257,7 @@ onMounted(() => {
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="nodes.length === 0">
-              <td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+              <td colspan="8" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 {{ t('super.nodes.noNodesDesc') }}
               </td>
             </tr>
@@ -239,6 +287,34 @@ onMounted(() => {
                 >
                   {{ node.role }}
                 </span>
+              </td>
+              <td class="px-6 py-4 text-sm">
+                <!-- Inline region editing -->
+                <div v-if="editingRegionNodeId === node.id" class="flex items-center gap-1.5">
+                  <select
+                    v-model="editingRegionValue"
+                    class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  >
+                    <option value="">None</option>
+                    <option v-for="loc in locations" :key="loc.key" :value="loc.key">{{ loc.label }}</option>
+                  </select>
+                  <button @click="saveRegion(node.id)" :disabled="savingRegion" class="p-0.5 text-green-600 dark:text-green-400 hover:text-green-700">
+                    <Check class="w-3.5 h-3.5" />
+                  </button>
+                  <button @click="cancelEditRegion()" class="p-0.5 text-gray-400 hover:text-gray-600">
+                    <X class="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div v-else class="flex items-center gap-1.5 group">
+                  <span v-if="node.location" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                    <MapPin class="w-3 h-3" />
+                    {{ locations.find(l => l.key === node.location)?.label || node.location }}
+                  </span>
+                  <span v-else class="text-xs text-gray-400 dark:text-gray-500">--</span>
+                  <button @click="startEditRegion(node)" class="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Pencil class="w-3 h-3" />
+                  </button>
+                </div>
               </td>
               <td class="px-6 py-4 text-sm">
                 <span class="flex items-center gap-1.5">

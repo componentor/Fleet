@@ -83,6 +83,8 @@ export const domainTldPricing = pgTable('domain_tld_pricing', {
   providerRenewalPrice: integer('provider_renewal_price').notNull(),
   markupType: varchar('markup_type', { length: 20 }).notNull().default('percentage'),
   markupValue: integer('markup_value').notNull().default(20),
+  renewalMarkupType: varchar('renewal_markup_type', { length: 20 }),
+  renewalMarkupValue: integer('renewal_markup_value'),
   sellRegistrationPrice: integer('sell_registration_price').notNull(),
   sellRenewalPrice: integer('sell_renewal_price').notNull(),
   enabled: boolean('enabled').default(true),

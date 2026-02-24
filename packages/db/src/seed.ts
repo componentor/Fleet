@@ -28,67 +28,87 @@ const seeders: SeederFn[] = [
     version: '0.1.0',
     description: 'Initial default email templates',
     run: async (db, schema, dialect) => {
+      // Styled email template helpers (matches email.service.ts DEFAULT_TEMPLATES)
+      const sH1 = 'style="margin:0 0 8px;font-size:24px;font-weight:700;color:#111827;line-height:1.3;"';
+      const sSub = 'style="margin:0 0 24px;font-size:15px;color:#6b7280;line-height:1.5;"';
+      const sP = 'style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.6;"';
+      const sMuted = 'style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5;"';
+      const sLabel = 'style="margin:0 0 4px;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;"';
+      const seedBtn = (href: string, text: string) =>
+        `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="border-radius:8px;background-color:#4f46e5;"><a href="${href}" style="display:inline-block;padding:12px 28px;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;">${text}</a></td></tr></table>`;
+      const seedInfoBox = (color: string, title: string) => {
+        const c: Record<string, { bg: string; border: string; text: string }> = {
+          green: { bg: '#f0fdf4', border: '#22c55e', text: '#166534' },
+          red: { bg: '#fef2f2', border: '#ef4444', text: '#991b1b' },
+          amber: { bg: '#fffbeb', border: '#f59e0b', text: '#92400e' },
+        };
+        const s = c[color] ?? c['red']!;
+        return `<div style="padding:16px 20px;background-color:${s.bg};border-radius:8px;border-left:4px solid ${s.border};margin:0 0 24px;"><p style="margin:0;font-size:14px;font-weight:600;color:${s.text};">${title}</p></div>`;
+      };
+      const seedMetaBox = (label: string, value: string, bg = '#f9fafb', border = '#e5e7eb', color = '#111827') =>
+        `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;"><tr><td style="padding:12px 16px;background-color:${bg};border-radius:8px;border:1px solid ${border};"><p ${sLabel}>${label}</p><p style="margin:0;font-size:14px;color:${color};font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">${value}</p></td></tr></table>`;
+
       const defaultTemplates = [
         {
           slug: 'email-verification',
           subject: 'Verify your email address',
-          bodyHtml: '<h1>Verify Your Email</h1><p>Hi {{userName}},</p><p>Please verify your email address by clicking the link below:</p><p><a href="{{verifyUrl}}">Verify Email</a></p><p>This link expires in 24 hours.</p>',
+          bodyHtml: `<h1 ${sH1}>Verify your email</h1><p ${sSub}>Confirm your email address to get started.</p><p ${sP}>Hi <strong>{{userName}}</strong>,</p><p ${sP}>Please verify your email address by clicking the button below.</p>${seedBtn('{{verifyUrl}}', 'Verify Email Address')}<p ${sMuted}>This link expires in 24 hours. If you didn't create an account, you can ignore this email.</p>`,
           variables: { userName: 'string', verifyUrl: 'string' },
           enabled: true,
         },
         {
           slug: 'welcome',
           subject: 'Welcome to {{platformName}}',
-          bodyHtml: '<h1>Welcome, {{userName}}!</h1><p>Your account has been created on {{platformName}}.</p>',
-          variables: { platformName: 'string', userName: 'string' },
+          bodyHtml: `<h1 ${sH1}>Welcome aboard!</h1><p ${sSub}>Your account is ready to go.</p><p ${sP}>Hi <strong>{{userName}}</strong>,</p><p ${sP}>Your account on <strong>{{platformName}}</strong> has been created successfully. You can start deploying services right away.</p>${seedBtn('{{loginUrl}}', 'Go to Dashboard')}<p ${sMuted}>If you have any questions, check out the documentation or contact support.</p>`,
+          variables: { platformName: 'string', userName: 'string', loginUrl: 'string' },
           enabled: true,
         },
         {
           slug: 'password-reset',
           subject: 'Reset your password',
-          bodyHtml: '<h1>Password Reset</h1><p>Click the link below to reset your password:</p><p><a href="{{resetUrl}}">Reset Password</a></p><p>This link expires in 1 hour.</p>',
-          variables: { resetUrl: 'string', userName: 'string' },
+          bodyHtml: `<h1 ${sH1}>Reset your password</h1><p ${sSub}>We received a request to reset your password.</p><p ${sP}>Hi <strong>{{userName}}</strong>,</p><p ${sP}>Click the button below to choose a new password. This link will expire in <strong>{{expiresIn}}</strong>.</p>${seedBtn('{{resetUrl}}', 'Reset Password')}<p ${sMuted}>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>`,
+          variables: { resetUrl: 'string', userName: 'string', expiresIn: 'string' },
           enabled: true,
         },
         {
           slug: 'invite',
-          subject: 'You\'ve been invited to {{accountName}}',
-          bodyHtml: '<h1>You\'re Invited!</h1><p>{{inviterName}} has invited you to join {{accountName}} on {{platformName}}.</p><p><a href="{{inviteUrl}}">Accept Invitation</a></p>',
-          variables: { inviterName: 'string', accountName: 'string', platformName: 'string', inviteUrl: 'string' },
+          subject: 'You have been invited to {{accountName}}',
+          bodyHtml: `<h1 ${sH1}>You're invited!</h1><p ${sSub}>Join a team on {{platformName}}.</p><p ${sP}>Hi <strong>{{userName}}</strong>,</p><p ${sP}>You've been invited to join <strong>{{accountName}}</strong> on <strong>{{platformName}}</strong>. Click below to accept the invitation and get started.</p>${seedBtn('{{inviteUrl}}', 'Accept Invitation')}<p ${sMuted}>If you don't recognize this invitation, you can ignore this email.</p>`,
+          variables: { userName: 'string', accountName: 'string', platformName: 'string', inviteUrl: 'string' },
           enabled: true,
         },
         {
           slug: 'deploy-success',
-          subject: 'Deployment successful: {{serviceName}}',
-          bodyHtml: '<h1>Deployment Succeeded</h1><p>Your service <strong>{{serviceName}}</strong> has been deployed successfully.</p><p>Image: {{imageTag}}</p>',
+          subject: 'Deployment succeeded: {{serviceName}}',
+          bodyHtml: `${seedInfoBox('green', 'Deployment Successful')}<p ${sP}>Your service <strong>{{serviceName}}</strong> has been deployed successfully.</p>${seedMetaBox('Image', '{{imageTag}}')}`,
           variables: { serviceName: 'string', imageTag: 'string' },
           enabled: true,
         },
         {
           slug: 'deploy-failed',
           subject: 'Deployment failed: {{serviceName}}',
-          bodyHtml: '<h1>Deployment Failed</h1><p>The deployment of <strong>{{serviceName}}</strong> has failed.</p><p>Error: {{errorMessage}}</p><p>Check the deployment logs for more details.</p>',
+          bodyHtml: `${seedInfoBox('red', 'Deployment Failed')}<p ${sP}>The deployment of <strong>{{serviceName}}</strong> has failed.</p>${seedMetaBox('Error', '{{errorMessage}}', '#fef2f2', '#fecaca', '#7f1d1d')}<p ${sMuted}>Check the deployment logs in your dashboard for more details.</p>`,
           variables: { serviceName: 'string', errorMessage: 'string' },
           enabled: true,
         },
         {
           slug: 'domain-expiry',
           subject: 'Domain expiring soon: {{domain}}',
-          bodyHtml: '<h1>Domain Expiry Warning</h1><p>Your domain <strong>{{domain}}</strong> expires on {{expiryDate}}.</p><p><a href="{{renewUrl}}">Renew Now</a></p>',
+          bodyHtml: `${seedInfoBox('amber', 'Domain Expiring Soon')}<p ${sP}>Your domain <strong>{{domain}}</strong> will expire on <strong>{{expiryDate}}</strong>.</p><p ${sP}>Please renew it before expiration to avoid losing access to this domain.</p>${seedBtn('{{renewUrl}}', 'Renew Domain')}`,
           variables: { domain: 'string', expiryDate: 'string', renewUrl: 'string' },
           enabled: true,
         },
         {
           slug: 'payment-failed',
           subject: 'Payment failed for your subscription',
-          bodyHtml: '<h1>Payment Failed</h1><p>We were unable to process the payment for your {{planName}} subscription.</p><p>Please update your payment method to avoid service interruption.</p><p><a href="{{billingUrl}}">Update Payment</a></p>',
+          bodyHtml: `${seedInfoBox('red', 'Payment Failed')}<p ${sP}>We were unable to process the payment for your <strong>{{planName}}</strong> subscription.</p><p ${sP}>Please update your payment method to avoid service interruption.</p>${seedBtn('{{billingUrl}}', 'Update Payment')}`,
           variables: { planName: 'string', billingUrl: 'string' },
           enabled: true,
         },
         {
           slug: 'service-down',
           subject: 'Service alert: {{serviceName}} is down',
-          bodyHtml: '<h1>Service Down</h1><p>Your service <strong>{{serviceName}}</strong> has no running containers.</p><p>Last status: {{lastStatus}}</p><p><a href="{{dashboardUrl}}">View Dashboard</a></p>',
+          bodyHtml: `${seedInfoBox('red', 'Service Down')}<p ${sP}>Your service <strong>{{serviceName}}</strong> has no running containers.</p>${seedMetaBox('Last Status', '{{lastStatus}}')}<p ${sMuted}>Check your dashboard for more details.</p>`,
           variables: { serviceName: 'string', lastStatus: 'string', dashboardUrl: 'string' },
           enabled: true,
         },

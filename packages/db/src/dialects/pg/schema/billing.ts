@@ -119,6 +119,8 @@ export const resourceLimits = pgTable('resource_limits', {
   maxBandwidthGb: integer('max_bandwidth_gb'),
   maxNfsStorageGb: integer('max_nfs_storage_gb'),
   maxContainerDiskMb: integer('max_container_disk_mb'),
+  maxTotalCpuCores: integer('max_total_cpu_cores'),
+  maxTotalMemoryMb: integer('max_total_memory_mb'),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),

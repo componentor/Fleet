@@ -20,65 +20,154 @@ export interface StorageClusterConfig {
   objectConfig: Record<string, any>;
 }
 
+export interface ClusterEntry {
+  id: string;
+  name: string;
+  region: string | null;
+  scope: string;
+  config: StorageClusterConfig;
+  volumeProvider: VolumeStorageProvider;
+  objectProvider: ObjectStorageProvider;
+}
+
 /**
- * Storage Manager — singleton orchestrator for all storage operations.
+ * Storage Manager — orchestrator for multi-cluster storage operations.
  *
- * Reads cluster config from DB (or defaults to 'local') and instantiates
- * the correct volume and object providers. All services should call
- * storageManager.volumes / storageManager.objects instead of using
- * NFS/filesystem directly.
+ * Loads all storage clusters from DB and instantiates the correct volume and
+ * object providers for each. Supports regional clusters (data stays in one
+ * geography) and global clusters (geo-replicated, slow writes, fast local reads).
+ *
+ * Backwards-compatible: `storageManager.volumes` / `storageManager.objects`
+ * return the default cluster's providers. Use `getClusterForRegion()` to
+ * resolve to the best cluster for a given region.
  */
 class StorageManager {
-  private volumeProvider!: VolumeStorageProvider;
-  private objectProvider!: ObjectStorageProvider;
+  private clusters = new Map<string, ClusterEntry>();
+  private defaultClusterId: string | null = null;
   private initialized = false;
-  private clusterConfig: StorageClusterConfig | null = null;
+
+  // ── Backwards-compatible getters (default cluster) ─────────────────────
 
   get volumes(): VolumeStorageProvider {
     if (!this.initialized) throw new Error('StorageManager not initialized');
-    return this.volumeProvider;
+    const entry = this.getDefaultCluster();
+    return entry.volumeProvider;
   }
 
   get objects(): ObjectStorageProvider {
     if (!this.initialized) throw new Error('StorageManager not initialized');
-    return this.objectProvider;
+    const entry = this.getDefaultCluster();
+    return entry.objectProvider;
   }
 
   get config(): StorageClusterConfig | null {
-    return this.clusterConfig;
+    const entry = this.defaultClusterId ? this.clusters.get(this.defaultClusterId) : undefined;
+    return entry?.config ?? null;
   }
 
   get isDistributed(): boolean {
-    return this.clusterConfig?.provider !== 'local' || this.clusterConfig?.objectProvider !== 'local';
+    return this.config?.provider !== 'local' || this.config?.objectProvider !== 'local';
   }
 
-  /** Whether the volume provider specifically is distributed (affects platform volumes). */
+  /** Whether the default volume provider is distributed (affects platform volumes). */
   get isVolumeDistributed(): boolean {
-    return !!this.clusterConfig && this.clusterConfig.provider !== 'local';
+    return !!this.config && this.config.provider !== 'local';
   }
+
+  // ── Multi-cluster accessors ────────────────────────────────────────────
+
+  getCluster(id: string): ClusterEntry | undefined {
+    return this.clusters.get(id);
+  }
+
+  getAllClusters(): ClusterEntry[] {
+    return Array.from(this.clusters.values());
+  }
+
+  /**
+   * Resolve the best cluster for a given region.
+   *
+   * Resolution order:
+   * 1. If `region` is set → find a cluster with `scope = 'regional'` and matching `region`
+   * 2. If no regional match → fall back to any `scope = 'global'` cluster
+   * 3. If nothing → fall back to `defaultClusterId`
+   */
+  getClusterForRegion(region: string | null): ClusterEntry | undefined {
+    if (region) {
+      // 1. Try regional match
+      for (const entry of this.clusters.values()) {
+        if (entry.scope === 'regional' && entry.region === region) {
+          return entry;
+        }
+      }
+    }
+
+    // 2. Try global cluster
+    for (const entry of this.clusters.values()) {
+      if (entry.scope === 'global') {
+        return entry;
+      }
+    }
+
+    // 3. Fall back to default
+    return this.defaultClusterId ? this.clusters.get(this.defaultClusterId) : undefined;
+  }
+
+  // ── Initialization ─────────────────────────────────────────────────────
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    // Load cluster config from DB
-    let cluster: any;
+    // Load all cluster configs from DB
+    let dbClusters: any[] = [];
     try {
-      cluster = await db.query.storageClusters.findFirst();
+      dbClusters = await db.query.storageClusters.findMany();
     } catch {
       // Table may not exist yet (before migration)
     }
 
-    if (cluster) {
-      this.clusterConfig = {
-        provider: cluster.provider,
-        objectProvider: cluster.objectProvider,
-        status: cluster.status,
-        replicationFactor: cluster.replicationFactor ?? 3,
-        config: (cluster.config as Record<string, any>) ?? {},
-        objectConfig: (cluster.objectConfig as Record<string, any>) ?? {},
-      };
+    if (dbClusters.length > 0) {
+      for (const cluster of dbClusters) {
+        const clusterConfig: StorageClusterConfig = {
+          provider: cluster.provider,
+          objectProvider: cluster.objectProvider,
+          status: cluster.status,
+          replicationFactor: cluster.replicationFactor ?? 3,
+          config: (cluster.config as Record<string, any>) ?? {},
+          objectConfig: (cluster.objectConfig as Record<string, any>) ?? {},
+        };
+
+        const { volumeProvider, objectProvider } = await this.loadProviders(clusterConfig);
+
+        this.clusters.set(cluster.id, {
+          id: cluster.id,
+          name: cluster.name ?? 'default',
+          region: cluster.region ?? null,
+          scope: cluster.scope ?? 'regional',
+          config: clusterConfig,
+          volumeProvider,
+          objectProvider,
+        });
+
+        logger.info(
+          {
+            clusterId: cluster.id,
+            name: cluster.name,
+            region: cluster.region,
+            scope: cluster.scope,
+            volumeProvider: volumeProvider.name,
+            objectProvider: objectProvider.name,
+          },
+          'Storage cluster initialized',
+        );
+      }
+
+      // Default = first cluster (backwards compatible)
+      this.defaultClusterId = dbClusters[0].id;
     } else {
-      this.clusterConfig = {
+      // No clusters in DB — create an in-memory local fallback
+      const fallbackId = '__local__';
+      const fallbackConfig: StorageClusterConfig = {
         provider: 'local',
         objectProvider: 'local',
         status: 'healthy',
@@ -86,22 +175,82 @@ class StorageManager {
         config: {},
         objectConfig: {},
       };
+
+      const volumeProvider = new LocalVolumeProvider();
+      const objectProvider = new LocalObjectProvider();
+      await volumeProvider.initialize();
+      await objectProvider.initialize();
+
+      for (const bucket of Object.values(STORAGE_BUCKETS)) {
+        await objectProvider.ensureBucket(bucket).catch((err) => {
+          logger.warn({ err, bucket }, 'Failed to ensure bucket');
+        });
+      }
+
+      this.clusters.set(fallbackId, {
+        id: fallbackId,
+        name: 'default',
+        region: null,
+        scope: 'regional',
+        config: fallbackConfig,
+        volumeProvider,
+        objectProvider,
+      });
+
+      this.defaultClusterId = fallbackId;
     }
 
-    // Instantiate providers based on config
-    await this.loadProviders();
-
     this.initialized = true;
+    const defaultEntry = this.clusters.get(this.defaultClusterId!);
     logger.info(
-      { volumeProvider: this.volumeProvider.name, objectProvider: this.objectProvider.name },
+      {
+        clusterCount: this.clusters.size,
+        defaultCluster: this.defaultClusterId,
+        volumeProvider: defaultEntry?.volumeProvider.name,
+        objectProvider: defaultEntry?.objectProvider.name,
+      },
       'Storage manager initialized',
     );
   }
 
-  /** Re-initialize after a config change (e.g. switching providers). */
+  /** Re-initialize all clusters after a config change. */
   async reload(): Promise<void> {
+    this.clusters.clear();
+    this.defaultClusterId = null;
     this.initialized = false;
     await this.initialize();
+  }
+
+  /** Re-initialize a single cluster after its config changes. */
+  async reloadCluster(clusterId: string): Promise<void> {
+    const cluster = await db.query.storageClusters.findFirst({
+      where: eq(storageClusters.id, clusterId),
+    });
+    if (!cluster) {
+      this.clusters.delete(clusterId);
+      return;
+    }
+
+    const clusterConfig: StorageClusterConfig = {
+      provider: cluster.provider,
+      objectProvider: cluster.objectProvider,
+      status: cluster.status,
+      replicationFactor: cluster.replicationFactor ?? 3,
+      config: (cluster.config as Record<string, any>) ?? {},
+      objectConfig: (cluster.objectConfig as Record<string, any>) ?? {},
+    };
+
+    const { volumeProvider, objectProvider } = await this.loadProviders(clusterConfig);
+
+    this.clusters.set(cluster.id, {
+      id: cluster.id,
+      name: cluster.name ?? 'default',
+      region: cluster.region ?? null,
+      scope: cluster.scope ?? 'regional',
+      config: clusterConfig,
+      volumeProvider,
+      objectProvider,
+    });
   }
 
   // ── Volume operations with quota enforcement ────────────────────────────
@@ -109,6 +258,7 @@ class StorageManager {
   /**
    * Create a volume with quota enforcement.
    * Checks account storage limits before creating.
+   * If `region` is provided, the volume is created on the best matching cluster.
    */
   async createVolume(
     accountId: string,
@@ -116,11 +266,14 @@ class StorageManager {
     displayName: string,
     sizeGb: number,
     nodeId?: string,
+    region?: string | null,
   ): Promise<VolumeResult> {
     // Check account storage quota
     await this.enforceStorageQuota(accountId, sizeGb);
 
-    const result = await this.volumeProvider.createVolume(name, sizeGb, nodeId);
+    // Resolve cluster
+    const cluster = this.getClusterForRegion(region ?? null) ?? this.getDefaultCluster();
+    const result = await cluster.volumeProvider.createVolume(name, sizeGb, nodeId);
 
     // Track in DB
     await db.insert(storageVolumes).values({
@@ -128,10 +281,11 @@ class StorageManager {
       name,
       displayName,
       sizeGb,
-      provider: this.volumeProvider.name,
+      clusterId: cluster.id === '__local__' ? null : cluster.id,
+      provider: cluster.volumeProvider.name,
       providerVolumeId: result.name,
       mountPath: result.path,
-      replicaCount: this.clusterConfig?.replicationFactor ?? 1,
+      replicaCount: cluster.config.replicationFactor ?? 1,
       status: 'ready',
     });
 
@@ -140,9 +294,31 @@ class StorageManager {
 
   /**
    * Delete a volume and remove its DB record.
+   * Always cleans up the DB record even if the provider fails (e.g. volume
+   * only existed as a plain Docker volume with no backing storage).
    */
   async deleteVolume(accountId: string, name: string): Promise<void> {
-    await this.volumeProvider.deleteVolume(name);
+    // Look up the volume to find its cluster
+    const dbVolume = await db.query.storageVolumes.findFirst({
+      where: and(
+        eq(storageVolumes.name, name),
+        eq(storageVolumes.accountId, accountId),
+        isNull(storageVolumes.deletedAt),
+      ),
+    });
+
+    const cluster = dbVolume?.clusterId
+      ? this.clusters.get(dbVolume.clusterId)
+      : undefined;
+    const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
+
+    try {
+      await provider.deleteVolume(name);
+    } catch (err) {
+      // Provider may fail if the volume doesn't physically exist (e.g. orphaned DB record
+      // from a template deployed without NFS). Still clean up the DB record.
+      logger.warn({ err, name }, 'Volume provider delete failed — cleaning up DB record anyway');
+    }
 
     await db.update(storageVolumes)
       .set({ deletedAt: new Date(), status: 'deleting', updatedAt: new Date() })
@@ -167,8 +343,13 @@ class StorageManager {
     // Enrich with live usage data from provider
     const results: VolumeInfo[] = [];
     for (const v of dbVolumes) {
+      const cluster = v.clusterId
+        ? this.clusters.get(v.clusterId)
+        : undefined;
+      const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
+
       try {
-        const live = await this.volumeProvider.getVolumeInfo(v.name);
+        const live = await provider.getVolumeInfo(v.name);
         results.push({
           ...live,
           replicaCount: v.replicaCount ?? 1,
@@ -225,76 +406,102 @@ class StorageManager {
   // ── Health ──────────────────────────────────────────────────────────────
 
   async getHealth(): Promise<{ volumes: StorageHealth; objects: StorageHealth }> {
-    if (!this.initialized || !this.volumeProvider || !this.objectProvider) {
+    const entry = this.defaultClusterId ? this.clusters.get(this.defaultClusterId) : undefined;
+    if (!this.initialized || !entry) {
       return {
         volumes: { status: 'error', provider: 'unknown', message: 'Storage manager not initialized' },
         objects: { status: 'error', provider: 'unknown', message: 'Storage manager not initialized' },
       };
     }
     const [volumeHealth, objectHealth] = await Promise.all([
-      this.volumeProvider.getHealth(),
-      this.objectProvider.getHealth(),
+      entry.volumeProvider.getHealth(),
+      entry.objectProvider.getHealth(),
+    ]);
+    return { volumes: volumeHealth, objects: objectHealth };
+  }
+
+  /** Get health for a specific cluster. */
+  async getClusterHealth(clusterId: string): Promise<{ volumes: StorageHealth; objects: StorageHealth } | null> {
+    const entry = this.clusters.get(clusterId);
+    if (!entry) return null;
+
+    const [volumeHealth, objectHealth] = await Promise.all([
+      entry.volumeProvider.getHealth(),
+      entry.objectProvider.getHealth(),
     ]);
     return { volumes: volumeHealth, objects: objectHealth };
   }
 
   // ── Private ─────────────────────────────────────────────────────────────
 
-  private async loadProviders(): Promise<void> {
-    const volumeType = this.clusterConfig?.provider ?? 'local';
-    const objectType = this.clusterConfig?.objectProvider ?? 'local';
+  private getDefaultCluster(): ClusterEntry {
+    const entry = this.defaultClusterId ? this.clusters.get(this.defaultClusterId) : undefined;
+    if (!entry) throw new Error('No default storage cluster available');
+    return entry;
+  }
+
+  private async loadProviders(clusterConfig: StorageClusterConfig): Promise<{
+    volumeProvider: VolumeStorageProvider;
+    objectProvider: ObjectStorageProvider;
+  }> {
+    const volumeType = clusterConfig.provider ?? 'local';
+    const objectType = clusterConfig.objectProvider ?? 'local';
 
     // Volume provider
+    let volumeProvider: VolumeStorageProvider;
     switch (volumeType) {
       case 'glusterfs': {
         const { GlusterFSVolumeProvider } = await import('./providers/glusterfs-volume.provider.js');
-        this.volumeProvider = new GlusterFSVolumeProvider(this.clusterConfig!.config);
+        volumeProvider = new GlusterFSVolumeProvider(clusterConfig.config);
         break;
       }
       case 'ceph': {
         const { CephVolumeProvider } = await import('./providers/ceph-volume.provider.js');
-        this.volumeProvider = new CephVolumeProvider(this.clusterConfig!.config);
+        volumeProvider = new CephVolumeProvider(clusterConfig.config);
         break;
       }
       case 'local':
       default:
-        this.volumeProvider = new LocalVolumeProvider();
+        volumeProvider = new LocalVolumeProvider();
         break;
     }
 
     // Object provider
+    let objectProvider: ObjectStorageProvider;
     switch (objectType) {
       case 'minio': {
         const { MinIOObjectProvider } = await import('./providers/minio-object.provider.js');
-        this.objectProvider = new MinIOObjectProvider(this.clusterConfig!.objectConfig);
+        objectProvider = new MinIOObjectProvider(clusterConfig.objectConfig);
         break;
       }
       case 's3': {
         const { S3ObjectProvider } = await import('./providers/s3-object.provider.js');
-        this.objectProvider = new S3ObjectProvider(this.clusterConfig!.objectConfig);
+        objectProvider = new S3ObjectProvider(clusterConfig.objectConfig);
         break;
       }
       case 'gcs': {
         const { GCSObjectProvider } = await import('./providers/gcs-object.provider.js');
-        this.objectProvider = new GCSObjectProvider(this.clusterConfig!.objectConfig);
+        objectProvider = new GCSObjectProvider(clusterConfig.objectConfig);
         break;
       }
       case 'local':
       default:
-        this.objectProvider = new LocalObjectProvider();
+        objectProvider = new LocalObjectProvider();
         break;
     }
 
     // Initialize providers
-    await this.volumeProvider.initialize();
-    await this.objectProvider.initialize();
+    await volumeProvider.initialize();
+    await objectProvider.initialize();
 
     // Ensure default buckets exist
     for (const bucket of Object.values(STORAGE_BUCKETS)) {
-      await this.objectProvider.ensureBucket(bucket).catch((err) => {
+      await objectProvider.ensureBucket(bucket).catch((err) => {
         logger.warn({ err, bucket }, 'Failed to ensure bucket');
       });
     }
+
+    return { volumeProvider, objectProvider };
   }
 
   private async enforceStorageQuota(accountId: string, requestedGb: number): Promise<void> {

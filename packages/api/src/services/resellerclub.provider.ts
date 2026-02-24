@@ -1,4 +1,4 @@
-import type { RegistrarProvider, DomainSearchResult, DomainContact, DomainInfo } from './registrar.service.js';
+import type { RegistrarProvider, DomainSearchResult, DomainContact, DomainInfo, TldPriceEntry } from './registrar.service.js';
 import { logger } from './logger.js';
 
 const RC_API_PROD = 'https://httpapi.com/api';
@@ -262,6 +262,33 @@ export class ResellerClubProvider implements RegistrarProvider {
       const body = await modifyRes.text();
       throw new Error(`ResellerClub setNameservers failed (${modifyRes.status}): ${body}`);
     }
+  }
+
+  async listTldPricing(): Promise<TldPriceEntry[]> {
+    const data = await this.request<Record<string, any>>('GET', '/products/reseller-cost-price.json');
+    const results: TldPriceEntry[] = [];
+
+    for (const [key, val] of Object.entries(data)) {
+      if (!key.startsWith('dot') || !val || typeof val !== 'object') continue;
+      const addNew = val.addnewdomain as Record<string, string> | undefined;
+      if (!addNew) continue;
+
+      const tld = key.slice(3); // "dotcom" → "com"
+      const regPrice = Number(addNew['1']) || 0;
+      const renewData = val.renewdomain as Record<string, string> | undefined;
+      const renPrice = Number(renewData?.['1']) || regPrice;
+
+      if (regPrice > 0) {
+        results.push({
+          tld,
+          registration: regPrice,
+          renewal: renPrice,
+          currency: 'USD',
+        });
+      }
+    }
+
+    return results;
   }
 
   async renewDomain(

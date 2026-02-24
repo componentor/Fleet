@@ -22,6 +22,17 @@ let autoRefreshInterval: ReturnType<typeof setInterval> | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)))
 
+/** Client-side filtered errors — hides resolved rows reactively when filter is active. */
+const filteredErrors = computed(() => {
+  if (resolvedFilter.value === 'false') {
+    return errors.value.filter((e) => !e.resolved)
+  }
+  if (resolvedFilter.value === 'true') {
+    return errors.value.filter((e) => e.resolved)
+  }
+  return errors.value
+})
+
 async function fetchErrors() {
   loading.value = true
   try {
@@ -210,7 +221,7 @@ onUnmounted(() => {
     <!-- Table -->
     <template v-else>
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div v-if="errors.length === 0" class="text-center py-12">
+        <div v-if="filteredErrors.length === 0" class="text-center py-12">
           <Bug class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.errors.noErrors') }}</p>
         </div>
@@ -228,7 +239,7 @@ onUnmounted(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-            <template v-for="err in errors" :key="err.id">
+            <template v-for="err in filteredErrors" :key="err.id">
               <!-- Main row -->
               <tr
                 class="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
@@ -308,7 +319,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Pagination -->
-      <div v-if="errors.length > 0" class="flex items-center justify-between mt-4">
+      <div v-if="filteredErrors.length > 0" class="flex items-center justify-between mt-4">
         <p class="text-sm text-gray-500 dark:text-gray-400">
           {{ $t('super.errors.showing', { from: (page - 1) * limit + 1, to: Math.min(page * limit, total), total }) }}
         </p>

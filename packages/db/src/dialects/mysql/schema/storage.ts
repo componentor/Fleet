@@ -15,6 +15,9 @@ import { nodes } from './nodes';
 
 export const storageClusters = mysqlTable('storage_clusters', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: varchar('name', { length: 255 }).default('default').notNull(),
+  region: varchar('region', { length: 100 }),
+  scope: varchar('scope', { length: 20 }).default('regional').notNull(),
   provider: varchar('provider', { length: 255 }).default('local').notNull(),
   objectProvider: varchar('object_provider', { length: 255 }).default('local').notNull(),
   status: varchar('status', { length: 255 }).default('inactive').notNull(),
@@ -61,6 +64,7 @@ export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
 
 export const storageVolumes = mysqlTable('storage_volumes', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  clusterId: varchar('cluster_id', { length: 36 }).references(() => storageClusters.id, { onDelete: 'set null' }),
   accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   displayName: varchar('display_name', { length: 255 }),
@@ -80,6 +84,10 @@ export const storageVolumes = mysqlTable('storage_volumes', {
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({
+  cluster: one(storageClusters, {
+    fields: [storageVolumes.clusterId],
+    references: [storageClusters.id],
+  }),
   account: one(accounts, {
     fields: [storageVolumes.accountId],
     references: [accounts.id],

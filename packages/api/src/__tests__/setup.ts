@@ -93,6 +93,7 @@ sqlite.exec(`
     ssl_enabled INTEGER DEFAULT 1,
     status TEXT DEFAULT 'stopped',
     node_constraint TEXT,
+    region TEXT,
     placement_constraints TEXT DEFAULT '[]',
     update_parallelism INTEGER DEFAULT 1,
     update_delay TEXT DEFAULT '10s',
@@ -304,6 +305,8 @@ sqlite.exec(`
     max_bandwidth_gb INTEGER,
     max_nfs_storage_gb INTEGER,
     max_container_disk_mb INTEGER,
+    max_total_cpu_cores INTEGER,
+    max_total_memory_mb INTEGER,
     updated_at INTEGER DEFAULT (unixepoch())
   );
 
@@ -439,8 +442,14 @@ sqlite.exec(`
     mem_used INTEGER NOT NULL,
     mem_free INTEGER NOT NULL,
     container_count INTEGER NOT NULL,
+    disk_total INTEGER DEFAULT 0 NOT NULL,
+    disk_used INTEGER DEFAULT 0 NOT NULL,
+    disk_free INTEGER DEFAULT 0 NOT NULL,
+    disk_type TEXT DEFAULT 'unknown' NOT NULL,
     recorded_at INTEGER DEFAULT (unixepoch())
   );
+  CREATE INDEX idx_node_metrics_node_id ON node_metrics(node_id);
+  CREATE INDEX idx_node_metrics_node_recorded ON node_metrics(node_id, recorded_at);
 
   CREATE TABLE notifications (
     id TEXT PRIMARY KEY,
@@ -490,6 +499,153 @@ sqlite.exec(`
     event_type TEXT NOT NULL,
     processed_at INTEGER DEFAULT (unixepoch()),
     payload TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE shared_domains (
+    id TEXT PRIMARY KEY,
+    domain TEXT NOT NULL UNIQUE,
+    enabled INTEGER DEFAULT 1,
+    pricing_type TEXT NOT NULL DEFAULT 'free',
+    price INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    max_per_account INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE subdomain_claims (
+    id TEXT PRIMARY KEY,
+    shared_domain_id TEXT NOT NULL REFERENCES shared_domains(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    subdomain TEXT NOT NULL,
+    service_id TEXT REFERENCES services(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    stripe_payment_id TEXT,
+    stripe_subscription_id TEXT,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+  CREATE INDEX idx_subdomain_claims_shared_domain_id ON subdomain_claims(shared_domain_id);
+  CREATE INDEX idx_subdomain_claims_account_id ON subdomain_claims(account_id);
+  CREATE UNIQUE INDEX idx_subdomain_claims_unique ON subdomain_claims(shared_domain_id, subdomain);
+
+  CREATE TABLE reseller_config (
+    id TEXT PRIMARY KEY,
+    enabled INTEGER DEFAULT 0,
+    approval_mode TEXT DEFAULT 'manual',
+    allow_sub_account_reselling INTEGER DEFAULT 0,
+    default_discount_type TEXT DEFAULT 'percentage',
+    default_discount_percent INTEGER DEFAULT 0,
+    default_discount_fixed INTEGER DEFAULT 0,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE reseller_accounts (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+    status TEXT DEFAULT 'pending',
+    stripe_connect_id TEXT,
+    connect_onboarded INTEGER DEFAULT 0,
+    discount_type TEXT,
+    discount_percent INTEGER,
+    discount_fixed INTEGER,
+    markup_type TEXT DEFAULT 'percentage',
+    markup_percent INTEGER DEFAULT 0,
+    markup_fixed INTEGER DEFAULT 0,
+    can_sub_account_resell INTEGER DEFAULT 0,
+    signup_slug TEXT UNIQUE,
+    custom_domain TEXT,
+    brand_name TEXT,
+    brand_logo_url TEXT,
+    brand_primary_color TEXT,
+    brand_description TEXT,
+    approved_at INTEGER,
+    approved_by TEXT,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+  CREATE INDEX idx_reseller_accounts_status ON reseller_accounts(status);
+
+  CREATE TABLE reseller_applications (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    message TEXT,
+    status TEXT DEFAULT 'pending',
+    reviewed_by TEXT,
+    reviewed_at INTEGER,
+    review_note TEXT,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
+  CREATE INDEX idx_reseller_applications_account_id ON reseller_applications(account_id);
+  CREATE INDEX idx_reseller_applications_status ON reseller_applications(status);
+
+  CREATE TABLE storage_clusters (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT 'default' NOT NULL,
+    region TEXT,
+    scope TEXT DEFAULT 'regional' NOT NULL,
+    provider TEXT DEFAULT 'local' NOT NULL,
+    object_provider TEXT DEFAULT 'local' NOT NULL,
+    status TEXT DEFAULT 'inactive' NOT NULL,
+    replication_factor INTEGER DEFAULT 3,
+    config TEXT DEFAULT '{}',
+    object_config TEXT DEFAULT '{}',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE storage_nodes (
+    id TEXT PRIMARY KEY,
+    cluster_id TEXT REFERENCES storage_clusters(id) ON DELETE CASCADE,
+    node_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+    hostname TEXT NOT NULL,
+    ip_address TEXT NOT NULL,
+    role TEXT DEFAULT 'storage' NOT NULL,
+    status TEXT DEFAULT 'pending' NOT NULL,
+    storage_path_root TEXT DEFAULT '/srv/fleet-storage',
+    capacity_gb INTEGER,
+    used_gb INTEGER DEFAULT 0,
+    last_health_check INTEGER,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+  CREATE INDEX storage_nodes_cluster_idx ON storage_nodes(cluster_id);
+  CREATE INDEX idx_storage_nodes_last_health_check ON storage_nodes(last_health_check);
+
+  CREATE TABLE storage_volumes (
+    id TEXT PRIMARY KEY,
+    cluster_id TEXT REFERENCES storage_clusters(id) ON DELETE SET NULL,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    display_name TEXT,
+    size_gb INTEGER NOT NULL,
+    used_gb INTEGER DEFAULT 0,
+    provider TEXT DEFAULT 'local' NOT NULL,
+    provider_volume_id TEXT,
+    mount_path TEXT,
+    replica_count INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'creating' NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    deleted_at INTEGER
+  );
+  CREATE INDEX storage_volumes_account_idx ON storage_volumes(account_id);
+  CREATE INDEX idx_storage_volumes_deleted_at ON storage_volumes(deleted_at);
+
+  CREATE TABLE storage_migrations (
+    id TEXT PRIMARY KEY,
+    from_provider TEXT NOT NULL,
+    to_provider TEXT NOT NULL,
+    status TEXT DEFAULT 'pending' NOT NULL,
+    progress INTEGER DEFAULT 0,
+    total_bytes INTEGER,
+    migrated_bytes INTEGER DEFAULT 0,
+    current_item TEXT,
+    log TEXT,
+    started_at INTEGER,
+    completed_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch())
   );
 `);
@@ -1005,6 +1161,23 @@ vi.mock('@fleet/db', () => ({
   apiKeysRelations: sqliteSchema.apiKeysRelations,
   errorLog: (sqliteSchema as any).errorLog,
   webhookEvents: (sqliteSchema as any).webhookEvents,
+  sharedDomains: sqliteSchema.sharedDomains,
+  subdomainClaims: sqliteSchema.subdomainClaims,
+  sharedDomainsRelations: sqliteSchema.sharedDomainsRelations,
+  subdomainClaimsRelations: (sqliteSchema as any).subdomainClaimsRelations,
+  resellerConfig: (sqliteSchema as any).resellerConfig,
+  resellerAccounts: (sqliteSchema as any).resellerAccounts,
+  resellerApplications: (sqliteSchema as any).resellerApplications,
+  resellerAccountsRelations: (sqliteSchema as any).resellerAccountsRelations,
+  resellerApplicationsRelations: (sqliteSchema as any).resellerApplicationsRelations,
+  storageClusters: sqliteSchema.storageClusters,
+  storageNodes: sqliteSchema.storageNodes,
+  storageVolumes: sqliteSchema.storageVolumes,
+  storageMigrations: sqliteSchema.storageMigrations,
+  storageClustersRelations: sqliteSchema.storageClustersRelations,
+  storageNodesRelations: sqliteSchema.storageNodesRelations,
+  storageVolumesRelations: sqliteSchema.storageVolumesRelations,
+  storageMigrationsRelations: sqliteSchema.storageMigrationsRelations,
 
   // Helpers
   insertReturning,
@@ -1072,10 +1245,19 @@ const allTableNames = [
   'domain_tld_pricing',
   'domain_registrations',
   'domain_registrars',
+  'subdomain_claims',
+  'shared_domains',
   'dns_records',
   'dns_zones',
   'deployments',
   'services',
+  'reseller_applications',
+  'reseller_accounts',
+  'reseller_config',
+  'storage_migrations',
+  'storage_volumes',
+  'storage_nodes',
+  'storage_clusters',
   'oauth_providers',
   'user_accounts',
   'users',

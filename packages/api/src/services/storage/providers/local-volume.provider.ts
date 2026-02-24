@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, access, constants } from 'node:fs/promises';
+import { logger } from '../../logger.js';
 import type {
   VolumeStorageProvider,
   VolumeInfo,
@@ -23,19 +24,41 @@ function validateVolumeName(name: string): void {
 }
 
 /**
- * Local volume provider — uses the host filesystem with optional NFS exports.
- * This is the default provider for dev and single-node setups.
- * Wraps the existing NFS service logic.
+ * Local volume provider — uses plain Docker volumes by default.
+ * When NFS is available (exportfs + /srv/nfs exists), volumes are also
+ * exported via NFS for multi-node access. Without NFS, volumes are
+ * Docker-managed local volumes (suitable for dev and single-node setups).
  */
 export class LocalVolumeProvider implements VolumeStorageProvider {
   readonly name = 'local';
+  private nfsAvailable = false;
 
   async initialize(): Promise<void> {
-    await mkdir(NFS_BASE_PATH, { recursive: true }).catch(() => {});
+    // Detect whether NFS is actually available on this host
+    this.nfsAvailable = await this.detectNfs();
+    if (this.nfsAvailable) {
+      await mkdir(NFS_BASE_PATH, { recursive: true }).catch(() => {});
+      logger.info('Local volume provider initialized with NFS support');
+    } else {
+      logger.info('Local volume provider initialized — NFS not available, using plain Docker volumes');
+    }
   }
 
-  async createVolume(name: string, sizeGb: number, nodeId?: string): Promise<VolumeResult> {
+  async createVolume(name: string, _sizeGb: number, _nodeId?: string): Promise<VolumeResult> {
     validateVolumeName(name);
+
+    if (!this.nfsAvailable) {
+      // No NFS — volumes are plain Docker named volumes managed by the Docker daemon.
+      // No host directory or NFS export needed.
+      return {
+        name,
+        path: name,
+        driver: 'local',
+        driverOptions: {},
+      };
+    }
+
+    // NFS available — create host directory and export
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
     await execFile('mkdir', ['-p', volumePath]);
@@ -60,6 +83,9 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
 
   async deleteVolume(name: string): Promise<void> {
     validateVolumeName(name);
+
+    if (!this.nfsAvailable) return;
+
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
     // Remove from NFS exports
@@ -76,6 +102,8 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
   }
 
   async listVolumes(): Promise<VolumeInfo[]> {
+    if (!this.nfsAvailable) return [];
+
     try {
       const { stdout } = await execFile('ls', ['-1', NFS_BASE_PATH]);
       const dirs = stdout.trim().split('\n').filter(Boolean);
@@ -97,6 +125,19 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
 
   async getVolumeInfo(name: string): Promise<VolumeInfo> {
     validateVolumeName(name);
+
+    if (!this.nfsAvailable) {
+      return {
+        name,
+        path: name,
+        sizeGb: 0,
+        usedGb: 0,
+        availableGb: 0,
+        replicaCount: 1,
+        status: 'ready',
+      };
+    }
+
     const volumePath = `${NFS_BASE_PATH}/${name}`;
 
     const { stdout } = await execFile('df', ['-BG', '--output=size,used,avail', volumePath]);
@@ -131,8 +172,12 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
     return {};
   }
 
+  /**
+   * Returns true only when NFS is available and volumes can be shared across nodes.
+   * When false, Docker uses plain named volumes (single-node only).
+   */
   isReady(): boolean {
-    return true;
+    return this.nfsAvailable;
   }
 
   getPrerequisites(): StoragePrerequisite[] {
@@ -140,11 +185,28 @@ export class LocalVolumeProvider implements VolumeStorageProvider {
   }
 
   async getHealth(): Promise<StorageHealth> {
+    if (!this.nfsAvailable) {
+      return { status: 'healthy', provider: 'local', message: 'Using plain Docker volumes (NFS not configured)' };
+    }
+
     try {
       await execFile('ls', [NFS_BASE_PATH]);
-      return { status: 'healthy', provider: 'local', message: 'Local filesystem accessible' };
+      return { status: 'healthy', provider: 'local', message: 'NFS storage accessible' };
     } catch {
-      return { status: 'error', provider: 'local', message: 'Local storage path not accessible' };
+      return { status: 'error', provider: 'local', message: 'NFS storage path not accessible' };
+    }
+  }
+
+  /** Detect whether NFS server tools are available on the host. */
+  private async detectNfs(): Promise<boolean> {
+    try {
+      // Check if NFS base path exists (or is at least writable)
+      await access(NFS_BASE_PATH, constants.W_OK);
+      // Check if exportfs is available (NFS server installed)
+      await execFile('which', ['exportfs']);
+      return true;
+    } catch {
+      return false;
     }
   }
 }

@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, storageVolumes, eq, and, isNull } from '@fleet/db';
+import { db, storageVolumes, eq, and, or, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { storageManager } from '../services/storage/storage-manager.js';
@@ -159,10 +159,14 @@ storage.openapi(getVolumeRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Look up volume in DB by displayName + accountId (authoritative ownership check)
+  // Look up volume in DB by id, name, or displayName (dashboard may pass any of these)
   const dbVolume = await db.query.storageVolumes.findFirst({
     where: and(
-      eq(storageVolumes.displayName, volumeId),
+      or(
+        eq(storageVolumes.id, volumeId),
+        eq(storageVolumes.name, volumeId),
+        eq(storageVolumes.displayName, volumeId),
+      ),
       eq(storageVolumes.accountId, accountId),
       isNull(storageVolumes.deletedAt),
     ),
@@ -173,7 +177,9 @@ storage.openapi(getVolumeRoute, (async (c: any) => {
   }
 
   try {
-    const volume = await storageManager.volumes.getVolumeInfo(dbVolume.name);
+    const cluster = dbVolume.clusterId ? storageManager.getCluster(dbVolume.clusterId) : undefined;
+    const provider = cluster?.volumeProvider ?? storageManager.volumes;
+    const volume = await provider.getVolumeInfo(dbVolume.name);
     return c.json(volume);
   } catch (err) {
     logger.error({ err }, 'Failed to get volume info');
@@ -215,10 +221,14 @@ storage.openapi(deleteVolumeRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  // Look up volume in DB by displayName + accountId (authoritative ownership check)
+  // Look up volume in DB by id, name, or displayName (dashboard may pass any of these)
   const dbVolume = await db.query.storageVolumes.findFirst({
     where: and(
-      eq(storageVolumes.displayName, volumeId),
+      or(
+        eq(storageVolumes.id, volumeId),
+        eq(storageVolumes.name, volumeId),
+        eq(storageVolumes.displayName, volumeId),
+      ),
       eq(storageVolumes.accountId, accountId),
       isNull(storageVolumes.deletedAt),
     ),

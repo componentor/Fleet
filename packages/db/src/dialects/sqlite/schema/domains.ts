@@ -80,6 +80,8 @@ export const domainTldPricing = sqliteTable('domain_tld_pricing', {
   providerRenewalPrice: integer('provider_renewal_price').notNull(),
   markupType: text('markup_type').notNull().default('percentage'),
   markupValue: integer('markup_value').notNull().default(20),
+  renewalMarkupType: text('renewal_markup_type'),
+  renewalMarkupValue: integer('renewal_markup_value'),
   sellRegistrationPrice: integer('sell_registration_price').notNull(),
   sellRenewalPrice: integer('sell_renewal_price').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).default(true),

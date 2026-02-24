@@ -32,6 +32,7 @@ export const services = pgTable('services', {
   sslEnabled: boolean('ssl_enabled').default(true),
   status: varchar('status').default('stopped'),
   nodeConstraint: varchar('node_constraint'),
+  region: varchar('region'),
   placementConstraints: jsonb('placement_constraints').default([]),
   updateParallelism: integer('update_parallelism').default(1),
   updateDelay: varchar('update_delay').default('10s'),

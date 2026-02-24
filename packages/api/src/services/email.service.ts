@@ -110,6 +110,71 @@ class ResendProvider implements EmailProvider {
   }
 }
 
+// ── Shared email layout ────────────────────────────────────────────
+// Wraps template body content in a responsive, styled email shell.
+// Uses {{__body__}} as the inner content placeholder.
+const EMAIL_LAYOUT = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Email</title></head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f3f4f6;">
+<tr><td align="center" style="padding:48px 24px;">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08),0 4px 12px rgba(0,0,0,0.04);">
+<tr><td style="padding:40px 48px 36px 48px;">
+{{__body__}}
+</td></tr>
+</table>
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+<tr><td style="padding:24px 48px;text-align:center;">
+<p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">This is an automated message. If you didn't expect this email, you can safely ignore it.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+/** Wrap body content in the email layout (skip if body is already a full HTML document) */
+function wrapInEmailLayout(bodyHtml: string): string {
+  const trimmed = bodyHtml.trimStart().toLowerCase();
+  if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
+    return bodyHtml;
+  }
+  return EMAIL_LAYOUT.replace('{{__body__}}', bodyHtml);
+}
+
+// ── Reusable HTML snippets for styled templates ────────────────────
+const S = {
+  h1: 'style="margin:0 0 8px;font-size:24px;font-weight:700;color:#111827;line-height:1.3;"',
+  sub: 'style="margin:0 0 24px;font-size:15px;color:#6b7280;line-height:1.5;"',
+  p: 'style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.6;"',
+  muted: 'style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5;"',
+  mono: `style="margin:0;font-size:14px;color:#111827;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;"`,
+  label: 'style="margin:0 0 4px;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;"',
+} as const;
+
+function btn(href: string, text: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="border-radius:8px;background-color:#4f46e5;"><a href="${href}" style="display:inline-block;padding:12px 28px;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;">${text}</a></td></tr></table>`;
+}
+
+function infoBox(color: 'green' | 'red' | 'amber' | 'blue', title: string): string {
+  const colors = {
+    green: { bg: '#f0fdf4', border: '#22c55e', text: '#166534' },
+    red:   { bg: '#fef2f2', border: '#ef4444', text: '#991b1b' },
+    amber: { bg: '#fffbeb', border: '#f59e0b', text: '#92400e' },
+    blue:  { bg: '#f0f9ff', border: '#3b82f6', text: '#1e40af' },
+  };
+  const c = colors[color];
+  return `<div style="padding:16px 20px;background-color:${c.bg};border-radius:8px;border-left:4px solid ${c.border};margin:0 0 24px;"><p style="margin:0;font-size:14px;font-weight:600;color:${c.text};">${title}</p></div>`;
+}
+
+function metaBox(label: string, value: string, opts?: { bg?: string; border?: string; monoColor?: string }): string {
+  const bg = opts?.bg ?? '#f9fafb';
+  const border = opts?.border ?? '#e5e7eb';
+  const monoColor = opts?.monoColor ?? '#111827';
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;"><tr><td style="padding:12px 16px;background-color:${bg};border-radius:8px;border:1px solid ${border};"><p ${S.label}>${label}</p><p style="margin:0;font-size:14px;color:${monoColor};font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">${value}</p></td></tr></table>`;
+}
+
 // Default email templates that ship with the platform
 const DEFAULT_TEMPLATES: Record<
   string,
@@ -117,101 +182,110 @@ const DEFAULT_TEMPLATES: Record<
 > = {
   'email-verification': {
     subject: 'Verify your email address',
-    bodyHtml: `<h1>Verify Your Email</h1>
-<p>Hi {{userName}},</p>
-<p>Please verify your email address by clicking the link below:</p>
-<p><a href="{{verifyUrl}}">Verify Email</a></p>
-<p>This link expires in 24 hours.</p>`,
+    bodyHtml: `<h1 ${S.h1}>Verify your email</h1>
+<p ${S.sub}>Confirm your email address to get started.</p>
+<p ${S.p}>Hi <strong>{{userName}}</strong>,</p>
+<p ${S.p}>Please verify your email address by clicking the button below.</p>
+${btn('{{verifyUrl}}', 'Verify Email Address')}
+<p ${S.muted}>This link expires in 24 hours. If you didn't create an account, you can ignore this email.</p>`,
     variables: ['userName', 'verifyUrl'],
   },
   'welcome': {
     subject: 'Welcome to {{platformName}}',
-    bodyHtml: `<h1>Welcome, {{userName}}!</h1>
-<p>Your account on <strong>{{platformName}}</strong> has been created successfully.</p>
-<p>You can log in at <a href="{{loginUrl}}">{{loginUrl}}</a>.</p>`,
+    bodyHtml: `<h1 ${S.h1}>Welcome aboard!</h1>
+<p ${S.sub}>Your account is ready to go.</p>
+<p ${S.p}>Hi <strong>{{userName}}</strong>,</p>
+<p ${S.p}>Your account on <strong>{{platformName}}</strong> has been created successfully. You can start deploying services right away.</p>
+${btn('{{loginUrl}}', 'Go to Dashboard')}
+<p ${S.muted}>If you have any questions, check out the documentation or contact support.</p>`,
     variables: ['userName', 'platformName', 'loginUrl'],
   },
   'password-reset': {
     subject: 'Reset your password',
-    bodyHtml: `<h1>Password Reset</h1>
-<p>Hi {{userName}},</p>
-<p>Click the link below to reset your password:</p>
-<p><a href="{{resetUrl}}">{{resetUrl}}</a></p>
-<p>This link expires in {{expiresIn}}.</p>`,
+    bodyHtml: `<h1 ${S.h1}>Reset your password</h1>
+<p ${S.sub}>We received a request to reset your password.</p>
+<p ${S.p}>Hi <strong>{{userName}}</strong>,</p>
+<p ${S.p}>Click the button below to choose a new password. This link will expire in <strong>{{expiresIn}}</strong>.</p>
+${btn('{{resetUrl}}', 'Reset Password')}
+<p ${S.muted}>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>`,
     variables: ['userName', 'resetUrl', 'expiresIn'],
   },
   'invite': {
     subject: 'You have been invited to {{accountName}}',
-    bodyHtml: `<h1>Account Invitation</h1>
-<p>Hi {{userName}},</p>
-<p>You have been invited to join <strong>{{accountName}}</strong> on {{platformName}}.</p>
-<p>Click below to accept the invitation:</p>
-<p><a href="{{inviteUrl}}">Accept Invitation</a></p>`,
+    bodyHtml: `<h1 ${S.h1}>You're invited!</h1>
+<p ${S.sub}>Join a team on {{platformName}}.</p>
+<p ${S.p}>Hi <strong>{{userName}}</strong>,</p>
+<p ${S.p}>You've been invited to join <strong>{{accountName}}</strong> on <strong>{{platformName}}</strong>. Click below to accept the invitation and get started.</p>
+${btn('{{inviteUrl}}', 'Accept Invitation')}
+<p ${S.muted}>If you don't recognize this invitation, you can ignore this email.</p>`,
     variables: ['userName', 'accountName', 'platformName', 'inviteUrl'],
   },
   'deploy-success': {
     subject: 'Deployment succeeded: {{serviceName}}',
-    bodyHtml: `<h1>Deployment Successful</h1>
-<p>Your service <strong>{{serviceName}}</strong> has been deployed successfully.</p>
-<p>Image: {{imageTag}}</p>`,
+    bodyHtml: `${infoBox('green', 'Deployment Successful')}
+<p ${S.p}>Your service <strong>{{serviceName}}</strong> has been deployed successfully.</p>
+${metaBox('Image', '{{imageTag}}')}`,
     variables: ['serviceName', 'imageTag'],
   },
   'deploy-failed': {
     subject: 'Deployment failed: {{serviceName}}',
-    bodyHtml: `<h1>Deployment Failed</h1>
-<p>The deployment of <strong>{{serviceName}}</strong> has failed.</p>
-<p>Error: {{errorMessage}}</p>
-<p>Please check the deployment logs for more details.</p>`,
+    bodyHtml: `${infoBox('red', 'Deployment Failed')}
+<p ${S.p}>The deployment of <strong>{{serviceName}}</strong> has failed.</p>
+${metaBox('Error', '{{errorMessage}}', { bg: '#fef2f2', border: '#fecaca', monoColor: '#7f1d1d' })}
+<p ${S.muted}>Check the deployment logs in your dashboard for more details.</p>`,
     variables: ['serviceName', 'errorMessage'],
   },
   'domain-expiry': {
     subject: 'Domain expiring soon: {{domain}}',
-    bodyHtml: `<h1>Domain Expiration Notice</h1>
-<p>Your domain <strong>{{domain}}</strong> will expire on <strong>{{expiryDate}}</strong>.</p>
-<p>Please renew it before expiration to avoid losing it.</p>
-<p><a href="{{renewUrl}}">Renew Now</a></p>`,
+    bodyHtml: `${infoBox('amber', 'Domain Expiring Soon')}
+<p ${S.p}>Your domain <strong>{{domain}}</strong> will expire on <strong>{{expiryDate}}</strong>.</p>
+<p ${S.p}>Please renew it before expiration to avoid losing access to this domain.</p>
+${btn('{{renewUrl}}', 'Renew Domain')}`,
     variables: ['domain', 'expiryDate', 'renewUrl'],
   },
   'domain-renewal-upcoming': {
     subject: 'Upcoming auto-renewal: {{domain}}',
-    bodyHtml: `<h1>Domain Auto-Renewal Notice</h1>
-<p>Your domain <strong>{{domain}}</strong> will auto-renew on <strong>{{chargeDate}}</strong>.</p>
-<p>You will be charged <strong>{{amount}}</strong> for a 1-year renewal.</p>
-<p>If you do not wish to renew, disable auto-renewal before the charge date.</p>
-<p><a href="{{manageUrl}}">Manage Domain</a></p>`,
+    bodyHtml: `<h1 ${S.h1}>Upcoming auto-renewal</h1>
+<p ${S.sub}>Your domain will renew automatically.</p>
+<p ${S.p}>Your domain <strong>{{domain}}</strong> will auto-renew on <strong>{{chargeDate}}</strong>.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;"><tr><td style="padding:12px 16px;background-color:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><p ${S.label}>Renewal Amount</p><p style="margin:0;font-size:20px;font-weight:700;color:#111827;">{{amount}}</p><p style="margin:4px 0 0;font-size:12px;color:#9ca3af;">for 1-year renewal</p></td></tr></table>
+<p ${S.p}>If you do not wish to renew, disable auto-renewal before the charge date.</p>
+${btn('{{manageUrl}}', 'Manage Domain')}`,
     variables: ['domain', 'chargeDate', 'amount', 'manageUrl'],
   },
   'domain-renewal-charged': {
     subject: 'Domain renewal payment received: {{domain}}',
-    bodyHtml: `<h1>Domain Renewal Confirmed</h1>
-<p>Your domain <strong>{{domain}}</strong> has been renewed successfully.</p>
-<p>Amount charged: <strong>{{amount}}</strong></p>
-<p>New expiry date: <strong>{{newExpiryDate}}</strong></p>
-<p><a href="{{manageUrl}}">View Domain</a></p>`,
+    bodyHtml: `${infoBox('green', 'Domain Renewed Successfully')}
+<p ${S.p}>Your domain <strong>{{domain}}</strong> has been renewed.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;"><tr>
+<td style="padding:12px 16px;background-color:#f9fafb;border-radius:8px 0 0 8px;border:1px solid #e5e7eb;border-right:none;width:50%;"><p ${S.label}>Amount Charged</p><p style="margin:0;font-size:16px;font-weight:700;color:#111827;">{{amount}}</p></td>
+<td style="padding:12px 16px;background-color:#f9fafb;border-radius:0 8px 8px 0;border:1px solid #e5e7eb;width:50%;"><p ${S.label}>New Expiry</p><p style="margin:0;font-size:16px;font-weight:700;color:#111827;">{{newExpiryDate}}</p></td>
+</tr></table>
+${btn('{{manageUrl}}', 'View Domain')}`,
     variables: ['domain', 'amount', 'newExpiryDate', 'manageUrl'],
   },
   'domain-renewal-failed': {
     subject: 'Domain renewal payment failed: {{domain}}',
-    bodyHtml: `<h1>Domain Renewal Payment Failed</h1>
-<p>We were unable to charge your payment method for the renewal of <strong>{{domain}}</strong>.</p>
-<p>Your domain expires on <strong>{{expiryDate}}</strong>. Please update your payment method to avoid losing it.</p>
-<p><a href="{{billingUrl}}">Update Payment Method</a></p>`,
+    bodyHtml: `${infoBox('red', 'Renewal Payment Failed')}
+<p ${S.p}>We were unable to charge your payment method for the renewal of <strong>{{domain}}</strong>.</p>
+<p ${S.p}>Your domain expires on <strong>{{expiryDate}}</strong>. Please update your payment method to avoid losing it.</p>
+${btn('{{billingUrl}}', 'Update Payment Method')}`,
     variables: ['domain', 'expiryDate', 'billingUrl'],
   },
   'payment-failed': {
     subject: 'Payment failed for your subscription',
-    bodyHtml: `<h1>Payment Failed</h1>
-<p>We were unable to process the payment for your <strong>{{planName}}</strong> subscription.</p>
-<p>Please update your payment method to avoid service interruption.</p>
-<p><a href="{{billingUrl}}">Update Payment</a></p>`,
+    bodyHtml: `${infoBox('red', 'Payment Failed')}
+<p ${S.p}>We were unable to process the payment for your <strong>{{planName}}</strong> subscription.</p>
+<p ${S.p}>Please update your payment method to avoid service interruption.</p>
+${btn('{{billingUrl}}', 'Update Payment')}`,
     variables: ['planName', 'billingUrl'],
   },
   'service-down': {
     subject: 'Service alert: {{serviceName}} is down',
-    bodyHtml: `<h1>Service Down</h1>
-<p>Your service <strong>{{serviceName}}</strong> has no running containers.</p>
-<p>Last status: {{lastStatus}}</p>
-<p><a href="{{dashboardUrl}}">View Dashboard</a></p>`,
+    bodyHtml: `${infoBox('red', 'Service Down')}
+<p ${S.p}>Your service <strong>{{serviceName}}</strong> has no running containers.</p>
+${metaBox('Last Status', '{{lastStatus}}')}
+${btn('{{dashboardUrl}}', 'View Dashboard')}`,
     variables: ['serviceName', 'lastStatus', 'dashboardUrl'],
   },
 };
@@ -331,9 +405,11 @@ export class EmailService {
       });
     };
 
+    const interpolatedHtml = interpolate(bodyHtml, true);
+
     return {
       subject: interpolate(subject, false), // plain text — no HTML encoding
-      html: interpolate(bodyHtml, true),
+      html: wrapInEmailLayout(interpolatedHtml),
     };
   }
 
@@ -459,6 +535,14 @@ export class EmailService {
     { subject: string; bodyHtml: string; variables: string[] }
   > {
     return DEFAULT_TEMPLATES;
+  }
+
+  /**
+   * Get the shared email layout HTML (with {{__body__}} placeholder).
+   * Used by the admin UI to preview templates with the same layout as sent emails.
+   */
+  getEmailLayout(): string {
+    return EMAIL_LAYOUT;
   }
 }
 

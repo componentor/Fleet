@@ -1,3 +1,4 @@
+import Dockerode from 'dockerode';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { logger } from '../../logger.js';
@@ -11,6 +12,7 @@ import type {
 } from '../storage-provider.js';
 
 const execFile = promisify(execFileCb);
+const docker = new Dockerode({ socketPath: '/var/run/docker.sock' });
 
 /** Validate volume name to prevent injection. */
 function validateVolumeName(name: string): void {
@@ -48,12 +50,27 @@ export interface GlusterFSConfig {
 
 /**
  * GlusterFS Volume Provider — manages replicated volumes across a GlusterFS cluster.
- * All commands use execFile (no shell) for safety.
+ *
+ * Architecture: A single GlusterFS volume (fleet-service-data) is FUSE-mounted at
+ * /mnt/fleet-volumes on every Swarm node via a systemd service. Individual service
+ * "volumes" are subdirectories under this mount, automatically replicated by GlusterFS.
+ *
+ * Docker cannot FUSE-mount GlusterFS directly ("no such device"), so Docker services
+ * use bind mounts from the host-level FUSE mount managed by systemd.
+ *
+ * The base volume creation and systemd mount setup is handled by
+ * DockerService.ensureServiceVolumeMount(), called during storage cluster setup.
  */
 export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   readonly name = 'glusterfs';
   private config: GlusterFSConfig;
   private replicaCount: number;
+
+  /** Base mount path where the GlusterFS service volume is mounted on each host. */
+  static readonly HOST_MOUNT_BASE = '/mnt/fleet-volumes';
+
+  /** Name of the single GlusterFS volume used for all service data. */
+  static readonly SERVICE_VOLUME_NAME = 'fleet-service-data';
 
   constructor(config: Record<string, any>) {
     this.config = {
@@ -65,111 +82,99 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
   }
 
   async initialize(): Promise<void> {
-    // Verify gluster CLI is available (may not be if running in Docker container)
-    let hasGlusterCli = false;
-    try {
-      await execFile('gluster', ['--version']);
-      hasGlusterCli = true;
-    } catch {
-      logger.warn('GlusterFS CLI not available locally — peer probing will be handled via SSH during volume operations');
-    }
-
     // Validate configured peers
     for (const node of this.config.nodes) {
       validateIp(node.ip);
       validateBrickPath(node.brickPath);
     }
 
-    // Probe peers if gluster CLI is available (e.g. running on a storage node itself)
+    // Verify gluster CLI is available (may not be if running in Docker container)
+    let hasGlusterCli = false;
+    try {
+      await execFile('gluster', ['--version']);
+      hasGlusterCli = true;
+    } catch {
+      logger.info('GlusterFS CLI not available locally — expected when running in Docker container');
+    }
+
+    // Probe peers if gluster CLI is available
     if (hasGlusterCli) {
       for (const node of this.config.nodes) {
         try {
           await execFile('gluster', ['peer', 'probe', node.ip]);
           logger.info({ ip: node.ip, hostname: node.hostname }, 'GlusterFS peer probed');
         } catch (err) {
-          // Peer may already be probed or is the local node
           logger.debug({ err, ip: node.ip }, 'GlusterFS peer probe skipped');
         }
       }
     }
   }
 
+  /**
+   * Create a service volume as a subdirectory under the base GlusterFS mount.
+   * GlusterFS automatically replicates the directory to all nodes.
+   */
   async createVolume(name: string, _sizeGb: number, _nodeId?: string): Promise<VolumeResult> {
     validateVolumeName(name);
 
-    if (this.config.nodes.length < this.replicaCount) {
-      throw new Error(
-        `Cannot create replica-${this.replicaCount} volume: only ${this.config.nodes.length} storage node(s) available`,
-      );
-    }
+    const hostPath = this.getHostMountPath(name);
 
-    // Build brick list: node1:/brick/vol-name node2:/brick/vol-name ...
-    const bricks = this.config.nodes
-      .slice(0, this.replicaCount)
-      .map((n) => `${n.ip}:${n.brickPath}/${name}`);
-
-    // Create the replicated volume
-    const args = [
-      'volume', 'create', name,
-      'replica', String(this.replicaCount),
-      'transport', this.config.transport ?? 'tcp',
-      ...bricks,
-      'force',
-    ];
-
-    await execFile('gluster', args);
-    logger.info({ name, replicaCount: this.replicaCount, bricks }, 'GlusterFS volume created');
-
-    // Start the volume
-    await execFile('gluster', ['volume', 'start', name]);
-    logger.info({ name }, 'GlusterFS volume started');
+    // Create subdirectory via temporary Docker container that bind-mounts the
+    // host's GlusterFS mount point. Creating on one node replicates to all via GlusterFS.
+    await this.runOnHostMount(['mkdir', '-p', `/vol/${name}`]);
+    logger.info({ name, hostPath }, 'GlusterFS service volume subdirectory created');
 
     return {
       name,
-      path: name, // GlusterFS volumes are referenced by name
-      driver: 'glusterfs',
-      driverOptions: this.getDockerVolumeOptions(name),
+      path: hostPath,
+      driver: 'local',
+      driverOptions: {},
     };
   }
 
+  /**
+   * Delete a service volume subdirectory.
+   */
   async deleteVolume(name: string): Promise<void> {
     validateVolumeName(name);
 
-    try {
-      // Stop the volume first (--mode=script avoids interactive confirmation)
-      await execFile('gluster', ['volume', 'stop', name, 'force', '--mode=script']);
-    } catch {
-      // Volume might already be stopped
-    }
-
-    try {
-      await execFile('gluster', ['volume', 'delete', name, '--mode=script']);
-      logger.info({ name }, 'GlusterFS volume deleted');
-    } catch (err) {
-      logger.error({ err, name }, 'Failed to delete GlusterFS volume');
-      throw err;
-    }
+    await this.runOnHostMount(['rm', '-rf', `/vol/${name}`]);
+    logger.info({ name }, 'GlusterFS service volume subdirectory deleted');
   }
 
   async resizeVolume(name: string, _newSizeGb: number): Promise<void> {
     validateVolumeName(name);
-    // GlusterFS volumes grow by adding bricks. For simplicity, this is a no-op
-    // in the basic implementation. Expansion is handled via the admin API.
-    logger.warn({ name }, 'GlusterFS volume resize is a no-op — use add-brick for expansion');
+    // GlusterFS volumes share the underlying brick space. Individual subdirectory
+    // quotas could be set via `gluster volume quota` but are not implemented yet.
+    logger.debug({ name }, 'GlusterFS volume resize is a no-op — brick space is shared');
   }
 
+  /**
+   * List service volume subdirectories under the base mount.
+   */
   async listVolumes(): Promise<VolumeInfo[]> {
     try {
-      const { stdout } = await execFile('gluster', ['volume', 'list']);
-      const names = stdout.trim().split('\n').filter(Boolean);
+      const output = await this.runOnHostMount(
+        ['sh', '-c', 'for d in /vol/*/; do [ -d "$d" ] && basename "$d"; done'],
+      );
+      const names = output.trim().split('\n').filter(Boolean);
 
       const volumes: VolumeInfo[] = [];
       for (const name of names) {
+        // Skip the lost+found directory and hidden dirs
+        if (name === 'lost+found' || name.startsWith('.')) continue;
         try {
           const info = await this.getVolumeInfo(name);
           volumes.push(info);
         } catch {
-          // Skip volumes that fail inspection
+          volumes.push({
+            name,
+            path: this.getHostMountPath(name),
+            sizeGb: 0,
+            usedGb: 0,
+            availableGb: 0,
+            status: 'error',
+          });
         }
       }
       return volumes;
@@ -178,59 +183,64 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
     }
   }
 
+  /**
+   * Get info about a service volume subdirectory.
+   */
   async getVolumeInfo(name: string): Promise<VolumeInfo> {
     validateVolumeName(name);
 
-    const { stdout } = await execFile('gluster', ['volume', 'info', name]);
-    const statusLine = stdout.match(/Status:\s*(\w+)/);
-    const replicaLine = stdout.match(/Number of Bricks:\s*.*x\s*(\d+)/);
-
-    // Get size info from volume status
-    let sizeGb = 0;
+    // Get directory size via temp container
     let usedGb = 0;
+    let sizeGb = 0;
     let availableGb = 0;
 
     try {
-      const { stdout: statusOut } = await execFile('gluster', ['volume', 'status', name, 'detail']);
-      // Parse disk usage from status output
-      const sizeMatch = statusOut.match(/Disk Space Free\s*:\s*([\d.]+)([TGMK]B)/);
-      const totalMatch = statusOut.match(/Total Disk Space\s*:\s*([\d.]+)([TGMK]B)/);
-
-      if (totalMatch) sizeGb = parseSize(totalMatch[1]!, totalMatch[2]!);
-      if (sizeMatch) availableGb = parseSize(sizeMatch[1]!, sizeMatch[2]!);
-      usedGb = Math.max(0, sizeGb - availableGb);
+      const output = await this.runOnHostMount(
+        ['sh', '-c', `du -sk /vol/${name} 2>/dev/null | awk '{print $1}'; df -k /vol/${name} 2>/dev/null | tail -1 | awk '{print $2, $3, $4}'`],
+      );
+      const lines = output.trim().split('\n');
+      if (lines[0]) {
+        usedGb = Math.round(parseInt(lines[0], 10) / (1024 * 1024) * 100) / 100;
+      }
+      if (lines[1]) {
+        const [total, used, avail] = lines[1].split(/\s+/).map(Number);
+        if (total) sizeGb = Math.round(total / (1024 * 1024) * 100) / 100;
+        if (avail) availableGb = Math.round(avail / (1024 * 1024) * 100) / 100;
+        // If du didn't work, fall back to df used
+        if (usedGb === 0 && used) usedGb = Math.round(used / (1024 * 1024) * 100) / 100;
+      }
     } catch {
-      // Status might not be available
+      // Stats not available
     }
 
     return {
       name,
-      path: name,
+      path: this.getHostMountPath(name),
       sizeGb,
       usedGb,
       availableGb,
-      replicaCount: replicaLine ? parseInt(replicaLine[1]!, 10) : this.replicaCount,
-      status: statusLine?.[1]?.toLowerCase() === 'started' ? 'ready' : 'degraded',
+      replicaCount: this.replicaCount,
+      status: 'ready',
     };
   }
 
   getDockerVolumeDriver(): string {
-    // Use Docker's built-in 'local' driver with type=glusterfs mount options.
-    // This avoids needing a third-party Docker volume plugin — only requires
-    // glusterfs-client (FUSE) to be installed on each Swarm node.
     return 'local';
   }
 
-  getDockerVolumeOptions(name: string): Record<string, string> {
-    // Find the first available node to use as the mount server
-    const mountNode = this.config.nodes[0];
-    if (!mountNode) return {};
+  getDockerVolumeOptions(_name: string): Record<string, string> {
+    // Docker's local volume driver CANNOT FUSE-mount GlusterFS ("no such device").
+    // All service volumes use bind mounts via getHostMountPath() instead.
+    return {};
+  }
 
-    return {
-      'type': 'glusterfs',
-      'o': `addr=${mountNode.ip},volfile-id=/${name}`,
-      'device': `${mountNode.ip}:/${name}`,
-    };
+  /**
+   * GlusterFS requires host-level FUSE mounts managed by systemd.
+   * Service volumes are subdirectories under /mnt/fleet-volumes/<name>.
+   * The base GlusterFS volume is mounted at /mnt/fleet-volumes via a systemd service.
+   */
+  getHostMountPath(name: string): string {
+    return `${GlusterFSVolumeProvider.HOST_MOUNT_BASE}/${name}`;
   }
 
   isReady(): boolean {
@@ -242,7 +252,7 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
       {
         package: 'fuse',
         description: 'FUSE kernel module (required for GlusterFS volume mounts)',
-        checkCommand: 'lsmod | grep -q fuse',
+        checkCommand: 'test -e /dev/fuse || lsmod | grep -q fuse',
         installCommand: 'modprobe fuse && echo fuse > /etc/modules-load.d/fuse.conf',
       },
       {
@@ -376,16 +386,56 @@ export class GlusterFSVolumeProvider implements VolumeStorageProvider {
     validateVolumeName(volumeName);
     await execFile('gluster', ['volume', 'heal', volumeName, 'full']);
   }
+
+  // ── Private helpers ────────────────────────────────────────────────────
+
+  /**
+   * Run a command inside a temporary container that has the host's GlusterFS
+   * base mount (HOST_MOUNT_BASE) bind-mounted at /vol.
+   *
+   * Since the API container doesn't have the FUSE mount, we use Docker to
+   * access the host's mount namespace. Creating/deleting files on the GlusterFS
+   * mount replicates automatically to all nodes.
+   */
+  private async runOnHostMount(cmd: string[]): Promise<string> {
+    const container = await docker.createContainer({
+      Image: 'alpine:latest',
+      Cmd: cmd,
+      HostConfig: {
+        Binds: [`${GlusterFSVolumeProvider.HOST_MOUNT_BASE}:/vol`],
+      },
+    });
+
+    try {
+      await container.start();
+      const logStream = await container.logs({ follow: true, stdout: true, stderr: true });
+      let output = '';
+      if (Buffer.isBuffer(logStream)) {
+        output = logStream.toString();
+      } else {
+        const chunks: Buffer[] = [];
+        await new Promise<void>((resolve) => {
+          (logStream as NodeJS.ReadableStream).on('data', (chunk: Buffer) => chunks.push(chunk));
+          (logStream as NodeJS.ReadableStream).on('end', resolve);
+        });
+        output = Buffer.concat(chunks).toString();
+      }
+      const result = await container.wait();
+      if (result.StatusCode !== 0) {
+        throw new Error(`Command failed (exit ${result.StatusCode}): ${output}`);
+      }
+      // Strip Docker stream header bytes (8-byte prefix per frame)
+      return stripDockerStreamHeaders(output);
+    } finally {
+      await container.remove({ force: true }).catch(() => {});
+    }
+  }
 }
 
-/** Parse GlusterFS size strings like "10.5GB" or "1.2TB" to GB. */
-function parseSize(value: string, unit: string): number {
-  const num = parseFloat(value);
-  switch (unit.toUpperCase()) {
-    case 'TB': return Math.round(num * 1024);
-    case 'GB': return Math.round(num);
-    case 'MB': return Math.round(num / 1024);
-    case 'KB': return Math.round(num / (1024 * 1024));
-    default: return Math.round(num);
-  }
+/** Strip Docker stream multiplexing header bytes from container log output. */
+function stripDockerStreamHeaders(raw: string): string {
+  // Docker stream protocol: each frame has an 8-byte header (stream type + size)
+  // In text mode the headers may appear as garbled characters
+  // Try to extract clean lines by removing non-printable characters
+  return raw.replace(/[\x00-\x08\x0e-\x1f]/g, '').trim();
 }

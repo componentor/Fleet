@@ -83,6 +83,8 @@ const resourceLimitsSchema = z.object({
   maxStorageGb: z.number().int().min(0).nullable().optional(),
   maxBandwidthGb: z.number().int().min(0).nullable().optional(),
   maxNfsStorageGb: z.number().int().min(0).nullable().optional(),
+  maxTotalCpuCores: z.number().int().min(0).nullable().optional(),
+  maxTotalMemoryMb: z.number().int().min(0).nullable().optional(),
 }).openapi('ResourceLimitsRequest');
 
 const overrideSchema = z.object({
@@ -605,6 +607,8 @@ billingAdmin.openapi(getGlobalResourceLimitsRoute, (async (c: any) => {
     maxStorageGb: null,
     maxBandwidthGb: null,
     maxNfsStorageGb: null,
+    maxTotalCpuCores: null,
+    maxTotalMemoryMb: null,
   });
 }) as any);
 
@@ -652,6 +656,8 @@ billingAdmin.openapi(getAccountResourceLimitsRoute, (async (c: any) => {
       maxStorageGb: override?.maxStorageGb ?? global?.maxStorageGb ?? null,
       maxBandwidthGb: override?.maxBandwidthGb ?? global?.maxBandwidthGb ?? null,
       maxNfsStorageGb: override?.maxNfsStorageGb ?? global?.maxNfsStorageGb ?? null,
+      maxTotalCpuCores: override?.maxTotalCpuCores ?? global?.maxTotalCpuCores ?? null,
+      maxTotalMemoryMb: override?.maxTotalMemoryMb ?? global?.maxTotalMemoryMb ?? null,
     },
   });
 }) as any);

@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, services, deployments, oauthProviders, resourceLimits, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
+import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
@@ -34,6 +34,61 @@ async function getContainerDiskLimit(accountId: string): Promise<number | undefi
     where: isNull(resourceLimits.accountId),
   });
   return globalLimit?.maxContainerDiskMb ?? undefined;
+}
+
+/**
+ * Enforce total CPU/memory pool limits for an account.
+ * Returns an error string if the limit would be exceeded, or null if OK.
+ */
+async function enforceResourcePool(
+  accountId: string,
+  serviceId: string | null,
+  cpuLimit: number,
+  memoryLimit: number,
+  replicas: number,
+): Promise<string | null> {
+  const accountLimit = await db.query.resourceLimits.findFirst({
+    where: eq(resourceLimits.accountId, accountId),
+  });
+  const globalLimit = await db.query.resourceLimits.findFirst({
+    where: isNull(resourceLimits.accountId),
+  });
+  const maxTotalCpu = accountLimit?.maxTotalCpuCores ?? globalLimit?.maxTotalCpuCores;
+  const maxTotalMemory = accountLimit?.maxTotalMemoryMb ?? globalLimit?.maxTotalMemoryMb;
+
+  // No pool limits configured — skip enforcement
+  if (!maxTotalCpu && !maxTotalMemory) return null;
+
+  // Sum current allocations across all account services (excluding the one being updated)
+  const allServices = await db.query.services.findMany({
+    where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
+    columns: { id: true, cpuLimit: true, memoryLimit: true, replicas: true },
+  });
+
+  let totalCpu = 0;
+  let totalMemory = 0;
+  for (const svc of allServices) {
+    if (serviceId && svc.id === serviceId) continue;
+    const r = svc.replicas ?? 1;
+    totalCpu += (svc.cpuLimit ?? 1) * r;
+    totalMemory += (svc.memoryLimit ?? 1024) * r;
+  }
+
+  // Add the requested allocation
+  const requestedCpu = cpuLimit * replicas;
+  const requestedMemory = memoryLimit * replicas;
+
+  if (maxTotalCpu && totalCpu + requestedCpu > maxTotalCpu) {
+    return `Total CPU limit exceeded: using ${totalCpu.toFixed(1)} of ${maxTotalCpu} cores, requested ${requestedCpu.toFixed(1)} cores (${cpuLimit} x ${replicas} replicas)`;
+  }
+  if (maxTotalMemory && totalMemory + requestedMemory > maxTotalMemory) {
+    const usedGb = (totalMemory / 1024).toFixed(1);
+    const maxGb = (maxTotalMemory / 1024).toFixed(1);
+    const reqGb = (requestedMemory / 1024).toFixed(1);
+    return `Total memory limit exceeded: using ${usedGb} GB of ${maxGb} GB, requested ${reqGb} GB (${memoryLimit} MB x ${replicas} replicas)`;
+  }
+
+  return null;
 }
 
 const serviceRoutes = new OpenAPIHono<{
@@ -76,6 +131,7 @@ const createServiceSchema = z.object({
   domain: z.string().regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/).nullable().optional(),
   sslEnabled: z.boolean().default(true),
   nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
+  region: z.string().max(50).nullable().optional(),
   placementConstraints: z.array(
     z.string().max(200).refine(
       (s) => {
@@ -97,6 +153,8 @@ const createServiceSchema = z.object({
   githubRepo: z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/, 'Must be in owner/repo format').nullable().optional(),
   githubBranch: z.string().nullable().optional(),
   autoDeploy: z.boolean().default(false),
+  cpuLimit: z.number().min(0.1).max(64).nullable().optional(),
+  memoryLimit: z.number().int().min(64).max(131072).nullable().optional(),
   sourceType: z.enum(['docker', 'github', 'upload', 'marketplace']).nullable().optional(),
   sourcePath: z.string().nullable().optional(),
   tags: z.array(z.string().max(50)).max(20).default([]),
@@ -129,6 +187,7 @@ const updateServiceSchema = z.object({
     ),
   ).optional(),
   nodeConstraint: z.string().regex(/^[a-zA-Z0-9]+$/, 'Invalid node ID format').nullable().optional(),
+  region: z.string().max(50).nullable().optional(),
   updateParallelism: z.number().int().min(1).optional(),
   updateDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
   rollbackOnFailure: z.boolean().optional(),
@@ -141,6 +200,8 @@ const updateServiceSchema = z.object({
   restartCondition: z.enum(['none', 'on-failure', 'any']).optional(),
   restartMaxAttempts: z.number().int().min(0).max(100).optional(),
   restartDelay: z.string().max(20).regex(/^\d+(\.\d+)?(ns|us|ms|s|m|h)$/, 'Invalid duration format').optional(),
+  cpuLimit: z.number().min(0.1).max(64).optional(),
+  memoryLimit: z.number().int().min(64).max(131072).optional(),
   autoDeploy: z.boolean().optional(),
   githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
@@ -574,6 +635,7 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
   const result = await db.query.services.findMany({
     where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
     orderBy: (s: any, { desc }: any) => desc(s.createdAt),
+    with: { deployments: { orderBy: (d: any, { desc }: any) => desc(d.createdAt), limit: 1, columns: { status: true, log: true } } },
   });
 
   // Live Docker status sync — reconcile DB status with actual Swarm state
@@ -636,7 +698,17 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
     }
   }
 
-  return c.json(result);
+  // Attach lastDeployError for failed services so the list UI can show it
+  const enriched = result.map((svc: any) => {
+    const lastDeploy = svc.deployments?.[0];
+    const lastDeployError = (svc.status === 'failed' && lastDeploy?.status === 'failed' && lastDeploy?.log)
+      ? lastDeploy.log.slice(0, 200)
+      : null;
+    const { deployments: _d, ...rest } = svc;
+    return lastDeployError ? { ...rest, lastDeployError } : rest;
+  });
+
+  return c.json(enriched);
 }) as any);
 
 // POST / — deploy a new service
@@ -659,6 +731,34 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     return c.json({ error: `Service limit reached (${SERVICE_QUOTA}). Please delete unused services or contact support.` }, 429);
   }
 
+  // Enforce per-container resource limits
+  if (data.cpuLimit || data.memoryLimit) {
+    const accountLimit = await db.query.resourceLimits.findFirst({
+      where: eq(resourceLimits.accountId, accountId),
+    });
+    const globalLimit = await db.query.resourceLimits.findFirst({
+      where: isNull(resourceLimits.accountId),
+    });
+    const maxCpu = accountLimit?.maxCpuPerContainer ?? globalLimit?.maxCpuPerContainer ?? 4;
+    const maxMemory = accountLimit?.maxMemoryPerContainer ?? globalLimit?.maxMemoryPerContainer ?? 8192;
+
+    if (data.cpuLimit && data.cpuLimit > maxCpu) {
+      return c.json({ error: `CPU limit exceeds maximum of ${maxCpu} cores per container` }, 403);
+    }
+    if (data.memoryLimit && data.memoryLimit > maxMemory) {
+      return c.json({ error: `Memory limit exceeds maximum of ${maxMemory} MB per container` }, 403);
+    }
+  }
+
+  // Enforce total resource pool limits
+  const poolError = await enforceResourcePool(
+    accountId, null,
+    data.cpuLimit ?? 1, data.memoryLimit ?? 1024, data.replicas,
+  );
+  if (poolError) {
+    return c.json({ error: poolError }, 403);
+  }
+
   // Determine target port for Traefik and port allocation
   const primaryTargetPort = data.ports?.[0]?.target ?? 80;
   const traefikLabels = buildTraefikLabels(data.name, data.domain ?? null, data.sslEnabled, primaryTargetPort);
@@ -667,6 +767,9 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   const constraints = [...data.placementConstraints];
   if (data.nodeConstraint) {
     constraints.push(`node.id == ${data.nodeConstraint}`);
+  }
+  if (data.region) {
+    constraints.push(`node.labels.region == ${data.region}`);
   }
 
   // Insert into DB
@@ -681,6 +784,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     domain: data.domain ?? null,
     sslEnabled: data.sslEnabled,
     nodeConstraint: data.nodeConstraint ?? null,
+    region: data.region ?? null,
     placementConstraints: data.placementConstraints,
     updateParallelism: data.updateParallelism,
     updateDelay: data.updateDelay,
@@ -689,6 +793,8 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     githubRepo: data.githubRepo ?? null,
     githubBranch: data.githubBranch ?? null,
     autoDeploy: data.autoDeploy,
+    cpuLimit: data.cpuLimit ?? null,
+    memoryLimit: data.memoryLimit ?? null,
     sourceType: data.sourceType ?? (data.githubRepo ? 'github' : 'docker'),
     sourcePath: data.sourcePath ?? null,
     tags: data.tags,
@@ -727,7 +833,8 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
 
-    const swarmServiceName = `fleet-${accountId}-${data.name}`;
+    const accountShort = accountId.replace(/-/g, '').substring(0, 12);
+    const swarmServiceName = `fleet-${accountShort}-${data.name}`;
     const storageLimitMb = await getContainerDiskLimit(accountId);
 
     // Port management: domain services use Traefik (no ingress ports),
@@ -759,6 +866,8 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       updateParallelism: data.updateParallelism,
       updateDelay: data.updateDelay,
       rollbackOnFailure: data.rollbackOnFailure,
+      cpuLimit: data.cpuLimit ?? undefined,
+      memoryLimit: data.memoryLimit ?? undefined,
       networkId,
       storageLimitMb,
     });
@@ -986,6 +1095,36 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
     }
   }
 
+  // Enforce per-container resource limits when changing CPU or memory
+  if (data.cpuLimit !== undefined || data.memoryLimit !== undefined) {
+    const accountLimit = await db.query.resourceLimits.findFirst({
+      where: eq(resourceLimits.accountId, accountId),
+    });
+    const globalLimit = await db.query.resourceLimits.findFirst({
+      where: isNull(resourceLimits.accountId),
+    });
+    const maxCpu = accountLimit?.maxCpuPerContainer ?? globalLimit?.maxCpuPerContainer ?? 4;
+    const maxMemory = accountLimit?.maxMemoryPerContainer ?? globalLimit?.maxMemoryPerContainer ?? 8192;
+
+    if (data.cpuLimit !== undefined && data.cpuLimit > maxCpu) {
+      return c.json({ error: `CPU limit exceeds maximum of ${maxCpu} cores per container` }, 403);
+    }
+    if (data.memoryLimit !== undefined && data.memoryLimit > maxMemory) {
+      return c.json({ error: `Memory limit exceeds maximum of ${maxMemory} MB per container` }, 403);
+    }
+  }
+
+  // Enforce total resource pool limits when changing CPU, memory, or replicas
+  if (data.cpuLimit !== undefined || data.memoryLimit !== undefined || data.replicas !== undefined) {
+    const effectiveCpu = data.cpuLimit ?? svc.cpuLimit ?? 1;
+    const effectiveMemory = data.memoryLimit ?? svc.memoryLimit ?? 1024;
+    const effectiveReplicas = data.replicas ?? svc.replicas ?? 1;
+    const poolError = await enforceResourcePool(accountId, serviceId, effectiveCpu, effectiveMemory, effectiveReplicas);
+    if (poolError) {
+      return c.json({ error: poolError }, 403);
+    }
+  }
+
   // Handle auto-deploy webhook management
   const autoDeployChanged = data.autoDeploy !== undefined && data.autoDeploy !== (svc.autoDeploy ?? false);
   let githubWebhookId = svc.githubWebhookId ?? null;
@@ -1058,6 +1197,17 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         }
       }
 
+      // Rebuild constraints including nodeConstraint and region
+      const effectiveConstraints = [...(dockerFields.placementConstraints ?? (svc.placementConstraints as string[]) ?? [])];
+      const effectiveNodeConstraint = dockerFields.nodeConstraint !== undefined ? dockerFields.nodeConstraint : svc.nodeConstraint;
+      if (effectiveNodeConstraint) {
+        effectiveConstraints.push(`node.id == ${effectiveNodeConstraint}`);
+      }
+      const effectiveRegion = dockerFields.region !== undefined ? dockerFields.region : svc.region;
+      if (effectiveRegion) {
+        effectiveConstraints.push(`node.labels.region == ${effectiveRegion}`);
+      }
+
       await dockerService.updateService(svc.dockerServiceId, {
         image: dockerFields.image,
         replicas: dockerFields.replicas,
@@ -1067,7 +1217,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
           'fleet.account-id': accountId,
           'fleet.service-id': serviceId,
         },
-        constraints: dockerFields.placementConstraints ?? (svc.placementConstraints as string[]) ?? [],
+        constraints: effectiveConstraints,
         ports: updatedPorts,
         volumes: dockerFields.volumes?.map((v: any) => ({
           source: v.source,
@@ -1078,6 +1228,8 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         updateParallelism: dockerFields.updateParallelism,
         updateDelay: dockerFields.updateDelay,
         rollbackOnFailure: dockerFields.rollbackOnFailure,
+        cpuLimit: dockerFields.cpuLimit,
+        memoryLimit: dockerFields.memoryLimit,
         restartCondition: dockerFields.restartCondition,
         restartMaxAttempts: dockerFields.restartMaxAttempts,
         restartDelay: dockerFields.restartDelay,
@@ -1351,7 +1503,8 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
   async function createDockerService() {
     const networkName = `fleet-account-${accountId}`;
     const networkId = await dockerService.ensureNetwork(networkName);
-    const swarmServiceName = `fleet-${accountId}-${svc!.name}`;
+    const accountShort = accountId.replace(/-/g, '').substring(0, 12);
+    const swarmServiceName = `fleet-${accountShort}-${svc!.name}`;
     const svcPorts = (svc!.ports as any[]) ?? [];
     const primaryTargetPort = svcPorts[0]?.target ?? 80;
     const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true, primaryTargetPort);
@@ -1606,7 +1759,8 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
       const networkName = `fleet-account-${accountId}`;
       const networkId = await dockerService.ensureNetwork(networkName);
 
-      const swarmServiceName = `fleet-${accountId}-${svc.name}`;
+      const accountShort = accountId.replace(/-/g, '').substring(0, 12);
+      const swarmServiceName = `fleet-${accountShort}-${svc.name}`;
       const svcPorts = (svc.ports as any[]) ?? [];
       const primaryTargetPort = svcPorts[0]?.target ?? 80;
 
@@ -2175,6 +2329,52 @@ serviceRoutes.openapi(updateDockerfileRoute, (async (c: any) => {
   }
 
   return c.json({ message: 'Dockerfile updated' });
+}) as any);
+
+// GET /regions — list available regions with active nodes
+const listRegionsRoute = createRoute({
+  method: 'get',
+  path: '/regions',
+  tags: ['Services'],
+  summary: 'List available deployment regions',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.object({
+      key: z.string(),
+      label: z.string(),
+      nodeCount: z.number(),
+    })), 'Available regions with active nodes'),
+    ...standardErrors,
+  },
+});
+
+serviceRoutes.openapi(listRegionsRoute, (async (c: any) => {
+  // Get all defined regions from billing location multipliers
+  const locations = await db.query.locationMultipliers.findMany();
+
+  // Get active node counts per location
+  const activeNodes = await db.query.nodes.findMany({
+    where: and(eq(nodes.status, 'active'), not(isNull(nodes.location))),
+    columns: { location: true },
+  });
+
+  const nodeCounts = new Map<string, number>();
+  for (const node of activeNodes) {
+    if (node.location) {
+      nodeCounts.set(node.location, (nodeCounts.get(node.location) ?? 0) + 1);
+    }
+  }
+
+  // Only return regions that have at least one active node
+  const regions = locations
+    .filter((loc) => nodeCounts.has(loc.locationKey))
+    .map((loc) => ({
+      key: loc.locationKey,
+      label: loc.label,
+      nodeCount: nodeCounts.get(loc.locationKey) ?? 0,
+    }));
+
+  return c.json(regions);
 }) as any);
 
 export default serviceRoutes;

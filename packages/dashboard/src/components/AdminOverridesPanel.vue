@@ -36,6 +36,8 @@ const resourceFields = [
   { key: 'maxStorageGb', label: 'Max Storage', unit: 'GB' },
   { key: 'maxBandwidthGb', label: 'Max Bandwidth', unit: 'GB' },
   { key: 'maxNfsStorageGb', label: 'Max NFS Storage', unit: 'GB' },
+  { key: 'maxTotalCpuCores', label: 'Total CPU Pool', unit: 'cores' },
+  { key: 'maxTotalMemoryMb', label: 'Total Memory Pool', unit: 'MB' },
 ]
 
 const billingFields = [

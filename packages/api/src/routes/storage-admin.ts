@@ -82,6 +82,9 @@ const objectConfigSchema = z.record(z.string(), z.any()).default({}).refine((con
 }, 'objectConfig.endpoint must be a valid public URL (no private/loopback IPs)');
 
 const clusterSchema = z.object({
+  name: z.string().max(100).optional(),
+  region: z.string().max(100).nullable().optional(),
+  scope: z.enum(['regional', 'global']).default('regional'),
   provider: z.enum(['local', 'glusterfs', 'ceph']),
   objectProvider: z.enum(['local', 'minio', 's3', 'gcs']),
   replicationFactor: z.number().int().min(1).max(5).default(3),
@@ -94,6 +97,7 @@ const hostnameRe = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 const safePathRe = /^\/[a-zA-Z0-9/_-]+$/;
 
 const addNodeSchema = z.object({
+  clusterId: z.string().uuid().optional(),
   nodeId: z.string().uuid().optional(),
   hostname: z.string().min(1).max(253).regex(hostnameRe, 'Invalid hostname'),
   ipAddress: z.string().regex(ipv4Re, 'Invalid IPv4 address').refine((ip) => {
@@ -148,7 +152,8 @@ const getClusterRoute = createRoute({
 });
 
 storageAdmin.openapi(getClusterRoute, (async (c: any) => {
-  const cluster = await db.query.storageClusters.findFirst();
+  const clusters = await db.query.storageClusters.findMany();
+  const cluster = clusters[0] ?? null;
   const health = await storageManager.getHealth();
   const nodes = await db.query.storageNodes.findMany();
   const platformVolumeMode = await dockerService.getPlatformVolumeMode();
@@ -160,10 +165,75 @@ storageAdmin.openapi(getClusterRoute, (async (c: any) => {
       status: 'healthy',
       replicationFactor: 1,
     },
+    clusters,
     health,
     nodes,
     platformVolumeMode,
   });
+}) as any);
+
+// GET /clusters — List all storage clusters
+const listClustersRoute = createRoute({
+  method: 'get',
+  path: '/clusters',
+  tags: ['Storage Admin'],
+  summary: 'List all storage clusters with nodes and health',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of all storage clusters'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(listClustersRoute, (async (c: any) => {
+  const clusters = await db.query.storageClusters.findMany({
+    with: { storageNodes: true },
+  });
+
+  const results = [];
+  for (const cluster of clusters) {
+    const health = await storageManager.getClusterHealth(cluster.id);
+    results.push({
+      ...cluster,
+      health,
+    });
+  }
+
+  return c.json(results);
+}) as any);
+
+// GET /clusters/:id — Get a single cluster detail
+const getClusterByIdRoute = createRoute({
+  method: 'get',
+  path: '/clusters/{id}',
+  tags: ['Storage Admin'],
+  summary: 'Get a single storage cluster detail',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Storage cluster detail'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(getClusterByIdRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  if (!uuidRe.test(id)) return c.json({ error: 'Invalid cluster ID' }, 400);
+
+  const cluster = await db.query.storageClusters.findFirst({
+    where: eq(storageClusters.id, id),
+    with: { storageNodes: true },
+  });
+
+  if (!cluster) {
+    return c.json({ error: 'Cluster not found' }, 404);
+  }
+
+  const health = await storageManager.getClusterHealth(id);
+
+  return c.json({ ...cluster, health });
 }) as any);
 
 // POST /cluster — Initialize or update cluster config
@@ -185,10 +255,25 @@ const postClusterRoute = createRoute({
 storageAdmin.openapi(postClusterRoute, (async (c: any) => {
   const data = c.req.valid('json');
 
-  const existing = await db.query.storageClusters.findFirst();
+  // Find existing cluster: match by region+scope, or fall back to first cluster for backwards compat
+  let existing: any = null;
+  if (data.region !== undefined || data.scope) {
+    existing = await db.query.storageClusters.findFirst({
+      where: and(
+        data.region ? eq(storageClusters.region, data.region) : isNull(storageClusters.region),
+        eq(storageClusters.scope, data.scope ?? 'regional'),
+      ),
+    });
+  } else {
+    existing = await db.query.storageClusters.findFirst();
+  }
 
+  let clusterId: string;
   if (existing) {
     await db.update(storageClusters).set({
+      name: data.name ?? existing.name,
+      region: data.region !== undefined ? data.region : existing.region,
+      scope: data.scope ?? existing.scope,
       provider: data.provider,
       objectProvider: data.objectProvider,
       replicationFactor: data.replicationFactor,
@@ -197,8 +282,12 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       status: 'initializing',
       updatedAt: new Date(),
     }).where(eq(storageClusters.id, existing.id));
+    clusterId = existing.id;
   } else {
-    await insertReturning(storageClusters, {
+    const [created] = await insertReturning(storageClusters, {
+      name: data.name ?? (data.region ? `${data.region}-${data.scope ?? 'regional'}` : 'default'),
+      region: data.region ?? null,
+      scope: data.scope ?? 'regional',
       provider: data.provider,
       objectProvider: data.objectProvider,
       replicationFactor: data.replicationFactor,
@@ -206,6 +295,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       objectConfig: data.objectConfig,
       status: 'initializing',
     });
+    clusterId = created.id;
   }
 
   // Reload storage manager with new config
@@ -224,13 +314,10 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       if (!prereqResult.success) {
         logger.warn({ results: prereqResult.results }, 'Some nodes failed prerequisite installation');
         // Mark as degraded — prerequisites are not fully installed
-        const cluster = await db.query.storageClusters.findFirst();
-        if (cluster) {
-          await db.update(storageClusters).set({
-            status: 'degraded',
-            updatedAt: new Date(),
-          }).where(eq(storageClusters.id, cluster.id));
-        }
+        await db.update(storageClusters).set({
+          status: 'degraded',
+          updatedAt: new Date(),
+        }).where(eq(storageClusters.id, clusterId));
 
         return c.json({
           message: 'Storage cluster configured but prerequisites failed on some nodes',
@@ -247,12 +334,22 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
     }
 
     // Mark as healthy — all prerequisites installed
-    const cluster = await db.query.storageClusters.findFirst();
-    if (cluster) {
-      await db.update(storageClusters).set({
-        status: 'healthy',
-        updatedAt: new Date(),
-      }).where(eq(storageClusters.id, cluster.id));
+    await db.update(storageClusters).set({
+      status: 'healthy',
+      updatedAt: new Date(),
+    }).where(eq(storageClusters.id, clusterId));
+
+    // Set up service volume base mount (GlusterFS/Ceph mounted on all nodes via systemd)
+    let serviceVolumes: { applied: boolean; message: string } | undefined;
+    try {
+      if (storageManager.isVolumeDistributed) {
+        const svcResult = await dockerService.ensureServiceVolumeMount();
+        serviceVolumes = svcResult;
+        logger.info({ serviceVolumes }, 'Service volume mount set up after storage cluster config');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to set up service volume mount after storage cluster config');
+      serviceVolumes = { applied: false, message: `Failed: ${err instanceof Error ? err.message : String(err)}` };
     }
 
     // Auto-apply platform volume configuration (switch Traefik certs to distributed/local)
@@ -267,29 +364,106 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       platformVolumes = { mode: 'unknown', applied: false, message: `Failed: ${err instanceof Error ? err.message : String(err)}` };
     }
 
+    // Auto-repair existing services: migrate their volumes from Docker volumes
+    // to distributed bind mounts (or back to Docker volumes if switching to local).
+    // This copies data from old volumes so nothing is lost.
+    let repairedServices: { repaired: string[]; migrated: string[]; failed: Array<{ name: string; error: string }> } | undefined;
+    try {
+      const useHostMount = storageManager.volumes.isReady() && !!storageManager.volumes.getHostMountPath;
+      if (useHostMount || !storageManager.isVolumeDistributed) {
+        const allSvcs: any[] = await dockerService.listServices();
+        const userServices = allSvcs.filter((s) =>
+          s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
+        );
+        const repaired: string[] = [];
+        const migrated: string[] = [];
+        const failed: Array<{ name: string; error: string }> = [];
+
+        for (const svc of userServices) {
+          const spec = svc.Spec;
+          if (!spec?.TaskTemplate?.ContainerSpec) continue;
+          const mounts: any[] = spec.TaskTemplate.ContainerSpec.Mounts ?? [];
+          let needsUpdate = false;
+
+          for (const mount of mounts) {
+            if (mount.Source === '/var/run/docker.sock') continue;
+            if (useHostMount && mount.Type === 'volume') { needsUpdate = true; break; }
+            if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) { needsUpdate = true; break; }
+          }
+          if (!needsUpdate) continue;
+
+          const newMounts: any[] = [];
+          for (const mount of mounts) {
+            if (mount.Source === '/var/run/docker.sock' || (mount.Type === 'bind' && !mount.Source?.startsWith('/mnt/fleet-volumes/'))) {
+              newMounts.push(mount);
+              continue;
+            }
+            if (useHostMount && mount.Type === 'volume') {
+              const volumeName = mount.Source;
+              const hostPath = storageManager.volumes.getHostMountPath!(volumeName) ?? volumeName;
+              try { await storageManager.volumes.createVolume(volumeName, 0); } catch { /* may exist */ }
+              try {
+                await dockerService.copyVolumeData(volumeName, hostPath);
+                migrated.push(`${spec.Name}:${volumeName}`);
+              } catch { /* best effort */ }
+              newMounts.push({ Source: hostPath, Target: mount.Target, Type: 'bind' as const, ReadOnly: mount.ReadOnly ?? false });
+            } else if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
+              const volumeName = mount.Source.split('/').pop()!;
+              try {
+                await dockerService.copyVolumeData(mount.Source, volumeName);
+                migrated.push(`${spec.Name}:${volumeName}`);
+              } catch { /* best effort */ }
+              newMounts.push({ Source: volumeName, Target: mount.Target, Type: 'volume' as const, ReadOnly: mount.ReadOnly ?? false });
+            } else {
+              newMounts.push(mount);
+            }
+          }
+
+          try {
+            const dockerSvc = dockerService.getDockerClient().getService(svc.ID);
+            spec.TaskTemplate.ContainerSpec.Mounts = newMounts;
+            await dockerSvc.update({
+              ...spec,
+              version: svc.Version?.Index,
+              TaskTemplate: { ...spec.TaskTemplate, ForceUpdate: ((spec.TaskTemplate as any).ForceUpdate ?? 0) + 1 },
+            } as any);
+            repaired.push(spec.Name);
+          } catch (err) {
+            failed.push({ name: spec.Name ?? svc.ID, error: (err as Error).message });
+          }
+        }
+        if (repaired.length > 0 || failed.length > 0) {
+          repairedServices = { repaired, migrated, failed };
+          logger.info({ repaired, migrated, failed }, 'Auto-repaired existing service volumes after storage config change');
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to auto-repair existing service volumes');
+    }
+
     return c.json({
       message: 'Storage cluster configured',
+      clusterId,
       status: 'healthy',
       prerequisites: prereqResult ? {
         installed: true,
         packages: prerequisites.map((p) => p.package),
         results: prereqResult.results,
       } : undefined,
+      serviceVolumes,
       platformVolumes,
+      repairedServices,
     });
   } catch (err) {
     // Mark as error
-    const cluster = await db.query.storageClusters.findFirst();
-    if (cluster) {
-      await db.update(storageClusters).set({
-        status: 'error',
-        updatedAt: new Date(),
-      }).where(eq(storageClusters.id, cluster.id));
-    }
+    await db.update(storageClusters).set({
+      status: 'error',
+      updatedAt: new Date(),
+    }).where(eq(storageClusters.id, clusterId));
 
     const detail = err instanceof Error ? err.message : String(err);
-    logger.error({ err }, 'Failed to initialize storage cluster');
-    return c.json({ error: `Failed to initialize storage cluster: ${detail}`, status: 'error' }, 500);
+    logger.error({ err, clusterId }, 'Failed to initialize storage cluster');
+    return c.json({ error: `Failed to initialize storage cluster: ${detail}`, status: 'error', clusterId }, 500);
   }
 }) as any);
 
@@ -352,7 +526,12 @@ const addNodeRoute = createRoute({
 storageAdmin.openapi(addNodeRoute, (async (c: any) => {
   const data = c.req.valid('json');
 
-  const cluster = await db.query.storageClusters.findFirst();
+  // Resolve cluster: use explicit clusterId if provided, otherwise fall back to first cluster
+  let targetClusterId: string | null = data.clusterId ?? null;
+  if (!targetClusterId) {
+    const cluster = await db.query.storageClusters.findFirst();
+    targetClusterId = cluster?.id ?? null;
+  }
 
   // Check for existing node with same hostname + IP (exact match = wizard retry, allow upsert)
   const exactMatch = await db.query.storageNodes.findFirst({
@@ -367,7 +546,7 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
     const [updated] = await updateReturning(
       storageNodes,
       {
-        clusterId: cluster?.id ?? null,
+        clusterId: targetClusterId,
         nodeId: data.nodeId ?? null,
         role: data.role,
         storagePathRoot: data.storagePathRoot,
@@ -380,12 +559,16 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
     return c.json(updated, 200);
   }
 
-  // Check for partial match (hostname OR IP already in use by another node)
+  // Check for partial match (hostname OR IP already in use by another node in same cluster)
+  const conflictWhere = targetClusterId
+    ? and(
+        or(eq(storageNodes.hostname, data.hostname), eq(storageNodes.ipAddress, data.ipAddress)),
+        eq(storageNodes.clusterId, targetClusterId),
+      )
+    : or(eq(storageNodes.hostname, data.hostname), eq(storageNodes.ipAddress, data.ipAddress));
+
   const conflict = await db.query.storageNodes.findFirst({
-    where: or(
-      eq(storageNodes.hostname, data.hostname),
-      eq(storageNodes.ipAddress, data.ipAddress),
-    ),
+    where: conflictWhere,
   });
 
   if (conflict) {
@@ -396,7 +579,7 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
   }
 
   const [node] = await insertReturning(storageNodes, {
-    clusterId: cluster?.id ?? null,
+    clusterId: targetClusterId,
     nodeId: data.nodeId ?? null,
     hostname: data.hostname,
     ipAddress: data.ipAddress,
@@ -410,18 +593,23 @@ storageAdmin.openapi(addNodeRoute, (async (c: any) => {
 }) as any);
 
 // POST /nodes/reset — Remove all storage nodes (cleanup/reset)
+const resetNodesSchema = z.object({
+  password: z.string().min(1),
+  clusterId: z.string().uuid().optional(),
+});
+
 const resetAllNodesRoute = createRoute({
   method: 'post',
   path: '/nodes/reset',
   tags: ['Storage Admin'],
-  summary: 'Remove all storage nodes (requires password confirmation)',
+  summary: 'Remove storage nodes and cluster (requires password confirmation)',
   security: bearerSecurity,
   request: {
-    body: jsonBody(passwordConfirmSchema),
+    body: jsonBody(resetNodesSchema),
   },
   responses: {
     ...standardErrors,
-    200: jsonContent(messageResponseSchema, 'All storage nodes removed'),
+    200: jsonContent(messageResponseSchema, 'Storage nodes removed'),
   },
 });
 
@@ -429,6 +617,30 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
   const denied = await verifyPassword(c);
   if (denied) return denied;
 
+  const { clusterId } = c.req.valid('json');
+
+  if (clusterId) {
+    // Reset only the specified cluster
+    if (!uuidRe.test(clusterId)) return c.json({ error: 'Invalid cluster ID' }, 400);
+
+    const clusterNodes = await db.query.storageNodes.findMany({
+      where: eq(storageNodes.clusterId, clusterId),
+    });
+    for (const node of clusterNodes) {
+      await db.delete(storageNodes).where(eq(storageNodes.id, node.id));
+    }
+    await db.delete(storageClusters).where(eq(storageClusters.id, clusterId));
+
+    try {
+      await storageManager.reload();
+    } catch (err) {
+      logger.warn({ err }, 'Failed to reload storage manager after cluster reset');
+    }
+
+    return c.json({ message: `Removed ${clusterNodes.length} storage node(s) and cluster ${clusterId}` });
+  }
+
+  // Reset ALL clusters and nodes
   const all = await db.query.storageNodes.findMany();
   if (all.length > 0) {
     for (const node of all) {
@@ -436,9 +648,8 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
     }
   }
 
-  // Also reset the cluster config
-  const cluster = await db.query.storageClusters.findFirst();
-  if (cluster) {
+  const allClusters = await db.query.storageClusters.findMany();
+  for (const cluster of allClusters) {
     await db.delete(storageClusters).where(eq(storageClusters.id, cluster.id));
   }
 
@@ -451,7 +662,7 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
     logger.warn({ err }, 'Failed to switch platform volumes to local after storage reset');
   }
 
-  return c.json({ message: `Removed ${all.length} storage node(s) and reset cluster configuration` });
+  return c.json({ message: `Removed ${all.length} storage node(s) and ${allClusters.length} cluster(s)` });
 }) as any);
 
 // POST /nodes/:id/detach — Detach a storage node (requires password confirmation)
@@ -487,10 +698,12 @@ storageAdmin.openapi(detachNodeRoute, (async (c: any) => {
   }
 
   // If GlusterFS, detach the peer first
-  if (storageManager.config?.provider === 'glusterfs') {
+  const clusterEntry = node.clusterId ? storageManager.getCluster(node.clusterId) : undefined;
+  const clusterConfig = clusterEntry?.config ?? storageManager.config;
+  if (clusterConfig?.provider === 'glusterfs') {
     try {
       const { GlusterFSVolumeProvider } = await import('../services/storage/providers/glusterfs-volume.provider.js');
-      const provider = storageManager.volumes as InstanceType<typeof GlusterFSVolumeProvider>;
+      const provider = (clusterEntry?.volumeProvider ?? storageManager.volumes) as InstanceType<typeof GlusterFSVolumeProvider>;
       if (typeof provider.removePeer === 'function') {
         await provider.removePeer(node.ipAddress);
       }
@@ -545,20 +758,40 @@ const healthRoute = createRoute({
 storageAdmin.openapi(healthRoute, (async (c: any) => {
   const health = await storageManager.getHealth();
   const nodes = await db.query.storageNodes.findMany();
-  const cluster = await db.query.storageClusters.findFirst();
+  const allClusters = await db.query.storageClusters.findMany();
+  const defaultCluster = allClusters[0];
+
+  const clustersHealth = [];
+  for (const cluster of allClusters) {
+    const clusterHealth = await storageManager.getClusterHealth(cluster.id);
+    const clusterNodes = nodes.filter((n) => n.clusterId === cluster.id);
+    clustersHealth.push({
+      id: cluster.id,
+      name: cluster.name,
+      region: cluster.region,
+      scope: cluster.scope,
+      provider: cluster.provider,
+      objectProvider: cluster.objectProvider,
+      status: cluster.status,
+      replicationFactor: cluster.replicationFactor,
+      health: clusterHealth,
+      nodes: clusterNodes.map((n) => ({ ...n, healthy: n.status === 'active' })),
+    });
+  }
 
   return c.json({
     cluster: {
-      provider: cluster?.provider ?? 'local',
-      objectProvider: cluster?.objectProvider ?? 'local',
-      status: cluster?.status ?? 'healthy',
-      replicationFactor: cluster?.replicationFactor ?? 1,
+      provider: defaultCluster?.provider ?? 'local',
+      objectProvider: defaultCluster?.objectProvider ?? 'local',
+      status: defaultCluster?.status ?? 'healthy',
+      replicationFactor: defaultCluster?.replicationFactor ?? 1,
     },
     health,
     nodes: nodes.map((n) => ({
       ...n,
       healthy: n.status === 'active',
     })),
+    clusters: clustersHealth,
   });
 }) as any);
 
@@ -578,15 +811,16 @@ const repairServicesRoute = createRoute({
 });
 
 storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
-  const driver = storageManager.volumes.getDockerVolumeDriver();
+  const useHostMount = storageManager.volumes.isReady() && !!storageManager.volumes.getHostMountPath;
 
-  // List all Docker services managed by Fleet (cast to any for flexible property access)
+  // List all Docker services managed by Fleet (user services, not platform)
   const allServices: any[] = await dockerService.listServices();
   const fleetServices = allServices.filter((s) =>
     s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
   );
 
   const repaired: string[] = [];
+  const migrated: string[] = [];
   const failed: Array<{ name: string; error: string }> = [];
 
   for (const svc of fleetServices) {
@@ -596,18 +830,20 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
     const mounts: any[] = spec.TaskTemplate.ContainerSpec.Mounts ?? [];
     let needsUpdate = false;
 
+    // Check each mount to see if it needs updating
     for (const mount of mounts) {
-      if (mount.Type !== 'volume') continue;
-      const currentDriver = mount.VolumeOptions?.DriverConfig?.Name;
-      // Check if mount uses a stale non-local driver that doesn't match current config
-      if (currentDriver && currentDriver !== 'local' && currentDriver !== driver) {
-        needsUpdate = true;
-        break;
-      }
-      // Also check if current driver is 'local' but mount has no VolumeOptions when it should
-      if (driver === 'local' && !mount.VolumeOptions?.DriverConfig && mount.Source) {
-        const driverOpts = storageManager.volumes.getDockerVolumeOptions(mount.Source);
-        if (Object.keys(driverOpts).length > 0) {
+      // Skip non-data mounts (docker socket, etc.)
+      if (mount.Source === '/var/run/docker.sock') continue;
+
+      if (useHostMount) {
+        // Should be a bind mount to host path — check if it's still a Docker volume
+        if (mount.Type === 'volume') {
+          needsUpdate = true;
+          break;
+        }
+      } else {
+        // Should be a plain Docker volume — check if it's a stale bind mount to distributed storage
+        if (mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
           needsUpdate = true;
           break;
         }
@@ -616,20 +852,65 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
 
     if (!needsUpdate) continue;
 
-    // Rebuild mounts with correct driver config
-    const newMounts = mounts.map((mount: any) => {
-      if (mount.Type !== 'volume' || !mount.Source) return mount;
-      const driverOpts = storageManager.volumes.getDockerVolumeOptions(mount.Source);
-      const hasDriverOpts = Object.keys(driverOpts).length > 0;
-      return {
-        ...mount,
-        VolumeOptions: hasDriverOpts ? {
-          NoCopy: false,
-          Labels: {},
-          DriverConfig: { Name: driver, Options: driverOpts },
-        } : undefined,
-      };
-    });
+    // Rebuild mounts with correct type and migrate data
+    const newMounts: any[] = [];
+    for (const mount of mounts) {
+      // Skip non-data mounts — pass through as-is
+      if (mount.Source === '/var/run/docker.sock' || mount.Type === 'bind' && !mount.Source?.startsWith('/mnt/fleet-volumes/')) {
+        newMounts.push(mount);
+        continue;
+      }
+
+      if (useHostMount && mount.Type === 'volume') {
+        // Switching from Docker volume → host bind mount (distributed storage)
+        const volumeName = mount.Source;
+        const hostPath = storageManager.volumes.getHostMountPath!(volumeName) ?? volumeName;
+
+        // Create the subdirectory on the distributed storage
+        try {
+          await storageManager.volumes.createVolume(volumeName, 0);
+        } catch {
+          // May already exist
+        }
+
+        // Copy data from old Docker volume to new distributed mount
+        try {
+          await dockerService.copyVolumeData(volumeName, hostPath);
+          migrated.push(`${spec.Name}:${volumeName}`);
+          logger.info({ service: spec.Name, volume: volumeName, hostPath }, 'Migrated volume data to distributed storage');
+        } catch (err) {
+          logger.warn({ err, service: spec.Name, volume: volumeName }, 'Failed to migrate volume data — service will start with empty volume on distributed storage');
+        }
+
+        newMounts.push({
+          Source: hostPath,
+          Target: mount.Target,
+          Type: 'bind' as const,
+          ReadOnly: mount.ReadOnly ?? false,
+        });
+      } else if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
+        // Switching from host bind mount → Docker volume (back to local)
+        const volumeName = mount.Source.split('/').pop()!;
+
+        // Copy data from distributed mount back to Docker volume
+        try {
+          await dockerService.copyVolumeData(mount.Source, volumeName);
+          migrated.push(`${spec.Name}:${volumeName}`);
+          logger.info({ service: spec.Name, hostPath: mount.Source, volume: volumeName }, 'Migrated volume data from distributed storage to Docker volume');
+        } catch (err) {
+          logger.warn({ err, service: spec.Name }, 'Failed to migrate volume data back — service will start with empty Docker volume');
+        }
+
+        newMounts.push({
+          Source: volumeName,
+          Target: mount.Target,
+          Type: 'volume' as const,
+          ReadOnly: mount.ReadOnly ?? false,
+        });
+      } else {
+        newMounts.push(mount);
+      }
+    }
 
     try {
       const dockerSvc = dockerService.getDockerClient().getService(svc.ID);
@@ -643,7 +924,7 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
         },
       } as any);
       repaired.push(spec.Name);
-      logger.info({ service: spec.Name }, 'Repaired volume driver config');
+      logger.info({ service: spec.Name }, 'Repaired service volume mounts');
     } catch (err) {
       failed.push({ name: spec.Name ?? svc.ID, error: (err as Error).message });
       logger.error({ err, service: spec.Name }, 'Failed to repair service');
@@ -651,8 +932,9 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
   }
 
   return c.json({
-    message: `Repaired ${repaired.length} service(s), ${failed.length} failed`,
+    message: `Repaired ${repaired.length} service(s), migrated ${migrated.length} volume(s), ${failed.length} failed`,
     repaired,
+    migrated,
     failed,
   });
 }) as any);

@@ -146,19 +146,99 @@ try {
   // Swarm may not be initialized yet
 }
 
-// Ensure platform volumes (Traefik certs) match the configured storage provider.
-// This handles cases where docker stack deploy reverts volume config, or a node restart.
+// Ensure distributed storage mounts are healthy (service volumes + platform certs).
+// This handles cases where docker stack deploy reverts volume config, or a node restart,
+// or a server crash during volume migration.
 try {
   const { storageManager } = await import('./services/storage/storage-manager.js')
   const { dockerService } = await import('./services/docker.service.js')
+
+  // Ensure service volume base mount exists on all nodes (idempotent)
+  if (storageManager.isVolumeDistributed) {
+    try {
+      await dockerService.ensureServiceVolumeMount()
+    } catch (err) {
+      logger.warn({ err }, 'Failed to ensure service volume mount on startup')
+    }
+  }
+
+  // Ensure platform volumes (Traefik certs) match the configured storage provider
   const expectedMode = storageManager.isVolumeDistributed ? 'distributed' : 'local'
   const currentMode = await dockerService.getPlatformVolumeMode()
   if (expectedMode !== currentMode) {
     logger.info({ expectedMode, currentMode }, 'Platform volume mode mismatch detected — applying correct configuration')
     await dockerService.updatePlatformVolumeMounts(expectedMode)
   }
+
+  // Auto-repair user services with stale volume mounts.
+  // Handles: crash during migration, stack redeploy reverting mounts, or newly added storage.
+  // Safe to run repeatedly — detects current mount type vs expected and only repairs mismatches.
+  // Data is copied from old volume before switching; old volume is NEVER deleted (safe to retry).
+  try {
+    const useHostMount = storageManager.volumes.isReady() && !!storageManager.volumes.getHostMountPath
+    const allSvcs: any[] = await dockerService.listServices()
+    const userServices = allSvcs.filter((s: any) =>
+      s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
+    )
+
+    let repairCount = 0
+    for (const svc of userServices) {
+      const spec = svc.Spec
+      if (!spec?.TaskTemplate?.ContainerSpec) continue
+      const mounts: any[] = spec.TaskTemplate.ContainerSpec.Mounts ?? []
+      let needsRepair = false
+
+      for (const mount of mounts) {
+        if (mount.Source === '/var/run/docker.sock') continue
+        if (useHostMount && mount.Type === 'volume') { needsRepair = true; break }
+        if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) { needsRepair = true; break }
+      }
+      if (!needsRepair) continue
+
+      // Rebuild mounts with data migration
+      const newMounts: any[] = []
+      for (const mount of mounts) {
+        if (mount.Source === '/var/run/docker.sock' || (mount.Type === 'bind' && !mount.Source?.startsWith('/mnt/fleet-volumes/'))) {
+          newMounts.push(mount)
+          continue
+        }
+        if (useHostMount && mount.Type === 'volume') {
+          const volumeName = mount.Source
+          const hostPath = storageManager.volumes.getHostMountPath!(volumeName) ?? volumeName
+          try { await storageManager.volumes.createVolume(volumeName, 0) } catch { /* may exist */ }
+          try { await dockerService.copyVolumeData(volumeName, hostPath) } catch { /* best effort — old volume preserved */ }
+          newMounts.push({ Source: hostPath, Target: mount.Target, Type: 'bind', ReadOnly: mount.ReadOnly ?? false })
+        } else if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
+          const volumeName = mount.Source.split('/').pop()!
+          try { await dockerService.copyVolumeData(mount.Source, volumeName) } catch { /* best effort */ }
+          newMounts.push({ Source: volumeName, Target: mount.Target, Type: 'volume', ReadOnly: mount.ReadOnly ?? false })
+        } else {
+          newMounts.push(mount)
+        }
+      }
+
+      try {
+        const dockerSvc = dockerService.getDockerClient().getService(svc.ID)
+        spec.TaskTemplate.ContainerSpec.Mounts = newMounts
+        await dockerSvc.update({
+          ...spec,
+          version: svc.Version?.Index,
+          TaskTemplate: { ...spec.TaskTemplate, ForceUpdate: ((spec.TaskTemplate as any).ForceUpdate ?? 0) + 1 },
+        } as any)
+        repairCount++
+      } catch (err) {
+        logger.warn({ err, service: spec.Name }, 'Failed to repair service volume mount on startup')
+      }
+    }
+
+    if (repairCount > 0) {
+      logger.info({ repairCount }, 'Auto-repaired service volume mounts on startup')
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to auto-repair service volume mounts on startup')
+  }
 } catch {
-  // Non-critical — platform volume check can fail if Swarm or storage not ready
+  // Non-critical — volume checks can fail if Swarm or storage not ready
 }
 
 server = serve({

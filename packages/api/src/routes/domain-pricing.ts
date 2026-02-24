@@ -54,6 +54,8 @@ const domainPricingEntrySchema = z.object({
   providerRenewalPrice: z.number(),
   markupType: z.string(),
   markupValue: z.number(),
+  renewalMarkupType: z.string().nullable(),
+  renewalMarkupValue: z.number().nullable(),
   sellRegistrationPrice: z.number(),
   sellRenewalPrice: z.number(),
   enabled: z.boolean().nullable(),
@@ -68,6 +70,8 @@ const upsertSchema = z.object({
   providerRenewalPrice: z.number().int().min(0),
   markupType: z.enum(['percentage', 'fixed_amount', 'fixed_price']).default('percentage'),
   markupValue: z.number().int().min(0).default(20),
+  renewalMarkupType: z.enum(['percentage', 'fixed_amount', 'fixed_price']).nullable().optional(),
+  renewalMarkupValue: z.number().int().min(0).nullable().optional(),
   enabled: z.boolean().default(true),
   currency: z.string().length(3).default('USD'),
 }).openapi('DomainPricingUpsert');
@@ -77,6 +81,8 @@ const patchSchema = z.object({
   providerRenewalPrice: z.number().int().min(0).optional(),
   markupType: z.enum(['percentage', 'fixed_amount', 'fixed_price']).optional(),
   markupValue: z.number().int().min(0).optional(),
+  renewalMarkupType: z.enum(['percentage', 'fixed_amount', 'fixed_price']).nullable().optional(),
+  renewalMarkupValue: z.number().int().min(0).nullable().optional(),
   enabled: z.boolean().optional(),
   currency: z.string().length(3).optional(),
 }).openapi('DomainPricingPatch');
@@ -129,7 +135,9 @@ domainPricingRoutes.openapi(upsertRoute, (async (c: any) => {
   const tld = data.tld.replace(/^\./, '').toLowerCase();
 
   const sellRegistrationPrice = computeSellPrice(data.providerRegistrationPrice, data.markupType, data.markupValue);
-  const sellRenewalPrice = computeSellPrice(data.providerRenewalPrice, data.markupType, data.markupValue);
+  const renMarkupType = data.renewalMarkupType ?? data.markupType;
+  const renMarkupValue = data.renewalMarkupValue ?? data.markupValue;
+  const sellRenewalPrice = computeSellPrice(data.providerRenewalPrice, renMarkupType, renMarkupValue);
 
   // Check if exists
   const existing = await db.query.domainTldPricing.findFirst({
@@ -142,6 +150,8 @@ domainPricingRoutes.openapi(upsertRoute, (async (c: any) => {
       providerRenewalPrice: data.providerRenewalPrice,
       markupType: data.markupType,
       markupValue: data.markupValue,
+      renewalMarkupType: data.renewalMarkupType ?? null,
+      renewalMarkupValue: data.renewalMarkupValue ?? null,
       sellRegistrationPrice,
       sellRenewalPrice,
       enabled: data.enabled,
@@ -157,6 +167,8 @@ domainPricingRoutes.openapi(upsertRoute, (async (c: any) => {
     providerRenewalPrice: data.providerRenewalPrice,
     markupType: data.markupType,
     markupValue: data.markupValue,
+    renewalMarkupType: data.renewalMarkupType ?? null,
+    renewalMarkupValue: data.renewalMarkupValue ?? null,
     sellRegistrationPrice,
     sellRenewalPrice,
     enabled: data.enabled,
@@ -200,8 +212,12 @@ domainPricingRoutes.openapi(patchRoute, (async (c: any) => {
   const mType = updates.markupType ?? existing.markupType;
   const mValue = updates.markupValue ?? existing.markupValue;
 
+  // For renewal: use dedicated renewal markup if provided, otherwise fall back to reg markup
+  const renMarkupType = (updates.renewalMarkupType !== undefined ? updates.renewalMarkupType : existing.renewalMarkupType) ?? mType;
+  const renMarkupValue = (updates.renewalMarkupValue !== undefined ? updates.renewalMarkupValue : existing.renewalMarkupValue) ?? mValue;
+
   const sellRegistrationPrice = computeSellPrice(regPrice, mType, mValue);
-  const sellRenewalPrice = computeSellPrice(renPrice, mType, mValue);
+  const sellRenewalPrice = computeSellPrice(renPrice, renMarkupType, renMarkupValue);
 
   const [updated] = await updateReturning(domainTldPricing, {
     ...updates,
@@ -265,33 +281,22 @@ const syncRoute = createRoute({
 domainPricingRoutes.openapi(syncRoute, (async (c: any) => {
   try {
     const provider = await registrarService.getProvider();
-    const commonTlds = ['com', 'net', 'org', 'io', 'dev', 'app', 'co', 'xyz', 'me', 'ai', 'no', 'se', 'dk', 'fi'];
-
-    // Use a random string to avoid hitting premium domain pricing
-    const randomQuery = `fleetpricecheck${Date.now().toString(36)}`;
-    const results = await provider.searchDomains(randomQuery, commonTlds);
+    const tldPrices = await provider.listTldPricing();
     let synced = 0;
-    let skippedPremium = 0;
 
-    for (const result of results) {
-      if (!result.price) continue;
-      // Skip premium domains — their pricing is not representative of standard TLD rates
-      if (result.premium) {
-        skippedPremium++;
-        continue;
-      }
-      const tld = result.domain.split('.').slice(1).join('.');
+    for (const { tld, registration, renewal, currency } of tldPrices) {
+      const regPriceCents = Math.round(registration * 100);
+      const renPriceCents = Math.round(renewal * 100);
 
       const existing = await db.query.domainTldPricing.findFirst({
         where: eq(domainTldPricing.tld, tld),
       });
 
-      const regPriceCents = Math.round(result.price.registration * 100);
-      const renPriceCents = Math.round(result.price.renewal * 100);
-
       if (existing) {
         const sellReg = computeSellPrice(regPriceCents, existing.markupType, existing.markupValue);
-        const sellRen = computeSellPrice(renPriceCents, existing.markupType, existing.markupValue);
+        const renMarkupType = existing.renewalMarkupType ?? existing.markupType;
+        const renMarkupValue = existing.renewalMarkupValue ?? existing.markupValue;
+        const sellRen = computeSellPrice(renPriceCents, renMarkupType, renMarkupValue);
 
         await updateReturning(domainTldPricing, {
           providerRegistrationPrice: regPriceCents,
@@ -314,16 +319,13 @@ domainPricingRoutes.openapi(syncRoute, (async (c: any) => {
           sellRegistrationPrice: sellReg,
           sellRenewalPrice: sellRen,
           enabled: true,
-          currency: result.price.currency,
+          currency,
         });
       }
       synced++;
     }
 
-    const msg = skippedPremium > 0
-      ? `Synced ${synced} TLD prices from provider (skipped ${skippedPremium} premium TLDs)`
-      : `Synced ${synced} TLD prices from provider`;
-    return c.json({ message: msg }, 200);
+    return c.json({ message: `Synced ${synced} TLD prices from provider` }, 200);
   } catch (err) {
     logger.error({ err }, 'Price sync failed');
     return c.json({ error: 'Failed to sync prices' }, 500);

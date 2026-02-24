@@ -39,6 +39,13 @@ export interface DomainInfo {
   locked: boolean;
 }
 
+export interface TldPriceEntry {
+  tld: string;
+  registration: number;
+  renewal: number;
+  currency: string;
+}
+
 export interface RegistrarProvider {
   name: string;
   searchDomains(
@@ -57,6 +64,7 @@ export interface RegistrarProvider {
     years: number,
   ): Promise<{ expiresAt: Date }>;
   setNameservers(domain: string, nameservers: string[]): Promise<void>;
+  listTldPricing(): Promise<TldPriceEntry[]>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -204,6 +212,15 @@ class SimulatedRegistrarProvider implements RegistrarProvider {
 
   async setNameservers(domain: string, nameservers: string[]): Promise<void> {
     logger.info({ domain, nameservers }, 'Simulated: setNameservers');
+  }
+
+  async listTldPricing(): Promise<TldPriceEntry[]> {
+    return Object.entries(this.tldPrices).map(([tld, prices]) => ({
+      tld,
+      registration: prices.registration,
+      renewal: prices.renewal,
+      currency: 'USD',
+    }));
   }
 }
 

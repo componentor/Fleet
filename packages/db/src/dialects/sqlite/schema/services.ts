@@ -28,6 +28,7 @@ export const services = sqliteTable('services', {
   sslEnabled: integer('ssl_enabled', { mode: 'boolean' }).default(true),
   status: text('status').default('stopped'),
   nodeConstraint: text('node_constraint'),
+  region: text('region'),
   placementConstraints: text('placement_constraints', { mode: 'json' }).$default(() => ([])),
   updateParallelism: integer('update_parallelism').default(1),
   updateDelay: text('update_delay').default('10s'),

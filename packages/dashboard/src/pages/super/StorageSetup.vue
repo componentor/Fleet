@@ -7,6 +7,7 @@ import {
   Loader2, Plus, Trash2, RefreshCw, AlertTriangle, Database,
   Cloud, Monitor, Settings, Activity, BookOpen, ChevronDown,
   ChevronUp, Lock, Network, Terminal, Wifi, WifiOff, Cpu,
+  MapPin, Globe,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -21,6 +22,16 @@ const success = ref('')
 // Cluster state (loaded on mount)
 const clusterData = ref<any>(null)
 const isConfigured = ref(false)
+
+// Multi-cluster state
+const clusters = ref<any[]>([])
+const locations = ref<{ locationKey: string; label: string }[]>([])
+
+// Wizard cluster identity fields
+const clusterName = ref('')
+const clusterScope = ref<'regional' | 'global'>('regional')
+const clusterRegion = ref<string | null>(null)
+const editingClusterId = ref<string | null>(null) // non-null = editing existing cluster
 
 // Wizard state
 const showWizard = ref(false)
@@ -197,7 +208,7 @@ const canProceed = computed(() => {
 // ── Lifecycle ────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await Promise.all([loadCluster(), fetchSwarmNodes()])
+  await Promise.all([loadCluster(), fetchSwarmNodes(), fetchLocations()])
 })
 
 // ── API ──────────────────────────────────────────────────────────────────
@@ -207,6 +218,7 @@ async function loadCluster() {
   try {
     clusterData.value = await api.get('/admin/storage/cluster')
     isConfigured.value = !!clusterData.value?.cluster?.id
+    clusters.value = clusterData.value?.clusters ?? []
     if (isConfigured.value && clusterData.value.cluster.status !== 'inactive') {
       showWizard.value = false
     }
@@ -214,16 +226,45 @@ async function loadCluster() {
     // Not configured yet
     clusterData.value = null
     isConfigured.value = false
+    clusters.value = []
   } finally {
     loading.value = false
   }
 }
 
-function startWizard() {
+async function fetchLocations() {
+  try {
+    locations.value = await api.get<any[]>('/billing/admin/locations') as any[] ?? []
+  } catch {
+    locations.value = []
+  }
+}
+
+function startWizard(existingCluster?: any) {
   showWizard.value = true
   currentStep.value = 1
   error.value = ''
   success.value = ''
+
+  if (existingCluster) {
+    editingClusterId.value = existingCluster.id
+    clusterName.value = existingCluster.name ?? ''
+    clusterScope.value = existingCluster.scope ?? 'regional'
+    clusterRegion.value = existingCluster.region ?? null
+    selectedMode.value = existingCluster.provider === 'local' ? 'local' : 'distributed'
+    if (existingCluster.provider !== 'local') {
+      selectedVolumeProvider.value = existingCluster.provider as any
+    }
+    if (existingCluster.objectProvider !== 'local') {
+      selectedObjectProvider.value = existingCluster.objectProvider as any
+    }
+    replicationFactor.value = existingCluster.replicationFactor ?? 3
+  } else {
+    editingClusterId.value = null
+    clusterName.value = ''
+    clusterScope.value = 'regional'
+    clusterRegion.value = null
+  }
 }
 
 async function fetchSwarmNodes() {
@@ -382,22 +423,7 @@ async function initializeCluster() {
   const isDistributed = selectedMode.value === 'distributed'
 
   try {
-    // Register nodes first
-    if (isDistributed) {
-      initLogs.value.push(t('storageSetup.registeringNodes'))
-      for (const node of storageNodes.value) {
-        await api.post('/admin/storage/nodes', {
-          hostname: node.hostname,
-          ipAddress: node.ipAddress,
-          role: node.role,
-          storagePathRoot: node.storagePathRoot,
-          capacityGb: node.capacityGb,
-        })
-        initLogs.value.push(`  + ${node.hostname} (${node.ipAddress})`)
-      }
-    }
-
-    // Configure cluster
+    // Configure cluster first (so we get the clusterId for node registration)
     initLogs.value.push(t('storageSetup.configuringCluster'))
 
     // Build volume provider config
@@ -453,6 +479,9 @@ async function initializeCluster() {
     }
 
     const clusterConfig: any = {
+      name: clusterName.value || undefined,
+      region: clusterRegion.value || null,
+      scope: clusterScope.value,
       provider: volumeProvider,
       objectProvider,
       replicationFactor: isDistributed ? replicationFactor.value : 1,
@@ -461,6 +490,23 @@ async function initializeCluster() {
     }
 
     const result = await api.post('/admin/storage/cluster', clusterConfig) as any
+    const newClusterId = result.clusterId
+
+    // Register nodes with the cluster
+    if (isDistributed && storageNodes.value.length > 0) {
+      initLogs.value.push(t('storageSetup.registeringNodes'))
+      for (const node of storageNodes.value) {
+        await api.post('/admin/storage/nodes', {
+          clusterId: newClusterId,
+          hostname: node.hostname,
+          ipAddress: node.ipAddress,
+          role: node.role,
+          storagePathRoot: node.storagePathRoot,
+          capacityGb: node.capacityGb,
+        })
+        initLogs.value.push(`  + ${node.hostname} (${node.ipAddress})`)
+      }
+    }
 
     // Show prerequisite installation results
     if (result.prerequisites) {
@@ -809,7 +855,15 @@ async function attachNewNode() {
           {{ t('storageSetup.migrateStorage') }}
         </button>
         <button
-          @click="startWizard"
+          v-if="isConfigured"
+          @click="startWizard()"
+          class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium transition-colors"
+        >
+          <Plus class="w-4 h-4" />
+          Add Cluster
+        </button>
+        <button
+          @click="startWizard()"
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
           <Settings class="w-4 h-4" />
@@ -820,6 +874,73 @@ async function attachNewNode() {
 
     <!-- Current Status (when not in wizard mode) -->
     <template v-if="!showWizard && !loading">
+
+      <!-- Multi-Cluster List -->
+      <div v-if="clusters.length > 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage Clusters</h2>
+          <button
+            @click="startWizard()"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            Add Cluster
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-gray-200 dark:border-gray-700">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Name</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Scope</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Region</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Provider</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Object Storage</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Nodes</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Status</th>
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tr v-for="cl in clusters" :key="cl.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ cl.name ?? 'default' }}</td>
+                <td class="px-6 py-4">
+                  <span
+                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="cl.scope === 'global'
+                      ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                      : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'"
+                  >
+                    <component :is="cl.scope === 'global' ? Globe : MapPin" class="w-3 h-3" />
+                    {{ cl.scope }}
+                  </span>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ cl.region ?? 'All regions' }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 capitalize">{{ cl.provider }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 capitalize">{{ cl.objectProvider }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ cl.storageNodes?.length ?? 0 }}</td>
+                <td class="px-6 py-4">
+                  <span
+                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                    :class="cl.status === 'healthy' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'"
+                  >
+                    {{ cl.status }}
+                  </span>
+                </td>
+                <td class="px-6 py-4 text-right">
+                  <button
+                    @click="startWizard(cl)"
+                    class="text-xs text-primary-600 dark:text-primary-400 hover:underline font-medium"
+                  >
+                    Edit
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Cluster Overview -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
@@ -1290,6 +1411,82 @@ async function attachNewNode() {
               <span class="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">{{ t('storageSetup.selfHealing') }}</span>
             </div>
           </button>
+        </div>
+
+        <!-- Cluster Identity (name, scope, region) -->
+        <div class="max-w-3xl mx-auto space-y-6 mt-8">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 space-y-4">
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Cluster Identity</h3>
+
+            <!-- Cluster Name -->
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Cluster Name</label>
+              <input
+                v-model="clusterName"
+                type="text"
+                placeholder="e.g. eu-storage, global-cdn"
+                class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+              />
+            </div>
+
+            <!-- Scope Toggle -->
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Cluster Scope</label>
+              <div class="grid grid-cols-2 gap-3">
+                <button
+                  @click="clusterScope = 'regional'"
+                  :class="[
+                    'flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all text-sm',
+                    clusterScope === 'regional'
+                      ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'
+                  ]"
+                >
+                  <MapPin class="w-5 h-5 text-blue-500 shrink-0" />
+                  <div>
+                    <p class="font-medium text-gray-900 dark:text-white">Regional</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Data stays in one region. GDPR compliant.</p>
+                  </div>
+                </button>
+                <button
+                  @click="clusterScope = 'global'"
+                  :class="[
+                    'flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all text-sm',
+                    clusterScope === 'global'
+                      ? 'border-purple-500 ring-2 ring-purple-500/20 bg-purple-50 dark:bg-purple-900/20'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-purple-400'
+                  ]"
+                >
+                  <Globe class="w-5 h-5 text-purple-500 shrink-0" />
+                  <div>
+                    <p class="font-medium text-gray-900 dark:text-white">Global</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Geo-replicated. Slow writes, fast local reads.</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Region (only for regional scope) -->
+            <div v-if="clusterScope === 'regional'">
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Region</label>
+              <select
+                v-model="clusterRegion"
+                class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+              >
+                <option :value="null">No specific region</option>
+                <option v-for="loc in locations" :key="loc.locationKey" :value="loc.locationKey">{{ loc.label }}</option>
+              </select>
+            </div>
+
+            <!-- Global scope info -->
+            <div v-if="clusterScope === 'global'" class="flex items-start gap-3 p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
+              <Globe class="w-5 h-5 text-purple-500 shrink-0 mt-0.5" />
+              <div class="text-xs text-purple-700 dark:text-purple-300">
+                <p class="font-medium">Global replication</p>
+                <p class="mt-0.5">Data replicates to all nodes across regions. Writes are slow (cross-region), reads are fast (local). Ideal for large file distribution like game updates or CDN assets.</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Provider Selection (when distributed is selected) -->

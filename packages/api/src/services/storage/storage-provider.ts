@@ -58,6 +58,14 @@ export interface VolumeStorageProvider {
   getDockerVolumeOptions(name: string): Record<string, string>;
 
   /**
+   * If the provider uses host-level FUSE mounts (e.g. GlusterFS), returns the
+   * host path where volumes are mounted. Docker uses a bind mount to this path
+   * instead of a volume driver (which can't do FUSE mounts).
+   * Returns null for providers that work natively with Docker's volume driver.
+   */
+  getHostMountPath?(name: string): string | null;
+
+  /**
    * Whether the storage cluster is operational and can serve volumes.
    * When false, docker.service.ts will fall back to plain local volumes.
    */

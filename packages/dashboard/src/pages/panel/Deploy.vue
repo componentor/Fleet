@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Shield,
+  MapPin,
 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
@@ -50,6 +51,16 @@ const authStore = useAuthStore()
 const api = useApi()
 
 const deployMethod = ref<'github' | 'docker' | 'upload' | null>(null)
+
+// Region selection (shared across all deploy methods)
+const regions = ref<Array<{ key: string; label: string; nodeCount: number }>>([])
+const selectedRegion = ref<string | null>(null)
+
+async function fetchRegions() {
+  try {
+    regions.value = await api.get<any[]>('/services/regions')
+  } catch {}
+}
 
 // Docker form state
 const serviceName = ref('')
@@ -194,6 +205,7 @@ async function executeUploadDeploy() {
     if (buildEnvVarsPayload()) formData.append('env', JSON.stringify(buildEnvVarsPayload()))
     if (buildPortsPayload()) formData.append('ports', JSON.stringify(buildPortsPayload()))
     if (domain.value) formData.append('domain', domain.value)
+    if (selectedRegion.value) formData.append('region', selectedRegion.value)
     formData.append('replicas', String(replicas.value))
 
     await api.upload('/upload/deploy', formData)
@@ -277,6 +289,7 @@ async function executeDockerDeploy() {
       image: dockerImage.value,
       replicas: replicas.value,
       domain: domain.value || undefined,
+      region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
       ports: buildPortsPayload(),
     } as any)
@@ -309,6 +322,7 @@ async function executeGithubDeploy() {
       githubRepo: selectedRepo.value!.fullName,
       githubBranch: selectedBranch.value,
       autoDeploy: autoDeploy.value,
+      region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
       ports: buildPortsPayload(),
     } as any)
@@ -419,6 +433,7 @@ watch(
 
 // Handle OAuth return — token is now in URL fragment (#) to prevent server-side leakage
 onMounted(() => {
+  fetchRegions()
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const isGithubConnected = hashParams.get('github_connected') || route.query.github_connected
   if (isGithubConnected) {
@@ -567,6 +582,24 @@ onMounted(() => {
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               />
             </div>
+          </div>
+
+          <!-- Region Selector -->
+          <div v-if="regions.length > 0">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <span class="inline-flex items-center gap-1.5">
+                <MapPin class="w-3.5 h-3.5" />
+                Region
+              </span>
+            </label>
+            <select
+              v-model="selectedRegion"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            >
+              <option :value="null">Auto (any region)</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'node' : 'nodes' }})</option>
+            </select>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Choose where your containers run for lower latency</p>
           </div>
 
           <!-- Environment Variables -->

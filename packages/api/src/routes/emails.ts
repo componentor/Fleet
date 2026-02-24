@@ -19,6 +19,23 @@ const emails = new OpenAPIHono<{
 emails.use('*', authMiddleware);
 emails.use('*', tenantMiddleware);
 
+// GET /templates/layout — get the shared email layout for preview
+const getLayoutRoute = createRoute({
+  method: 'get',
+  path: '/templates/layout',
+  tags: ['Emails'],
+  summary: 'Get the email layout wrapper HTML',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ html: z.string() }), 'Email layout HTML with {{__body__}} placeholder'),
+    ...standardErrors,
+  },
+});
+
+emails.openapi(getLayoutRoute, (async (c: any) => {
+  return c.json({ html: emailService.getEmailLayout() });
+}) as any);
+
 // GET /templates — list email templates
 // Returns DB templates merged with built-in defaults.
 const listTemplatesRoute = createRoute({
@@ -357,6 +374,58 @@ emails.openapi(resetTemplateRoute, (async (c: any) => {
   }
 
   return c.json({ error: 'Cannot reset without account context' }, 400);
+}) as any);
+
+// POST /templates/reseed — reset all (or one) template(s) to built-in defaults
+// Deletes global DB rows so built-in defaults take over.
+const reseedTemplatesRoute = createRoute({
+  method: 'post',
+  path: '/templates/reseed',
+  tags: ['Emails'],
+  summary: 'Re-seed email templates to built-in defaults',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      slug: z.string().optional(),
+    }).optional()),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Templates re-seeded'),
+    ...standardErrors,
+  },
+  middleware: [requireAdmin],
+});
+
+emails.openapi(reseedTemplatesRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can re-seed templates' }, 403);
+  }
+
+  const body = c.req.valid('json') ?? {};
+  const defaults = emailService.getDefaultTemplates();
+  const slugsToReseed = body.slug ? [body.slug] : Object.keys(defaults);
+
+  let reset = 0;
+  for (const slug of slugsToReseed) {
+    if (!defaults[slug]) continue;
+    const deleted = await deleteReturning(
+      emailTemplates,
+      and(
+        eq(emailTemplates.slug, slug),
+        isNull(emailTemplates.accountId),
+      )!,
+    );
+    if (deleted.length > 0) reset++;
+  }
+
+  return c.json({
+    message: body.slug
+      ? reset > 0 ? `Template "${body.slug}" re-seeded to default` : `Template "${body.slug}" is already using the default`
+      : `Re-seeded ${reset} template(s) to built-in defaults`,
+    reset,
+    total: slugsToReseed.length,
+  });
 }) as any);
 
 export default emails;

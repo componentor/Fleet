@@ -3,8 +3,9 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { db, appTemplates, services, storageVolumes, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
+import { db, appTemplates, services, deployments, storageVolumes, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
 import { dockerService } from './docker.service.js';
+import { storageManager } from './storage/storage-manager.js';
 import { buildTraefikLabels } from './traefik.js';
 import { logger } from './logger.js';
 
@@ -28,6 +29,7 @@ export interface TemplateServiceDefinition {
   env?: Record<string, string>;
   volumes?: Array<{ source: string; target: string; readonly?: boolean }>;
   domain?: string;
+  resources?: { cpuLimit?: number; memoryLimit?: number };
 }
 
 export interface ParsedTemplate {
@@ -114,14 +116,21 @@ export class TemplateService {
     );
 
     const rawServices = (raw['services'] as Array<Record<string, unknown>>) ?? [];
-    const templateServices: TemplateServiceDefinition[] = rawServices.map((s) => ({
-      name: String(s['name'] ?? ''),
-      image: String(s['image'] ?? ''),
-      ports: s['ports'] as TemplateServiceDefinition['ports'],
-      env: s['env'] as Record<string, string> | undefined,
-      volumes: s['volumes'] as TemplateServiceDefinition['volumes'],
-      domain: s['domain'] as string | undefined,
-    }));
+    const templateServices: TemplateServiceDefinition[] = rawServices.map((s) => {
+      const res = s['resources'] as Record<string, unknown> | undefined;
+      return {
+        name: String(s['name'] ?? ''),
+        image: String(s['image'] ?? ''),
+        ports: s['ports'] as TemplateServiceDefinition['ports'],
+        env: s['env'] as Record<string, string> | undefined,
+        volumes: s['volumes'] as TemplateServiceDefinition['volumes'],
+        domain: s['domain'] as string | undefined,
+        resources: res ? {
+          cpuLimit: typeof res['cpu_limit'] === 'number' ? res['cpu_limit'] : undefined,
+          memoryLimit: typeof res['memory_limit'] === 'number' ? res['memory_limit'] : undefined,
+        } : undefined,
+      };
+    });
 
     const volumes = (raw['volumes'] as string[]) ?? [];
 
@@ -277,8 +286,10 @@ export class TemplateService {
 
     // Build a map of service names to their Swarm service names for cross-references.
     // Include a short stack suffix so deploying the same template multiple times
-    // produces unique Docker service names (e.g. fleet-{account}-wordpress-a1b2c3d4).
-    const swarmNamePrefix = `fleet-${accountId}`;
+    // produces unique Docker service names (e.g. fleet-a1b2c3d4-wordpress-e5f6g7h8).
+    // Use short account ID (12 chars) to stay under Docker's 63-char name limit.
+    const accountShort = accountId.replace(/-/g, '').substring(0, 12);
+    const swarmNamePrefix = `fleet-${accountShort}`;
     const stackShort = stackId.substring(0, 8);
     const stackNamespace = `${swarmNamePrefix}-${slug}-${stackShort}`;
     const serviceNameMap: Record<string, string> = {};
@@ -330,11 +341,11 @@ export class TemplateService {
         readonly: v.readonly ?? false,
       }));
 
-      // Apply per-service resource overrides if provided
+      // Apply per-service resource overrides if provided (override > template > null → docker.service defaults)
       const overrides = options?.resourceOverrides?.[svcDef.name];
       const replicas = overrides?.replicas ?? 1;
-      const cpuLimit = overrides?.cpuLimit ?? null;
-      const memoryLimit = overrides?.memoryLimit ?? null;
+      const cpuLimit = overrides?.cpuLimit ?? svcDef.resources?.cpuLimit ?? null;
+      const memoryLimit = overrides?.memoryLimit ?? svcDef.resources?.memoryLimit ?? null;
 
       // Insert service record into DB
       const [svc] = await insertReturning(services, {
@@ -410,11 +421,23 @@ export class TemplateService {
           })
           .where(eq(services.id, svc.id));
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         logger.error({ err, service: svcDef.name }, `Failed to deploy template service ${svcDef.name}`);
         await db
           .update(services)
           .set({ status: 'failed', updatedAt: new Date() })
           .where(eq(services.id, svc.id));
+        // Create a deployment record so the error is visible in the UI
+        try {
+          await db.insert(deployments).values({
+            serviceId: svc.id,
+            status: 'failed',
+            log: errMsg,
+            imageTag: image,
+            trigger: 'template',
+            completedAt: new Date(),
+          });
+        } catch { /* best-effort */ }
       }
 
       createdServices.push({
@@ -426,27 +449,33 @@ export class TemplateService {
 
     // Track template volumes in the storageVolumes table so they appear in the
     // Storage page and can be browsed via the volume file explorer.
-    for (const volName of parsed.volumes ?? []) {
-      const dockerVolName = `${swarmNamePrefix}-${volName}`;
-      try {
-        const existing = await db.query.storageVolumes.findFirst({
-          where: and(
-            eq(storageVolumes.name, dockerVolName),
-            eq(storageVolumes.accountId, accountId),
-            isNull(storageVolumes.deletedAt),
-          ),
-        });
-        if (!existing) {
-          await db.insert(storageVolumes).values({
-            accountId,
-            name: dockerVolName,
-            displayName: volName,
-            sizeGb: 0,
-            status: 'ready',
+    // Only track when a storage provider is actually managing volumes (NFS, GlusterFS, Ceph).
+    // Plain Docker volumes (no NFS) are ephemeral container volumes — no need to track.
+    const hasStorageProvider = storageManager.volumes.isReady();
+    if (hasStorageProvider) {
+      for (const volName of parsed.volumes ?? []) {
+        const dockerVolName = `${swarmNamePrefix}-${volName}`;
+        try {
+          const existing = await db.query.storageVolumes.findFirst({
+            where: and(
+              eq(storageVolumes.name, dockerVolName),
+              eq(storageVolumes.accountId, accountId),
+              isNull(storageVolumes.deletedAt),
+            ),
           });
+          if (!existing) {
+            await db.insert(storageVolumes).values({
+              accountId,
+              name: dockerVolName,
+              displayName: volName,
+              sizeGb: 0,
+              provider: storageManager.volumes.name,
+              status: 'ready',
+            });
+          }
+        } catch (err) {
+          logger.warn({ err, volume: dockerVolName }, 'Failed to create storageVolumes record for template volume');
         }
-      } catch (err) {
-        logger.warn({ err, volume: dockerVolName }, 'Failed to create storageVolumes record for template volume');
       }
     }
 

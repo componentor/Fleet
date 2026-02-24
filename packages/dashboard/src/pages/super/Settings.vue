@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2 } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -88,6 +88,12 @@ const testResult = ref<{ success: boolean; message: string } | null>(null)
 const pricingEntries = ref<any[]>([])
 const pricingLoading = ref(false)
 const syncing = ref(false)
+const pricingSearch = ref('')
+const filteredPricingEntries = computed(() => {
+  const q = pricingSearch.value.toLowerCase().replace(/^\./, '')
+  if (!q) return pricingEntries.value
+  return pricingEntries.value.filter((e: any) => e.tld.toLowerCase().includes(q))
+})
 
 // Branding
 const brandTitleInput = ref('')
@@ -230,6 +236,8 @@ async function updatePricingEntry(entry: any) {
     await api.patch(`/domain-pricing/${entry.id}`, {
       markupType: entry.markupType,
       markupValue: entry.markupValue,
+      renewalMarkupType: entry.renewalMarkupType,
+      renewalMarkupValue: entry.renewalMarkupValue,
       enabled: entry.enabled,
     })
     await fetchPricing()
@@ -475,7 +483,7 @@ onMounted(() => {
           <div class="p-6 space-y-5">
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformName') }}</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformName" type="text" placeholder="Fleet" @keydown.enter="saveGeneralField('platform:name', platformName)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:name', platformName)" :disabled="savingField === 'general:platform:name'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'general:platform:name'" class="w-4 h-4 animate-spin" />
@@ -486,7 +494,7 @@ onMounted(() => {
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.rootDomain') }}</label>
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ $t('super.settings.rootDomainDesc') }}</p>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformDomain" type="text" placeholder="fleet.example.com" @keydown.enter="saveGeneralField('platform:domain', platformDomain)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:domain', platformDomain)" :disabled="savingField === 'general:platform:domain'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'general:platform:domain'" class="w-4 h-4 animate-spin" />
@@ -496,7 +504,7 @@ onMounted(() => {
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformUrl') }}</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" @keydown.enter="saveGeneralField('platform:url', platformUrl)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:url', platformUrl)" :disabled="savingField === 'general:platform:url'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'general:platform:url'" class="w-4 h-4 animate-spin" />
@@ -506,7 +514,7 @@ onMounted(() => {
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.email') }}</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" @keydown.enter="saveGeneralField('platform:supportEmail', supportEmail)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:supportEmail', supportEmail)" :disabled="savingField === 'general:platform:supportEmail'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'general:platform:supportEmail'" class="w-4 h-4 animate-spin" />
@@ -678,7 +686,7 @@ onMounted(() => {
           <div class="p-6 space-y-5">
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Provider</label>
-              <div class="flex items-center gap-2 max-w-xs">
+              <div class="flex items-center gap-2 max-w-lg">
                 <select v-model="emailProvider" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
                   <option value="smtp">SMTP</option>
                   <option value="resend">Resend</option>
@@ -693,7 +701,7 @@ onMounted(() => {
             <template v-if="emailProvider === 'smtp'">
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpHost') }}</label>
-                <div class="flex items-center gap-2 max-w-md">
+                <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpHost" type="text" placeholder="smtp.example.com" @keydown.enter="saveEmailField('smtpHost', smtpHost)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpHost', smtpHost)" :disabled="savingField === 'email:smtpHost'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <Loader2 v-if="savingField === 'email:smtpHost'" class="w-4 h-4 animate-spin" />
@@ -703,7 +711,7 @@ onMounted(() => {
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPort') }}</label>
-                <div class="flex items-center gap-2 max-w-xs">
+                <div class="flex items-center gap-2 max-w-lg">
                   <input v-model.number="smtpPort" type="number" placeholder="587" @keydown.enter="saveEmailField('smtpPort', smtpPort)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpPort', smtpPort)" :disabled="savingField === 'email:smtpPort'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <Loader2 v-if="savingField === 'email:smtpPort'" class="w-4 h-4 animate-spin" />
@@ -713,7 +721,7 @@ onMounted(() => {
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpUser') }}</label>
-                <div class="flex items-center gap-2 max-w-md">
+                <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpUser" type="text" placeholder="your-username" @keydown.enter="saveEmailField('smtpUser', smtpUser)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpUser', smtpUser)" :disabled="savingField === 'email:smtpUser'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <Loader2 v-if="savingField === 'email:smtpUser'" class="w-4 h-4 animate-spin" />
@@ -723,7 +731,7 @@ onMounted(() => {
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPass') }}</label>
-                <div class="flex items-center gap-2 max-w-md">
+                <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpPass" type="password" :placeholder="smtpPassHint || 'Enter new password to update'" @keydown.enter="saveEmailField('smtpPass', smtpPass)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpPass', smtpPass)" :disabled="savingField === 'email:smtpPass'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <Loader2 v-if="savingField === 'email:smtpPass'" class="w-4 h-4 animate-spin" />
@@ -733,7 +741,7 @@ onMounted(() => {
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
-                <div class="flex items-center gap-2 max-w-md">
+                <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('smtpFrom', smtpFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpFrom', smtpFrom)" :disabled="savingField === 'email:smtpFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <Loader2 v-if="savingField === 'email:smtpFrom'" class="w-4 h-4 animate-spin" />
@@ -756,7 +764,7 @@ onMounted(() => {
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
-                <div class="flex items-center gap-2 max-w-md">
+                <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="resendFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('resendFrom', resendFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('resendFrom', resendFrom)" :disabled="savingField === 'email:resendFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <Loader2 v-if="savingField === 'email:resendFrom'" class="w-4 h-4 animate-spin" />
@@ -796,7 +804,7 @@ onMounted(() => {
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Provider</label>
-              <div class="flex items-center gap-2 max-w-xs">
+              <div class="flex items-center gap-2 max-w-lg">
                 <select v-model="registrarProvider" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
                   <option value="resellerclub">ResellerClub</option>
                   <option value="namecom">Name.com</option>
@@ -807,7 +815,7 @@ onMounted(() => {
             <!-- ResellerClub fields -->
             <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Reseller ID</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" @keydown.enter="saveRegistrarField('resellerId', registrarResellerId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveRegistrarField('resellerId', registrarResellerId)" :disabled="savingField === 'registrar:resellerId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'registrar:resellerId'" class="w-4 h-4 animate-spin" />
@@ -818,7 +826,7 @@ onMounted(() => {
 
             <div v-if="registrarProvider === 'resellerclub'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Key</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiKey" type="password" :placeholder="registrarApiKeyHint || 'Enter API key'" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'registrar:apiKey'" class="w-4 h-4 animate-spin" />
@@ -830,7 +838,7 @@ onMounted(() => {
             <!-- Name.com fields -->
             <div v-if="registrarProvider === 'namecom'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Username</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiKey" type="text" placeholder="Your Name.com username" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'registrar:apiKey'" class="w-4 h-4 animate-spin" />
@@ -841,7 +849,7 @@ onMounted(() => {
 
             <div v-if="registrarProvider === 'namecom'">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Token</label>
-              <div class="flex items-center gap-2 max-w-md">
+              <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiSecret" type="password" :placeholder="registrarApiSecretHint || 'Enter API token'" @keydown.enter="saveRegistrarField('apiSecret', registrarApiSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveRegistrarField('apiSecret', registrarApiSecret)" :disabled="savingField === 'registrar:apiSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <Loader2 v-if="savingField === 'registrar:apiSecret'" class="w-4 h-4 animate-spin" />
@@ -905,72 +913,143 @@ onMounted(() => {
             {{ $t('super.settings.noTldPricing') }}
           </div>
 
-          <div v-else class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b border-gray-200 dark:border-gray-700">
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.tld') }}</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.registerPrice') }}</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Markup</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('super.settings.renewPrice') }}</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Profit</th>
-                  <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('common.enabled') }}</th>
-                  <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                <tr v-for="entry in pricingEntries" :key="entry.id" class="hover:bg-gray-50 dark:hover:bg-gray-750">
-                  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900 dark:text-white">.{{ entry.tld }}</td>
-                  <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                    ${{ formatCents(entry.providerRegistrationPrice) }} / ${{ formatCents(entry.providerRenewalPrice) }}
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="flex items-center gap-2">
-                      <select
-                        v-model="entry.markupType"
-                        class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs"
-                      >
-                        <option value="percentage">%</option>
-                        <option value="fixed_amount">+ $</option>
-                        <option value="fixed_price">= $</option>
-                      </select>
-                      <input
-                        v-model.number="entry.markupValue"
-                        type="number"
-                        min="0"
-                        class="w-20 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs"
-                      />
-                    </div>
-                  </td>
-                  <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
-                    ${{ formatCents(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue)) }} / ${{ formatCents(computeSellPriceLocal(entry.providerRenewalPrice, entry.markupType, entry.markupValue)) }}
-                  </td>
-                  <td class="px-4 py-3 text-sm font-medium whitespace-nowrap"
-                    :class="(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
-                  >
-                    {{ (computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) >= 0 ? '+' : '' }}${{ formatCents(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) }}
-                    /
-                    {{ (computeSellPriceLocal(entry.providerRenewalPrice, entry.markupType, entry.markupValue) - entry.providerRenewalPrice) >= 0 ? '+' : '' }}${{ formatCents(computeSellPriceLocal(entry.providerRenewalPrice, entry.markupType, entry.markupValue) - entry.providerRenewalPrice) }}
-                  </td>
-                  <td class="px-4 py-3 text-center">
-                    <input
-                      type="checkbox"
-                      v-model="entry.enabled"
-                      class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
-                    />
-                  </td>
-                  <td class="px-4 py-3 text-right">
-                    <button
-                      @click="updatePricingEntry(entry)"
-                      class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+          <template v-else>
+            <!-- Search -->
+            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+              <div class="relative max-w-xs">
+                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  v-model="pricingSearch"
+                  type="text"
+                  placeholder="Filter TLDs..."
+                  class="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ filteredPricingEntries.length }} of {{ pricingEntries.length }} TLDs</p>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="border-b border-gray-200 dark:border-gray-700">
+                    <th class="px-3 py-2.5 text-left font-semibold text-gray-500 dark:text-gray-400 uppercase" rowspan="2">TLD</th>
+                    <th class="px-3 py-1.5 text-center font-semibold text-gray-500 dark:text-gray-400 uppercase border-b border-gray-200 dark:border-gray-700" colspan="4">Registration</th>
+                    <th class="px-3 py-1.5 text-center font-semibold text-gray-500 dark:text-gray-400 uppercase border-b border-gray-200 dark:border-gray-700 border-l" colspan="4">Renewal</th>
+                    <th class="px-3 py-2.5 text-center font-semibold text-gray-500 dark:text-gray-400 uppercase" rowspan="2">On</th>
+                    <th class="px-3 py-2.5 text-right font-semibold text-gray-500 dark:text-gray-400 uppercase" rowspan="2"></th>
+                  </tr>
+                  <tr class="border-b border-gray-200 dark:border-gray-700">
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Cost</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Markup</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Sell</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Profit</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500 border-l border-gray-200 dark:border-gray-700">Cost</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Markup</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Sell</th>
+                    <th class="px-3 py-1.5 text-left font-medium text-gray-400 dark:text-gray-500">Profit</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                  <tr v-for="entry in filteredPricingEntries" :key="entry.id" class="hover:bg-gray-50 dark:hover:bg-gray-750">
+                    <!-- TLD -->
+                    <td class="px-3 py-2 font-mono font-medium text-gray-900 dark:text-white">.{{ entry.tld }}</td>
+
+                    <!-- Registration Cost -->
+                    <td class="px-3 py-2 text-gray-600 dark:text-gray-400">${{ formatCents(entry.providerRegistrationPrice) }}</td>
+
+                    <!-- Registration Markup -->
+                    <td class="px-3 py-2">
+                      <div class="flex items-center gap-1">
+                        <select
+                          v-model="entry.markupType"
+                          class="px-1 py-0.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs w-12"
+                        >
+                          <option value="percentage">%</option>
+                          <option value="fixed_amount">+$</option>
+                          <option value="fixed_price">=$</option>
+                        </select>
+                        <input
+                          v-model.number="entry.markupValue"
+                          type="number"
+                          min="0"
+                          class="w-16 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs"
+                        />
+                      </div>
+                    </td>
+
+                    <!-- Registration Sell -->
+                    <td class="px-3 py-2 font-medium text-gray-900 dark:text-white">
+                      ${{ formatCents(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue)) }}
+                    </td>
+
+                    <!-- Registration Profit -->
+                    <td class="px-3 py-2 font-medium whitespace-nowrap"
+                      :class="(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
                     >
-                      {{ $t('common.save') }}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                      {{ (computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) >= 0 ? '+' : '' }}${{ formatCents(computeSellPriceLocal(entry.providerRegistrationPrice, entry.markupType, entry.markupValue) - entry.providerRegistrationPrice) }}
+                    </td>
+
+                    <!-- Renewal Cost -->
+                    <td class="px-3 py-2 text-gray-600 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">${{ formatCents(entry.providerRenewalPrice) }}</td>
+
+                    <!-- Renewal Markup -->
+                    <td class="px-3 py-2">
+                      <div class="flex items-center gap-1">
+                        <select
+                          v-model="entry.renewalMarkupType"
+                          class="px-1 py-0.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs w-12"
+                        >
+                          <option :value="null">--</option>
+                          <option value="percentage">%</option>
+                          <option value="fixed_amount">+$</option>
+                          <option value="fixed_price">=$</option>
+                        </select>
+                        <input
+                          v-model.number="entry.renewalMarkupValue"
+                          type="number"
+                          min="0"
+                          :placeholder="entry.renewalMarkupType ? '' : String(entry.markupValue)"
+                          :disabled="!entry.renewalMarkupType"
+                          class="w-16 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs disabled:opacity-40"
+                        />
+                      </div>
+                    </td>
+
+                    <!-- Renewal Sell -->
+                    <td class="px-3 py-2 font-medium text-gray-900 dark:text-white">
+                      ${{ formatCents(computeSellPriceLocal(entry.providerRenewalPrice, entry.renewalMarkupType ?? entry.markupType, entry.renewalMarkupValue ?? entry.markupValue)) }}
+                    </td>
+
+                    <!-- Renewal Profit -->
+                    <td class="px-3 py-2 font-medium whitespace-nowrap"
+                      :class="(computeSellPriceLocal(entry.providerRenewalPrice, entry.renewalMarkupType ?? entry.markupType, entry.renewalMarkupValue ?? entry.markupValue) - entry.providerRenewalPrice) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                    >
+                      {{ (computeSellPriceLocal(entry.providerRenewalPrice, entry.renewalMarkupType ?? entry.markupType, entry.renewalMarkupValue ?? entry.markupValue) - entry.providerRenewalPrice) >= 0 ? '+' : '' }}${{ formatCents(computeSellPriceLocal(entry.providerRenewalPrice, entry.renewalMarkupType ?? entry.markupType, entry.renewalMarkupValue ?? entry.markupValue) - entry.providerRenewalPrice) }}
+                    </td>
+
+                    <!-- Enabled -->
+                    <td class="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        v-model="entry.enabled"
+                        class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+                      />
+                    </td>
+
+                    <!-- Save -->
+                    <td class="px-3 py-2 text-right">
+                      <button
+                        @click="updatePricingEntry(entry)"
+                        class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        {{ $t('common.save') }}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </div>
 
         <!-- Branding -->
@@ -983,7 +1062,7 @@ onMounted(() => {
             <!-- Title -->
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.brandTitle') }}</label>
-              <input v-model="brandTitleInput" type="text" placeholder="Fleet" class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+              <input v-model="brandTitleInput" type="text" placeholder="Fleet" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
 
             <!-- Logo -->

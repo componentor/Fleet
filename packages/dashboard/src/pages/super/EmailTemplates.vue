@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Mail, Loader2, Save, RotateCcw, Send, Eye, Code, Check } from 'lucide-vue-next'
+import { Mail, Loader2, Save, RotateCcw, Send, Eye, Code, Check, RefreshCw } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -11,6 +11,8 @@ const loading = ref(true)
 const saving = ref(false)
 const sending = ref(false)
 const resetting = ref(false)
+const reseeding = ref(false)
+const reseedingSlug = ref<string | null>(null)
 const error = ref('')
 const success = ref('')
 
@@ -19,14 +21,22 @@ interface EmailTemplate {
   slug: string
   subject: string
   bodyHtml: string
-  variables: string[]
+  variables: string[] | Record<string, string>
   accountId: string | null
   enabled: boolean
   updatedAt: string | null
   isDefault: boolean
 }
 
+/** Extract variable names from either array or object format */
+function getVariableNames(vars: string[] | Record<string, string> | null | undefined): string[] {
+  if (!vars) return []
+  if (Array.isArray(vars)) return vars
+  return Object.keys(vars)
+}
+
 const templates = ref<EmailTemplate[]>([])
+const emailLayout = ref('')
 const selectedSlug = ref<string | null>(null)
 const editSubject = ref('')
 const editBodyHtml = ref('')
@@ -42,7 +52,12 @@ const selectedTemplate = computed(() =>
 async function fetchTemplates() {
   loading.value = true
   try {
-    templates.value = await api.get<EmailTemplate[]>('/emails/templates')
+    const [tpls, layout] = await Promise.all([
+      api.get<EmailTemplate[]>('/emails/templates'),
+      api.get<{ html: string }>('/emails/templates/layout').catch(() => ({ html: '' })),
+    ])
+    templates.value = tpls
+    emailLayout.value = layout.html
   } catch {
     templates.value = []
   } finally {
@@ -60,7 +75,7 @@ function selectTemplate(slug: string) {
     previewMode.value = 'edit'
     // Build test variables
     testVariables.value = {}
-    for (const v of tpl.variables ?? []) {
+    for (const v of getVariableNames(tpl.variables)) {
       testVariables.value[v] = ''
     }
   }
@@ -107,6 +122,39 @@ async function resetTemplate() {
   }
 }
 
+async function reseedAll() {
+  if (!confirm('Re-seed all templates to the latest built-in defaults? This will overwrite any customizations on global templates.')) return
+  reseeding.value = true
+  error.value = ''
+  try {
+    const res = await api.post<{ message: string }>('/emails/templates/reseed', {})
+    success.value = res.message
+    await fetchTemplates()
+    if (selectedSlug.value) selectTemplate(selectedSlug.value)
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to re-seed templates'
+  } finally {
+    reseeding.value = false
+  }
+}
+
+async function reseedOne(slug: string) {
+  reseedingSlug.value = slug
+  error.value = ''
+  try {
+    const res = await api.post<{ message: string }>('/emails/templates/reseed', { slug })
+    success.value = res.message
+    await fetchTemplates()
+    if (selectedSlug.value === slug) selectTemplate(slug)
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to re-seed template'
+  } finally {
+    reseedingSlug.value = null
+  }
+}
+
 async function sendTest() {
   if (!selectedSlug.value || !testEmail.value) return
   sending.value = true
@@ -130,6 +178,11 @@ function renderPreview(): string {
   for (const [key, val] of Object.entries(testVariables.value)) {
     html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), val || `[${key}]`)
   }
+  // Wrap in the email layout so the preview matches the actual sent email
+  const trimmed = html.trimStart().toLowerCase()
+  if (emailLayout.value && !trimmed.startsWith('<!doctype') && !trimmed.startsWith('<html')) {
+    html = emailLayout.value.replace('{{__body__}}', html)
+  }
   return html
 }
 
@@ -140,9 +193,21 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="flex items-center gap-3 mb-8">
-      <Mail class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Email Templates</h1>
+    <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-3">
+        <Mail class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Email Templates</h1>
+      </div>
+      <button
+        v-if="!loading"
+        @click="reseedAll"
+        :disabled="reseeding"
+        class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+      >
+        <Loader2 v-if="reseeding" class="w-4 h-4 animate-spin" />
+        <RefreshCw v-else class="w-4 h-4" />
+        Re-seed All
+      </button>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -153,23 +218,37 @@ onMounted(() => {
       <!-- Template list -->
       <div class="lg:w-64 shrink-0">
         <nav class="space-y-1">
-          <button
+          <div
             v-for="tpl in templates"
             :key="tpl.slug"
-            @click="selectTemplate(tpl.slug)"
-            :class="[
-              'w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
-              selectedSlug === tpl.slug
-                ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800',
-            ]"
+            class="flex items-center gap-1"
           >
-            <div class="flex items-center justify-between">
-              <span>{{ tpl.slug }}</span>
-              <span v-if="tpl.isDefault" class="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded">default</span>
-              <span v-else class="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">custom</span>
-            </div>
-          </button>
+            <button
+              @click="selectTemplate(tpl.slug)"
+              :class="[
+                'flex-1 text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                selectedSlug === tpl.slug
+                  ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800',
+              ]"
+            >
+              <div class="flex items-center justify-between">
+                <span class="truncate">{{ tpl.slug }}</span>
+                <span v-if="tpl.isDefault" class="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded shrink-0 ml-2">default</span>
+                <span v-else class="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded shrink-0 ml-2">custom</span>
+              </div>
+            </button>
+            <button
+              v-if="!tpl.isDefault"
+              @click.stop="reseedOne(tpl.slug)"
+              :disabled="reseedingSlug === tpl.slug"
+              class="p-1.5 rounded-md text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 shrink-0"
+              title="Re-seed to default"
+            >
+              <Loader2 v-if="reseedingSlug === tpl.slug" class="w-3.5 h-3.5 animate-spin" />
+              <RefreshCw v-else class="w-3.5 h-3.5" />
+            </button>
+          </div>
         </nav>
       </div>
 
@@ -194,7 +273,7 @@ onMounted(() => {
               <div>
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ selectedSlug }}</h2>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  Variables: {{ selectedTemplate?.variables?.join(', ') || 'none' }}
+                  Variables: {{ getVariableNames(selectedTemplate?.variables).join(', ') || 'none' }}
                 </p>
               </div>
               <div class="flex items-center gap-2">
@@ -242,12 +321,12 @@ onMounted(() => {
               </div>
 
               <!-- Preview (sandboxed iframe to prevent XSS from template HTML) -->
-              <div v-else class="border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 min-h-[200px]">
+              <div v-else class="border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 min-h-[400px]">
                 <iframe
                   :srcdoc="renderPreview()"
                   sandbox=""
-                  class="w-full min-h-[200px] border-0"
-                  style="background: white;"
+                  class="w-full min-h-[400px] border-0"
+                  style="background: #f3f4f6;"
                 />
               </div>
 

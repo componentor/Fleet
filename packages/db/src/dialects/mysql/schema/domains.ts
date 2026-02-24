@@ -83,6 +83,8 @@ export const domainTldPricing = mysqlTable('domain_tld_pricing', {
   providerRenewalPrice: int('provider_renewal_price').notNull(),
   markupType: varchar('markup_type', { length: 20 }).notNull().default('percentage'),
   markupValue: int('markup_value').notNull().default(20),
+  renewalMarkupType: varchar('renewal_markup_type', { length: 20 }),
+  renewalMarkupValue: int('renewal_markup_value'),
   sellRegistrationPrice: int('sell_registration_price').notNull(),
   sellRenewalPrice: int('sell_renewal_price').notNull(),
   enabled: boolean('enabled').default(true),

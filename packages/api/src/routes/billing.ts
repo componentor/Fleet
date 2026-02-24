@@ -1013,6 +1013,8 @@ authed.openapi(resourceLimitsRoute, (async (c: any) => {
     maxStorageGb: override?.maxStorageGb ?? global?.maxStorageGb ?? null,
     maxBandwidthGb: override?.maxBandwidthGb ?? global?.maxBandwidthGb ?? null,
     maxNfsStorageGb: override?.maxNfsStorageGb ?? global?.maxNfsStorageGb ?? null,
+    maxTotalCpuCores: override?.maxTotalCpuCores ?? global?.maxTotalCpuCores ?? null,
+    maxTotalMemoryMb: override?.maxTotalMemoryMb ?? global?.maxTotalMemoryMb ?? null,
   });
 }) as any);
 

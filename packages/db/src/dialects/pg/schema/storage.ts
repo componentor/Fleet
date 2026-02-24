@@ -15,6 +15,9 @@ import { nodes } from './nodes';
 
 export const storageClusters = pgTable('storage_clusters', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar('name').default('default').notNull(),
+  region: varchar('region'),
+  scope: varchar('scope').default('regional').notNull(),
   provider: varchar('provider').default('local').notNull(),
   objectProvider: varchar('object_provider').default('local').notNull(),
   status: varchar('status').default('inactive').notNull(),
@@ -61,6 +64,7 @@ export const storageNodesRelations = relations(storageNodes, ({ one }) => ({
 
 export const storageVolumes = pgTable('storage_volumes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  clusterId: uuid('cluster_id').references(() => storageClusters.id, { onDelete: 'set null' }),
   accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
   name: varchar('name').notNull(),
   displayName: varchar('display_name'),
@@ -80,6 +84,10 @@ export const storageVolumes = pgTable('storage_volumes', {
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({
+  cluster: one(storageClusters, {
+    fields: [storageVolumes.clusterId],
+    references: [storageClusters.id],
+  }),
   account: one(accounts, {
     fields: [storageVolumes.accountId],
     references: [accounts.id],

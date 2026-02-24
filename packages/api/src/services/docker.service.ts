@@ -133,6 +133,25 @@ export class DockerService {
           Env: envArray,
           Labels: Object.keys(containerLabels).length > 0 ? containerLabels : undefined,
           Mounts: opts.volumes.map((v) => {
+            // Check if provider uses host-level mounts (e.g. GlusterFS FUSE)
+            let hostPath: string | null = null;
+            try {
+              if (storageManager.volumes.isReady() && storageManager.volumes.getHostMountPath) {
+                hostPath = storageManager.volumes.getHostMountPath(v.source);
+              }
+            } catch { /* storage not initialized */ }
+
+            if (hostPath) {
+              // Use bind mount from host-level FUSE/kernel mount
+              return {
+                Source: hostPath,
+                Target: v.target,
+                Type: 'bind' as const,
+                ReadOnly: v.readonly ?? false,
+              };
+            }
+
+            // Fall back to Docker volume driver
             let driver = 'local';
             let driverOpts: Record<string, string> = {};
             try {
@@ -172,18 +191,18 @@ export class DockerService {
         Resources: {
           Limits: {
             NanoCPUs: (opts.cpuLimit ?? 1) * 1e9,  // Convert CPU cores to nanocores
-            MemoryBytes: (opts.memoryLimit ?? 512) * 1024 * 1024,  // Convert MB to bytes
+            MemoryBytes: (opts.memoryLimit ?? 1024) * 1024 * 1024,  // Convert MB to bytes (1 GB default)
           },
           Reservations: {
             NanoCPUs: Math.min((opts.cpuLimit ?? 1) * 0.25e9, 0.25e9),  // Reserve 25% of limit, min 0.25 CPU
-            MemoryBytes: Math.min((opts.memoryLimit ?? 512) * 0.25 * 1024 * 1024, 128 * 1024 * 1024),  // Reserve 25% of limit, min 128MB
+            MemoryBytes: Math.min((opts.memoryLimit ?? 1024) * 0.25 * 1024 * 1024, 256 * 1024 * 1024),  // Reserve 25% of limit, min 256MB
           },
         },
         RestartPolicy: {
           Condition: opts.restartCondition ?? 'on-failure',
           Delay: parseDelay(opts.restartDelay ?? '10s'),
-          MaxAttempts: opts.restartMaxAttempts ?? 3,
-          Window: 120_000_000_000,
+          MaxAttempts: opts.restartMaxAttempts ?? 5,
+          Window: 300_000_000_000,  // 5-minute window
         },
         Placement: {
           Constraints: opts.constraints,
@@ -283,6 +302,24 @@ export class DockerService {
 
     if (opts.volumes) {
       spec.TaskTemplate.ContainerSpec.Mounts = opts.volumes.map((v) => {
+        // Check if provider uses host-level mounts (e.g. GlusterFS FUSE)
+        let hostPath: string | null = null;
+        try {
+          if (storageManager.volumes.isReady() && storageManager.volumes.getHostMountPath) {
+            hostPath = storageManager.volumes.getHostMountPath(v.source);
+          }
+        } catch { /* storage not initialized */ }
+
+        if (hostPath) {
+          return {
+            Source: hostPath,
+            Target: v.target,
+            Type: 'bind' as const,
+            ReadOnly: v.readonly ?? false,
+          };
+        }
+
+        // Fall back to Docker volume driver
         let driver = 'local';
         let driverOpts: Record<string, string> = {};
         try {
@@ -1477,6 +1514,160 @@ export class DockerService {
         ? 'Platform volumes switched to distributed storage — Traefik will redeploy on all manager nodes'
         : 'Platform volumes switched to local storage — ensured directories on all nodes',
     };
+  }
+
+  /**
+   * Ensure the base service volume mount exists on all Swarm nodes.
+   *
+   * For GlusterFS: Creates the `fleet-service-data` GlusterFS volume (idempotent),
+   * then creates a systemd service on every node to FUSE-mount it at /mnt/fleet-volumes.
+   *
+   * For Ceph: Creates a CephFS subvolume and kernel-mounts it on every node.
+   *
+   * Must be called after storage cluster setup (POST /cluster) and verified at startup.
+   */
+  async ensureServiceVolumeMount(): Promise<{
+    applied: boolean;
+    message: string;
+  }> {
+    const provider = storageManager.config?.provider;
+    if (!provider || provider === 'local') {
+      return { applied: false, message: 'No distributed storage configured' };
+    }
+
+    const MOUNT_BASE = '/mnt/fleet-volumes';
+
+    if (provider === 'glusterfs') {
+      const config = storageManager.config!.config;
+      const nodes = config.nodes as Array<{ hostname: string; ip: string; brickPath: string }>;
+      const replicaCount = config.replicaCount ?? storageManager.config!.replicationFactor;
+      const transport = config.transport ?? 'tcp';
+      const volumeName = 'fleet-service-data';
+
+      if (!nodes || nodes.length < replicaCount) {
+        return { applied: false, message: `Need at least ${replicaCount} storage nodes for GlusterFS` };
+      }
+
+      const bricks = nodes
+        .slice(0, replicaCount)
+        .map((n: any) => `${n.ip}:${n.brickPath}/${volumeName}`)
+        .join(' ');
+      const gluster = '/usr/sbin/gluster';
+      const firstNodeIp = nodes[0]!.ip;
+
+      // Create the GlusterFS volume on the cluster (idempotent)
+      const createCmd = [
+        `${gluster} volume info ${volumeName} >/dev/null 2>&1`,
+        `|| (${gluster} volume create ${volumeName} replica ${replicaCount} transport ${transport} ${bricks} force`,
+        `&& ${gluster} volume start ${volumeName})`,
+      ].join(' ');
+
+      const createResult = await this.runOnLocalHost(createCmd, { timeoutMs: 30_000 });
+      if (createResult.exitCode !== 0) {
+        logger.warn({ exitCode: createResult.exitCode, stdout: createResult.stdout }, 'GlusterFS service volume creation may have failed');
+      } else {
+        logger.info('GlusterFS service data volume created/verified');
+      }
+
+      // Create systemd mount service on ALL nodes
+      const mountCmd = [
+        `umount -l ${MOUNT_BASE} 2>/dev/null || true`,
+        `mkdir -p ${MOUNT_BASE}`,
+        `cat > /etc/systemd/system/fleet-gluster-volumes.service << 'SYSTEMD_EOF'`,
+        `[Unit]`,
+        `Description=GlusterFS Service Volumes Mount`,
+        `After=network-online.target glusterd.service`,
+        `Wants=network-online.target`,
+        ``,
+        `[Service]`,
+        `Type=forking`,
+        `ExecStart=/bin/mount -t glusterfs ${firstNodeIp}:/${volumeName} ${MOUNT_BASE}`,
+        `ExecStop=/bin/umount ${MOUNT_BASE}`,
+        `RemainAfterExit=yes`,
+        `Restart=on-failure`,
+        `RestartSec=10`,
+        ``,
+        `[Install]`,
+        `WantedBy=multi-user.target`,
+        `SYSTEMD_EOF`,
+        `systemctl daemon-reload`,
+        `systemctl enable fleet-gluster-volumes.service`,
+        `systemctl start fleet-gluster-volumes.service`,
+        `sleep 2`,
+        `mountpoint -q ${MOUNT_BASE} && echo "MOUNT_OK" || echo "MOUNT_FAILED"`,
+      ].join('\n');
+
+      const mountResult = await this.runOnAllNodesPrivileged(mountCmd, { timeoutMs: 120_000 });
+      if (!mountResult.success) {
+        logger.warn({ results: mountResult.results }, 'GlusterFS service volume mount failed on some nodes');
+        return { applied: false, message: 'Failed to mount GlusterFS service volume on all nodes' };
+      }
+
+      logger.info('GlusterFS service data volume mounted on all Swarm nodes');
+      return { applied: true, message: 'GlusterFS service volume mounted on all nodes via systemd' };
+    }
+
+    if (provider === 'ceph') {
+      const config = storageManager.config!.config;
+      const monitors = config.monitors as string;
+      const user = config.user ?? 'admin';
+      const keyring = config.keyring ?? '/etc/ceph/ceph.client.admin.keyring';
+
+      if (!monitors) {
+        return { applied: false, message: 'Ceph monitors not configured' };
+      }
+
+      // CephFS kernel mount for service volumes
+      const cephfsPath = '/fleet-service-data';
+
+      // Ensure the CephFS directory exists
+      try {
+        const mkdirCmd = `mkdir -p /tmp/cephfs-tmp && ` +
+          `mount -t ceph ${monitors}:/ /tmp/cephfs-tmp -o name=${user},secretfile=${keyring} && ` +
+          `mkdir -p /tmp/cephfs-tmp${cephfsPath} && ` +
+          `umount /tmp/cephfs-tmp 2>/dev/null; rmdir /tmp/cephfs-tmp 2>/dev/null; true`;
+        await this.runOnLocalHost(mkdirCmd, { timeoutMs: 30_000 });
+      } catch (err) {
+        logger.warn({ err }, 'Failed to prepare CephFS service volume directory');
+      }
+
+      // Create systemd mount service on ALL nodes (CephFS uses kernel mount, not FUSE)
+      const mountCmd = [
+        `umount -l ${MOUNT_BASE} 2>/dev/null || true`,
+        `mkdir -p ${MOUNT_BASE}`,
+        `cat > /etc/systemd/system/fleet-ceph-volumes.service << 'SYSTEMD_EOF'`,
+        `[Unit]`,
+        `Description=CephFS Service Volumes Mount`,
+        `After=network-online.target`,
+        `Wants=network-online.target`,
+        ``,
+        `[Service]`,
+        `Type=oneshot`,
+        `ExecStart=/bin/mount -t ceph ${monitors}:${cephfsPath} ${MOUNT_BASE} -o name=${user},secretfile=${keyring},_netdev`,
+        `ExecStop=/bin/umount ${MOUNT_BASE}`,
+        `RemainAfterExit=yes`,
+        ``,
+        `[Install]`,
+        `WantedBy=multi-user.target`,
+        `SYSTEMD_EOF`,
+        `systemctl daemon-reload`,
+        `systemctl enable fleet-ceph-volumes.service`,
+        `systemctl start fleet-ceph-volumes.service`,
+        `sleep 1`,
+        `mountpoint -q ${MOUNT_BASE} && echo "MOUNT_OK" || echo "MOUNT_FAILED"`,
+      ].join('\n');
+
+      const mountResult = await this.runOnAllNodesPrivileged(mountCmd, { timeoutMs: 120_000 });
+      if (!mountResult.success) {
+        logger.warn({ results: mountResult.results }, 'CephFS service volume mount failed on some nodes');
+        return { applied: false, message: 'Failed to mount CephFS service volume on all nodes' };
+      }
+
+      logger.info('CephFS service data volume mounted on all Swarm nodes');
+      return { applied: true, message: 'CephFS service volume mounted on all nodes via systemd' };
+    }
+
+    return { applied: false, message: `Unsupported storage provider: ${provider}` };
   }
 }
 
