@@ -266,7 +266,7 @@ export class TemplateService {
 
     const composeYaml = options?.composeOverride ?? template.composeTemplate;
     const parsed = this.parseTemplate(composeYaml);
-    const stackId = randomBytes(16).toString('hex');
+    const stackId = crypto.randomUUID();
 
     // Build the variable values: use provided config, fall back to defaults, generate passwords
     // Empty strings from the UI are treated as "not provided" so defaults can kick in
