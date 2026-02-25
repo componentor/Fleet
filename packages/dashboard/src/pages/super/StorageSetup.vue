@@ -234,6 +234,19 @@ async function loadCluster() {
   }
 }
 
+async function toggleCapability(clusterId: string, field: 'allowServices' | 'allowBackups', currentValue: boolean) {
+  try {
+    await api.patch(`/admin/storage/clusters/${clusterId}/capabilities`, {
+      [field]: !currentValue,
+    })
+    // Update local state immediately
+    const cl = clusters.value.find((c: any) => c.id === clusterId)
+    if (cl) cl[field] = !currentValue
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to update capability'
+  }
+}
+
 async function fetchLocations() {
   try {
     locations.value = await api.get<any[]>('/billing/admin/locations') as any[] ?? []
@@ -930,15 +943,26 @@ async function attachNewNode() {
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ cl.storageNodes?.length ?? 0 }}</td>
                 <td class="px-6 py-4">
                   <div class="flex flex-wrap gap-1">
-                    <span v-if="cl.allowServices !== false" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                    <button
+                      @click="toggleCapability(cl.id, 'allowServices', cl.allowServices !== false)"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors"
+                      :class="cl.allowServices !== false
+                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50'
+                        : 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 line-through'"
+                      :title="cl.allowServices !== false ? 'Click to disable services' : 'Click to enable services'"
+                    >
                       Services
-                    </span>
-                    <span v-if="cl.allowBackups !== false" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                    </button>
+                    <button
+                      @click="toggleCapability(cl.id, 'allowBackups', cl.allowBackups !== false)"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors"
+                      :class="cl.allowBackups !== false
+                        ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50'
+                        : 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 line-through'"
+                      :title="cl.allowBackups !== false ? 'Click to disable backups' : 'Click to enable backups'"
+                    >
                       Backups
-                    </span>
-                    <span v-if="cl.allowServices === false && cl.allowBackups === false" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
-                      None
-                    </span>
+                    </button>
                   </div>
                 </td>
                 <td class="px-6 py-4">
