@@ -331,7 +331,14 @@ export class DockerService {
     }
 
     if (opts.labels) {
-      spec.Labels = { ...spec.Labels, ...opts.labels };
+      // Strip old Traefik labels before applying new ones to prevent stale
+      // router/service configs when the router name changes (e.g. domain updates
+      // after stack deployment use a different label namespace).
+      const cleaned: Record<string, string> = {};
+      for (const [k, v] of Object.entries(spec.Labels ?? {})) {
+        if (!k.startsWith('traefik.')) cleaned[k] = String(v);
+      }
+      spec.Labels = { ...cleaned, ...opts.labels };
     }
 
     if (opts.readOnly !== undefined) {

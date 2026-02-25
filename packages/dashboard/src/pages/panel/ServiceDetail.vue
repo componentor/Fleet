@@ -293,7 +293,7 @@ async function rollbackToDeployment(deploymentId: string) {
   try {
     await api.post(`/deployments/${deploymentId}/rollback`, {})
     toast.success('Rollback initiated')
-    await fetchService()
+    await refreshService()
     await fetchDeployments()
   } catch (err: any) {
     toast.error(err?.body?.error || 'Rollback failed')
@@ -428,7 +428,7 @@ async function rebuildService() {
       result = await api.post('/deployments/trigger', { serviceId })
     }
     toast.success('Rebuild triggered')
-    await fetchService()
+    await refreshService()
     // Auto-start deployment tracking and deploy stream
     startDeploymentPolling()
     const newDeploymentId = result?.deploymentId
@@ -707,6 +707,13 @@ async function fetchService() {
   }
 }
 
+/** Silent refresh — updates service data without showing the full-page loader */
+async function refreshService() {
+  try {
+    service.value = await api.get(`/services/${serviceId}`)
+  } catch { /* silent */ }
+}
+
 async function fetchLogs() {
   logsLoading.value = true
   try {
@@ -745,7 +752,7 @@ async function stopService() {
   actionLoading.value = 'stop'
   try {
     await api.post(`/services/${serviceId}/stop`, {})
-    await fetchService()
+    await refreshService()
   } catch {
     toast.error(t('service.stopFailed', 'Failed to stop service'))
   } finally {
@@ -757,7 +764,7 @@ async function startService() {
   actionLoading.value = 'start'
   try {
     await api.post(`/services/${serviceId}/start`, {})
-    await fetchService()
+    await refreshService()
     if (service.value?.status === 'deploying') startStatusPolling()
   } catch {
     toast.error(t('service.startFailed', 'Failed to start service'))
@@ -770,7 +777,7 @@ async function restartService() {
   actionLoading.value = 'restart'
   try {
     await api.post(`/services/${serviceId}/restart`, {})
-    await fetchService()
+    await refreshService()
     if (service.value?.status === 'deploying') startStatusPolling()
   } catch {
     toast.error(t('service.restartFailed', 'Failed to restart service'))
@@ -783,7 +790,7 @@ async function redeployService() {
   actionLoading.value = 'redeploy'
   try {
     const result: any = await api.post(`/services/${serviceId}/redeploy`, {})
-    await fetchService()
+    await refreshService()
     // For image-only redeploys, the deployment completes immediately (no build step).
     // Only start deploy stream for services with a build source (github/upload).
     const hasBuildSource = service.value?.sourceType === 'github' || service.value?.sourceType === 'upload'
@@ -834,7 +841,7 @@ async function syncStatus() {
     if (result.synced && service.value) {
       service.value.status = result.status
     }
-    await fetchService()
+    await refreshService()
   } catch {
     toast.error('Failed to sync service status')
   } finally {
@@ -863,7 +870,7 @@ async function saveSettings() {
       if (v.key.trim()) envObj[v.key.trim()] = v.value
     }
     await api.patch(`/services/${serviceId}`, { env: envObj })
-    await fetchService()
+    await refreshService()
   } catch {
     toast.error(t('service.saveSettingsFailed', 'Failed to save settings'))
   } finally {
@@ -885,7 +892,7 @@ async function saveConfig() {
       updateDelay: configUpdateDelay.value,
       rollbackOnFailure: configRollbackOnFailure.value,
     })
-    await fetchService()
+    await refreshService()
     toast.success('Configuration saved')
   } catch {
     toast.error('Failed to save configuration')
@@ -901,7 +908,7 @@ async function saveDomain() {
       domain: configDomain.value || null,
       sslEnabled: configSslEnabled.value,
     })
-    await fetchService()
+    await refreshService()
     toast.success('Domain settings saved')
   } catch {
     toast.error('Failed to save domain settings')
@@ -919,7 +926,7 @@ async function saveVolumes() {
     const result = await api.patch(`/services/${serviceId}`, {
       volumes: validVolumes,
     }) as any
-    await fetchService()
+    await refreshService()
     if (result?.migrationFailures?.length) {
       migrationFailures.value = result.migrationFailures
       toast.error('Volume saved but data migration failed — you can retry below')
@@ -968,7 +975,7 @@ async function saveAutoDeploy() {
       autoDeploy: autoDeployEnabled.value,
       githubBranch: autoDeployBranch.value || undefined,
     })
-    await fetchService()
+    await refreshService()
   } catch (err: any) {
     autoDeployError.value = err?.body?.error || err?.message || 'Failed to update auto-deploy settings'
   } finally {
@@ -1017,7 +1024,7 @@ async function saveTags() {
   tagsLoading.value = true
   try {
     await api.patch(`/services/${serviceId}`, { tags: serviceTags.value })
-    await fetchService()
+    await refreshService()
     toast.success('Tags saved')
   } catch {
     toast.error('Failed to save tags')
