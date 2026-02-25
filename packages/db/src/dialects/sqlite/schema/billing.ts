@@ -126,6 +126,8 @@ export const resourceLimits = sqliteTable('resource_limits', {
   maxContainerDiskMb: integer('max_container_disk_mb'),
   maxTotalCpuCores: integer('max_total_cpu_cores'),
   maxTotalMemoryMb: integer('max_total_memory_mb'),
+  maxBackupStorageGb: integer('max_backup_storage_gb'), // Separate backup quota
+  backupClusterId: text('backup_cluster_id'), // Account-level backup cluster override
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),

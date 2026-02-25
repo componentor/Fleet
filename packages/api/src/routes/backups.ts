@@ -23,6 +23,36 @@ const backupRoutes = new OpenAPIHono<{
 backupRoutes.use('*', authMiddleware);
 backupRoutes.use('*', tenantMiddleware);
 
+// GET /quota — backup storage quota for account
+const getQuotaRoute = createRoute({
+  method: 'get',
+  path: '/quota',
+  tags: ['Backups'],
+  summary: 'Get backup storage quota for the current account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      usedBytes: z.number(),
+      limitBytes: z.number(),
+      usedGb: z.number(),
+      limitGb: z.number(),
+      percentUsed: z.number(),
+    }), 'Backup quota'),
+    ...standardErrors,
+  },
+});
+
+backupRoutes.openapi(getQuotaRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const quota = await backupService.getBackupQuota(accountId);
+  return c.json(quota);
+}) as any);
+
 // GET / — list backups for account
 const listBackupsRoute = createRoute({
   method: 'get',
@@ -61,7 +91,8 @@ backupRoutes.openapi(listBackupsRoute, (async (c: any) => {
 // POST / — create manual backup
 const createBackupSchema = z.object({
   serviceId: z.string().uuid().optional(),
-  storageBackend: z.enum(['nfs', 'local']).default('nfs'),
+  storageBackend: z.enum(['nfs', 'local', 'object']).default('nfs'),
+  clusterId: z.string().uuid().optional(),
 });
 
 const createBackupRoute = createRoute({
@@ -99,6 +130,7 @@ backupRoutes.openapi(createBackupRoute, (async (c: any) => {
       accountId,
       data.serviceId,
       data.storageBackend,
+      { clusterId: data.clusterId },
     );
 
     eventService.log({
@@ -116,6 +148,10 @@ backupRoutes.openapi(createBackupRoute, (async (c: any) => {
       sizeBytes: backup.sizeBytes.toString(),
     }, 201);
   } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (message.includes('Backup quota exceeded')) {
+      return c.json({ error: message }, 409);
+    }
     logger.error({ err }, 'Backup creation failed');
     return c.json({ error: 'Failed to create backup' }, 500);
   }
@@ -157,7 +193,8 @@ const createScheduleSchema = z.object({
   cron: z.string().min(1).regex(/^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$/, 'Invalid cron expression'),
   retentionDays: z.number().int().min(1).max(365).default(30),
   retentionCount: z.number().int().min(1).max(100).default(10),
-  storageBackend: z.enum(['nfs', 'local']).default('nfs'),
+  storageBackend: z.enum(['nfs', 'local', 'object']).default('nfs'),
+  clusterId: z.string().uuid().optional(),
 });
 
 const createScheduleRoute = createRoute({
@@ -205,7 +242,8 @@ const updateScheduleSchema = z.object({
   cron: z.string().min(1).regex(/^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$/, 'Invalid cron expression').optional(),
   retentionDays: z.number().int().min(1).max(365).optional(),
   retentionCount: z.number().int().min(1).max(100).optional(),
-  storageBackend: z.enum(['nfs', 'local']).optional(),
+  storageBackend: z.enum(['nfs', 'local', 'object']).optional(),
+  clusterId: z.string().uuid().nullable().optional(),
   enabled: z.boolean().optional(),
 });
 
