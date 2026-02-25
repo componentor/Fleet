@@ -181,7 +181,7 @@ export class DockerService {
       containerLabels['com.docker.compose.service'] = opts.labels['com.docker.compose.service'];
     }
 
-    const serviceSpec: Dockerode.CreateServiceOptions = {
+    const serviceSpec: Dockerode.CreateServiceOptions & { TaskTemplate: { ContainerSpec: { SecurityOpt?: string[] } } } = {
       Name: opts.name,
       Labels: opts.labels,
       TaskTemplate: {
@@ -244,6 +244,7 @@ export class DockerService {
           // Security: only apply ReadOnly / custom User when explicitly requested
           ...(opts.readOnly === true ? { ReadOnly: true } : {}),
           ...(opts.user !== undefined ? { User: opts.user } : {}),
+          SecurityOpt: ['no-new-privileges:true'],
         },
         Resources: {
           Limits: {
@@ -1406,6 +1407,10 @@ export class DockerService {
    * Silently ignores nodes where the volume doesn't exist.
    */
   async removeDockerVolumeOnAllNodes(volumeName: string): Promise<void> {
+    // Validate volume name to prevent shell injection
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(volumeName)) {
+      throw new Error(`Invalid volume name: ${volumeName}`);
+    }
     const serviceName = `fleet-vol-cleanup-${Date.now().toString(36)}`;
     const svc = await docker.createService({
       Name: serviceName,

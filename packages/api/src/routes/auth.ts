@@ -73,6 +73,7 @@ const refreshRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 30, keyPrefix: 
 const oauthRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'oauth' });
 const twoFactorSetupRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: '2fa-setup' });
 const resendVerificationRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 3, keyPrefix: 'resend-verify' });
+const registerRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'register' });
 
 /** Queue an email via BullMQ if available, otherwise send directly (fire-and-forget). */
 async function queueEmail(data: EmailJobData): Promise<void> {
@@ -179,7 +180,7 @@ const registerRoute = createRoute({
     201: jsonContent(z.any(), 'Registration successful'),
     409: jsonContent(errorResponseSchema, 'User already exists'),
   },
-  middleware: [authRateLimit],
+  middleware: [authRateLimit, registerRateLimit],
 });
 
 auth.openapi(registerRoute, (async (c: any) => {
