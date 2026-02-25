@@ -1,0 +1,73 @@
+name: Check Schema Migrations
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - 'packages/db/src/dialects/*/schema/**'
+      - 'packages/db/src/migrations/**'
+  pull_request:
+    paths:
+      - 'packages/db/src/dialects/*/schema/**'
+      - 'packages/db/src/migrations/**'
+
+jobs:
+  check-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for schema changes without migrations
+        run: |
+          BASE="${{ github.event.before || 'HEAD~1' }}"
+
+          # Get changed schema files
+          SCHEMA_CHANGES=$(git diff --name-only "$BASE" HEAD -- \
+            'packages/db/src/dialects/*/schema/*.ts' 2>/dev/null || true)
+
+          if [ -z "$SCHEMA_CHANGES" ]; then
+            echo "No schema changes detected."
+            exit 0
+          fi
+
+          echo "Schema files changed:"
+          echo "$SCHEMA_CHANGES"
+          echo ""
+
+          # Check if any migration files were added
+          MIGRATION_CHANGES=$(git diff --name-only --diff-filter=A "$BASE" HEAD -- \
+            'packages/db/src/migrations/*/*.sql' 2>/dev/null || true)
+
+          if [ -z "$MIGRATION_CHANGES" ]; then
+            echo "::error::Schema files were modified but no migration files were added!"
+            echo ""
+            echo "Modified schema files:"
+            echo "$SCHEMA_CHANGES"
+            echo ""
+            echo "You must create migration files for all 3 dialects:"
+            echo "  - packages/db/src/migrations/pg/NNNN_<name>.sql"
+            echo "  - packages/db/src/migrations/sqlite/NNNN_<name>.sql"
+            echo "  - packages/db/src/migrations/mysql/NNNN_<name>.sql"
+            exit 1
+          fi
+
+          echo "Migration files added:"
+          echo "$MIGRATION_CHANGES"
+
+          # Verify all 3 dialects have migrations
+          HAS_PG=$(echo "$MIGRATION_CHANGES" | grep -c 'migrations/pg/' || true)
+          HAS_SQLITE=$(echo "$MIGRATION_CHANGES" | grep -c 'migrations/sqlite/' || true)
+          HAS_MYSQL=$(echo "$MIGRATION_CHANGES" | grep -c 'migrations/mysql/' || true)
+
+          MISSING=""
+          [ "$HAS_PG" -eq 0 ] && MISSING="$MISSING PostgreSQL"
+          [ "$HAS_SQLITE" -eq 0 ] && MISSING="$MISSING SQLite"
+          [ "$HAS_MYSQL" -eq 0 ] && MISSING="$MISSING MySQL"
+
+          if [ -n "$MISSING" ]; then
+            echo "::warning::Missing migrations for:$MISSING"
+          fi
+
+          echo "Schema migration check passed."

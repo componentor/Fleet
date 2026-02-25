@@ -220,7 +220,7 @@ logArchiveRoutes.openapi(triggerRoute, async (c) => {
       return c.json({ error: 'Queue system not available' }, 503) as any;
     }
     await getMaintenanceQueue().add('log-archive', { type: 'log-archive' }, {
-      jobId: `manual:log-archive:${Date.now()}`,
+      jobId: `manual-log-archive-${Date.now()}`,
     });
     return c.json({ success: true }, 200);
   } catch {
