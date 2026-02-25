@@ -13,7 +13,6 @@ import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { uploadService } from '../services/upload.service.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
-import { storageManager } from '../services/storage/storage-manager.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
@@ -1417,13 +1416,8 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
 
     for (const v of vols) {
       if (v.source && !siblingVols.has(v.source)) {
-        // Remove Docker volume object
         await dockerService.removeVolume(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
-        });
-        // Remove storage provider volume (GlusterFS directory + DB record)
-        await storageManager.deleteVolume(accountId, v.source).catch((err) => {
-          logger.warn({ err, volume: v.source }, 'Failed to remove storage volume on service delete');
         });
       }
     }
@@ -2187,13 +2181,10 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
     removedDockerServiceIds.map((id) => dockerService.waitForServiceTasksGone(id).catch(() => {})),
   );
 
-  // Clean up Docker volumes and storage provider volumes after containers are gone
+  // Clean up Docker volumes after containers are gone (storage volumes managed separately)
   for (const volName of volumeNames) {
     await dockerService.removeVolume(volName).catch((err) => {
       logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
-    });
-    await storageManager.deleteVolume(accountId, volName).catch((err) => {
-      logger.warn({ err, volume: volName }, 'Failed to remove storage volume during stack delete');
     });
   }
 
