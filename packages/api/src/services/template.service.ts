@@ -29,6 +29,7 @@ export interface TemplateServiceDefinition {
   env?: Record<string, string>;
   volumes?: Array<{ source: string; target: string; readonly?: boolean }>;
   domain?: string;
+  user?: string;
   resources?: { cpuLimit?: number; memoryLimit?: number };
 }
 
@@ -125,6 +126,7 @@ export class TemplateService {
         env: s['env'] as Record<string, string> | undefined,
         volumes: s['volumes'] as TemplateServiceDefinition['volumes'],
         domain: s['domain'] as string | undefined,
+        user: s['user'] as string | undefined,
         resources: res ? {
           cpuLimit: typeof res['cpu_limit'] === 'number' ? res['cpu_limit'] : undefined,
           memoryLimit: typeof res['memory_limit'] === 'number' ? res['memory_limit'] : undefined,
@@ -530,6 +532,7 @@ export class TemplateService {
           updateParallelism: 1,
           updateDelay: '10s',
           rollbackOnFailure: true,
+          ...(svcDef.user ? { user: svcDef.user } : {}),
         });
 
         dockerServiceId = result.id;

@@ -19,6 +19,7 @@ variables:
 services:
   - name: mattermost
     image: mattermost/mattermost-team-edition:10
+    user: "root"
     ports:
       - target: 8065
         published: 8065
