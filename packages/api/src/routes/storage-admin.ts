@@ -1144,7 +1144,7 @@ storageAdmin.openapi(startMigrateRoute, (async (c: any) => {
     await getMaintenanceQueue().add(
       'storage-migration',
       { type: 'storage-migration', migrationId: migration.id },
-      { jobId: `migration:${migration.id}`, removeOnComplete: false, removeOnFail: false },
+      { jobId: `migration-${migration.id}`, removeOnComplete: false, removeOnFail: false },
     );
   }
 
@@ -1236,7 +1236,7 @@ storageAdmin.openapi(resumeMigrateRoute, (async (c: any) => {
       await getMaintenanceQueue().add(
         'storage-migration',
         { type: 'storage-migration', migrationId: id },
-        { jobId: `migration-resume:${id}:${Date.now()}`, removeOnComplete: false, removeOnFail: false },
+        { jobId: `migration-resume-${id}-${Date.now()}`, removeOnComplete: false, removeOnFail: false },
       );
     }
 

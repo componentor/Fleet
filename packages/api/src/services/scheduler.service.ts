@@ -224,7 +224,7 @@ class SchedulerService {
         { type: 'backup-schedule', scheduleId },
         {
           repeat: { pattern: cronExpr },
-          jobId: `backup:${scheduleId}`,
+          jobId: `backup-${scheduleId}`,
         },
       );
     } catch (err) {
