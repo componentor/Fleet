@@ -26,7 +26,13 @@ export function useTheme() {
   function toggle() {
     const order: ThemeMode[] = ['system', 'light', 'dark']
     const current = order.indexOf(theme.value)
-    theme.value = order[(current + 1) % order.length]!
+    const next = order[(current + 1) % order.length]!
+
+    if ((document as any).startViewTransition) {
+      ;(document as any).startViewTransition(() => { theme.value = next })
+    } else {
+      theme.value = next
+    }
   }
 
   return {

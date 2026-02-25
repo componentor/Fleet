@@ -1785,6 +1785,47 @@ billing.post('/webhook', async (c) => {
   return c.json({ received: true });
 });
 
+// ── Public routes (no auth required) ──────────────────────────────────────────
+
+const publicPlansRoute = createRoute({
+  method: 'get',
+  path: '/public/plans',
+  tags: ['Billing'],
+  summary: 'List visible billing plans (public, no auth)',
+  responses: {
+    200: jsonContent(z.object({
+      plans: z.array(z.any()),
+      allowedCycles: z.array(z.string()).optional(),
+      trialDays: z.number().optional(),
+    }), 'Public plans list'),
+  },
+});
+
+billing.openapi(publicPlansRoute, (async (c: any) => {
+  const plans = await db.query.billingPlans.findMany({
+    where: eq(billingPlans.visible, true),
+    orderBy: (p: any, { asc }: any) => asc(p.sortOrder),
+  });
+
+  // Strip sensitive Stripe fields
+  const safePlans = plans.map(({ stripeProductId, stripePriceIds, ...rest }: any) => rest);
+
+  // Include billing config for cycle/trial info
+  let allowedCycles: string[] | undefined;
+  let trialDays: number | undefined;
+  try {
+    const config = await db.query.billingConfig.findFirst();
+    if (config) {
+      allowedCycles = (config.allowedCycles as string[]) ?? undefined;
+      trialDays = config.trialDays ?? undefined;
+    }
+  } catch {
+    // Billing config may not exist yet
+  }
+
+  return c.json({ plans: safePlans, allowedCycles, trialDays });
+}) as any);
+
 billing.route('/', authed);
 
 export default billing;

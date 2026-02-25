@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Settings, Save, AlertTriangle, Loader2, Calendar, ShieldX } from 'lucide-vue-next'
+import { Settings, Save, AlertTriangle, Loader2, Calendar, ShieldX, KeyRound, Github, Trash2, Plus } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 import { useRole } from '@/composables/useRole'
@@ -24,6 +24,12 @@ const deletePassword = ref('')
 const showDeleteConfirm = ref(false)
 const deleting = ref(false)
 const revoking = ref(false)
+
+// Registry credentials
+const registryCreds = ref<Array<{ id: string; registry: string; username: string; createdAt: string | null }>>([])
+const loadingCreds = ref(false)
+const connectingGithub = ref(false)
+const credError = ref('')
 
 async function loadAccount() {
   loading.value = true
@@ -116,6 +122,45 @@ async function revokeDeletion() {
   }
 }
 
+async function loadRegistryCreds() {
+  loadingCreds.value = true
+  try {
+    const res = await api.get<{ credentials: typeof registryCreds.value }>('/registry-credentials')
+    registryCreds.value = res.credentials
+  } catch {
+    // silent — non-critical
+  } finally {
+    loadingCreds.value = false
+  }
+}
+
+async function connectGithubPackages() {
+  connectingGithub.value = true
+  credError.value = ''
+  try {
+    await api.post('/registry-credentials/github', {})
+    success.value = t('settings.credentialAdded')
+    setTimeout(() => { success.value = '' }, 3000)
+    await loadRegistryCreds()
+  } catch (err: any) {
+    credError.value = err?.body?.error || t('settings.connectGithubFailed')
+  } finally {
+    connectingGithub.value = false
+  }
+}
+
+async function removeCredential(id: string) {
+  if (!confirm(t('settings.removeCredentialConfirm'))) return
+  try {
+    await api.del(`/registry-credentials/${id}`)
+    success.value = t('settings.credentialRemoved')
+    setTimeout(() => { success.value = '' }, 3000)
+    await loadRegistryCreds()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to remove credential'
+  }
+}
+
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
 }
@@ -127,6 +172,7 @@ function daysUntil(dateStr: string): number {
 
 onMounted(() => {
   loadAccount()
+  loadRegistryCreds()
 })
 </script>
 
@@ -206,6 +252,67 @@ onMounted(() => {
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- Registry Credentials -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <KeyRound class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('settings.registryCredentials') }}</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('settings.registryCredentialsDesc') }}</p>
+        </div>
+        <div class="p-6 space-y-4">
+          <div v-if="credError" class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p class="text-sm text-red-700 dark:text-red-300">{{ credError }}</p>
+          </div>
+
+          <!-- Existing credentials -->
+          <div v-if="loadingCreds" class="flex items-center justify-center py-4">
+            <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+          </div>
+          <div v-else-if="registryCreds.length > 0" class="space-y-3">
+            <div
+              v-for="cred in registryCreds"
+              :key="cred.id"
+              class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
+            >
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                  <KeyRound class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ cred.registry }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ cred.username }}</p>
+                </div>
+              </div>
+              <button
+                @click="removeCredential(cred.id)"
+                class="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                :title="$t('settings.removeCredential')"
+              >
+                <Trash2 class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div v-else class="text-sm text-gray-500 dark:text-gray-400 py-2">
+            {{ $t('settings.noCredentials') }}
+          </div>
+
+          <!-- Connect GitHub Packages button -->
+          <div class="pt-2">
+            <button
+              @click="connectGithubPackages"
+              :disabled="connectingGithub"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Loader2 v-if="connectingGithub" class="w-4 h-4 animate-spin" />
+              <Github v-else class="w-4 h-4" />
+              {{ $t('settings.connectGithubPackages') }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Danger zone -->

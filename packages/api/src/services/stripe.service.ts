@@ -478,6 +478,46 @@ export class StripeService {
   }
 
   /**
+   * Create a subscription checkout with Stripe Connect destination charges.
+   * Each invoice payment transfers funds to the reseller's Connect account,
+   * minus the platform's application fee.
+   */
+  async createSubscriptionWithConnect(params: {
+    customerId: string;
+    lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
+    metadata: Record<string, string>;
+    successUrl: string;
+    cancelUrl: string;
+    connectAccountId: string;
+    applicationFeePercent: number;
+  }): Promise<Stripe.Checkout.Session> {
+    return (await getStripe()).checkout.sessions.create({
+      customer: params.customerId,
+      mode: 'subscription',
+      line_items: params.lineItems,
+      metadata: params.metadata,
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+      subscription_data: {
+        metadata: params.metadata,
+        application_fee_percent: params.applicationFeePercent,
+        transfer_data: {
+          destination: params.connectAccountId,
+        },
+      },
+    });
+  }
+
+  /**
+   * Create a Stripe Express login link so a reseller can view their Connect dashboard.
+   */
+  async createConnectLoginLink(
+    connectAccountId: string,
+  ): Promise<Stripe.LoginLink> {
+    return (await getStripe()).accounts.createLoginLink(connectAccountId);
+  }
+
+  /**
    * Construct and verify a Stripe webhook event from the raw payload and signature.
    */
   async constructWebhookEvent(

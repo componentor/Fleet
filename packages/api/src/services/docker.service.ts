@@ -4,6 +4,8 @@ import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
 import { logger } from './logger.js';
+import { db, registryCredentials, eq, and } from '@fleet/db';
+import { decrypt } from './crypto.service.js';
 
 const PLATFORM_CERTS_VOLUME = 'fleet-platform-certs';
 
@@ -38,6 +40,7 @@ export interface CreateSwarmServiceOptions {
   restartCondition?: 'none' | 'on-failure' | 'any';
   restartMaxAttempts?: number;
   restartDelay?: string;
+  registryAuth?: { username: string; password: string; serveraddress: string };
 }
 
 export interface ContainerStats {
@@ -181,7 +184,7 @@ export class DockerService {
       containerLabels['com.docker.compose.service'] = opts.labels['com.docker.compose.service'];
     }
 
-    const serviceSpec: Dockerode.CreateServiceOptions = {
+    const serviceSpec: Dockerode.CreateServiceOptions & { TaskTemplate: { ContainerSpec: { SecurityOpt?: string[] } } } = {
       Name: opts.name,
       Labels: opts.labels,
       TaskTemplate: {
@@ -244,6 +247,7 @@ export class DockerService {
           // Security: only apply ReadOnly / custom User when explicitly requested
           ...(opts.readOnly === true ? { ReadOnly: true } : {}),
           ...(opts.user !== undefined ? { User: opts.user } : {}),
+          SecurityOpt: ['no-new-privileges:true'],
         },
         Resources: {
           Limits: {
@@ -297,13 +301,16 @@ export class DockerService {
       },
     };
 
-    const service = await docker.createService(serviceSpec);
+    const service = opts.registryAuth
+      ? await docker.createService(opts.registryAuth, serviceSpec)
+      : await docker.createService(serviceSpec);
     return { id: service.id };
   }
 
   async updateService(
     dockerServiceId: string,
     opts: Partial<CreateSwarmServiceOptions>,
+    registryAuth?: { username: string; password: string; serveraddress: string },
   ): Promise<void> {
     // Validate volume mounts if volumes are being updated (defense-in-depth)
     if (opts.volumes) {
@@ -442,7 +449,11 @@ export class DockerService {
       spec.TaskTemplate.Networks = opts.networkIds.map((id) => ({ Target: id }));
     }
 
-    await service.update({ version, ...spec });
+    if (registryAuth) {
+      await service.update(registryAuth, { version, ...spec });
+    } else {
+      await service.update({ version, ...spec });
+    }
   }
 
   async removeService(dockerServiceId: string): Promise<void> {
@@ -1406,6 +1417,10 @@ export class DockerService {
    * Silently ignores nodes where the volume doesn't exist.
    */
   async removeDockerVolumeOnAllNodes(volumeName: string): Promise<void> {
+    // Validate volume name to prevent shell injection
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(volumeName)) {
+      throw new Error(`Invalid volume name: ${volumeName}`);
+    }
     const serviceName = `fleet-vol-cleanup-${Date.now().toString(36)}`;
     const svc = await docker.createService({
       Name: serviceName,
@@ -2018,3 +2033,45 @@ function parseDelay(delay: string): number {
 }
 
 export const dockerService = new DockerService();
+
+/**
+ * Parse registry hostname from a Docker image reference.
+ * "ghcr.io/user/repo:tag" → "ghcr.io"
+ * "myregistry.com:5000/img" → "myregistry.com:5000"
+ * "nginx:latest" → "docker.io"
+ */
+function parseRegistryFromImage(image: string): string {
+  // Strip tag/digest
+  const ref = image.split('@')[0]!.split(':')[0]!;
+  const parts = ref.split('/');
+  // If first part contains a dot or colon, it's a registry hostname
+  if (parts.length >= 2 && (parts[0]!.includes('.') || parts[0]!.includes(':'))) {
+    return parts[0]!;
+  }
+  return 'docker.io';
+}
+
+/**
+ * Look up stored registry credentials for a given image.
+ * Returns undefined if no matching credential exists (public pull).
+ */
+export async function getRegistryAuthForImage(
+  accountId: string,
+  image: string,
+): Promise<{ username: string; password: string; serveraddress: string } | undefined> {
+  const registry = parseRegistryFromImage(image);
+
+  const cred = await db.query.registryCredentials.findFirst({
+    where: and(
+      eq(registryCredentials.accountId, accountId),
+      eq(registryCredentials.registry, registry),
+    ),
+  });
+
+  if (!cred) return undefined;
+  return {
+    username: cred.username,
+    password: decrypt(cred.password),
+    serveraddress: `https://${cred.registry}`,
+  };
+}

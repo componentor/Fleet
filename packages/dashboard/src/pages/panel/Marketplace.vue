@@ -109,11 +109,25 @@ onMounted(() => {
         @click="startDeploy(tmpl)"
       >
         <div class="p-6">
-          <div class="flex items-start justify-between mb-3">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">{{ tmpl.name }}</h3>
-            <span v-if="tmpl.category" :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', categoryColor(tmpl.category)]">
-              {{ tmpl.category }}
-            </span>
+          <div class="flex items-start gap-3 mb-3">
+            <div class="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 overflow-hidden">
+              <img
+                v-if="tmpl.iconUrl"
+                :src="tmpl.iconUrl"
+                :alt="tmpl.name"
+                class="w-7 h-7 object-contain"
+                @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden')"
+              />
+              <Store :class="[tmpl.iconUrl ? 'hidden' : '', 'w-5 h-5 text-gray-400 dark:text-gray-500']" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-2">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors truncate">{{ tmpl.name }}</h3>
+                <span v-if="tmpl.category" :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0', categoryColor(tmpl.category)]">
+                  {{ tmpl.category }}
+                </span>
+              </div>
+            </div>
           </div>
           <p class="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">{{ tmpl.description }}</p>
           <p v-if="tmpl.composeTemplate" class="text-xs text-gray-500 dark:text-gray-500 font-mono truncate">{{ tmpl.slug }}</p>

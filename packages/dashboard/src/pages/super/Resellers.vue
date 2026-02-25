@@ -14,17 +14,23 @@ import {
   ChevronUp,
   Link,
   Unlink,
+  Store,
+  TrendingUp,
+  Zap,
+  AlertCircle,
+  Eye,
+  ExternalLink,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useToast } from '@/composables/useToast'
 
 const { t } = useI18n()
 const api = useApi()
+const toast = useToast()
 
 // ─── State ──────────────────────────────────────────────────
 const loading = ref(true)
 const savingConfig = ref(false)
-const error = ref('')
-const success = ref('')
 const activeTab = ref<'config' | 'applications' | 'resellers'>('config')
 
 // ─── Config ─────────────────────────────────────────────────
@@ -51,23 +57,37 @@ const loadingResellers = ref(false)
 const expandedReseller = ref<string | null>(null)
 const savingReseller = ref<string | null>(null)
 const editForm = ref<Record<string, any>>({})
+const resellerFilter = ref<'all' | 'active' | 'suspended'>('all')
 
 // ─── Computed ───────────────────────────────────────────────
 const pendingCount = computed(() => applications.value.length)
 
 const tabs = computed(() => {
-  const items: { id: 'config' | 'applications' | 'resellers'; label: string; icon: any }[] = [
-    { id: 'config', label: t('reseller.tabs.config'), icon: Settings },
-    { id: 'resellers', label: t('reseller.tabs.resellers'), icon: UserCheck },
+  const items: { id: 'config' | 'applications' | 'resellers'; label: string; icon: any; badge?: number }[] = [
+    { id: 'config', label: 'Configuration', icon: Settings },
+    { id: 'resellers', label: 'Resellers', icon: UserCheck, badge: resellers.value.length },
   ]
   if (config.value.approvalMode === 'manual') {
     items.splice(1, 0, {
       id: 'applications',
-      label: t('reseller.tabs.applications'),
+      label: 'Applications',
       icon: FileText,
+      badge: pendingCount.value,
     })
   }
   return items
+})
+
+const filteredResellers = computed(() => {
+  if (resellerFilter.value === 'all') return resellers.value
+  return resellers.value.filter((r: any) => r.status === resellerFilter.value)
+})
+
+const stats = computed(() => {
+  const active = resellers.value.filter((r: any) => r.status === 'active').length
+  const connected = resellers.value.filter((r: any) => r.stripeConnectId).length
+  const suspended = resellers.value.filter((r: any) => r.status === 'suspended').length
+  return { total: resellers.value.length, active, connected, suspended, pending: pendingCount.value }
 })
 
 // ─── Fetch Functions ────────────────────────────────────────
@@ -83,7 +103,7 @@ async function fetchConfig() {
       defaultDiscountFixed: data.defaultDiscountFixed ?? 0,
     }
   } catch {
-    error.value = t('reseller.errors.loadConfig')
+    toast.error('Failed to load reseller configuration')
   }
 }
 
@@ -101,7 +121,7 @@ async function fetchApplications() {
 async function fetchResellers() {
   loadingResellers.value = true
   try {
-    resellers.value = await api.get<any[]>('/reseller/admin/accounts?status=active')
+    resellers.value = await api.get<any[]>('/reseller/admin/accounts')
   } catch {
     resellers.value = []
   } finally {
@@ -121,12 +141,11 @@ async function fetchAll() {
 // ─── Config Actions ─────────────────────────────────────────
 async function saveConfig() {
   savingConfig.value = true
-  error.value = ''
   try {
     await api.patch('/reseller/admin/config', config.value)
-    showSuccess(t('reseller.success.configSaved'))
+    toast.success('Configuration saved')
   } catch (err: any) {
-    error.value = err?.body?.error || t('reseller.errors.saveConfig')
+    toast.error(err?.body?.error || 'Failed to save configuration')
   } finally {
     savingConfig.value = false
   }
@@ -138,10 +157,10 @@ async function approveApplication(id: string) {
   try {
     await api.post(`/reseller/admin/applications/${id}/approve`, {})
     applications.value = applications.value.filter(a => a.id !== id)
-    showSuccess(t('reseller.success.approved'))
+    toast.success('Application approved')
     await fetchResellers()
   } catch (err: any) {
-    error.value = err?.body?.error || t('reseller.errors.approve')
+    toast.error(err?.body?.error || 'Failed to approve application')
   } finally {
     processingApplication.value = null
   }
@@ -164,9 +183,9 @@ async function confirmReject() {
     showRejectModal.value = false
     rejectingId.value = null
     rejectNote.value = ''
-    showSuccess(t('reseller.success.rejected'))
+    toast.success('Application rejected')
   } catch (err: any) {
-    error.value = err?.body?.error || t('reseller.errors.reject')
+    toast.error(err?.body?.error || 'Failed to reject application')
   } finally {
     processingApplication.value = null
   }
@@ -190,7 +209,6 @@ function toggleReseller(accountId: string, reseller: any) {
 
 async function saveReseller(accountId: string) {
   savingReseller.value = accountId
-  error.value = ''
   try {
     await api.patch(`/reseller/admin/accounts/${accountId}`, {
       discountType: editForm.value.discountType || null,
@@ -199,21 +217,30 @@ async function saveReseller(accountId: string) {
       canSubAccountResell: editForm.value.canSubAccountResell,
       status: editForm.value.status,
     })
-    showSuccess(t('reseller.success.resellerUpdated'))
+    toast.success('Reseller settings updated')
+    expandedReseller.value = null
     await fetchResellers()
   } catch (err: any) {
-    error.value = err?.body?.error || t('reseller.errors.updateReseller')
+    toast.error(err?.body?.error || 'Failed to update reseller')
   } finally {
     savingReseller.value = null
   }
 }
 
 function formatDiscountOverride(reseller: any): string {
-  if (!reseller.discountType) return t('reseller.useDefault')
+  if (!reseller.discountType) return 'Default'
   if (reseller.discountType === 'percentage') return `${reseller.discountPercent ?? 0}%`
   if (reseller.discountType === 'fixed') return `${reseller.discountFixed ?? 0}c`
   if (reseller.discountType === 'hybrid') return `${reseller.discountPercent ?? 0}% + ${reseller.discountFixed ?? 0}c`
   return '-'
+}
+
+function formatMarkup(reseller: any): string {
+  if (!reseller.markupType) return '--'
+  if (reseller.markupType === 'percentage') return `${reseller.markupPercent ?? 0}%`
+  if (reseller.markupType === 'fixed') return `${reseller.markupFixed ?? 0}c`
+  if (reseller.markupType === 'hybrid') return `${reseller.markupPercent ?? 0}% + ${reseller.markupFixed ?? 0}c`
+  return '--'
 }
 
 function statusColor(status: string): string {
@@ -229,13 +256,7 @@ function statusColor(status: string): string {
 
 function formatDate(ts: any): string {
   if (!ts) return '--'
-  return new Date(ts).toLocaleDateString()
-}
-
-// ─── Helpers ────────────────────────────────────────────────
-function showSuccess(msg: string) {
-  success.value = msg
-  setTimeout(() => { success.value = '' }, 3000)
+  return new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 onMounted(() => { fetchAll() })
@@ -243,9 +264,15 @@ onMounted(() => { fetchAll() })
 
 <template>
   <div>
+    <!-- Page header -->
     <div class="flex items-center gap-3 mb-8">
-      <Users class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('reseller.title') }}</h1>
+      <div class="p-2 rounded-xl bg-primary-100 dark:bg-primary-900/30">
+        <Store class="w-6 h-6 text-primary-600 dark:text-primary-400" />
+      </div>
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Reseller Program</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Manage the reseller program, applications, and active resellers</p>
+      </div>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -253,12 +280,44 @@ onMounted(() => { fetchAll() })
     </div>
 
     <template v-else>
-      <!-- Alerts -->
-      <div v-if="error" class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-        <p class="text-sm text-red-700 dark:text-red-300">{{ error }}</p>
-      </div>
-      <div v-if="success" class="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-        <p class="text-sm text-green-700 dark:text-green-300">{{ success }}</p>
+      <!-- Stats overview -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+              <Users class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Total Resellers</p>
+          </div>
+          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats.total }}</p>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="p-1.5 rounded-lg bg-green-100 dark:bg-green-900/30">
+              <Zap class="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+            </div>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Active</p>
+          </div>
+          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats.active }}</p>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+              <Link class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Stripe Connected</p>
+          </div>
+          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats.connected }}</p>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+              <FileText class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Pending</p>
+          </div>
+          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats.pending }}</p>
+        </div>
       </div>
 
       <!-- Tabs -->
@@ -277,30 +336,33 @@ onMounted(() => { fetchAll() })
           <component :is="tab.icon" class="w-4 h-4" />
           {{ tab.label }}
           <span
-            v-if="tab.id === 'applications' && pendingCount > 0"
-            class="ml-1 px-1.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+            v-if="tab.badge && tab.badge > 0"
+            :class="[
+              'ml-1 px-1.5 py-0.5 rounded-full text-xs font-semibold',
+              tab.id === 'applications'
+                ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+            ]"
           >
-            {{ pendingCount }}
+            {{ tab.badge }}
           </span>
         </button>
       </div>
 
-      <!-- ═══════════════════════════════════════════════════════ -->
-      <!-- Tab 1: Configuration                                   -->
-      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- ═══ Tab: Configuration ════════════════════════════ -->
       <div v-if="activeTab === 'config'">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('reseller.config.title') }}</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('reseller.config.description') }}</p>
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white">Program Settings</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Configure how the reseller program works</p>
           </div>
 
           <form @submit.prevent="saveConfig" class="p-6 space-y-6">
-            <!-- Enable Reseller Program -->
+            <!-- Enable toggle -->
             <div class="flex items-center justify-between p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div>
-                <label for="resellerEnabled" class="text-sm font-medium text-gray-900 dark:text-white">{{ t('reseller.config.enable') }}</label>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ t('reseller.config.enableDesc') }}</p>
+                <label for="resellerEnabled" class="text-sm font-medium text-gray-900 dark:text-white">Enable Reseller Program</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Allow users to apply and become resellers</p>
               </div>
               <input
                 id="resellerEnabled"
@@ -310,24 +372,26 @@ onMounted(() => { fetchAll() })
               />
             </div>
 
-            <!-- Approval Mode -->
+            <!-- Approval mode -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('reseller.config.approvalMode') }}</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Approval Mode</label>
               <select
                 v-model="config.approvalMode"
                 class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
               >
-                <option value="auto">{{ t('reseller.config.autoApproval') }}</option>
-                <option value="manual">{{ t('reseller.config.manualApproval') }}</option>
+                <option value="auto">Auto-approve</option>
+                <option value="manual">Manual review</option>
               </select>
-              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('reseller.config.approvalModeDesc') }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {{ config.approvalMode === 'auto' ? 'New applications are instantly approved' : 'Applications require admin review before activation' }}
+              </p>
             </div>
 
-            <!-- Allow Sub-Account Reselling -->
+            <!-- Sub-account reselling -->
             <div class="flex items-center justify-between p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-600">
               <div>
-                <label for="allowSubAccount" class="text-sm font-medium text-gray-900 dark:text-white">{{ t('reseller.config.allowSubAccount') }}</label>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ t('reseller.config.allowSubAccountDesc') }}</p>
+                <label for="allowSubAccount" class="text-sm font-medium text-gray-900 dark:text-white">Allow Sub-Account Reselling</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Let resellers grant reselling rights to their sub-accounts</p>
               </div>
               <input
                 id="allowSubAccount"
@@ -337,25 +401,25 @@ onMounted(() => { fetchAll() })
               />
             </div>
 
-            <!-- Default Discount Settings -->
+            <!-- Default discount -->
             <div class="space-y-4">
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('reseller.config.defaultDiscount') }}</h3>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Default Discount for New Resellers</h3>
 
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('reseller.config.discountType') }}</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Discount Type</label>
                 <select
                   v-model="config.defaultDiscountType"
                   class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                  <option value="percentage">{{ t('reseller.discountTypes.percentage') }}</option>
-                  <option value="fixed">{{ t('reseller.discountTypes.fixed') }}</option>
-                  <option value="hybrid">{{ t('reseller.discountTypes.hybrid') }}</option>
+                  <option value="percentage">Percentage</option>
+                  <option value="fixed">Fixed (cents)</option>
+                  <option value="hybrid">Hybrid (% + fixed)</option>
                 </select>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div v-if="config.defaultDiscountType === 'percentage' || config.defaultDiscountType === 'hybrid'">
-                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('reseller.config.discountPercent') }}</label>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Percentage</label>
                   <div class="relative">
                     <input
                       v-model.number="config.defaultDiscountPercent"
@@ -369,7 +433,7 @@ onMounted(() => { fetchAll() })
                 </div>
 
                 <div v-if="config.defaultDiscountType === 'fixed' || config.defaultDiscountType === 'hybrid'">
-                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('reseller.config.discountFixed') }}</label>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Fixed Amount</label>
                   <div class="relative">
                     <input
                       v-model.number="config.defaultDiscountFixed"
@@ -377,7 +441,7 @@ onMounted(() => { fetchAll() })
                       min="0"
                       class="w-full max-w-[200px] px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
-                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">{{ t('reseller.cents') }}</span>
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">cents</span>
                   </div>
                 </div>
               </div>
@@ -392,21 +456,19 @@ onMounted(() => { fetchAll() })
               >
                 <Loader2 v-if="savingConfig" class="w-4 h-4 animate-spin" />
                 <Save v-else class="w-4 h-4" />
-                {{ savingConfig ? t('common.saving') : t('common.save') }}
+                {{ savingConfig ? 'Saving...' : 'Save Configuration' }}
               </button>
             </div>
           </form>
         </div>
       </div>
 
-      <!-- ═══════════════════════════════════════════════════════ -->
-      <!-- Tab 2: Applications (manual mode only)                 -->
-      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- ═══ Tab: Applications ═════════════════════════════ -->
       <div v-if="activeTab === 'applications'">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('reseller.applications.title') }}</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('reseller.applications.description') }}</p>
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white">Pending Applications</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Review and approve reseller applications</p>
           </div>
 
           <div v-if="loadingApplications" class="flex items-center justify-center py-12">
@@ -414,100 +476,115 @@ onMounted(() => { fetchAll() })
           </div>
 
           <div v-else-if="applications.length === 0" class="px-6 py-12 text-center">
-            <FileText class="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('reseller.applications.empty') }}</p>
+            <div class="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+              <FileText class="w-7 h-7 text-gray-400 dark:text-gray-500" />
+            </div>
+            <p class="text-sm font-medium text-gray-900 dark:text-white mb-1">No pending applications</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">New applications will appear here for review</p>
           </div>
 
-          <div v-else class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b border-gray-200 dark:border-gray-700">
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.applications.accountName') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.applications.message') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.applications.submitted') }}</th>
-                  <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('common.actions') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                <tr v-for="app in applications" :key="app.id" class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
-                  <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
+          <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
+            <div
+              v-for="app in applications"
+              :key="app.id"
+              class="p-6 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
                     {{ app.account?.name ?? app.accountId }}
-                  </td>
-                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 max-w-xs truncate">
-                    {{ app.message || '--' }}
-                  </td>
-                  <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                    {{ formatDate(app.createdAt) }}
-                  </td>
-                  <td class="px-6 py-4 text-right">
-                    <div class="flex items-center justify-end gap-2">
-                      <button
-                        @click="approveApplication(app.id)"
-                        :disabled="processingApplication === app.id"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
-                      >
-                        <Loader2 v-if="processingApplication === app.id" class="w-3.5 h-3.5 animate-spin" />
-                        <Check v-else class="w-3.5 h-3.5" />
-                        {{ t('reseller.applications.approve') }}
-                      </button>
-                      <button
-                        @click="openRejectModal(app.id)"
-                        :disabled="processingApplication === app.id"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-600 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 text-xs font-medium transition-colors"
-                      >
-                        <X class="w-3.5 h-3.5" />
-                        {{ t('reseller.applications.reject') }}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </h3>
+                  <p v-if="app.message" class="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{{ app.message }}</p>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">Applied {{ formatDate(app.createdAt) }}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    @click="approveApplication(app.id)"
+                    :disabled="processingApplication === app.id"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
+                  >
+                    <Loader2 v-if="processingApplication === app.id" class="w-3.5 h-3.5 animate-spin" />
+                    <Check v-else class="w-3.5 h-3.5" />
+                    Approve
+                  </button>
+                  <button
+                    @click="openRejectModal(app.id)"
+                    :disabled="processingApplication === app.id"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-red-300 dark:border-red-600 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 text-xs font-medium transition-colors"
+                  >
+                    <X class="w-3.5 h-3.5" />
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- ═══════════════════════════════════════════════════════ -->
-      <!-- Tab 3: Active Resellers                                -->
-      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- ═══ Tab: Active Resellers ═════════════════════════ -->
       <div v-if="activeTab === 'resellers'">
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('reseller.resellers.title') }}</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('reseller.resellers.description') }}</p>
+        <!-- Filter bar -->
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex gap-2">
+            <button
+              v-for="f in (['all', 'active', 'suspended'] as const)"
+              :key="f"
+              @click="resellerFilter = f"
+              :class="[
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                resellerFilter === f
+                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
+              ]"
+            >
+              {{ f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1) }}
+              <span
+                v-if="f === 'all'"
+                class="ml-1 text-gray-400 dark:text-gray-500"
+              >{{ resellers.length }}</span>
+            </button>
           </div>
+        </div>
 
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div v-if="loadingResellers" class="flex items-center justify-center py-12">
             <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
           </div>
 
-          <div v-else-if="resellers.length === 0" class="px-6 py-12 text-center">
-            <UserCheck class="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('reseller.resellers.empty') }}</p>
+          <div v-else-if="filteredResellers.length === 0" class="px-6 py-12 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+              <UserCheck class="w-7 h-7 text-gray-400 dark:text-gray-500" />
+            </div>
+            <p class="text-sm font-medium text-gray-900 dark:text-white mb-1">No resellers found</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ resellerFilter === 'all' ? 'No reseller accounts have been created yet' : 'No resellers match this filter' }}</p>
           </div>
 
           <div v-else class="overflow-x-auto">
             <table class="w-full">
               <thead>
                 <tr class="border-b border-gray-200 dark:border-gray-700">
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.resellers.accountName') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('common.status') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.resellers.discountOverride') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.resellers.markup') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('reseller.resellers.stripeConnected') }}</th>
-                  <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('common.actions') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Reseller</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Discount</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Markup</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stripe</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Signup Slug</th>
+                  <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider"></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                <template v-for="reseller in resellers" :key="reseller.account?.id ?? reseller.id">
+                <template v-for="reseller in filteredResellers" :key="reseller.account?.id ?? reseller.id">
                   <tr
                     class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer"
                     @click="toggleReseller(reseller.account?.id ?? reseller.id, reseller)"
                   >
-                    <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
-                      <div class="flex items-center gap-2">
-                        {{ reseller.account?.name ?? reseller.accountId }}
-                        <span v-if="reseller.account?.slug" class="text-xs text-gray-400 dark:text-gray-500 font-mono">{{ reseller.account.slug }}</span>
+                    <td class="px-6 py-4">
+                      <div>
+                        <span class="text-sm font-medium text-gray-900 dark:text-white">
+                          {{ reseller.brandName || reseller.account?.name || reseller.accountId }}
+                        </span>
+                        <p v-if="reseller.account?.slug" class="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5">{{ reseller.account.slug }}</p>
                       </div>
                     </td>
                     <td class="px-6 py-4">
@@ -519,20 +596,29 @@ onMounted(() => { fetchAll() })
                       {{ formatDiscountOverride(reseller) }}
                     </td>
                     <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                      {{ reseller.markupPercent != null ? `${reseller.markupPercent}%` : '--' }}
+                      {{ formatMarkup(reseller) }}
                     </td>
                     <td class="px-6 py-4">
                       <span
                         :class="[
                           'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium',
-                          reseller.stripeConnectId
+                          reseller.connectOnboarded
                             ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+                            : reseller.stripeConnectId
+                              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
                         ]"
                       >
-                        <component :is="reseller.stripeConnectId ? Link : Unlink" class="w-3 h-3" />
-                        {{ reseller.stripeConnectId ? t('reseller.resellers.connected') : t('reseller.resellers.notConnected') }}
+                        <component
+                          :is="reseller.connectOnboarded ? Link : reseller.stripeConnectId ? AlertCircle : Unlink"
+                          class="w-3 h-3"
+                        />
+                        {{ reseller.connectOnboarded ? 'Active' : reseller.stripeConnectId ? 'Pending' : 'None' }}
                       </span>
+                    </td>
+                    <td class="px-6 py-4">
+                      <span v-if="reseller.signupSlug" class="text-xs font-mono text-primary-600 dark:text-primary-400">/r/{{ reseller.signupSlug }}</span>
+                      <span v-else class="text-xs text-gray-400 dark:text-gray-500">--</span>
                     </td>
                     <td class="px-6 py-4 text-right">
                       <component
@@ -544,26 +630,26 @@ onMounted(() => { fetchAll() })
 
                   <!-- Expanded edit form -->
                   <tr v-if="expandedReseller === (reseller.account?.id ?? reseller.id)">
-                    <td colspan="6" class="px-6 py-5 bg-gray-50 dark:bg-gray-900/50">
+                    <td colspan="7" class="px-6 py-5 bg-gray-50 dark:bg-gray-900/50">
                       <form @submit.prevent="saveReseller(reseller.account?.id ?? reseller.id)" class="space-y-5">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                           <!-- Discount Type -->
                           <div>
-                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('reseller.config.discountType') }}</label>
+                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount Type</label>
                             <select
                               v-model="editForm.discountType"
                               class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                             >
-                              <option :value="null">{{ t('reseller.useDefault') }}</option>
-                              <option value="percentage">{{ t('reseller.discountTypes.percentage') }}</option>
-                              <option value="fixed">{{ t('reseller.discountTypes.fixed') }}</option>
-                              <option value="hybrid">{{ t('reseller.discountTypes.hybrid') }}</option>
+                              <option :value="null">Default</option>
+                              <option value="percentage">Percentage</option>
+                              <option value="fixed">Fixed</option>
+                              <option value="hybrid">Hybrid</option>
                             </select>
                           </div>
 
                           <!-- Discount Percent -->
                           <div v-if="editForm.discountType === 'percentage' || editForm.discountType === 'hybrid'">
-                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('reseller.config.discountPercent') }}</label>
+                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount %</label>
                             <div class="relative">
                               <input
                                 v-model.number="editForm.discountPercent"
@@ -578,7 +664,7 @@ onMounted(() => { fetchAll() })
 
                           <!-- Discount Fixed -->
                           <div v-if="editForm.discountType === 'fixed' || editForm.discountType === 'hybrid'">
-                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('reseller.config.discountFixed') }}</label>
+                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount Fixed</label>
                             <input
                               v-model.number="editForm.discountFixed"
                               type="number"
@@ -589,35 +675,36 @@ onMounted(() => { fetchAll() })
 
                           <!-- Status -->
                           <div>
-                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('common.status') }}</label>
+                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status</label>
                             <select
                               v-model="editForm.status"
                               class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                             >
-                              <option value="active">{{ t('common.active') }}</option>
-                              <option value="suspended">{{ t('reseller.resellers.suspended') }}</option>
+                              <option value="active">Active</option>
+                              <option value="suspended">Suspended</option>
                             </select>
                           </div>
-                        </div>
 
-                        <!-- Can Sub-Account Resell -->
-                        <div class="flex items-center gap-3">
-                          <input
-                            id="canSubAccountResell"
-                            v-model="editForm.canSubAccountResell"
-                            type="checkbox"
-                            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                          />
-                          <label for="canSubAccountResell" class="text-sm text-gray-700 dark:text-gray-300">{{ t('reseller.resellers.canSubAccountResell') }}</label>
+                          <!-- Can Sub-Account Resell -->
+                          <div class="flex items-end pb-1">
+                            <label class="flex items-center gap-2">
+                              <input
+                                v-model="editForm.canSubAccountResell"
+                                type="checkbox"
+                                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                              <span class="text-xs text-gray-700 dark:text-gray-300">Sub-account reselling</span>
+                            </label>
+                          </div>
                         </div>
 
                         <div class="flex gap-2 justify-end">
                           <button
                             type="button"
                             @click="expandedReseller = null"
-                            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700 transition-colors"
                           >
-                            {{ t('common.cancel') }}
+                            Cancel
                           </button>
                           <button
                             type="submit"
@@ -626,7 +713,7 @@ onMounted(() => { fetchAll() })
                           >
                             <Loader2 v-if="savingReseller === (reseller.account?.id ?? reseller.id)" class="w-4 h-4 animate-spin" />
                             <Save v-else class="w-4 h-4" />
-                            {{ t('common.save') }}
+                            Save
                           </button>
                         </div>
                       </form>
@@ -639,40 +726,33 @@ onMounted(() => { fetchAll() })
         </div>
       </div>
 
-      <!-- ═══════════════════════════════════════════════════════ -->
-      <!-- Reject Application Modal                               -->
-      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- ═══ Reject Application Modal ══════════════════════ -->
       <Teleport to="body">
         <div
           v-if="showRejectModal"
           class="fixed inset-0 z-50 flex items-center justify-center"
         >
-          <!-- Backdrop -->
           <div class="absolute inset-0 bg-black/50" @click="showRejectModal = false" />
-
-          <!-- Modal content -->
           <div class="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('reseller.applications.rejectTitle') }}</h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('reseller.applications.rejectDesc') }}</p>
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Reject Application</h3>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Provide a reason for rejecting this application</p>
             </div>
-
             <div class="p-6">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('reseller.applications.rejectNote') }}</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Rejection Note (optional)</label>
               <textarea
                 v-model="rejectNote"
                 rows="3"
-                :placeholder="t('reseller.applications.rejectNotePlaceholder')"
+                placeholder="Explain why this application was rejected..."
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm resize-none"
               />
             </div>
-
             <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
               <button
                 @click="showRejectModal = false"
                 class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                {{ t('common.cancel') }}
+                Cancel
               </button>
               <button
                 @click="confirmReject"
@@ -681,7 +761,7 @@ onMounted(() => { fetchAll() })
               >
                 <Loader2 v-if="processingApplication !== null" class="w-4 h-4 animate-spin" />
                 <X v-else class="w-4 h-4" />
-                {{ t('reseller.applications.confirmReject') }}
+                Reject
               </button>
             </div>
           </div>

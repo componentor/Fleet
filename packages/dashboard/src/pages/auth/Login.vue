@@ -158,7 +158,7 @@ function loginWithGoogle() {
       <!-- Register link -->
       <p class="text-center text-sm text-gray-500 dark:text-gray-400">
         {{ $t('auth.noAccount') }}
-        <RouterLink to="/register" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
+        <RouterLink to="/get-started" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
           {{ $t('auth.createOne') }}
         </RouterLink>
       </p>

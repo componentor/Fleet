@@ -21,10 +21,13 @@ import {
   CheckCircle2,
   Shield,
   MapPin,
+  HardDrive,
 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
+import { useVolumeManager } from '@/composables/useVolumeManager'
+import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
 import { useI18n } from 'vue-i18n'
 
 interface GitHubRepo {
@@ -49,6 +52,7 @@ const route = useRoute()
 const store = useServicesStore()
 const authStore = useAuthStore()
 const api = useApi()
+const volumeManager = useVolumeManager()
 
 const deployMethod = ref<'github' | 'docker' | 'upload' | null>(null)
 
@@ -119,7 +123,6 @@ function openConfirmModal(config: { name: string; image?: string; domain?: strin
     name: config.name,
     image: config.image || 'ghcr.io/placeholder',
     ...(config.domain ? { domain: config.domain } : {}),
-    ports: buildPortsPayload(),
   })
 }
 
@@ -148,9 +151,8 @@ const branchesLoading = ref(false)
 const ghServiceName = ref('')
 const autoDeploy = ref(true)
 
-// Shared env vars and ports for both deploy methods
+// Shared env vars for both deploy methods
 const envVars = ref<{ key: string; value: string }[]>([])
-const ports = ref<{ container: number | null; published: number | null }[]>([])
 
 // Upload form state
 const uploadFile = ref<File | null>(null)
@@ -158,6 +160,37 @@ const uploadServiceName = ref('')
 const uploadBuildFile = ref('')
 const uploadDragOver = ref(false)
 const uploadLoading = ref(false)
+
+// Volume state (shared across deploy methods)
+const deployVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
+
+function addDeployVolume() {
+  deployVolumes.value.push({ source: '', target: '', readonly: false })
+}
+
+function removeDeployVolume(index: number) {
+  deployVolumes.value.splice(index, 1)
+}
+
+async function handleDeployVolumeCreated(index: number, vol: { name: string; displayName: string; sizeGb: number }) {
+  try {
+    const created = await volumeManager.createVolume(vol.name, vol.sizeGb)
+    deployVolumes.value[index]!.source = created.name
+  } catch {
+    // Toast already shown by useApi
+  }
+}
+
+function buildVolumesPayload(): Array<{ source: string; target: string; readonly: boolean }> | undefined {
+  const valid = deployVolumes.value.filter((v) => v.source && v.target)
+  return valid.length > 0 ? valid : undefined
+}
+
+const showDbWarning = computed(() => {
+  if (!dockerImage.value) return false
+  if (!volumeManager.isDatabaseImage(dockerImage.value)) return false
+  return deployVolumes.value.filter((v) => v.source && v.target).length === 0
+})
 
 function onUploadFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
@@ -203,7 +236,7 @@ async function executeUploadDeploy() {
     formData.append('name', uploadServiceName.value)
     if (uploadBuildFile.value) formData.append('buildFile', uploadBuildFile.value)
     if (buildEnvVarsPayload()) formData.append('env', JSON.stringify(buildEnvVarsPayload()))
-    if (buildPortsPayload()) formData.append('ports', JSON.stringify(buildPortsPayload()))
+    if (buildVolumesPayload()) formData.append('volumes', JSON.stringify(buildVolumesPayload()))
     if (domain.value) formData.append('domain', domain.value)
     if (selectedRegion.value) formData.append('region', selectedRegion.value)
     formData.append('replicas', String(replicas.value))
@@ -234,31 +267,12 @@ function addEnvVar() {
 function removeEnvVar(index: number) {
   envVars.value.splice(index, 1)
 }
-function addPort() {
-  ports.value.push({ container: null, published: null })
-}
-function removePort(index: number) {
-  ports.value.splice(index, 1)
-}
-
 function buildEnvVarsPayload(): Record<string, string> | undefined {
   const filtered = envVars.value.filter((e) => e.key.trim())
   if (filtered.length === 0) return undefined
   const obj: Record<string, string> = {}
   for (const e of filtered) obj[e.key.trim()] = e.value
   return obj
-}
-
-function buildPortsPayload():
-  | { container: number; published: number; protocol: string }[]
-  | undefined {
-  const filtered = ports.value.filter((p) => p.container)
-  if (filtered.length === 0) return undefined
-  return filtered.map((p) => ({
-    container: p.container!,
-    published: p.published || p.container!,
-    protocol: 'tcp',
-  }))
 }
 
 function validateDockerForm(): boolean {
@@ -291,7 +305,7 @@ async function executeDockerDeploy() {
       domain: domain.value || undefined,
       region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
-      ports: buildPortsPayload(),
+      volumes: buildVolumesPayload(),
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -324,7 +338,7 @@ async function executeGithubDeploy() {
       autoDeploy: autoDeploy.value,
       region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
-      ports: buildPortsPayload(),
+      volumes: buildVolumesPayload(),
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -391,7 +405,6 @@ function goBackToRepos() {
   ghServiceName.value = ''
   selectedBranch.value = ''
   envVars.value = []
-  ports.value = []
   githubStep.value = 'repos'
 }
 
@@ -428,12 +441,24 @@ watch(
         checkGithubStatus()
       }
     }
+    // Reset volumes when switching deploy method
+    deployVolumes.value = []
   },
 )
+
+// Auto-suggest volume for database images
+watch(dockerImage, (newImage) => {
+  if (!newImage) return
+  const path = volumeManager.suggestedVolumePath(newImage)
+  if (path && deployVolumes.value.length === 0) {
+    deployVolumes.value.push({ source: '', target: path, readonly: false })
+  }
+})
 
 // Handle OAuth return — token is now in URL fragment (#) to prevent server-side leakage
 onMounted(() => {
   fetchRegions()
+  volumeManager.fetchAll()
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const isGithubConnected = hashParams.get('github_connected') || route.query.github_connected
   if (isGithubConnected) {
@@ -642,53 +667,51 @@ onMounted(() => {
             </p>
           </div>
 
-          <!-- Port Mappings -->
+          <!-- Persistent Storage -->
           <div>
             <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >{{ $t('deploy.portMappings') }}</label
-              >
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <span class="inline-flex items-center gap-1.5">
+                  <HardDrive class="w-3.5 h-3.5" />
+                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
+                </span>
+              </label>
               <button
                 type="button"
-                @click="addPort"
+                @click="addDeployVolume"
                 class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
               >
                 <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
               </button>
             </div>
-            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
-              <div class="flex-1">
-                <input
-                  v-model.number="port.container"
-                  type="number"
-                  :placeholder="$t('deploy.containerPort')"
-                  min="1"
-                  max="65535"
-                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                />
-              </div>
-              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
-              <div class="flex-1">
-                <input
-                  v-model.number="port.published"
-                  type="number"
-                  :placeholder="String(port.container || $t('deploy.hostPort'))"
-                  min="1"
-                  max="65535"
-                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                />
-              </div>
-              <button
-                type="button"
-                @click="removePort(i)"
-                class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-              >
-                <X class="w-4 h-4" />
-              </button>
+            <div v-if="deployVolumes.length > 0" class="space-y-2">
+              <InlineVolumeCreator
+                v-for="(vol, i) in deployVolumes"
+                :key="i"
+                :model-value="vol"
+                :account-volumes="volumeManager.accountVolumes.value"
+                :storage-quota="volumeManager.storageQuota.value"
+                :create-loading="volumeManager.createLoading.value"
+                :suggested-name="serviceName ? volumeManager.suggestedVolumeName(serviceName) : undefined"
+                @update:model-value="deployVolumes[i] = $event"
+                @volume-created="handleDeployVolumeCreated(i, $event)"
+                @remove="removeDeployVolume(i)"
+              />
             </div>
-            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">
-              {{ $t('deploy.noPorts') }}
+            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
+              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
             </p>
+          </div>
+
+          <!-- DB without volume warning -->
+          <div v-if="showDbWarning" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+            <div class="flex items-start gap-2">
+              <AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <p class="text-sm font-medium text-amber-800 dark:text-amber-200">{{ $t('deploy.dbWithoutVolume') || 'Database without persistent storage' }}</p>
+                <p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{{ $t('deploy.dbWithoutVolumeDesc', { path: volumeManager.suggestedVolumePath(dockerImage) }) || 'Data will be lost when the container restarts.' }}</p>
+              </div>
+            </div>
           </div>
 
           <div class="pt-2 flex justify-end">
@@ -1001,52 +1024,39 @@ onMounted(() => {
               </p>
             </div>
 
-            <!-- Port Mappings -->
+            <!-- Persistent Storage -->
             <div>
               <div class="flex items-center justify-between mb-2">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ $t('deploy.portMappings') }}</label
-                >
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <span class="inline-flex items-center gap-1.5">
+                    <HardDrive class="w-3.5 h-3.5" />
+                    {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
+                  </span>
+                </label>
                 <button
                   type="button"
-                  @click="addPort"
+                  @click="addDeployVolume"
                   class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
                 >
                   <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
                 </button>
               </div>
-              <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
-                <div class="flex-1">
-                  <input
-                    v-model.number="port.container"
-                    type="number"
-                    :placeholder="$t('deploy.containerPort')"
-                    min="1"
-                    max="65535"
-                    class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                  />
-                </div>
-                <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
-                <div class="flex-1">
-                  <input
-                    v-model.number="port.published"
-                    type="number"
-                    :placeholder="String(port.container || $t('deploy.hostPort'))"
-                    min="1"
-                    max="65535"
-                    class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                  />
-                </div>
-                <button
-                  type="button"
-                  @click="removePort(i)"
-                  class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  <X class="w-4 h-4" />
-                </button>
+              <div v-if="deployVolumes.length > 0" class="space-y-2">
+                <InlineVolumeCreator
+                  v-for="(vol, i) in deployVolumes"
+                  :key="i"
+                  :model-value="vol"
+                  :account-volumes="volumeManager.accountVolumes.value"
+                  :storage-quota="volumeManager.storageQuota.value"
+                  :create-loading="volumeManager.createLoading.value"
+                  :suggested-name="ghServiceName ? volumeManager.suggestedVolumeName(ghServiceName) : undefined"
+                  @update:model-value="deployVolumes[i] = $event"
+                  @volume-created="handleDeployVolumeCreated(i, $event)"
+                  @remove="removeDeployVolume(i)"
+                />
               </div>
-              <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">
-                {{ $t('deploy.noPorts') }}
+              <p v-else class="text-xs text-gray-400 dark:text-gray-500">
+                {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
               </p>
             </div>
 
@@ -1174,25 +1184,40 @@ onMounted(() => {
             <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noEnvVars') }}</p>
           </div>
 
-          <!-- Port Mappings -->
+          <!-- Persistent Storage -->
           <div>
             <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('deploy.portMappings') }}</label>
-              <button type="button" @click="addPort" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <span class="inline-flex items-center gap-1.5">
+                  <HardDrive class="w-3.5 h-3.5" />
+                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
+                </span>
+              </label>
+              <button
+                type="button"
+                @click="addDeployVolume"
+                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+              >
                 <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
               </button>
             </div>
-            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
-              <div class="flex-1">
-                <input v-model.number="port.container" type="number" :placeholder="$t('deploy.containerPort')" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              </div>
-              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
-              <div class="flex-1">
-                <input v-model.number="port.published" type="number" :placeholder="String(port.container || $t('deploy.hostPort'))" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              </div>
-              <button type="button" @click="removePort(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
+            <div v-if="deployVolumes.length > 0" class="space-y-2">
+              <InlineVolumeCreator
+                v-for="(vol, i) in deployVolumes"
+                :key="i"
+                :model-value="vol"
+                :account-volumes="volumeManager.accountVolumes.value"
+                :storage-quota="volumeManager.storageQuota.value"
+                :create-loading="volumeManager.createLoading.value"
+                :suggested-name="uploadServiceName ? volumeManager.suggestedVolumeName(uploadServiceName) : undefined"
+                @update:model-value="deployVolumes[i] = $event"
+                @volume-created="handleDeployVolumeCreated(i, $event)"
+                @remove="removeDeployVolume(i)"
+              />
             </div>
-            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noPorts') }}</p>
+            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
+              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
+            </p>
           </div>
 
           <div class="pt-2 flex justify-end">

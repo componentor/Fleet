@@ -13,6 +13,8 @@ import { useLogStream } from '@/composables/useLogStream'
 import { useDeployStream } from '@/composables/useDeployStream'
 import { useTerminal } from '@/composables/useTerminal'
 import { useToast } from '@/composables/useToast'
+import { useVolumeManager } from '@/composables/useVolumeManager'
+import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
 import { useI18n } from 'vue-i18n'
 import '@xterm/xterm/css/xterm.css'
 
@@ -26,6 +28,7 @@ const serviceId = route.params.id as string
 const logStream = useLogStream()
 const deployStream = useDeployStream()
 const { fetchDomains: fetchAccountDomains } = useDomainPicker()
+const volumeManager = useVolumeManager()
 
 const activeTab = ref('overview')
 const tabs = computed(() => {
@@ -139,7 +142,6 @@ const domainLoading = ref(false)
 
 // Volume settings
 const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
-const accountVolumes = ref<Array<{ name: string; displayName: string; sizeGb: number }>>([])
 const volumeLoading = ref(false)
 const migrationFailures = ref<Array<{ source: string; target: string; mountPath: string; error: string }>>([])
 const migrateRetryLoading = ref(false)
@@ -967,6 +969,15 @@ function removeVolume(index: number) {
   configVolumes.value.splice(index, 1)
 }
 
+async function handleVolumeCreated(index: number, vol: { name: string; displayName: string; sizeGb: number }) {
+  try {
+    const created = await volumeManager.createVolume(vol.name, vol.sizeGb)
+    configVolumes.value[index]!.source = created.name
+  } catch {
+    // Toast already shown by useApi
+  }
+}
+
 async function saveAutoDeploy() {
   autoDeployLoading.value = true
   autoDeployError.value = ''
@@ -1134,14 +1145,7 @@ async function onTabChange(tabId: string) {
       readonly: v.readonly ?? false,
     }))
     // Fetch account volumes for the dropdown
-    try {
-      const vols = await api.get<any[]>('/storage/volumes')
-      accountVolumes.value = (vols ?? []).map((v: any) => ({
-        name: v.name,
-        displayName: v.name.replace(/^vol-[a-f0-9-]+-/, ''),
-        sizeGb: v.sizeGb ?? 0,
-      }))
-    } catch { /* ignore */ }
+    volumeManager.fetchAll()
   }
   if (tabId === 'backups') fetchServiceBackups()
   if (tabId === 'terminal' && service.value?.status === 'running') {
@@ -2553,6 +2557,20 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- DB without volume warning -->
+          <div
+            v-if="service?.image && volumeManager.isDatabaseImage(service.image) && configVolumes.length === 0"
+            class="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800"
+          >
+            <div class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+              <div>
+                <p class="text-sm font-medium text-amber-800 dark:text-amber-200">{{ $t('deploy.dbWithoutVolume') }}</p>
+                <p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{{ $t('deploy.dbWithoutVolumeDesc', { path: volumeManager.suggestedVolumePath(service.image) }) }}</p>
+              </div>
+            </div>
+          </div>
+
           <!-- Volumes -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -2560,64 +2578,33 @@ onUnmounted(() => {
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volumes</h3>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Attach persistent storage volumes to this service</p>
               </div>
-              <button @click="addVolume" class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors">
-                + Add Volume
-              </button>
+              <div class="flex items-center gap-3">
+                <span v-if="volumeManager.storageQuota.value" class="text-xs text-gray-400 dark:text-gray-500">
+                  {{ volumeManager.storageQuota.value.usedGb }} / {{ volumeManager.storageQuota.value.limitGb }} GB used
+                </span>
+                <button @click="addVolume" class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors">
+                  + Add Volume
+                </button>
+              </div>
             </div>
             <div class="p-6">
               <div v-if="configVolumes.length === 0" class="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
                 No volumes attached. Click "Add Volume" to mount a storage volume.
               </div>
               <div v-else class="space-y-3">
-                <div v-for="(vol, idx) in configVolumes" :key="idx" class="flex items-start gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                  <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Volume</label>
-                      <select
-                        v-model="vol.source"
-                        class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">Select volume...</option>
-                        <option v-for="av in accountVolumes" :key="av.name" :value="av.name">
-                          {{ av.displayName }} ({{ av.sizeGb }}GB)
-                        </option>
-                        <option v-if="vol.source && !accountVolumes.find(v => v.name === vol.source)" :value="vol.source">
-                          {{ vol.source }}
-                        </option>
-                      </select>
-                      <span
-                        v-if="vol.source && volumeDriverLabel(vol.source)"
-                        class="inline-flex items-center mt-1.5 px-2 py-0.5 rounded text-[10px] font-medium"
-                        :class="volumeDriverLabel(vol.source) === 'local'
-                          ? 'bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
-                          : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'"
-                      >
-                        {{ volumeDriverLabel(vol.source) }}
-                      </span>
-                    </div>
-                    <div>
-                      <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Mount Path</label>
-                      <input
-                        v-model="vol.target"
-                        type="text"
-                        placeholder="/var/data"
-                        class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2 mt-5">
-                    <button v-if="vol.source" @click="browsingVolumeName = vol.source" class="p-1 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors" title="Browse files">
-                      <FolderOpen class="w-4 h-4" />
-                    </button>
-                    <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer" title="Read-Only — mount this volume without write permission">
-                      <input type="checkbox" v-model="vol.readonly" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
-                      RO
-                    </label>
-                    <button @click="removeVolume(idx)" class="p-1 text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors" title="Remove">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                    </button>
-                  </div>
-                </div>
+                <InlineVolumeCreator
+                  v-for="(vol, idx) in configVolumes"
+                  :key="idx"
+                  :model-value="vol"
+                  :account-volumes="volumeManager.accountVolumes.value"
+                  :storage-quota="volumeManager.storageQuota.value"
+                  :create-loading="volumeManager.createLoading.value"
+                  :suggested-target="service?.image ? volumeManager.suggestedVolumePath(service.image) ?? undefined : undefined"
+                  @update:model-value="configVolumes[idx] = $event"
+                  @volume-created="handleVolumeCreated(idx, $event)"
+                  @remove="removeVolume(idx)"
+                  @browse="browsingVolumeName = $event"
+                />
               </div>
             </div>
             <!-- Migration failure banner -->

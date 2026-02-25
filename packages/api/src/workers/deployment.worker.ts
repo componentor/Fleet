@@ -1,7 +1,7 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
 import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull, inArray } from '@fleet/db';
 import { buildService, scrubSecrets } from '../services/build.service.js';
-import { dockerService } from '../services/docker.service.js';
+import { dockerService, getRegistryAuthForImage } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
@@ -340,9 +340,10 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to prune old containers before deploy');
       }
 
+      const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
       await dockerService.updateService(svc.dockerServiceId, {
         image: fullImageTag,
-      });
+      }, deployRegistryAuth);
     } else {
       logger.warn({ serviceId: svc.id }, 'No dockerServiceId — image built but cannot deploy to Docker');
     }
