@@ -571,6 +571,123 @@ authed.openapi(getConnectStatusRoute, (async (c: any) => {
   }
 }) as any);
 
+// GET /connect/dashboard — get a Stripe Express dashboard login link
+const getConnectDashboardRoute = createRoute({
+  method: 'get',
+  path: '/connect/dashboard',
+  tags: ['Reseller'],
+  summary: 'Get Stripe Express dashboard login link',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ url: z.string() }), 'Dashboard login link'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getConnectDashboardRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const resellerAccount = await db.query.resellerAccounts.findFirst({
+    where: and(eq(resellerAccounts.accountId, accountId), eq(resellerAccounts.status, 'active')),
+  });
+  if (!resellerAccount?.stripeConnectId || !resellerAccount.connectOnboarded) {
+    return c.json({ error: 'Stripe Connect not set up' }, 400);
+  }
+
+  try {
+    const loginLink = await stripeService.createConnectLoginLink(resellerAccount.stripeConnectId);
+    return c.json({ url: loginLink.url });
+  } catch (err: any) {
+    logger.error({ err, accountId }, 'Failed to create Connect dashboard link');
+    return c.json({ error: 'Failed to create dashboard link' }, 500);
+  }
+}) as any);
+
+// GET /earnings — reseller earnings overview from sub-account subscriptions
+const getEarningsRoute = createRoute({
+  method: 'get',
+  path: '/earnings',
+  tags: ['Reseller'],
+  summary: 'Get reseller earnings overview',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Earnings data'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getEarningsRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const resellerAccount = await db.query.resellerAccounts.findFirst({
+    where: and(eq(resellerAccounts.accountId, accountId), eq(resellerAccounts.status, 'active')),
+  });
+  if (!resellerAccount) {
+    return c.json({ error: 'Not a reseller' }, 403);
+  }
+
+  // Get all sub-accounts with their subscriptions
+  const subAccountsList = await db.query.accounts.findMany({
+    where: and(eq(accounts.parentId, accountId), isNull(accounts.deletedAt)),
+    columns: { id: true, name: true, slug: true, status: true },
+  });
+
+  const { subscriptions: subscriptionsTable } = await import('@fleet/db');
+  const { eq: eq2 } = await import('@fleet/db');
+
+  let activeSubscriptions = 0;
+  let estimatedMonthlyRevenueCents = 0;
+  const subAccountEarnings: { id: string; name: string; status: string; hasSubscription: boolean; monthlyRevenueCents: number }[] = [];
+
+  const discount = await getEffectiveDiscount(resellerAccount);
+
+  for (const sub of subAccountsList) {
+    const subscription = await db.query.subscriptions.findFirst({
+      where: and(eq2(subscriptionsTable.accountId, sub.id), eq2(subscriptionsTable.status, 'active')),
+      with: { plan: true },
+    });
+
+    if (subscription?.plan) {
+      activeSubscriptions++;
+      const planPrice = (subscription.plan as any).priceCents ?? 0;
+      const discountAmount = calculateDiscount(planPrice, discount.type, discount.percent, discount.fixed);
+      const discountedPrice = planPrice - discountAmount;
+      const markupAmount = calculateMarkup(
+        discountedPrice,
+        resellerAccount.markupType,
+        resellerAccount.markupPercent,
+        resellerAccount.markupFixed,
+      );
+      estimatedMonthlyRevenueCents += markupAmount;
+      subAccountEarnings.push({
+        id: sub.id,
+        name: sub.name ?? sub.slug ?? sub.id,
+        status: sub.status ?? 'active',
+        hasSubscription: true,
+        monthlyRevenueCents: markupAmount,
+      });
+    } else {
+      subAccountEarnings.push({
+        id: sub.id,
+        name: sub.name ?? sub.slug ?? sub.id,
+        status: sub.status ?? 'active',
+        hasSubscription: false,
+        monthlyRevenueCents: 0,
+      });
+    }
+  }
+
+  return c.json({
+    totalSubAccounts: subAccountsList.length,
+    activeSubscriptions,
+    estimatedMonthlyRevenueCents,
+    subAccountEarnings,
+    stripeConnected: !!resellerAccount.stripeConnectId && !!resellerAccount.connectOnboarded,
+  });
+}) as any);
+
 // POST /sub-accounts/:subAccountId/enable-reselling
 const enableResellingRoute = createRoute({
   method: 'post',

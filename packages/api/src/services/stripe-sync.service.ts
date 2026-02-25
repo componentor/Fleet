@@ -222,12 +222,18 @@ class StripeSyncService {
       const resellerPricing = await calculateResellerPricing(accountId, baseAmount);
 
       if (resellerPricing.resellerConnectId && resellerPricing.markupAmount > 0) {
-        // Sub-account with reseller markup → use Stripe Connect destination charge
+        // Sub-account with reseller markup → use Stripe Connect subscription with destination charges.
+        // Each invoice payment transfers funds to the reseller, minus the platform's application fee.
         metadata['resellerDiscount'] = String(resellerPricing.discountAmount);
         metadata['resellerMarkup'] = String(resellerPricing.markupAmount);
         metadata['planId'] = planId;
 
-        const session = await stripeService.createPaymentWithConnect({
+        // Platform keeps everything except the reseller's markup portion
+        const applicationFeePercent = resellerPricing.finalPrice > 0
+          ? Math.round(((resellerPricing.finalPrice - resellerPricing.markupAmount) / resellerPricing.finalPrice) * 10000) / 100
+          : 100;
+
+        const session = await stripeService.createSubscriptionWithConnect({
           customerId: stripeCustomerId,
           lineItems: [{
             price_data: {
@@ -242,7 +248,7 @@ class StripeSyncService {
           successUrl,
           cancelUrl,
           connectAccountId: resellerPricing.resellerConnectId,
-          applicationFeeAmount: resellerPricing.finalPrice - resellerPricing.markupAmount,
+          applicationFeePercent,
         });
         return { url: session.url! };
       }
