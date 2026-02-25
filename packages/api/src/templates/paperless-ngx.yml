@@ -33,6 +33,7 @@ variables:
 services:
   - name: paperless-ngx
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    user: "root"
     ports:
       - target: 8000
         published: 8000

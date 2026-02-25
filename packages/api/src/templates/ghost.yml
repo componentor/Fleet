@@ -46,7 +46,6 @@ services:
     volumes:
       - source: ghost_content
         target: /var/lib/ghost/content
-    domain: "{{GHOST_URL}}"
 
   - name: ghost-db
     image: mysql:8.4

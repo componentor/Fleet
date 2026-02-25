@@ -47,6 +47,7 @@ variables:
 services:
   - name: directus
     image: directus/directus:11.3
+    user: "root"
     ports:
       - target: 8055
         published: 8055
