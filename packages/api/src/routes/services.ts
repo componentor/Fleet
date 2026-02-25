@@ -723,6 +723,7 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
 
 // GET /regions — list available regions with active nodes
 // Registered as plain .get() to guarantee matching before /{id} parameterized routes
+// Only returns regions that have at least one service-capable storage cluster
 serviceRoutes.get('/regions', async (c: any) => {
   const locations = await db.query.locationMultipliers.findMany();
 
@@ -738,8 +739,27 @@ serviceRoutes.get('/regions', async (c: any) => {
     }
   }
 
+  // Filter by service-capable clusters (only when real clusters exist)
+  const allClusters = storageManager.getAllClusters();
+  const firstCluster = allClusters[0];
+  const hasRealClusters = allClusters.length > 0 && firstCluster !== undefined && firstCluster.id !== '__local__';
+
+  let serviceRegions: Set<string> | null = null;
+  if (hasRealClusters) {
+    const serviceClusters = storageManager.getClustersForPurpose('services');
+    const hasGlobal = serviceClusters.some((c) => c.scope === 'global');
+    if (!hasGlobal) {
+      serviceRegions = new Set(serviceClusters.map((c) => c.region).filter(Boolean) as string[]);
+    }
+    // If a global service cluster exists, all regions are available (serviceRegions stays null)
+  }
+
   const regions = locations
-    .filter((loc: any) => nodeCounts.has(loc.locationKey))
+    .filter((loc: any) => {
+      if (!nodeCounts.has(loc.locationKey)) return false;
+      if (serviceRegions) return serviceRegions.has(loc.locationKey);
+      return true;
+    })
     .map((loc: any) => ({
       key: loc.locationKey,
       label: loc.label,

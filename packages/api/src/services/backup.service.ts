@@ -99,35 +99,45 @@ export class BackupService {
    * Priority: explicit → account override → platform default → first cluster → null (local).
    */
   async resolveBackupCluster(accountId: string, requestedClusterId?: string): Promise<string | null> {
-    // 1. Explicit cluster requested
+    // 1. Explicit cluster requested — must allow backups
     if (requestedClusterId) {
       const cluster = await db.query.storageClusters.findFirst({
-        where: eq(storageClusters.id, requestedClusterId),
+        where: and(eq(storageClusters.id, requestedClusterId), eq(storageClusters.allowBackups, true)),
       });
       if (cluster) return cluster.id;
     }
 
-    // 2. Account-level override
+    // 2. Account-level override — validate it still allows backups
     const accountLimits = await db.query.resourceLimits.findFirst({
       where: eq(resourceLimits.accountId, accountId),
     });
     if (accountLimits?.backupClusterId) {
-      return accountLimits.backupClusterId;
+      const overrideCluster = await db.query.storageClusters.findFirst({
+        where: and(eq(storageClusters.id, accountLimits.backupClusterId), eq(storageClusters.allowBackups, true)),
+      });
+      if (overrideCluster) return overrideCluster.id;
+      // Fall through if override cluster no longer allows backups
     }
 
-    // 3. Platform default
+    // 3. Platform default — validate it still allows backups
     const setting = await db.query.platformSettings.findFirst({
       where: eq(platformSettings.key, 'limits:defaultBackupClusterId'),
     });
     if (setting?.value) {
-      return String(setting.value);
+      const defaultCluster = await db.query.storageClusters.findFirst({
+        where: and(eq(storageClusters.id, String(setting.value)), eq(storageClusters.allowBackups, true)),
+      });
+      if (defaultCluster) return defaultCluster.id;
+      // Fall through if default cluster no longer allows backups
     }
 
-    // 4. First available storage cluster
-    const firstCluster = await db.query.storageClusters.findFirst();
+    // 4. First available backup-capable cluster
+    const firstCluster = await db.query.storageClusters.findFirst({
+      where: eq(storageClusters.allowBackups, true),
+    });
     if (firstCluster) return firstCluster.id;
 
-    // 5. No clusters — local/NFS
+    // 5. No backup-capable clusters — local/NFS
     return null;
   }
 

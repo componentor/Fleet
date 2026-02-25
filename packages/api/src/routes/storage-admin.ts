@@ -90,6 +90,8 @@ const clusterSchema = z.object({
   replicationFactor: z.number().int().min(1).max(5).default(3),
   config: z.record(z.string(), z.any()).default({}),
   objectConfig: objectConfigSchema,
+  allowServices: z.boolean().default(true),
+  allowBackups: z.boolean().default(true),
 });
 
 const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
@@ -236,6 +238,55 @@ storageAdmin.openapi(getClusterByIdRoute, (async (c: any) => {
   return c.json({ ...cluster, health });
 }) as any);
 
+// PATCH /clusters/:id/capabilities — Toggle cluster purpose delegation
+const updateCapabilitiesRoute = createRoute({
+  method: 'patch',
+  path: '/clusters/{id}/capabilities',
+  tags: ['Storage Admin'],
+  summary: 'Update cluster capabilities (services/backups)',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(z.object({
+      allowServices: z.boolean().optional(),
+      allowBackups: z.boolean().optional(),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Capabilities updated'),
+    ...standardErrors,
+  },
+});
+
+storageAdmin.openapi(updateCapabilitiesRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  if (!uuidRe.test(id)) return c.json({ error: 'Invalid cluster ID' }, 400);
+
+  const cluster = await db.query.storageClusters.findFirst({
+    where: eq(storageClusters.id, id),
+  });
+
+  if (!cluster) {
+    return c.json({ error: 'Cluster not found' }, 404);
+  }
+
+  const data = c.req.valid('json');
+
+  await db.update(storageClusters).set({
+    ...(data.allowServices !== undefined ? { allowServices: data.allowServices } : {}),
+    ...(data.allowBackups !== undefined ? { allowBackups: data.allowBackups } : {}),
+    updatedAt: new Date(),
+  }).where(eq(storageClusters.id, id));
+
+  await storageManager.reloadCluster(id);
+
+  return c.json({
+    message: 'Cluster capabilities updated',
+    allowServices: data.allowServices ?? cluster.allowServices,
+    allowBackups: data.allowBackups ?? cluster.allowBackups,
+  });
+}) as any);
+
 // POST /cluster — Initialize or update cluster config
 const postClusterRoute = createRoute({
   method: 'post',
@@ -279,6 +330,8 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       replicationFactor: data.replicationFactor,
       config: data.config,
       objectConfig: data.objectConfig,
+      allowServices: data.allowServices ?? existing.allowServices,
+      allowBackups: data.allowBackups ?? existing.allowBackups,
       status: 'initializing',
       updatedAt: new Date(),
     }).where(eq(storageClusters.id, existing.id));
@@ -293,6 +346,8 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       replicationFactor: data.replicationFactor,
       config: data.config,
       objectConfig: data.objectConfig,
+      allowServices: data.allowServices ?? true,
+      allowBackups: data.allowBackups ?? true,
       status: 'initializing',
     });
     clusterId = created.id;

@@ -498,11 +498,13 @@ async function fetchBackupDefaults() {
       api.get<any[]>('/storage/clusters').catch(() => []),
     ])
     defaultBackupClusterId.value = (data['limits:defaultBackupClusterId'] as string) ?? ''
-    storageClusters.value = (clusters || []).map((c: any) => ({
-      id: c.id,
-      label: c.label || c.region || c.id,
-      region: c.region,
-    }))
+    storageClusters.value = (clusters || [])
+      .filter((c: any) => c.allowBackups !== false)
+      .map((c: any) => ({
+        id: c.id,
+        label: c.name || c.label || c.region || c.id,
+        region: c.region,
+      }))
   } catch {
     // Settings may not exist yet
   }

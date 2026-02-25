@@ -389,7 +389,7 @@ async function fetchImageTags(serviceName: string, image: string) {
     const fullTags = result.tags.map((tag) => `${imageBase}:${tag}`)
     availableTags.value[serviceName] = fullTags
     // Default to latest tag from Docker Hub
-    if (fullTags.length > 0) {
+    if (fullTags.length > 0 && fullTags[0] !== undefined) {
       imageVersions.value[serviceName] = fullTags[0]
     }
   } catch {

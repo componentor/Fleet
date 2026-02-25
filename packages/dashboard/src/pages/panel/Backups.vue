@@ -25,8 +25,8 @@ const filteredBackups = computed(() => {
   return backups.value.filter((b: any) => b.serviceId === serviceFilter.value)
 })
 
-// Regions / clusters
-const regions = ref<Array<{ key: string; label: string }>>([])
+// Backup-capable clusters
+const backupClusters = ref<Array<{ id: string; name: string; region: string | null; scope: string }>>([])
 
 // Create backup
 const showCreateDialog = ref(false)
@@ -71,11 +71,11 @@ async function fetchQuota() {
   }
 }
 
-async function fetchRegions() {
+async function fetchBackupClusters() {
   try {
-    regions.value = await api.get<any[]>('/services/regions')
+    backupClusters.value = await api.get<any[]>('/backups/clusters')
   } catch {
-    regions.value = []
+    backupClusters.value = []
   }
 }
 
@@ -202,7 +202,7 @@ function onServiceFilterChange() {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchBackups(), fetchSchedules(), fetchQuota(), fetchRegions(), servicesStore.fetchServices()])
+  await Promise.all([fetchBackups(), fetchSchedules(), fetchQuota(), fetchBackupClusters(), servicesStore.fetchServices()])
 })
 </script>
 
@@ -274,14 +274,14 @@ onMounted(async () => {
                 <option value="object">Object Storage</option>
               </select>
             </div>
-            <div v-if="regions.length > 1">
+            <div v-if="backupClusters.length > 1">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Cluster (optional)</label>
               <select
                 v-model="createClusterId"
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               >
                 <option value="">Default</option>
-                <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }}</option>
+                <option v-for="cl in backupClusters" :key="cl.id" :value="cl.id">{{ cl.name }}{{ cl.region ? ` (${cl.region})` : '' }}</option>
               </select>
             </div>
             <div class="flex justify-end gap-3 pt-2">
@@ -473,14 +473,14 @@ onMounted(async () => {
               />
             </div>
           </div>
-          <div v-if="regions.length > 1" class="w-64">
+          <div v-if="backupClusters.length > 1" class="w-64">
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Cluster (optional)</label>
             <select
               v-model="scheduleClusterId"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             >
               <option value="">Default</option>
-              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }}</option>
+              <option v-for="cl in backupClusters" :key="cl.id" :value="cl.id">{{ cl.name }}{{ cl.region ? ` (${cl.region})` : '' }}</option>
             </select>
           </div>
           <div class="flex gap-3">

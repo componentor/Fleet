@@ -3,6 +3,7 @@ import { z } from '@hono/zod-openapi';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { backupService } from '../services/backup.service.js';
+import { db, storageClusters, eq } from '@fleet/db';
 import { schedulerService } from '../services/scheduler.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { logger } from '../services/logger.js';
@@ -51,6 +52,37 @@ backupRoutes.openapi(getQuotaRoute, (async (c: any) => {
 
   const quota = await backupService.getBackupQuota(accountId);
   return c.json(quota);
+}) as any);
+
+// GET /clusters — list backup-capable storage clusters
+const getClustersRoute = createRoute({
+  method: 'get',
+  path: '/clusters',
+  tags: ['Backups'],
+  summary: 'List storage clusters available for backups',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      region: z.string().nullable(),
+      scope: z.string(),
+    })), 'Backup-capable clusters'),
+    ...standardErrors,
+  },
+});
+
+backupRoutes.openapi(getClustersRoute, (async (c: any) => {
+  const clusters = await db.query.storageClusters.findMany({
+    where: eq(storageClusters.allowBackups, true),
+  });
+
+  return c.json(clusters.map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    region: c.region,
+    scope: c.scope,
+  })));
 }) as any);
 
 // GET / — list backups for account
