@@ -129,7 +129,14 @@ onUnmounted(() => {
           </button>
           <a
             v-if="showGetStarted"
-            :href="dashboardUrl + '/register'"
+            :href="dashboardUrl + '/login'"
+            class="rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-semibold text-surface-600 dark:text-surface-300 transition-all hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white"
+          >
+            {{ $t('nav.login') }}
+          </a>
+          <a
+            v-if="showGetStarted"
+            :href="dashboardUrl + '/get-started'"
             class="rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
           >
             {{ $t('nav.getStarted') }}
@@ -206,7 +213,15 @@ onUnmounted(() => {
         </select>
         <a
           v-if="showGetStarted"
-          :href="dashboardUrl + '/register'"
+          :href="dashboardUrl + '/login'"
+          class="mx-3 mt-2 block rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-center text-sm font-semibold text-surface-600 dark:text-surface-300"
+          @click="mobileMenuOpen = false"
+        >
+          {{ $t('nav.login') }}
+        </a>
+        <a
+          v-if="showGetStarted"
+          :href="dashboardUrl + '/get-started'"
           class="mx-3 mt-2 block rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-2 text-center text-sm font-semibold text-white"
           @click="mobileMenuOpen = false"
         >

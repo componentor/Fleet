@@ -123,7 +123,6 @@ function openConfirmModal(config: { name: string; image?: string; domain?: strin
     name: config.name,
     image: config.image || 'ghcr.io/placeholder',
     ...(config.domain ? { domain: config.domain } : {}),
-    ports: buildPortsPayload(),
   })
 }
 
@@ -152,9 +151,8 @@ const branchesLoading = ref(false)
 const ghServiceName = ref('')
 const autoDeploy = ref(true)
 
-// Shared env vars and ports for both deploy methods
+// Shared env vars for both deploy methods
 const envVars = ref<{ key: string; value: string }[]>([])
-const ports = ref<{ container: number | null; published: number | null }[]>([])
 
 // Upload form state
 const uploadFile = ref<File | null>(null)
@@ -238,7 +236,6 @@ async function executeUploadDeploy() {
     formData.append('name', uploadServiceName.value)
     if (uploadBuildFile.value) formData.append('buildFile', uploadBuildFile.value)
     if (buildEnvVarsPayload()) formData.append('env', JSON.stringify(buildEnvVarsPayload()))
-    if (buildPortsPayload()) formData.append('ports', JSON.stringify(buildPortsPayload()))
     if (buildVolumesPayload()) formData.append('volumes', JSON.stringify(buildVolumesPayload()))
     if (domain.value) formData.append('domain', domain.value)
     if (selectedRegion.value) formData.append('region', selectedRegion.value)
@@ -270,31 +267,12 @@ function addEnvVar() {
 function removeEnvVar(index: number) {
   envVars.value.splice(index, 1)
 }
-function addPort() {
-  ports.value.push({ container: null, published: null })
-}
-function removePort(index: number) {
-  ports.value.splice(index, 1)
-}
-
 function buildEnvVarsPayload(): Record<string, string> | undefined {
   const filtered = envVars.value.filter((e) => e.key.trim())
   if (filtered.length === 0) return undefined
   const obj: Record<string, string> = {}
   for (const e of filtered) obj[e.key.trim()] = e.value
   return obj
-}
-
-function buildPortsPayload():
-  | { container: number; published: number; protocol: string }[]
-  | undefined {
-  const filtered = ports.value.filter((p) => p.container)
-  if (filtered.length === 0) return undefined
-  return filtered.map((p) => ({
-    container: p.container!,
-    published: p.published || p.container!,
-    protocol: 'tcp',
-  }))
 }
 
 function validateDockerForm(): boolean {
@@ -327,7 +305,6 @@ async function executeDockerDeploy() {
       domain: domain.value || undefined,
       region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
-      ports: buildPortsPayload(),
       volumes: buildVolumesPayload(),
     } as any)
     router.push('/panel/services')
@@ -361,7 +338,6 @@ async function executeGithubDeploy() {
       autoDeploy: autoDeploy.value,
       region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
-      ports: buildPortsPayload(),
       volumes: buildVolumesPayload(),
     } as any)
     router.push('/panel/services')
@@ -429,7 +405,6 @@ function goBackToRepos() {
   ghServiceName.value = ''
   selectedBranch.value = ''
   envVars.value = []
-  ports.value = []
   githubStep.value = 'repos'
 }
 
@@ -689,55 +664,6 @@ onMounted(() => {
             </div>
             <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">
               {{ $t('deploy.noEnvVars') }}
-            </p>
-          </div>
-
-          <!-- Port Mappings -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >{{ $t('deploy.portMappings') }}</label
-              >
-              <button
-                type="button"
-                @click="addPort"
-                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-              >
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
-              <div class="flex-1">
-                <input
-                  v-model.number="port.container"
-                  type="number"
-                  :placeholder="$t('deploy.containerPort')"
-                  min="1"
-                  max="65535"
-                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                />
-              </div>
-              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
-              <div class="flex-1">
-                <input
-                  v-model.number="port.published"
-                  type="number"
-                  :placeholder="String(port.container || $t('deploy.hostPort'))"
-                  min="1"
-                  max="65535"
-                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                />
-              </div>
-              <button
-                type="button"
-                @click="removePort(i)"
-                class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-              >
-                <X class="w-4 h-4" />
-              </button>
-            </div>
-            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">
-              {{ $t('deploy.noPorts') }}
             </p>
           </div>
 
@@ -1098,55 +1024,6 @@ onMounted(() => {
               </p>
             </div>
 
-            <!-- Port Mappings -->
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ $t('deploy.portMappings') }}</label
-                >
-                <button
-                  type="button"
-                  @click="addPort"
-                  class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-                >
-                  <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-                </button>
-              </div>
-              <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
-                <div class="flex-1">
-                  <input
-                    v-model.number="port.container"
-                    type="number"
-                    :placeholder="$t('deploy.containerPort')"
-                    min="1"
-                    max="65535"
-                    class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                  />
-                </div>
-                <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
-                <div class="flex-1">
-                  <input
-                    v-model.number="port.published"
-                    type="number"
-                    :placeholder="String(port.container || $t('deploy.hostPort'))"
-                    min="1"
-                    max="65535"
-                    class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-                  />
-                </div>
-                <button
-                  type="button"
-                  @click="removePort(i)"
-                  class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  <X class="w-4 h-4" />
-                </button>
-              </div>
-              <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">
-                {{ $t('deploy.noPorts') }}
-              </p>
-            </div>
-
             <!-- Persistent Storage -->
             <div>
               <div class="flex items-center justify-between mb-2">
@@ -1305,27 +1182,6 @@ onMounted(() => {
               <button type="button" @click="removeEnvVar(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
             </div>
             <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noEnvVars') }}</p>
-          </div>
-
-          <!-- Port Mappings -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('deploy.portMappings') }}</label>
-              <button type="button" @click="addPort" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-for="(port, i) in ports" :key="i" class="flex items-center gap-2 mb-2">
-              <div class="flex-1">
-                <input v-model.number="port.container" type="number" :placeholder="$t('deploy.containerPort')" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              </div>
-              <span class="text-gray-400 dark:text-gray-500 text-sm shrink-0">:</span>
-              <div class="flex-1">
-                <input v-model.number="port.published" type="number" :placeholder="String(port.container || $t('deploy.hostPort'))" min="1" max="65535" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-              </div>
-              <button type="button" @click="removePort(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
-            </div>
-            <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noPorts') }}</p>
           </div>
 
           <!-- Persistent Storage -->

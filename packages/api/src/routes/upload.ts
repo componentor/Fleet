@@ -127,12 +127,24 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
     // Detect project files and build method (never fails)
     const detection = await uploadService.detectProjectFiles(sourcePath, buildFile || undefined);
 
-    // If runtime detection set a default port and user didn't specify ports, use it
+    // If runtime detection found a default port and no ports provided, use it
     if (detection.defaultPort && ports.length === 0) {
-      ports = [{ target: detection.defaultPort, published: detection.defaultPort, protocol: 'tcp' }];
+      ports = [{ target: detection.defaultPort, published: 0, protocol: 'tcp' }];
     }
 
-    const traefikLabels = buildTraefikLabels(name, domain, sslEnabled);
+    // Port management: domain services use Traefik (no ingress ports),
+    // non-domain services get auto-allocated published ports
+    if (!domain && ports.length > 0) {
+      ports = await dockerService.allocateIngressPorts(
+        ports.map((p) => ({ target: p.target, protocol: p.protocol || 'tcp' })),
+      );
+    } else if (domain) {
+      // Domain services don't need published ports — Traefik routes by Host header
+      ports = ports.map((p) => ({ target: p.target, published: 0, protocol: p.protocol || 'tcp' }));
+    }
+
+    const primaryTargetPort = ports[0]?.target ?? 80;
+    const traefikLabels = buildTraefikLabels(name, domain, sslEnabled, primaryTargetPort);
     const initialStatus = detection.buildMethod === 'none' ? 'stopped' : 'deploying';
 
     // Create service record

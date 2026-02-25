@@ -2,7 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, Tag } from 'lucide-vue-next'
+import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, RotateCw, Trash2, Tag } from 'lucide-vue-next'
+import ConfirmDeleteModal from '@/components/ConfirmDeleteModal.vue'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
@@ -17,6 +18,8 @@ const toast = useToast()
 const { canWrite } = useRole()
 
 const stackActionLoading = ref<string | null>(null)
+const deletingStackId = ref<string | null>(null)
+const deletingStackName = ref('')
 
 const searchQuery = ref('')
 const page = ref(1)
@@ -185,6 +188,40 @@ async function cancelDeployStack(svcs: any[]) {
   }
 }
 
+async function restartStack(stackId: string) {
+  stackActionLoading.value = stackId
+  try {
+    await api.post(`/services/stack/${stackId}/restart`, {})
+    await store.fetchServices()
+    toast.success(t('services.restartSuccess', 'Stack restarted'))
+  } catch {
+    toast.error(t('services.restartFailed', 'Failed to restart stack'))
+  } finally {
+    stackActionLoading.value = null
+  }
+}
+
+function promptDeleteStack(stackId: string, name: string) {
+  deletingStackId.value = stackId
+  deletingStackName.value = name
+}
+
+async function confirmDeleteStack(deleteVolumes: boolean) {
+  const stackId = deletingStackId.value
+  if (!stackId) return
+  stackActionLoading.value = stackId
+  try {
+    await store.deleteStack(stackId, { deleteVolumes })
+    deletingStackId.value = null
+    deletingStackName.value = ''
+    toast.success(t('services.deleteStackSuccess', 'Stack deleted'))
+  } catch {
+    toast.error(t('services.deleteStackFailed', 'Failed to delete stack'))
+  } finally {
+    stackActionLoading.value = null
+  }
+}
+
 // Auto-refresh when any service is deploying
 const refreshInterval = ref<ReturnType<typeof setInterval> | null>(null)
 
@@ -303,13 +340,10 @@ onUnmounted(() => {
         <!-- Stack header -->
         <div class="flex items-center justify-between w-full px-5 py-3.5 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
           <div class="flex items-center gap-3 flex-1 min-w-0">
-            <router-link
-              to="/panel/stacks"
-              class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-            >
+            <div class="flex items-center gap-2 min-w-0">
               <Layers class="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" />
-              <span class="text-sm font-semibold text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 transition-colors">{{ stackName(group.services) }}</span>
-            </router-link>
+              <span class="text-sm font-semibold text-gray-900 dark:text-white truncate">{{ stackName(group.services) }}</span>
+            </div>
             <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0', statusBadge(stackStatus(group.services))]">
               {{ stackStatus(group.services) }}
             </span>
@@ -351,6 +385,25 @@ onUnmounted(() => {
               <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
               <XCircle v-else class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">{{ $t('services.cancelDeploy', 'Cancel deploy') }}</span>
+            </button>
+            <button
+              @click.stop="restartStack(group.stackId)"
+              :disabled="stackActionLoading === group.stackId"
+              class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-50"
+              :title="$t('services.restartAll', 'Restart all')"
+            >
+              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <RotateCw v-else class="w-3.5 h-3.5" />
+              <span class="hidden sm:inline">{{ $t('services.restartAll', 'Restart all') }}</span>
+            </button>
+            <button
+              @click.stop="promptDeleteStack(group.stackId, stackName(group.services))"
+              :disabled="stackActionLoading === group.stackId"
+              class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+              :title="$t('services.deleteStack', 'Delete stack')"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+              <span class="hidden sm:inline">{{ $t('services.deleteStack', 'Delete stack') }}</span>
             </button>
           </div>
         </div>
@@ -446,4 +499,16 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+
+  <!-- Delete stack confirmation modal -->
+  <ConfirmDeleteModal
+    :show="!!deletingStackId"
+    :title="t('confirmDelete.titleStack', 'Delete Stack')"
+    :message="t('confirmDelete.messageStack', 'Are you sure you want to delete stack')"
+    :item-name="deletingStackName"
+    :show-volume-toggle="true"
+    :loading="!!stackActionLoading"
+    @confirm="confirmDeleteStack"
+    @cancel="deletingStackId = null; deletingStackName = ''"
+  />
 </template>

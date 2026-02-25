@@ -16,6 +16,7 @@ export function useAuth() {
   async function login(email: string, password: string) {
     await store.login({ email, password })
     await accountStore.fetchAccounts()
+    sessionStorage.setItem('fleet_just_logged_in', '1')
 
     const redirect = router.currentRoute.value.query.redirect as string | undefined
     if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
@@ -30,7 +31,15 @@ export function useAuth() {
   async function register(name: string, email: string, password: string) {
     await store.register({ name, email, password })
     await accountStore.fetchAccounts()
-    await router.push('/panel')
+    sessionStorage.setItem('fleet_just_logged_in', '1')
+    // If there's an onboarding return URL, redirect there; otherwise go to panel
+    const onboardingReturn = sessionStorage.getItem('fleet_onboarding_return')
+    if (onboardingReturn) {
+      sessionStorage.removeItem('fleet_onboarding_return')
+      await router.push(onboardingReturn)
+    } else {
+      await router.push('/get-started')
+    }
   }
 
   async function logout() {

@@ -12,7 +12,23 @@ const dashboardUrl = import.meta.env.VITE_DASHBOARD_URL || 'http://localhost:517
 const demoBanner = ref<HTMLElement | null>(null)
 const bannerHeight = ref(36)
 
-onMounted(() => {
+onMounted(async () => {
+  // Fetch dynamic plans from API
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL || ''
+    const res = await fetch(`${apiUrl}/api/v1/billing/public/plans`)
+    if (res.ok) {
+      const data = await res.json()
+      if (data.plans?.length) {
+        apiPlans.value = data.plans
+      }
+    }
+  } catch {
+    // Fall back to hardcoded plans
+  } finally {
+    plansLoaded.value = true
+  }
+
   // Measure demo banner and set CSS variable for navbar offset
   nextTick(() => {
     if (demoBanner.value) {
@@ -93,9 +109,28 @@ const features = computed(() => [
   },
 ])
 
-const plans = computed(() => [
+// Dynamic plans from API (with hardcoded fallback)
+interface ApiPlan {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  isFree: boolean
+  isDefault: boolean
+  priceCents: number
+  cpuLimit: number
+  memoryLimit: number
+  containerLimit: number
+  storageLimit: number
+}
+
+const apiPlans = ref<ApiPlan[]>([])
+const plansLoaded = ref(false)
+
+const fallbackPlans = computed(() => [
   {
     id: 'free',
+    slug: 'free',
     name: t('pricing.plans.free.name'),
     price: '$0',
     period: t('pricing.perMonth'),
@@ -111,6 +146,7 @@ const plans = computed(() => [
   },
   {
     id: 'starter',
+    slug: 'starter',
     name: t('pricing.plans.starter.name'),
     price: '$10',
     period: t('pricing.perMonth'),
@@ -126,6 +162,7 @@ const plans = computed(() => [
   },
   {
     id: 'pro',
+    slug: 'pro',
     name: t('pricing.plans.pro.name'),
     price: '$25',
     period: t('pricing.perMonth'),
@@ -140,6 +177,39 @@ const plans = computed(() => [
     highlighted: false,
   },
 ])
+
+function formatCents(cents: number): string {
+  if (cents === 0) return '$0'
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`
+}
+
+function formatMemory(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)}GB` : `${mb}MB`
+}
+
+function formatLimit(val: number, suffix: string): string {
+  return val === -1 ? `Unlimited ${suffix}` : `${val} ${suffix}`
+}
+
+const plans = computed(() => {
+  if (!plansLoaded.value || !apiPlans.value.length) return fallbackPlans.value
+
+  return apiPlans.value.map((p) => ({
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    price: formatCents(p.priceCents),
+    period: t('pricing.perMonth'),
+    description: p.description || '',
+    features: [
+      formatLimit(p.containerLimit, 'services'),
+      `${formatMemory(p.memoryLimit)} RAM`,
+      formatLimit(p.cpuLimit, 'CPU cores'),
+      `${p.storageLimit === -1 ? 'Unlimited' : p.storageLimit + 'GB'} storage`,
+    ],
+    highlighted: p.isDefault && !p.isFree,
+  }))
+})
 
 const apiDocsUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -203,7 +273,7 @@ const navLinks = computed<NavLink[]>(() => [
 
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <a
-            :href="dashboardUrl + '/register'"
+            :href="dashboardUrl + '/get-started'"
             class="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 px-8 py-3.5 text-base font-semibold text-white shadow-xl shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
           >
             {{ $t('hero.getStarted') }}
@@ -351,7 +421,7 @@ const navLinks = computed<NavLink[]>(() => [
             </ul>
 
             <a
-              :href="dashboardUrl + '/register'"
+              :href="`${dashboardUrl}/get-started?plan=${plan.slug || plan.id}`"
               :class="[
                 'mt-8 block w-full rounded-xl px-4 py-3 text-center text-sm font-semibold transition-all',
                 plan.highlighted
@@ -385,7 +455,7 @@ const navLinks = computed<NavLink[]>(() => [
             </p>
             <div class="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <a
-                :href="dashboardUrl + '/register'"
+                :href="dashboardUrl + '/get-started'"
                 class="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 px-8 py-3.5 text-base font-semibold text-white shadow-xl shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
               >
                 {{ $t('cta.getStarted') }}

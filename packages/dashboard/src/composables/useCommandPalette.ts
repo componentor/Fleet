@@ -5,7 +5,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
 import { useApi } from '@/composables/useApi'
 import {
-  LayoutDashboard, Box, Layers, Rocket, Store, Globe, Terminal,
+  LayoutDashboard, Box, Rocket, Store, Globe, Terminal,
   HardDrive, Archive, Key, KeyRound, Users, CreditCard, Settings,
   ScrollText, Search, LogOut, Sun, Plus, UserPlus,
 } from 'lucide-vue-next'
@@ -38,7 +38,6 @@ export function useCommandPalette() {
   const navigationItems: CommandItem[] = [
     { id: 'nav-dashboard', type: 'navigation', label: 'Dashboard', icon: LayoutDashboard, path: '/panel', keywords: ['home', 'overview'] },
     { id: 'nav-services', type: 'navigation', label: 'Services', icon: Box, path: '/panel/services', keywords: ['containers', 'apps'] },
-    { id: 'nav-stacks', type: 'navigation', label: 'Stacks', icon: Layers, path: '/panel/stacks', keywords: ['groups'] },
     { id: 'nav-deploy', type: 'navigation', label: 'Deploy', icon: Rocket, path: '/panel/deploy', keywords: ['new', 'create'] },
     { id: 'nav-marketplace', type: 'navigation', label: 'Marketplace', icon: Store, path: '/panel/marketplace', keywords: ['templates', 'apps'] },
     { id: 'nav-domains', type: 'navigation', label: 'Domains', icon: Globe, path: '/panel/domains', keywords: ['dns', 'ssl', 'certificate'] },

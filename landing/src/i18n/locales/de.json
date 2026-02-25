@@ -7,7 +7,8 @@
     "features": "Funktionen",
     "pricing": "Preise",
     "github": "GitHub",
-    "getStarted": "Loslegen"
+    "getStarted": "Loslegen",
+    "login": "Anmelden"
   },
   "hero": {
     "badge": "Open-Source-PaaS-Plattform",

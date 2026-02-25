@@ -9,7 +9,6 @@ import { useRole } from '@/composables/useRole'
 import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard,
-  Layers,
   Box,
   Rocket,
   Store,
@@ -87,7 +86,6 @@ const overridesPanelOpen = ref(false)
 const navItems = [
   { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
   { nameKey: 'nav.services', path: '/panel/services', icon: Box },
-  { nameKey: 'nav.stacks', path: '/panel/stacks', icon: Layers },
   { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
   { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
   { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
@@ -362,7 +360,9 @@ function changeLocale(newLocale: string) {
       <main class="p-6">
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">
-            <component :is="Component" />
+            <div v-if="Component" :key="$route.path">
+              <component :is="Component" />
+            </div>
           </Transition>
         </RouterView>
       </main>

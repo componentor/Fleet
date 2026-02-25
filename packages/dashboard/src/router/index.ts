@@ -12,10 +12,14 @@ const authRoutes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
-    path: '/register',
-    name: 'register',
-    component: () => import('@/pages/auth/Register.vue'),
+    path: '/get-started',
+    name: 'get-started',
+    component: () => import('@/pages/auth/GetStarted.vue'),
     meta: { public: true },
+  },
+  {
+    path: '/register',
+    redirect: '/get-started',
   },
   {
     path: '/auth/callback',
@@ -170,11 +174,6 @@ const panelRoutes: RouteRecordRaw[] = [
         path: 'services',
         name: 'panel-services',
         component: () => import('@/pages/panel/Services.vue'),
-      },
-      {
-        path: 'stacks',
-        name: 'panel-stacks',
-        component: () => import('@/pages/panel/Stacks.vue'),
       },
       {
         path: 'services/:id',
@@ -372,7 +371,7 @@ router.beforeEach(async (to) => {
 
   // Allow public routes
   if (to.meta.public) {
-    if (isAuthenticated && (to.name === 'login' || to.name === 'register')) {
+    if (isAuthenticated && to.name === 'login') {
       return { path: '/panel' }
     }
     return
