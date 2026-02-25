@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin } from 'lucide-vue-next'
+import ConfirmDeleteModal from '../../components/ConfirmDeleteModal.vue'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
@@ -59,6 +60,7 @@ const selectedContainerId = ref('')
 const service = ref<any>(null)
 const loading = ref(true)
 const actionLoading = ref('')
+const showDeleteModal = ref(false)
 const error = ref('')
 const logs = ref('')
 const logsLoading = ref(false)
@@ -825,11 +827,11 @@ async function syncStatus() {
   }
 }
 
-async function deleteService() {
-  if (!confirm('Are you sure you want to delete this service? This action cannot be undone.')) return
+async function confirmDeleteService(deleteVolumes: boolean) {
   actionLoading.value = 'delete'
   try {
-    await store.deleteService(serviceId)
+    await store.deleteService(serviceId, { deleteVolumes })
+    showDeleteModal.value = false
     router.push('/panel/services')
   } catch {
     toast.error(t('service.deleteFailed', 'Failed to delete service'))
@@ -1282,7 +1284,7 @@ onUnmounted(() => {
             Sync
           </button>
           <button
-            @click="deleteService"
+            @click="showDeleteModal = true"
             :disabled="!!actionLoading"
             class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm font-medium disabled:opacity-50"
           >
@@ -2711,5 +2713,17 @@ onUnmounted(() => {
       </div>
     </template>
   </div>
+
+  <!-- Delete confirmation modal -->
+  <ConfirmDeleteModal
+    :show="showDeleteModal"
+    :title="t('confirmDelete.title', 'Delete Service')"
+    :message="t('confirmDelete.message', 'Are you sure you want to delete')"
+    :item-name="service?.name || ''"
+    :show-volume-toggle="true"
+    :loading="actionLoading === 'delete'"
+    @confirm="confirmDeleteService"
+    @cancel="showDeleteModal = false"
+  />
 </template>
 

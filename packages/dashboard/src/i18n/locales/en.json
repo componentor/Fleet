@@ -1870,6 +1870,19 @@
     "jobRemoved": "Job removed",
     "jobPromoted": "Job promoted to waiting"
   },
+  "confirmDelete": {
+    "title": "Delete Service",
+    "message": "Are you sure you want to delete",
+    "titleStack": "Delete Stack",
+    "messageStack": "Are you sure you want to delete stack",
+    "cannotBeUndone": "This action cannot be undone.",
+    "deleteVolumes": "Also delete related storage volumes",
+    "deleteVolumesHint": "Permanently deletes all data stored in the volumes",
+    "deleteVolumesWarning": "Warning: All data in the associated volumes will be permanently deleted. This cannot be recovered.",
+    "cancel": "Cancel",
+    "deleting": "Deleting...",
+    "confirm": "Delete"
+  },
   "updates": {
     "title": "Platform Updates",
     "checkForUpdates": "Check for Updates",

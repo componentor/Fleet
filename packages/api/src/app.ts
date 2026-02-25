@@ -755,56 +755,120 @@ api.get(
           );
 
           // Use requested container if specified, otherwise first running task
-          let targetContainer: string | undefined;
-          if (requestedContainerId) {
-            const match = runningTasks.find((t) => t.containerStatus!.containerId === requestedContainerId);
-            targetContainer = match?.containerStatus?.containerId;
-          }
-          if (!targetContainer) {
-            targetContainer = runningTasks[0]?.containerStatus?.containerId;
+          let targetTask = requestedContainerId
+            ? runningTasks.find((t) => t.containerStatus!.containerId === requestedContainerId)
+            : undefined;
+          if (!targetTask) {
+            targetTask = runningTasks[0];
           }
 
-          if (!targetContainer) {
+          if (!targetTask?.containerStatus?.containerId) {
             ws.close(4004, 'No running containers');
             return;
           }
 
-          // Try multiple shells — some images only have bash or ash
-          let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
-          for (const shell of ['/bin/sh', '/bin/bash', '/bin/ash']) {
-            try {
-              result = await dockerService.execInContainer(targetContainer, [shell]);
-              break;
-            } catch {
-              // Try next shell
+          const targetContainer = targetTask.containerStatus.containerId;
+          const targetNodeId = targetTask.nodeId;
+
+          // Check if container is on this node or a remote node
+          const localNodeId = await dockerService.getLocalNodeId();
+          const isLocal = targetNodeId === localNodeId;
+
+          if (!isLocal) {
+            // ── Remote node: proxy through Fleet agent WebSocket ──
+            const agentUrl = await dockerService.getAgentAddress(targetNodeId);
+            if (!agentUrl) {
+              ws.close(4004, 'No agent on target node');
+              return;
             }
-          }
-          if (!result) {
-            ws.close(4004, 'No shell available in container');
-            return;
-          }
-          dockerStream = result.stream as import('node:stream').Duplex;
-          execId = result.execId;
 
-          dockerStream.on('data', (chunk: Buffer) => {
-            ws.send(chunk.toString('utf-8'));
-          });
+            const token = process.env['NODE_AUTH_TOKEN'] || '';
+            const agentWsUrl = agentUrl.replace('http://', 'ws://');
+            const proxyUrl = `${agentWsUrl}/ws/exec?token=${encodeURIComponent(token)}&containerId=${encodeURIComponent(targetContainer)}`;
 
-          dockerStream.on('end', () => {
-            ws.close(1000, 'Container stream ended');
-          });
+            const { default: WebSocket } = await import('ws');
+            const agentWs = new WebSocket(proxyUrl);
 
-          dockerStream.on('error', (err: Error) => {
-            logger.error({ err }, 'Docker stream error');
-            ws.close(1011, 'Container error');
-          });
+            agentWs.on('open', () => {
+              logger.info({ targetContainer, targetNodeId }, 'Agent terminal proxy connected');
+            });
 
-          // Send WebSocket-level pings every 25s to prevent proxy timeouts
-          const rawWs = (ws as any).raw;
-          if (rawWs?.ping) {
-            keepaliveTimer = setInterval(() => {
-              try { rawWs.ping(); } catch { /* connection already closed */ }
-            }, 25_000);
+            // Agent → Client: raw terminal output
+            agentWs.on('message', (data: Buffer | string) => {
+              ws.send(typeof data === 'string' ? data : data.toString('utf-8'));
+            });
+
+            agentWs.on('close', () => {
+              ws.close(1000, 'Agent disconnected');
+            });
+
+            agentWs.on('error', (err: Error) => {
+              logger.error({ err, targetNodeId }, 'Agent WebSocket proxy error');
+              ws.close(1011, 'Agent connection failed');
+            });
+
+            // Store proxy reference for onMessage/onClose handlers
+            dockerStream = {
+              write: (data: any) => {
+                if (agentWs.readyState === WebSocket.OPEN) {
+                  agentWs.send(data);
+                }
+              },
+              destroy: () => {
+                agentWs.close();
+              },
+            } as any;
+
+            // For resize, forward JSON message to agent
+            execId = '__proxy__';
+
+            // Send WebSocket-level pings every 25s to prevent proxy timeouts
+            const rawWs = (ws as any).raw;
+            if (rawWs?.ping) {
+              keepaliveTimer = setInterval(() => {
+                try { rawWs.ping(); } catch { /* connection already closed */ }
+              }, 25_000);
+            }
+          } else {
+            // ── Local node: direct exec into container ──
+
+            // Try multiple shells — some images only have bash or ash
+            let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
+            for (const shell of ['/bin/sh', '/bin/bash', '/bin/ash']) {
+              try {
+                result = await dockerService.execInContainer(targetContainer, [shell]);
+                break;
+              } catch {
+                // Try next shell
+              }
+            }
+            if (!result) {
+              ws.close(4004, 'No shell available in container');
+              return;
+            }
+            dockerStream = result.stream as import('node:stream').Duplex;
+            execId = result.execId;
+
+            dockerStream.on('data', (chunk: Buffer) => {
+              ws.send(chunk.toString('utf-8'));
+            });
+
+            dockerStream.on('end', () => {
+              ws.close(1000, 'Container stream ended');
+            });
+
+            dockerStream.on('error', (err: Error) => {
+              logger.error({ err }, 'Docker stream error');
+              ws.close(1011, 'Container error');
+            });
+
+            // Send WebSocket-level pings every 25s to prevent proxy timeouts
+            const rawWs = (ws as any).raw;
+            if (rawWs?.ping) {
+              keepaliveTimer = setInterval(() => {
+                try { rawWs.ping(); } catch { /* connection already closed */ }
+              }, 25_000);
+            }
           }
         } catch (err) {
           logger.error({ err }, 'WS terminal auth failed');
@@ -822,7 +886,12 @@ api.get(
           if (msg.type === 'input' && msg.data) {
             dockerStream.write(msg.data);
           } else if (msg.type === 'resize' && msg.cols && msg.rows && execId) {
-            await dockerService.resizeExec(execId, msg.rows, msg.cols);
+            if (execId === '__proxy__') {
+              // Forward resize to agent WebSocket as JSON
+              dockerStream.write(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
+            } else {
+              await dockerService.resizeExec(execId, msg.rows, msg.cols);
+            }
           }
         } catch {
           // Ignore invalid messages

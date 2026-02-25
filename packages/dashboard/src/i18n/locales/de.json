@@ -1866,6 +1866,19 @@
     "jobRemoved": "Aufgabe entfernt",
     "jobPromoted": "Aufgabe auf wartend gesetzt"
   },
+  "confirmDelete": {
+    "title": "Dienst löschen",
+    "message": "Sind Sie sicher, dass Sie löschen möchten",
+    "titleStack": "Stack löschen",
+    "messageStack": "Sind Sie sicher, dass Sie den Stack löschen möchten",
+    "cannotBeUndone": "Diese Aktion kann nicht rückgängig gemacht werden.",
+    "deleteVolumes": "Zugehörige Speichervolumes ebenfalls löschen",
+    "deleteVolumesHint": "Löscht dauerhaft alle in den Volumes gespeicherten Daten",
+    "deleteVolumesWarning": "Warnung: Alle Daten in den zugehörigen Volumes werden dauerhaft gelöscht. Dies kann nicht wiederhergestellt werden.",
+    "cancel": "Abbrechen",
+    "deleting": "Wird gelöscht...",
+    "confirm": "Löschen"
+  },
   "updates": {
     "title": "Plattform-Updates",
     "checkForUpdates": "Nach Updates suchen",

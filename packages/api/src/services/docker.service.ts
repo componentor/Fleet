@@ -607,6 +607,252 @@ export class DockerService {
     return container.inspect();
   }
 
+  // ── Node-aware exec routing ──
+  // Routes exec operations through Fleet agents on remote nodes.
+
+  private localNodeId: string | null = null;
+  private agentAddressCache = new Map<string, { url: string; ts: number }>();
+  private static readonly AGENT_CACHE_TTL = 60_000; // 1 minute
+
+  /**
+   * Get the Swarm node ID of the node this API instance is running on.
+   */
+  async getLocalNodeId(): Promise<string> {
+    if (this.localNodeId) return this.localNodeId;
+    const info = await docker.info();
+    this.localNodeId = (info as any).Swarm?.NodeID || '';
+    return this.localNodeId!;
+  }
+
+  /**
+   * Find the Fleet agent's overlay network IP for a specific Swarm node.
+   * Returns the HTTP base URL (e.g. http://10.0.1.5:3001) or null.
+   */
+  async getAgentAddress(nodeId: string): Promise<string | null> {
+    // Check cache
+    const cached = this.agentAddressCache.get(nodeId);
+    if (cached && Date.now() - cached.ts < DockerService.AGENT_CACHE_TTL) {
+      return cached.url;
+    }
+
+    try {
+      // Find the agent service (global mode, one per node)
+      const serviceList = await docker.listServices({
+        filters: { name: ['fleet_agent'] },
+      });
+      const agentService = serviceList[0];
+      if (!agentService) {
+        logger.warn('Fleet agent service not found');
+        return null;
+      }
+
+      // List agent tasks on the target node
+      const tasks = await docker.listTasks({
+        filters: {
+          service: [agentService.ID],
+          node: [nodeId],
+          'desired-state': ['running'],
+        },
+      });
+
+      const running = tasks.find((t: any) => t.Status?.State === 'running');
+      if (!running) {
+        logger.warn({ nodeId }, 'No running agent task on node');
+        return null;
+      }
+
+      // Get the agent container's IP on the overlay network
+      const networks: Array<{ Addresses?: string[] }> = (running as any).NetworksAttachments || [];
+      for (const net of networks) {
+        if (net.Addresses && net.Addresses.length > 0) {
+          const ip = net.Addresses[0]!.split('/')[0]; // Strip CIDR notation
+          const url = `http://${ip}:3001`;
+          this.agentAddressCache.set(nodeId, { url, ts: Date.now() });
+          return url;
+        }
+      }
+
+      logger.warn({ nodeId }, 'Agent task has no overlay network address');
+      return null;
+    } catch (err) {
+      logger.error({ err, nodeId }, 'Failed to discover agent address');
+      return null;
+    }
+  }
+
+  /**
+   * Execute a non-interactive command via a remote Fleet agent.
+   */
+  async remoteExecCommand(
+    agentUrl: string,
+    containerId: string,
+    cmd: string[],
+    timeoutMs: number = 30_000,
+    env?: string[],
+  ): Promise<{ stdout: string; exitCode: number }> {
+    const token = process.env['NODE_AUTH_TOKEN'];
+    const res = await fetch(`${agentUrl}/exec`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ containerId, cmd, timeoutMs, env }),
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Agent exec failed (${res.status}): ${body}`);
+    }
+
+    return res.json() as Promise<{ stdout: string; exitCode: number }>;
+  }
+
+  /**
+   * Execute a non-interactive command, routing to the correct node.
+   * Uses the local Docker socket if the container is on this node,
+   * otherwise routes through the Fleet agent on the target node.
+   */
+  async nodeAwareExecCommand(
+    containerId: string,
+    nodeId: string,
+    cmd: string[],
+    timeoutMs: number = 30_000,
+    env?: string[],
+  ): Promise<{ stdout: string; exitCode: number }> {
+    const localNodeId = await this.getLocalNodeId();
+
+    if (nodeId === localNodeId) {
+      return this.execCommand(containerId, cmd, timeoutMs, env);
+    }
+
+    const agentUrl = await this.getAgentAddress(nodeId);
+    if (!agentUrl) {
+      throw new Error(`No Fleet agent available on node ${nodeId}`);
+    }
+
+    return this.remoteExecCommand(agentUrl, containerId, cmd, timeoutMs, env);
+  }
+
+  /**
+   * Stream exec output from a remote Fleet agent (for database export).
+   */
+  async remoteExecCommandStream(
+    agentUrl: string,
+    containerId: string,
+    cmd: string[],
+    timeoutMs: number = 300_000,
+    env?: string[],
+  ): Promise<{ stream: import('node:stream').Readable }> {
+    const token = process.env['NODE_AUTH_TOKEN'];
+    const res = await fetch(`${agentUrl}/exec-stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ containerId, cmd, timeoutMs, env }),
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+
+    if (!res.ok || !res.body) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Agent exec-stream failed (${res.status}): ${body}`);
+    }
+
+    const { Readable } = await import('node:stream');
+    return { stream: Readable.fromWeb(res.body as any) };
+  }
+
+  /**
+   * Execute command with stdin input via remote Fleet agent (for database import).
+   */
+  async remoteExecCommandWithInput(
+    agentUrl: string,
+    containerId: string,
+    cmd: string[],
+    input: import('node:stream').Readable,
+    timeoutMs: number = 600_000,
+    env?: string[],
+  ): Promise<{ stdout: string; stderr?: string; exitCode: number }> {
+    const token = process.env['NODE_AUTH_TOKEN'];
+
+    // Collect input to buffer (agent needs full body)
+    const chunks: Buffer[] = [];
+    for await (const chunk of input) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const inputBuffer = Buffer.concat(chunks);
+
+    const res = await fetch(`${agentUrl}/exec-input`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Exec-Params': JSON.stringify({ containerId, cmd, timeoutMs, env }),
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: inputBuffer,
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Agent exec-input failed (${res.status}): ${body}`);
+    }
+
+    return res.json() as Promise<{ stdout: string; stderr?: string; exitCode: number }>;
+  }
+
+  /**
+   * Stream exec output, routing to the correct node.
+   */
+  async nodeAwareExecCommandStream(
+    containerId: string,
+    nodeId: string,
+    cmd: string[],
+    timeoutMs: number = 300_000,
+    env?: string[],
+  ): Promise<{ stream: import('node:stream').Readable; exec?: import('dockerode').Exec }> {
+    const localNodeId = await this.getLocalNodeId();
+
+    if (nodeId === localNodeId) {
+      return this.execCommandStream(containerId, cmd, timeoutMs, env);
+    }
+
+    const agentUrl = await this.getAgentAddress(nodeId);
+    if (!agentUrl) {
+      throw new Error(`No Fleet agent available on node ${nodeId}`);
+    }
+
+    return this.remoteExecCommandStream(agentUrl, containerId, cmd, timeoutMs, env);
+  }
+
+  /**
+   * Execute command with stdin input, routing to the correct node.
+   */
+  async nodeAwareExecCommandWithInput(
+    containerId: string,
+    nodeId: string,
+    cmd: string[],
+    input: import('node:stream').Readable,
+    timeoutMs: number = 600_000,
+    env?: string[],
+  ): Promise<{ stdout: string; stderr?: string; exitCode: number }> {
+    const localNodeId = await this.getLocalNodeId();
+
+    if (nodeId === localNodeId) {
+      return this.execCommandWithInput(containerId, cmd, input, timeoutMs, env) as any;
+    }
+
+    const agentUrl = await this.getAgentAddress(nodeId);
+    if (!agentUrl) {
+      throw new Error(`No Fleet agent available on node ${nodeId}`);
+    }
+
+    return this.remoteExecCommandWithInput(agentUrl, containerId, cmd, input, timeoutMs, env);
+  }
+
   /**
    * Get cumulative network rx/tx bytes for a running container.
    * Uses Docker stats API with stream=false (one-shot).

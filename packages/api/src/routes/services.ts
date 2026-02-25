@@ -13,6 +13,7 @@ import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { uploadService } from '../services/upload.service.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
+import { storageManager } from '../services/storage/storage-manager.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
@@ -364,6 +365,10 @@ const updateServiceRoute = createRoute({
   },
 });
 
+const deleteQuerySchema = z.object({
+  deleteVolumes: z.enum(['true', 'false']).optional().openapi({ description: 'Also delete related storage volumes' }),
+});
+
 const deleteServiceRoute = createRoute({
   method: 'delete',
   path: '/{id}',
@@ -373,6 +378,7 @@ const deleteServiceRoute = createRoute({
   middleware: [requireMember, requireScope('write')] as const,
   request: {
     params: idParamSchema,
+    query: deleteQuerySchema,
   },
   responses: {
     200: jsonContent(messageResponseSchema, 'Service destroyed'),
@@ -539,6 +545,7 @@ const deleteStackRoute = createRoute({
   middleware: [requireMember, requireScope('write')] as const,
   request: {
     params: stackIdParamSchema,
+    query: deleteQuerySchema,
   },
   responses: {
     200: jsonContent(z.any(), 'Stack deleted'),
@@ -1346,6 +1353,8 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const { id: serviceId } = c.req.valid('param');
+  const { deleteVolumes: deleteVolumesParam } = c.req.valid('query');
+  const shouldDeleteVolumes = deleteVolumesParam === 'true';
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1419,6 +1428,13 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
         await dockerService.removeVolume(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
         });
+
+        // Also delete storage volumes (GlusterFS + DB record) when requested
+        if (shouldDeleteVolumes) {
+          await storageManager.deleteVolume(accountId, v.source).catch((err) => {
+            logger.warn({ err, volume: v.source }, 'Failed to delete storage volume on service delete');
+          });
+        }
       }
     }
   }
@@ -1430,7 +1446,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   eventService.log({
     ...eventContext(c),
     eventType: EventTypes.SERVICE_DELETED,
-    description: `Deleted service '${svc.name}'`,
+    description: `Deleted service '${svc.name}'${shouldDeleteVolumes ? ' (with volumes)' : ''}`,
     resourceId: serviceId,
     resourceName: svc.name,
   });
@@ -2119,6 +2135,8 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const { stackId } = c.req.valid('param');
+  const { deleteVolumes: deleteVolumesParam } = c.req.valid('query');
+  const shouldDeleteVolumes = deleteVolumesParam === 'true';
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -2181,11 +2199,18 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
     removedDockerServiceIds.map((id) => dockerService.waitForServiceTasksGone(id).catch(() => {})),
   );
 
-  // Clean up Docker volumes after containers are gone (storage volumes managed separately)
+  // Clean up Docker volumes after containers are gone
   for (const volName of volumeNames) {
     await dockerService.removeVolume(volName).catch((err) => {
       logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
     });
+
+    // Also delete storage volumes (GlusterFS + DB record) when requested
+    if (shouldDeleteVolumes) {
+      await storageManager.deleteVolume(accountId, volName).catch((err) => {
+        logger.warn({ err, volume: volName }, 'Failed to delete storage volume during stack delete');
+      });
+    }
   }
 
 
