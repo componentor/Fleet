@@ -942,26 +942,42 @@ async function attachNewNode() {
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 capitalize">{{ cl.objectProvider }}</td>
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ cl.storageNodes?.length ?? 0 }}</td>
                 <td class="px-6 py-4">
-                  <div class="flex flex-wrap gap-1">
+                  <div class="flex flex-wrap gap-1.5">
                     <button
                       @click="toggleCapability(cl.id, 'allowServices', cl.allowServices !== false)"
-                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors"
+                      class="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all group"
                       :class="cl.allowServices !== false
                         ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50'
-                        : 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 line-through'"
-                      :title="cl.allowServices !== false ? 'Click to disable services' : 'Click to enable services'"
+                        : 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'"
                     >
-                      Services
+                      <span
+                        class="h-2.5 w-2.5 rounded-full transition-colors ring-1"
+                        :class="cl.allowServices !== false
+                          ? 'bg-blue-500 ring-blue-400/50'
+                          : 'bg-gray-300 dark:bg-gray-500 ring-gray-300 dark:ring-gray-500'"
+                      />
+                      <span :class="cl.allowServices !== false ? '' : 'line-through'">Services</span>
+                      <span class="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[10px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                        Click to {{ cl.allowServices !== false ? 'disable' : 'enable' }}
+                      </span>
                     </button>
                     <button
                       @click="toggleCapability(cl.id, 'allowBackups', cl.allowBackups !== false)"
-                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors"
+                      class="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all group"
                       :class="cl.allowBackups !== false
                         ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50'
-                        : 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 line-through'"
-                      :title="cl.allowBackups !== false ? 'Click to disable backups' : 'Click to enable backups'"
+                        : 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'"
                     >
-                      Backups
+                      <span
+                        class="h-2.5 w-2.5 rounded-full transition-colors ring-1"
+                        :class="cl.allowBackups !== false
+                          ? 'bg-amber-500 ring-amber-400/50'
+                          : 'bg-gray-300 dark:bg-gray-500 ring-gray-300 dark:ring-gray-500'"
+                      />
+                      <span :class="cl.allowBackups !== false ? '' : 'line-through'">Backups</span>
+                      <span class="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[10px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                        Click to {{ cl.allowBackups !== false ? 'disable' : 'enable' }}
+                      </span>
                     </button>
                   </div>
                 </td>
