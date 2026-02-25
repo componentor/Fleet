@@ -149,6 +149,10 @@ export const storageNodesRelations = _schema.storageNodesRelations;
 export const storageVolumesRelations = _schema.storageVolumesRelations;
 export const storageMigrationsRelations = _schema.storageMigrationsRelations;
 
+// registry-credentials.ts
+export const registryCredentials = _schema.registryCredentials as typeof PgSchema.registryCredentials;
+export const registryCredentialsRelations = _schema.registryCredentialsRelations;
+
 // --- Helper exports ---
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql, safeTransaction } from './helpers';
 export { getDialect } from './config';

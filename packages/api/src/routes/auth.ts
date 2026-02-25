@@ -1121,7 +1121,7 @@ auth.get('/github', oauthRateLimit, async (c) => {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'user:email repo',
+    scope: 'user:email repo read:packages',
   });
 
   // Generate a random nonce and store state in Valkey for CSRF protection

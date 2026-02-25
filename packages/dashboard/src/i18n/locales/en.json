@@ -974,7 +974,16 @@
     "saveChanges": "Save Changes",
     "disconnectParent": "Disconnect from Parent",
     "disconnectParentDesc": "Remove this account from its parent organization. This cannot be undone.",
-    "disconnect": "Disconnect"
+    "disconnect": "Disconnect",
+    "registryCredentials": "Registry Credentials",
+    "registryCredentialsDesc": "Connect container registries to pull private images during deployment.",
+    "connectGithubPackages": "Connect GitHub Packages",
+    "connectGithubFailed": "Failed to connect GitHub Packages",
+    "credentialAdded": "Registry credential added successfully.",
+    "credentialRemoved": "Registry credential removed.",
+    "removeCredential": "Remove credential",
+    "removeCredentialConfirm": "Are you sure you want to remove this registry credential?",
+    "noCredentials": "No registry credentials configured."
   },
   "users": {
     "title": "Team Members",

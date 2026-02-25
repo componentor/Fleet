@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { db, appTemplates, services, deployments, storageVolumes, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
-import { dockerService } from './docker.service.js';
+import { dockerService, getRegistryAuthForImage } from './docker.service.js';
 import { storageManager } from './storage/storage-manager.js';
 import { buildTraefikLabels } from './traefik.js';
 import { logger } from './logger.js';
@@ -511,6 +511,7 @@ export class TemplateService {
         const primaryPort = svcDef.ports?.[0]?.target ?? 80;
         const traefikLabels = buildTraefikLabels(swarmName, resolvedDomain, true, primaryPort);
 
+        const templateAuth = await getRegistryAuthForImage(accountId, image);
         const result = await dockerService.createService({
           name: swarmName,
           image,
@@ -533,6 +534,7 @@ export class TemplateService {
           updateDelay: '10s',
           rollbackOnFailure: true,
           ...(svcDef.user ? { user: svcDef.user } : {}),
+          registryAuth: templateAuth,
         });
 
         dockerServiceId = result.id;

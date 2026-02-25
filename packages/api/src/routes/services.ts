@@ -3,7 +3,7 @@ import { z } from '@hono/zod-openapi';
 import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { dockerService } from '../services/docker.service.js';
+import { dockerService, getRegistryAuthForImage } from '../services/docker.service.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
@@ -910,6 +910,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
           data.ports.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
         );
 
+    const registryAuth = await getRegistryAuthForImage(accountId, data.image);
     const result = await dockerService.createService({
       name: swarmServiceName,
       image: data.image,
@@ -927,6 +928,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
         'fleet.service-id': svc.id,
       },
       constraints,
+      registryAuth,
       healthCheck: data.healthCheck ?? undefined,
       updateParallelism: data.updateParallelism,
       updateDelay: data.updateDelay,
@@ -1306,6 +1308,8 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         }
       }
 
+      const updateImage = dockerFields.image ?? svc.image;
+      const updateRegistryAuth = updateImage ? await getRegistryAuthForImage(accountId, updateImage) : undefined;
       await dockerService.updateService(svc.dockerServiceId, {
         image: dockerFields.image,
         replicas: dockerFields.replicas,
@@ -1332,7 +1336,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         restartMaxAttempts: dockerFields.restartMaxAttempts,
         restartDelay: dockerFields.restartDelay,
         networkIds: networkUpdate,
-      });
+      }, updateRegistryAuth);
     } catch (err) {
       logger.error({ err }, 'Docker service update failed — DB not updated');
       logToErrorTable({
@@ -1496,11 +1500,12 @@ serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
 
   try {
     // Force update triggers a rolling restart
+    const restartAuth = await getRegistryAuthForImage(accountId, svc.image);
     await dockerService.updateService(svc.dockerServiceId, {
       image: svc.image,
-    });
+    }, restartAuth);
 
-  
+
     eventService.log({
       ...eventContext(c),
       eventType: EventTypes.SERVICE_RESTARTED,
@@ -1635,6 +1640,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
           svcPorts.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
         );
 
+    const recreateAuth = await getRegistryAuthForImage(accountId!, svc!.image);
     const result = await dockerService.createService({
       name: swarmServiceName,
       image: svc!.image,
@@ -1658,6 +1664,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       rollbackOnFailure: svc!.rollbackOnFailure ?? true,
       networkIds,
       storageLimitMb,
+      registryAuth: recreateAuth,
     });
 
     // Save allocated ports back to DB
@@ -1676,9 +1683,10 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       try {
         await dockerService.inspectService(dockerSvcId);
         // Exists — force re-pull the image
+        const repullAuth = await getRegistryAuthForImage(accountId!, svc.image);
         await dockerService.updateService(dockerSvcId, {
           image: svc.image,
-        });
+        }, repullAuth);
       } catch {
         // Docker service is gone — create a new one
         logger.warn({ serviceId, dockerSvcId }, 'Docker service not found during redeploy — recreating');
@@ -1898,6 +1906,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
             svcPorts.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
           );
 
+      const stackRegistryAuth = await getRegistryAuthForImage(accountId, svc.image);
       const result = await dockerService.createService({
         name: swarmServiceName,
         image: svc.image,
@@ -1921,6 +1930,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
         rollbackOnFailure: svc.rollbackOnFailure ?? true,
         networkIds,
         storageLimitMb,
+        registryAuth: stackRegistryAuth,
       });
 
       await db
@@ -2273,7 +2283,8 @@ serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
     }
 
     try {
-      await dockerService.updateService(svc.dockerServiceId, { image: svc.image });
+      const stackRestartAuth = await getRegistryAuthForImage(svc.accountId, svc.image);
+      await dockerService.updateService(svc.dockerServiceId, { image: svc.image }, stackRestartAuth);
       results.push({ id: svc.id, name: svc.name, success: true });
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to restart stack service');

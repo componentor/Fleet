@@ -402,7 +402,6 @@ onMounted(async () => {
               :label="gauge.label"
               :value="gauge.value"
               :icon="gauge.icon"
-              :color="gauge.color"
               :high-is-good="gauge.highIsGood"
               :detail="gauge.detail"
             />

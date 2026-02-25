@@ -5,7 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { buildService } from '../services/build.service.js';
-import { dockerService } from '../services/docker.service.js';
+import { dockerService, getRegistryAuthForImage } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
@@ -530,9 +530,10 @@ authenticatedRoutes.openapi(rollbackRoute, (async (c: any) => {
   // Update Docker service with the old image
   if (svc.dockerServiceId) {
     try {
+      const rollbackAuth = await getRegistryAuthForImage(svc.accountId, deployment.imageTag);
       await dockerService.updateService(svc.dockerServiceId, {
         image: deployment.imageTag,
-      });
+      }, rollbackAuth);
 
       await db
         .update(deployments)
