@@ -976,9 +976,9 @@ async function attachNewNode() {
                 <td class="px-6 py-4 text-right">
                   <button
                     @click="startWizard(cl)"
-                    class="text-xs text-primary-600 dark:text-primary-400 hover:underline font-medium"
+                    class="text-xs text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline font-medium"
                   >
-                    Edit
+                    Reconfigure
                   </button>
                 </td>
               </tr>
