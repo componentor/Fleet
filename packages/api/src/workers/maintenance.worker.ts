@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, eq, and, lt, like, isNull, isNotNull, inArray, safeTransaction, updateReturning } from '@fleet/db';
+import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, eq, and, lt, lte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -70,6 +70,18 @@ interface DataPurgeData {
   type: 'data-purge';
 }
 
+interface LogArchiveData {
+  type: 'log-archive';
+}
+
+interface LogArchiveCleanupData {
+  type: 'log-archive-cleanup';
+}
+
+interface BackupRetentionCleanupData {
+  type: 'backup-retention-cleanup';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -85,7 +97,10 @@ type MaintenanceJobData =
   | StorageMigrationData
   | DomainExpiryCheckData
   | DomainPriceSyncData
-  | DataPurgeData;
+  | DataPurgeData
+  | LogArchiveData
+  | LogArchiveCleanupData
+  | BackupRetentionCleanupData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -257,10 +272,15 @@ async function executeBackupSchedule(scheduleId: string): Promise<void> {
       `Executing backup schedule ${scheduleId} for account ${schedule.accountId}`,
     );
 
+    const expiresAt = schedule.retentionDays
+      ? new Date(Date.now() + schedule.retentionDays * 24 * 60 * 60 * 1000)
+      : undefined;
+
     await backupService.createBackup(
       schedule.accountId,
       schedule.serviceId ?? undefined,
       schedule.storageBackend ?? 'nfs',
+      { clusterId: schedule.clusterId ?? undefined, expiresAt },
     );
 
     await db
@@ -1333,6 +1353,391 @@ async function executeDataPurge(): Promise<void> {
   }
 }
 
+// ── Log Archive helpers ──
+
+const LOG_ARCHIVE_DIR = process.env['LOG_ARCHIVE_DIR']
+  ?? (process.env['NODE_ENV'] === 'production'
+    ? '/srv/nfs/log-archives'
+    : (await import('node:path')).join(process.cwd(), 'data', 'log-archives'));
+
+async function getSetting(key: string): Promise<unknown | null> {
+  const row = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, key),
+  });
+  return row?.value ?? null;
+}
+
+async function executeLogArchive(): Promise<void> {
+  try {
+    const enabled = await getSetting('platform:logArchive:enabled');
+    if (enabled !== true) {
+      logger.info('Log archive skipped — not enabled');
+      return;
+    }
+
+    const retentionDays = ((await getSetting('platform:logArchive:retentionDays')) as number) ?? 90;
+    const archiveRetentionDays = ((await getSetting('platform:logArchive:archiveRetentionDays')) as number) ?? 365;
+    const auditEnabled = (await getSetting('platform:logArchive:auditLogEnabled')) !== false;
+    const errorEnabled = (await getSetting('platform:logArchive:errorLogEnabled')) !== false;
+
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + archiveRetentionDays * 24 * 60 * 60 * 1000);
+
+    const { mkdir, stat: fsStat, rename, unlink } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { createWriteStream } = await import('node:fs');
+    const { createGzip } = await import('node:zlib');
+    const { pipeline } = await import('node:stream/promises');
+    const { Readable } = await import('node:stream');
+    const crypto = await import('node:crypto');
+
+    await mkdir(LOG_ARCHIVE_DIR, { recursive: true });
+
+    let totalArchived = 0;
+
+    // ── Archive audit_log ──
+    if (auditEnabled) {
+      // Get distinct accountIds (including NULL for system events)
+      const accountRows = await db
+        .selectDistinct({ accountId: auditLog.accountId })
+        .from(auditLog)
+        .where(lt(auditLog.createdAt, cutoff));
+
+      for (const row of accountRows) {
+        const accountId = row.accountId;
+        const condition = accountId
+          ? and(eq(auditLog.accountId, accountId), lt(auditLog.createdAt, cutoff))
+          : and(isNull(auditLog.accountId), lt(auditLog.createdAt, cutoff));
+
+        // Count and date range
+        const [meta] = await db
+          .select({
+            count: sql<number>`COUNT(*)`,
+            minDate: sql<Date>`MIN(${auditLog.createdAt})`,
+            maxDate: sql<Date>`MAX(${auditLog.createdAt})`,
+          })
+          .from(auditLog)
+          .where(condition);
+
+        const count = Number(meta?.count ?? 0);
+        if (count === 0) continue;
+
+        const dateFrom = meta!.minDate!;
+        const dateTo = meta!.maxDate!;
+        const shortId = crypto.randomUUID().slice(0, 8);
+        const dateFromStr = new Date(dateFrom).toISOString().slice(0, 10);
+        const dateToStr = new Date(dateTo).toISOString().slice(0, 10);
+        const acctSuffix = accountId ? `-${accountId.slice(0, 8)}` : '-system';
+        const filename = `audit${acctSuffix}-${dateFromStr}--${dateToStr}-${shortId}.tar.gz`;
+        const filePath = join(LOG_ARCHIVE_DIR, filename);
+        const tmpPath = filePath + '.tmp';
+
+        // Insert pending archive row
+        const archiveId = crypto.randomUUID();
+        await db.insert(logArchives).values({
+          id: archiveId,
+          logType: 'audit',
+          accountId: accountId ?? null,
+          dateFrom: new Date(dateFrom),
+          dateTo: new Date(dateTo),
+          recordCount: count,
+          filePath,
+          filename,
+          status: 'pending',
+          expiresAt,
+        });
+
+        try {
+          // Stream records in batches to JSONL, then gzip
+          const BATCH_SIZE = 5000;
+          let offset = 0;
+          const gzip = createGzip();
+          const outStream = createWriteStream(tmpPath);
+          const gzipPipeline = pipeline(gzip, outStream);
+
+          while (offset < count) {
+            const batch = await db
+              .select()
+              .from(auditLog)
+              .where(condition)
+              .orderBy(asc(auditLog.createdAt), asc(auditLog.id))
+              .limit(BATCH_SIZE)
+              .offset(offset);
+
+            for (const record of batch) {
+              gzip.write(JSON.stringify(record) + '\n');
+            }
+            offset += batch.length;
+            if (batch.length < BATCH_SIZE) break;
+          }
+
+          gzip.end();
+          await gzipPipeline;
+
+          // Rename tmp → final
+          await rename(tmpPath, filePath);
+          const fileInfo = await fsStat(filePath);
+
+          // Mark completed
+          await db.update(logArchives)
+            .set({ status: 'completed', sizeBytes: fileInfo.size })
+            .where(eq(logArchives.id, archiveId));
+
+          // Delete archived records
+          await db.delete(auditLog).where(condition);
+          totalArchived += count;
+
+          logger.info(
+            { logType: 'audit', accountId, count, filename, sizeBytes: fileInfo.size },
+            `Archived ${count} audit log records`,
+          );
+        } catch (err) {
+          logger.error({ err, archiveId }, 'Failed to create audit log archive');
+          await db.update(logArchives)
+            .set({ status: 'failed' })
+            .where(eq(logArchives.id, archiveId));
+          // Clean up tmp file if it exists
+          try { await unlink(tmpPath); } catch { /* ignore */ }
+        }
+      }
+    }
+
+    // ── Archive error_log ──
+    if (errorEnabled) {
+      const condition = lt(errorLog.createdAt, cutoff);
+
+      const [meta] = await db
+        .select({
+          count: sql<number>`COUNT(*)`,
+          minDate: sql<Date>`MIN(${errorLog.createdAt})`,
+          maxDate: sql<Date>`MAX(${errorLog.createdAt})`,
+        })
+        .from(errorLog)
+        .where(condition);
+
+      const count = Number(meta?.count ?? 0);
+      if (count > 0) {
+        const dateFrom = meta!.minDate!;
+        const dateTo = meta!.maxDate!;
+        const shortId = crypto.randomUUID().slice(0, 8);
+        const dateFromStr = new Date(dateFrom).toISOString().slice(0, 10);
+        const dateToStr = new Date(dateTo).toISOString().slice(0, 10);
+        const filename = `error-${dateFromStr}--${dateToStr}-${shortId}.tar.gz`;
+        const filePath = join(LOG_ARCHIVE_DIR, filename);
+        const tmpPath = filePath + '.tmp';
+
+        const archiveId = crypto.randomUUID();
+        await db.insert(logArchives).values({
+          id: archiveId,
+          logType: 'error',
+          accountId: null,
+          dateFrom: new Date(dateFrom),
+          dateTo: new Date(dateTo),
+          recordCount: count,
+          filePath,
+          filename,
+          status: 'pending',
+          expiresAt,
+        });
+
+        try {
+          const { createGzip: cg } = await import('node:zlib');
+          const BATCH_SIZE = 5000;
+          let offset = 0;
+          const gzip = cg();
+          const outStream = createWriteStream(tmpPath);
+          const gzipPipeline = pipeline(gzip, outStream);
+
+          while (offset < count) {
+            const batch = await db
+              .select()
+              .from(errorLog)
+              .where(condition)
+              .orderBy(asc(errorLog.createdAt), asc(errorLog.id))
+              .limit(BATCH_SIZE)
+              .offset(offset);
+
+            for (const record of batch) {
+              gzip.write(JSON.stringify(record) + '\n');
+            }
+            offset += batch.length;
+            if (batch.length < BATCH_SIZE) break;
+          }
+
+          gzip.end();
+          await gzipPipeline;
+
+          await rename(tmpPath, filePath);
+          const fileInfo = await fsStat(filePath);
+
+          await db.update(logArchives)
+            .set({ status: 'completed', sizeBytes: fileInfo.size })
+            .where(eq(logArchives.id, archiveId));
+
+          await db.delete(errorLog).where(condition);
+          totalArchived += count;
+
+          logger.info(
+            { logType: 'error', count, filename, sizeBytes: fileInfo.size },
+            `Archived ${count} error log records`,
+          );
+        } catch (err) {
+          logger.error({ err, archiveId }, 'Failed to create error log archive');
+          await db.update(logArchives)
+            .set({ status: 'failed' })
+            .where(eq(logArchives.id, archiveId));
+          try { await unlink(tmpPath); } catch { /* ignore */ }
+        }
+      }
+    }
+
+    if (totalArchived > 0) {
+      logger.info({ totalArchived }, `Log archive completed: ${totalArchived} record(s) archived`);
+    }
+  } catch (err) {
+    logger.error({ err }, 'Log archive job failed');
+  }
+}
+
+async function executeLogArchiveCleanup(): Promise<void> {
+  try {
+    const { unlink } = await import('node:fs/promises');
+
+    const expired = await db
+      .select()
+      .from(logArchives)
+      .where(and(
+        lte(logArchives.expiresAt, new Date()),
+        eq(logArchives.status, 'completed'),
+      ));
+
+    if (expired.length === 0) return;
+
+    let cleaned = 0;
+    for (const archive of expired) {
+      try {
+        await unlink(archive.filePath);
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          logger.warn({ err, archiveId: archive.id, filePath: archive.filePath }, 'Failed to delete archive file');
+        }
+      }
+      await db.delete(logArchives).where(eq(logArchives.id, archive.id));
+      cleaned++;
+    }
+
+    logger.info({ cleaned }, `Log archive cleanup: ${cleaned} expired archive(s) removed`);
+  } catch (err) {
+    logger.error({ err }, 'Log archive cleanup failed');
+  }
+}
+
+/**
+ * Enforce backup retention policies.
+ * For each schedule: apply retentionCount and retentionDays.
+ * Also clean up any completed backup past its expiresAt.
+ * Cascade: when deleting a level-0 backup, also delete all its incrementals.
+ */
+async function enforceBackupRetention(): Promise<void> {
+  try {
+    const allSchedules = await db.query.backupSchedules.findMany();
+    let totalDeleted = 0;
+
+    for (const schedule of allSchedules) {
+      // Find all completed backups for this account+service
+      const conditions = [
+        eq(backups.accountId, schedule.accountId),
+        eq(backups.status, 'completed'),
+      ];
+      if (schedule.serviceId) {
+        conditions.push(eq(backups.serviceId, schedule.serviceId));
+      } else {
+        conditions.push(isNull(backups.serviceId));
+      }
+
+      const scheduleBackups = await db.query.backups.findMany({
+        where: and(...conditions),
+        orderBy: (b, { desc: d }) => d(b.createdAt),
+      });
+
+      const toDelete = new Set<string>();
+
+      // Count retention: keep only retentionCount most recent
+      const retentionCount = schedule.retentionCount ?? 10;
+      if (scheduleBackups.length > retentionCount) {
+        for (const b of scheduleBackups.slice(retentionCount)) {
+          toDelete.add(b.id);
+        }
+      }
+
+      // Age retention: delete backups older than retentionDays
+      const retentionDays = schedule.retentionDays ?? 30;
+      const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+      for (const b of scheduleBackups) {
+        if (b.createdAt && b.createdAt < cutoff) {
+          toDelete.add(b.id);
+        }
+      }
+
+      // Cascade: when deleting a level-0 backup, also delete its incrementals
+      const level0Deletions = [...toDelete].filter((id) => {
+        const b = scheduleBackups.find((sb) => sb.id === id);
+        return b && (b.level ?? 0) === 0;
+      });
+
+      for (const parentId of level0Deletions) {
+        const children = await db.query.backups.findMany({
+          where: and(eq(backups.parentId, parentId), eq(backups.status, 'completed')),
+        });
+        for (const child of children) {
+          toDelete.add(child.id);
+        }
+      }
+
+      // Delete each backup
+      for (const id of toDelete) {
+        try {
+          await backupService.deleteBackup(id, schedule.accountId);
+          totalDeleted++;
+        } catch (err) {
+          logger.error({ err, backupId: id }, 'Failed to delete backup during retention cleanup');
+        }
+      }
+    }
+
+    // Also clean up by expiresAt — any completed backup past its expiry
+    const now = new Date();
+    const expiredBackups = await db.query.backups.findMany({
+      where: and(
+        eq(backups.status, 'completed'),
+        isNotNull(backups.expiresAt),
+        lt(backups.expiresAt, now),
+      ),
+    });
+
+    for (const b of expiredBackups) {
+      try {
+        await backupService.deleteBackup(b.id, b.accountId);
+        totalDeleted++;
+      } catch (err) {
+        logger.error({ err, backupId: b.id }, 'Failed to delete expired backup');
+      }
+    }
+
+    if (totalDeleted > 0) {
+      logger.info({ totalDeleted }, `Backup retention cleanup: deleted ${totalDeleted} backup(s)`);
+    }
+  } catch (err) {
+    logger.error({ err }, 'Backup retention cleanup failed');
+    logToErrorTable({
+      level: 'error',
+      message: `Backup retention cleanup failed: ${String(err)}`,
+      stack: err instanceof Error ? err.stack : undefined,
+      metadata: { worker: 'maintenance', task: 'backup_retention' },
+    });
+  }
+}
+
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
   switch (job.name) {
     case 'health-check':
@@ -1379,6 +1784,15 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'data-purge':
       await executeDataPurge();
+      break;
+    case 'log-archive':
+      await executeLogArchive();
+      break;
+    case 'log-archive-cleanup':
+      await executeLogArchiveCleanup();
+      break;
+    case 'backup-retention-cleanup':
+      await enforceBackupRetention();
       break;
   }
 }

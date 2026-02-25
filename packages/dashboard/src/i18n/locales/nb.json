@@ -1182,7 +1182,17 @@
       "removeFavicon": "Fjern favicon",
       "brandingSaved": "Merkevare lagret",
       "logoHint": "Anbefalt: PNG eller SVG, maks 2 MB",
-      "faviconHint": "Anbefalt: ICO eller PNG 32x32, maks 500 KB"
+      "faviconHint": "Anbefalt: ICO eller PNG 32x32, maks 500 KB",
+      "logArchiving": "Loggarkivering",
+      "logArchivingDesc": "Arkiver gamle aktivitets- og feillogger automatisk til komprimerte filer.",
+      "logArchiveEnabled": "Aktiver automatisk loggarkivering",
+      "logArchiveRetentionDays": "Arkiver logger eldre enn (dager)",
+      "logArchiveArchiveRetentionDays": "Slett arkiver eldre enn (dager)",
+      "logArchiveAuditEnabled": "Arkiver aktivitetslogg",
+      "logArchiveErrorEnabled": "Arkiver feillogg",
+      "logArchiveAllowUserDelete": "Tillat kontoeiere å slette egne arkiver",
+      "logArchiveRunNow": "Kjør arkivering nå",
+      "logArchiveRunNowSuccess": "Arkiveringsjobb er satt i kø"
     },
     "billing": {
       "title": "Faktureringskonfigurasjon",
@@ -1945,5 +1955,23 @@
     "restarting": "Containerne starter på nytt...",
     "restartingDesc": "Plattformen installerer oppdateringen. Siden oppdateres automatisk når API-et er tilbake.",
     "pinging": "Venter..."
+  },
+  "logArchives": {
+    "title": "Loggarkiver",
+    "dateRange": "Datoperiode",
+    "records": "Oppføringer",
+    "size": "Størrelse",
+    "status": "Status",
+    "download": "Last ned",
+    "delete": "Slett",
+    "deleteConfirm": "Slette dette arkivet? De opprinnelige loggoppføringene er allerede fjernet. Dette kan ikke angres.",
+    "noArchives": "Ingen arkiver ennå.",
+    "pending": "Arkiverer...",
+    "completed": "Fullført",
+    "failed": "Feilet",
+    "type": "Type",
+    "auditLog": "Aktivitetslogg",
+    "errorLog": "Feillogg",
+    "createdAt": "Arkivert"
   }
 }

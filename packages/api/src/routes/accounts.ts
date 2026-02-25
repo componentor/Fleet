@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { verify } from 'argon2';
-import { db, accounts, userAccounts, users, services, auditLog, insertReturning, updateReturning, deleteReturning, countSql, eq, like, and, or, isNull, isNotNull, desc, gte, lte, safeTransaction } from '@fleet/db';
+import { db, accounts, userAccounts, users, services, auditLog, logArchives, platformSettings, insertReturning, updateReturning, deleteReturning, countSql, eq, like, and, or, isNull, isNotNull, desc, gte, lte, safeTransaction } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin, requireOwner } from '../middleware/rbac.js';
@@ -1234,6 +1234,114 @@ accountRoutes.openapi(getActivityRoute, (async (c: any) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
+}) as any);
+
+// ── Account-scoped log archives ──
+
+accountRoutes.get('/:id/archives', authMiddleware, tenantMiddleware, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: paramId } = c.req.param();
+
+  if (!accountId || accountId !== paramId) {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
+  const limit = Math.min(Math.max(1, parseInt(c.req.query('limit') ?? '50', 10) || 50), 100);
+  const offset = (page - 1) * limit;
+
+  const archives = await db
+    .select()
+    .from(logArchives)
+    .where(and(eq(logArchives.accountId, accountId), eq(logArchives.logType, 'audit')))
+    .orderBy(desc(logArchives.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  const [total] = await db
+    .select({ count: countSql() })
+    .from(logArchives)
+    .where(and(eq(logArchives.accountId, accountId), eq(logArchives.logType, 'audit')));
+
+  return c.json({
+    data: archives,
+    pagination: {
+      page,
+      limit,
+      total: total?.count ?? 0,
+      totalPages: Math.ceil((total?.count ?? 0) / limit),
+    },
+  });
+}) as any);
+
+accountRoutes.get('/:id/archives/:archiveId/download', authMiddleware, tenantMiddleware, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: paramId, archiveId } = c.req.param();
+
+  if (!accountId || accountId !== paramId) {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  const archive = await db.query.logArchives.findFirst({
+    where: and(eq(logArchives.id, archiveId), eq(logArchives.accountId, accountId)),
+  });
+
+  if (!archive) {
+    return c.json({ error: 'Archive not found' }, 404);
+  }
+
+  try {
+    const { stat: fsStat } = await import('node:fs/promises');
+    const { createReadStream } = await import('node:fs');
+    const fileStat = await fsStat(archive.filePath);
+    c.header('Content-Type', 'application/gzip');
+    c.header('Content-Disposition', `attachment; filename="${archive.filename}"`);
+    c.header('Content-Length', String(fileStat.size));
+    const stream = createReadStream(archive.filePath);
+    return c.body(stream);
+  } catch {
+    return c.json({ error: 'Archive file not found on disk' }, 404);
+  }
+}) as any);
+
+accountRoutes.delete('/:id/archives/:archiveId', authMiddleware, tenantMiddleware, requireOwner, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: paramId, archiveId } = c.req.param();
+
+  if (!accountId || accountId !== paramId) {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  // Check if user archive deletion is allowed
+  const allowSetting = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'platform:logArchive:allowUserArchiveDelete'),
+  });
+  const allowed = allowSetting?.value === true;
+  const user = c.get('user');
+
+  if (!allowed && !user?.isSuper) {
+    return c.json({ error: 'Archive deletion is not permitted' }, 403);
+  }
+
+  const archive = await db.query.logArchives.findFirst({
+    where: and(eq(logArchives.id, archiveId), eq(logArchives.accountId, accountId)),
+  });
+
+  if (!archive) {
+    return c.json({ error: 'Archive not found' }, 404);
+  }
+
+  try {
+    const { unlink } = await import('node:fs/promises');
+    await unlink(archive.filePath);
+  } catch (err: any) {
+    if (err.code !== 'ENOENT') {
+      return c.json({ error: 'Failed to delete archive file' }, 500);
+    }
+  }
+
+  await db.delete(logArchives).where(eq(logArchives.id, archiveId));
+  return c.json({ success: true });
 }) as any);
 
 export default accountRoutes;

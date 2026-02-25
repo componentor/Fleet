@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Bug, CheckCircle, XCircle, RefreshCw, Filter, Loader2 } from 'lucide-vue-next'
+import { Bug, CheckCircle, XCircle, RefreshCw, Filter, Loader2, Archive } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
+import LogArchiveList from '@/components/LogArchiveList.vue'
 
 const { t } = useI18n()
 const api = useApi()
@@ -17,6 +18,7 @@ const expandedRow = ref<string | null>(null)
 const autoRefresh = ref(false)
 const resolvingId = ref<string | null>(null)
 const resolvingAll = ref(false)
+const viewMode = ref<'errors' | 'archives'>('errors')
 
 let autoRefreshInterval: ReturnType<typeof setInterval> | null = null
 
@@ -151,6 +153,19 @@ onUnmounted(() => {
       </div>
       <div class="flex items-center gap-3">
         <button
+          @click="viewMode = viewMode === 'errors' ? 'archives' : 'errors'"
+          :class="[
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border',
+            viewMode === 'archives'
+              ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300'
+              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
+          ]"
+        >
+          <Archive class="w-4 h-4" />
+          {{ $t('logArchives.title') }}
+        </button>
+        <button
+          v-if="viewMode === 'errors'"
           @click="resolveAll"
           :disabled="resolvingAll"
           class="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
@@ -160,6 +175,7 @@ onUnmounted(() => {
           <span v-else>{{ $t('super.errors.resolveAll') }}</span>
         </button>
         <button
+          v-if="viewMode === 'errors'"
           @click="toggleAutoRefresh"
           :class="[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border',
@@ -174,202 +190,213 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4 mb-6">
-      <div class="flex items-center gap-4 flex-wrap">
-        <div class="flex items-center gap-2">
-          <Filter class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('super.errors.filters') }}</span>
-        </div>
-        <select
-          v-model="levelFilter"
-          @change="applyFilters"
-          class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        >
-          <option value="">{{ $t('super.errors.allLevels') }}</option>
-          <option value="fatal">{{ $t('super.errors.fatal') }}</option>
-          <option value="error">{{ $t('super.errors.error') }}</option>
-          <option value="warn">{{ $t('super.errors.warning') }}</option>
-        </select>
-        <select
-          v-model="resolvedFilter"
-          @change="applyFilters"
-          class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        >
-          <option value="">{{ $t('super.errors.allStatus') }}</option>
-          <option value="false">{{ $t('super.errors.unresolved') }}</option>
-          <option value="true">{{ $t('super.errors.resolved') }}</option>
-        </select>
-        <select
-          v-model="limit"
-          @change="applyFilters"
-          class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        >
-          <option :value="10">{{ $t('super.errors.perPage', { count: 10 }) }}</option>
-          <option :value="25">{{ $t('super.errors.perPage', { count: 25 }) }}</option>
-          <option :value="50">{{ $t('super.errors.perPage', { count: 50 }) }}</option>
-          <option :value="100">{{ $t('super.errors.perPage', { count: 100 }) }}</option>
-        </select>
-      </div>
-    </div>
+    <!-- Archives view -->
+    <LogArchiveList
+      v-if="viewMode === 'archives'"
+      api-base-path="/log-archives?logType=error"
+      :show-type="false"
+      :show-delete="true"
+    />
 
-    <!-- Loading -->
-    <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
-    </div>
-
-    <!-- Table -->
+    <!-- Errors view -->
     <template v-else>
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div v-if="filteredErrors.length === 0" class="text-center py-12">
-          <Bug class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-          <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.errors.noErrors') }}</p>
-        </div>
-
-        <table v-else class="w-full">
-          <thead>
-            <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.timestamp') }}</th>
-              <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.level') }}</th>
-              <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.message') }}</th>
-              <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.path') }}</th>
-              <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.statusCode') }}</th>
-              <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.resolvedCol') }}</th>
-              <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.actions') }}</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-            <template v-for="err in filteredErrors" :key="err.id">
-              <!-- Main row -->
-              <tr
-                class="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-                @click="toggleExpand(err.id)"
-              >
-                <td class="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{{ formatDate(err.timestamp ?? err.createdAt) }}</td>
-                <td class="px-6 py-4">
-                  <span :class="['inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', levelBadgeClass(err.level)]">
-                    {{ err.level }}
-                  </span>
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">{{ truncate(err.message) }}</td>
-                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">
-                  <span v-if="err.method" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold mr-1.5" :class="{
-                    'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300': err.method === 'GET',
-                    'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300': err.method === 'POST',
-                    'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300': err.method === 'PATCH' || err.method === 'PUT',
-                    'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': err.method === 'DELETE',
-                    'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300': !['GET','POST','PATCH','PUT','DELETE'].includes(err.method),
-                  }">{{ err.method }}</span>{{ err.path ?? '--' }}
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ err.statusCode ?? '--' }}</td>
-                <td class="px-6 py-4">
-                  <CheckCircle v-if="err.resolved" class="w-5 h-5 text-green-500" />
-                  <XCircle v-else class="w-5 h-5 text-red-500" />
-                </td>
-                <td class="px-6 py-4 text-right">
-                  <button
-                    v-if="!err.resolved"
-                    @click.stop="resolveError(err.id)"
-                    :disabled="resolvingId === err.id"
-                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
-                  >
-                    <Loader2 v-if="resolvingId === err.id" class="w-3 h-3 animate-spin" />
-                    <CheckCircle v-else class="w-3 h-3" />
-                    {{ $t('super.errors.resolve') }}
-                  </button>
-                  <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ $t('super.errors.resolved') }}</span>
-                </td>
-              </tr>
-
-              <!-- Expanded detail row -->
-              <tr v-if="expandedRow === err.id">
-                <td colspan="7" class="px-6 py-4 bg-gray-50 dark:bg-gray-900/50">
-                  <div class="space-y-4">
-                    <!-- Full message -->
-                    <div>
-                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.fullMessage') }}</h4>
-                      <p class="text-sm text-gray-900 dark:text-gray-100">{{ err.message }}</p>
-                    </div>
-
-                    <!-- Stack trace -->
-                    <div v-if="err.stack">
-                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.stackTrace') }}</h4>
-                      <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ err.stack }}</pre>
-                    </div>
-
-                    <!-- HTTP Headers -->
-                    <div v-if="err.metadata?.headers && Object.keys(err.metadata.headers).length > 0">
-                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">HTTP Headers</h4>
-                      <div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
-                        <table class="text-xs font-mono">
-                          <tr v-for="(value, key) in err.metadata.headers" :key="key" class="align-top">
-                            <td class="pr-3 py-0.5 text-gray-500 dark:text-gray-400 whitespace-nowrap select-all">{{ key }}</td>
-                            <td class="py-0.5 text-gray-800 dark:text-gray-200 break-all select-all">{{ value }}</td>
-                          </tr>
-                        </table>
-                      </div>
-                    </div>
-
-                    <!-- Request Body -->
-                    <div v-if="err.metadata?.body && Object.keys(err.metadata.body).length > 0">
-                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Request Body</h4>
-                      <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(err.metadata.body) }}</pre>
-                    </div>
-
-                    <!-- Metadata (excluding headers and body which are shown above) -->
-                    <div v-if="err.metadata && Object.keys(err.metadata).filter(k => k !== 'headers' && k !== 'body').length > 0">
-                      <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.metadata') }}</h4>
-                      <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(Object.fromEntries(Object.entries(err.metadata).filter(([k]) => k !== 'headers' && k !== 'body'))) }}</pre>
-                    </div>
-
-                    <!-- Additional info -->
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div v-if="err.userId || err.user">
-                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.user') }}</h4>
-                        <p class="text-sm text-gray-900 dark:text-gray-100">{{ err.user?.email ?? err.userId ?? '--' }}</p>
-                      </div>
-                      <div v-if="err.ip">
-                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.ipAddress') }}</h4>
-                        <p class="text-sm font-mono text-gray-900 dark:text-gray-100">{{ err.ip }}</p>
-                      </div>
-                      <div v-if="err.userAgent">
-                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.userAgent') }}</h4>
-                        <p class="text-sm text-gray-900 dark:text-gray-100 truncate" :title="err.userAgent">{{ err.userAgent }}</p>
-                      </div>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Pagination -->
-      <div v-if="filteredErrors.length > 0" class="flex items-center justify-between mt-4">
-        <p class="text-sm text-gray-500 dark:text-gray-400">
-          {{ $t('super.errors.showing', { from: (page - 1) * limit + 1, to: Math.min(page * limit, total), total }) }}
-        </p>
-        <div class="flex items-center gap-2">
-          <button
-            @click="goToPage(page - 1)"
-            :disabled="page <= 1"
-            class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      <!-- Filters -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4 mb-6">
+        <div class="flex items-center gap-4 flex-wrap">
+          <div class="flex items-center gap-2">
+            <Filter class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('super.errors.filters') }}</span>
+          </div>
+          <select
+            v-model="levelFilter"
+            @change="applyFilters"
+            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            {{ $t('super.errors.previous') }}
-          </button>
-          <span class="text-sm text-gray-700 dark:text-gray-300">
-            {{ $t('super.errors.pageOf', { page, total: totalPages }) }}
-          </span>
-          <button
-            @click="goToPage(page + 1)"
-            :disabled="page >= totalPages"
-            class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            <option value="">{{ $t('super.errors.allLevels') }}</option>
+            <option value="fatal">{{ $t('super.errors.fatal') }}</option>
+            <option value="error">{{ $t('super.errors.error') }}</option>
+            <option value="warn">{{ $t('super.errors.warning') }}</option>
+          </select>
+          <select
+            v-model="resolvedFilter"
+            @change="applyFilters"
+            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            {{ $t('super.errors.next') }}
-          </button>
+            <option value="">{{ $t('super.errors.allStatus') }}</option>
+            <option value="false">{{ $t('super.errors.unresolved') }}</option>
+            <option value="true">{{ $t('super.errors.resolved') }}</option>
+          </select>
+          <select
+            v-model="limit"
+            @change="applyFilters"
+            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          >
+            <option :value="10">{{ $t('super.errors.perPage', { count: 10 }) }}</option>
+            <option :value="25">{{ $t('super.errors.perPage', { count: 25 }) }}</option>
+            <option :value="50">{{ $t('super.errors.perPage', { count: 50 }) }}</option>
+            <option :value="100">{{ $t('super.errors.perPage', { count: 100 }) }}</option>
+          </select>
         </div>
       </div>
+
+      <!-- Loading -->
+      <div v-if="loading" class="flex items-center justify-center py-20">
+        <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      </div>
+
+      <!-- Table -->
+      <template v-else>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div v-if="filteredErrors.length === 0" class="text-center py-12">
+            <Bug class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.errors.noErrors') }}</p>
+          </div>
+
+          <table v-else class="w-full">
+            <thead>
+              <tr class="border-b border-gray-200 dark:border-gray-700">
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.timestamp') }}</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.level') }}</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.message') }}</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.path') }}</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.statusCode') }}</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.resolvedCol') }}</th>
+                <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.actions') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <template v-for="err in filteredErrors" :key="err.id">
+                <!-- Main row -->
+                <tr
+                  class="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                  @click="toggleExpand(err.id)"
+                >
+                  <td class="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{{ formatDate(err.timestamp ?? err.createdAt) }}</td>
+                  <td class="px-6 py-4">
+                    <span :class="['inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', levelBadgeClass(err.level)]">
+                      {{ err.level }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">{{ truncate(err.message) }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">
+                    <span v-if="err.method" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold mr-1.5" :class="{
+                      'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300': err.method === 'GET',
+                      'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300': err.method === 'POST',
+                      'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300': err.method === 'PATCH' || err.method === 'PUT',
+                      'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': err.method === 'DELETE',
+                      'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300': !['GET','POST','PATCH','PUT','DELETE'].includes(err.method),
+                    }">{{ err.method }}</span>{{ err.path ?? '--' }}
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ err.statusCode ?? '--' }}</td>
+                  <td class="px-6 py-4">
+                    <CheckCircle v-if="err.resolved" class="w-5 h-5 text-green-500" />
+                    <XCircle v-else class="w-5 h-5 text-red-500" />
+                  </td>
+                  <td class="px-6 py-4 text-right">
+                    <button
+                      v-if="!err.resolved"
+                      @click.stop="resolveError(err.id)"
+                      :disabled="resolvingId === err.id"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
+                    >
+                      <Loader2 v-if="resolvingId === err.id" class="w-3 h-3 animate-spin" />
+                      <CheckCircle v-else class="w-3 h-3" />
+                      {{ $t('super.errors.resolve') }}
+                    </button>
+                    <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ $t('super.errors.resolved') }}</span>
+                  </td>
+                </tr>
+
+                <!-- Expanded detail row -->
+                <tr v-if="expandedRow === err.id">
+                  <td colspan="7" class="px-6 py-4 bg-gray-50 dark:bg-gray-900/50">
+                    <div class="space-y-4">
+                      <!-- Full message -->
+                      <div>
+                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.fullMessage') }}</h4>
+                        <p class="text-sm text-gray-900 dark:text-gray-100">{{ err.message }}</p>
+                      </div>
+
+                      <!-- Stack trace -->
+                      <div v-if="err.stack">
+                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.stackTrace') }}</h4>
+                        <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ err.stack }}</pre>
+                      </div>
+
+                      <!-- HTTP Headers -->
+                      <div v-if="err.metadata?.headers && Object.keys(err.metadata.headers).length > 0">
+                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">HTTP Headers</h4>
+                        <div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto">
+                          <table class="text-xs font-mono">
+                            <tr v-for="(value, key) in err.metadata.headers" :key="key" class="align-top">
+                              <td class="pr-3 py-0.5 text-gray-500 dark:text-gray-400 whitespace-nowrap select-all">{{ key }}</td>
+                              <td class="py-0.5 text-gray-800 dark:text-gray-200 break-all select-all">{{ value }}</td>
+                            </tr>
+                          </table>
+                        </div>
+                      </div>
+
+                      <!-- Request Body -->
+                      <div v-if="err.metadata?.body && Object.keys(err.metadata.body).length > 0">
+                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Request Body</h4>
+                        <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(err.metadata.body) }}</pre>
+                      </div>
+
+                      <!-- Metadata (excluding headers and body which are shown above) -->
+                      <div v-if="err.metadata && Object.keys(err.metadata).filter(k => k !== 'headers' && k !== 'body').length > 0">
+                        <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.metadata') }}</h4>
+                        <pre class="text-xs text-gray-800 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap break-words">{{ formatJson(Object.fromEntries(Object.entries(err.metadata).filter(([k]) => k !== 'headers' && k !== 'body'))) }}</pre>
+                      </div>
+
+                      <!-- Additional info -->
+                      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div v-if="err.userId || err.user">
+                          <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.user') }}</h4>
+                          <p class="text-sm text-gray-900 dark:text-gray-100">{{ err.user?.email ?? err.userId ?? '--' }}</p>
+                        </div>
+                        <div v-if="err.ip">
+                          <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.ipAddress') }}</h4>
+                          <p class="text-sm font-mono text-gray-900 dark:text-gray-100">{{ err.ip }}</p>
+                        </div>
+                        <div v-if="err.userAgent">
+                          <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{{ $t('super.errors.userAgent') }}</h4>
+                          <p class="text-sm text-gray-900 dark:text-gray-100 truncate" :title="err.userAgent">{{ err.userAgent }}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div v-if="filteredErrors.length > 0" class="flex items-center justify-between mt-4">
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            {{ $t('super.errors.showing', { from: (page - 1) * limit + 1, to: Math.min(page * limit, total), total }) }}
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              @click="goToPage(page - 1)"
+              :disabled="page <= 1"
+              class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {{ $t('super.errors.previous') }}
+            </button>
+            <span class="text-sm text-gray-700 dark:text-gray-300">
+              {{ $t('super.errors.pageOf', { page, total: totalPages }) }}
+            </span>
+            <button
+              @click="goToPage(page + 1)"
+              :disabled="page >= totalPages"
+              class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {{ $t('super.errors.next') }}
+            </button>
+          </div>
+        </div>
+      </template>
     </template>
   </div>
 </template>

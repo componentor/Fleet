@@ -647,6 +647,25 @@ sqlite.exec(`
   CREATE INDEX storage_volumes_account_idx ON storage_volumes(account_id);
   CREATE INDEX idx_storage_volumes_deleted_at ON storage_volumes(deleted_at);
 
+  CREATE TABLE log_archives (
+    id TEXT PRIMARY KEY,
+    log_type TEXT NOT NULL,
+    account_id TEXT,
+    date_from INTEGER NOT NULL,
+    date_to INTEGER NOT NULL,
+    record_count INTEGER NOT NULL DEFAULT 0,
+    size_bytes INTEGER DEFAULT 0,
+    file_path TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    status TEXT DEFAULT 'completed',
+    created_at INTEGER DEFAULT (unixepoch()),
+    expires_at INTEGER
+  );
+  CREATE INDEX idx_log_archives_log_type ON log_archives(log_type);
+  CREATE INDEX idx_log_archives_account_id ON log_archives(account_id);
+  CREATE INDEX idx_log_archives_created_at ON log_archives(created_at);
+  CREATE INDEX idx_log_archives_expires_at ON log_archives(expires_at);
+
   CREATE TABLE storage_migrations (
     id TEXT PRIMARY KEY,
     from_provider TEXT NOT NULL,
@@ -1224,6 +1243,7 @@ vi.mock('@fleet/db', () => ({
   storageNodesRelations: sqliteSchema.storageNodesRelations,
   storageVolumesRelations: sqliteSchema.storageVolumesRelations,
   storageMigrationsRelations: sqliteSchema.storageMigrationsRelations,
+  logArchives: (sqliteSchema as any).logArchives,
 
   // Helpers
   insertReturning,
@@ -1268,6 +1288,7 @@ vi.mock('@fleet/db', () => ({
 
 // ── All table names in FK-safe deletion order ──
 const allTableNames = [
+  'log_archives',
   'webhook_events',
   'error_log',
   'api_keys',

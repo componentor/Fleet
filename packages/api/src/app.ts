@@ -46,6 +46,7 @@ import sharedDomainRoutes from './routes/shared-domains.js';
 import resellerRoutes from './routes/reseller.js';
 import jobRoutes from './routes/jobs.js';
 import volumeFileRoutes from './routes/volume-files.js';
+import logArchiveRoutes from './routes/log-archives.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -282,6 +283,7 @@ api.route('/admin/storage', storageAdminRoutes);
 api.route('/admin/jobs', jobRoutes);
 api.route('/shared-domains', sharedDomainRoutes);
 api.route('/reseller', resellerRoutes);
+api.route('/log-archives', logArchiveRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(

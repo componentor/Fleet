@@ -8,15 +8,18 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Archive,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccount } from '@/composables/useAccount'
 import { useI18n } from 'vue-i18n'
+import LogArchiveList from '@/components/LogArchiveList.vue'
 
 const { t } = useI18n()
 const api = useApi()
 const { currentAccount } = useAccount()
 
+const viewMode = ref<'logs' | 'archives'>('logs')
 const logs = ref<any[]>([])
 const loading = ref(true)
 const page = ref(1)
@@ -197,20 +200,46 @@ onMounted(() => {
           <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} {{ $t('activity.events') }}</p>
         </div>
       </div>
-      <button
-        @click="showFilters = !showFilters"
-        :class="[
-          'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors',
-          hasActiveFilters()
-            ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-            : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
-        ]"
-      >
-        <Filter class="w-4 h-4" />
-        {{ $t('activity.filters') }}
-        <span v-if="hasActiveFilters()" class="w-2 h-2 rounded-full bg-primary-500" />
-      </button>
+      <div class="flex items-center gap-3">
+        <button
+          @click="viewMode = viewMode === 'logs' ? 'archives' : 'logs'"
+          :class="[
+            'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors',
+            viewMode === 'archives'
+              ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+              : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
+          ]"
+        >
+          <Archive class="w-4 h-4" />
+          {{ $t('logArchives.title') }}
+        </button>
+        <button
+          v-if="viewMode === 'logs'"
+          @click="showFilters = !showFilters"
+          :class="[
+            'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors',
+            hasActiveFilters()
+              ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+              : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
+          ]"
+        >
+          <Filter class="w-4 h-4" />
+          {{ $t('activity.filters') }}
+          <span v-if="hasActiveFilters()" class="w-2 h-2 rounded-full bg-primary-500" />
+        </button>
+      </div>
     </div>
+
+    <!-- Archives view -->
+    <LogArchiveList
+      v-if="viewMode === 'archives' && currentAccount?.id"
+      :api-base-path="`/accounts/${currentAccount.id}/archives`"
+      :show-type="false"
+      :show-delete="true"
+    />
+
+    <!-- Logs view -->
+    <template v-if="viewMode === 'logs'">
 
     <!-- Filters panel -->
     <div v-if="showFilters" class="mb-6 p-4 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
@@ -380,5 +409,7 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    </template>
   </div>
 </template>

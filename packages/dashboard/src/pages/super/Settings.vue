@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -25,6 +25,8 @@ const sections = [
   { id: 'registrar', label: () => t('super.settings.domainRegistrar') },
   { id: 'pricing', label: () => t('super.settings.domainPricing') },
   { id: 'branding', label: () => t('super.settings.branding') },
+  { id: 'log-archiving', label: () => t('super.settings.logArchiving') },
+  { id: 'backup-defaults', label: () => 'Backup Defaults' },
 ]
 
 // General settings
@@ -104,6 +106,21 @@ const brandFaviconSet = ref(false)
 const brandLogoFile = ref<File | null>(null)
 const brandFaviconFile = ref<File | null>(null)
 const savingBranding = ref(false)
+
+// Log Archiving settings
+const logArchiveEnabled = ref(false)
+const logArchiveRetentionDays = ref(90)
+const logArchiveArchiveRetentionDays = ref(365)
+const logArchiveAuditEnabled = ref(true)
+const logArchiveErrorEnabled = ref(true)
+const logArchiveAllowUserDelete = ref(false)
+const savingLogArchive = ref(false)
+const triggeringArchive = ref(false)
+
+// Backup defaults
+const defaultBackupClusterId = ref('')
+const storageClusters = ref<Array<{ id: string; label: string; region: string | null }>>([])
+const savingBackupDefaults = ref(false)
 
 async function fetchSettings() {
   loading.value = true
@@ -318,6 +335,57 @@ async function removeBrandingAsset(type: 'logo' | 'favicon') {
   }
 }
 
+async function fetchLogArchiveSettings() {
+  try {
+    const data = await api.get<Record<string, any>>('/settings')
+    logArchiveEnabled.value = data['platform:logArchive:enabled'] === true
+    logArchiveRetentionDays.value = (data['platform:logArchive:retentionDays'] as number) ?? 90
+    logArchiveArchiveRetentionDays.value = (data['platform:logArchive:archiveRetentionDays'] as number) ?? 365
+    logArchiveAuditEnabled.value = data['platform:logArchive:auditLogEnabled'] !== false
+    logArchiveErrorEnabled.value = data['platform:logArchive:errorLogEnabled'] !== false
+    logArchiveAllowUserDelete.value = data['platform:logArchive:allowUserArchiveDelete'] === true
+  } catch {
+    // Settings may not exist yet
+  }
+}
+
+async function saveLogArchiveSettings() {
+  savingLogArchive.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings', {
+      'platform:logArchive:enabled': logArchiveEnabled.value,
+      'platform:logArchive:retentionDays': logArchiveRetentionDays.value,
+      'platform:logArchive:archiveRetentionDays': logArchiveArchiveRetentionDays.value,
+      'platform:logArchive:auditLogEnabled': logArchiveAuditEnabled.value,
+      'platform:logArchive:errorLogEnabled': logArchiveErrorEnabled.value,
+      'platform:logArchive:allowUserArchiveDelete': logArchiveAllowUserDelete.value,
+    })
+    success.value = t('common.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save'
+  } finally {
+    savingLogArchive.value = false
+  }
+}
+
+async function triggerArchiveNow() {
+  triggeringArchive.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.post('/log-archives/trigger', {})
+    success.value = t('super.settings.logArchiveRunNowSuccess')
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to trigger archive'
+  } finally {
+    triggeringArchive.value = false
+  }
+}
+
 function formatCents(cents: number): string {
   return (cents / 100).toFixed(2)
 }
@@ -423,6 +491,40 @@ async function testEmailSend() {
   }
 }
 
+async function fetchBackupDefaults() {
+  try {
+    const [data, clusters] = await Promise.all([
+      api.get<Record<string, any>>('/settings'),
+      api.get<any[]>('/storage/clusters').catch(() => []),
+    ])
+    defaultBackupClusterId.value = (data['limits:defaultBackupClusterId'] as string) ?? ''
+    storageClusters.value = (clusters || []).map((c: any) => ({
+      id: c.id,
+      label: c.label || c.region || c.id,
+      region: c.region,
+    }))
+  } catch {
+    // Settings may not exist yet
+  }
+}
+
+async function saveBackupDefaults() {
+  savingBackupDefaults.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings', {
+      'limits:defaultBackupClusterId': defaultBackupClusterId.value || null,
+    })
+    success.value = 'Saved'
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save backup defaults'
+  } finally {
+    savingBackupDefaults.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -431,6 +533,8 @@ onMounted(() => {
   fetchRegistrar()
   fetchPricing()
   fetchBranding()
+  fetchLogArchiveSettings()
+  fetchBackupDefaults()
 })
 </script>
 
@@ -1120,6 +1224,102 @@ onMounted(() => {
                 <Loader2 v-if="savingBranding" class="w-4 h-4 animate-spin" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingBranding ? $t('common.saving') : $t('common.save') }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Log Archiving -->
+        <div v-if="activeSection === 'log-archiving'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.logArchiving') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.logArchivingDesc') }}</p>
+          </div>
+          <form @submit.prevent="saveLogArchiveSettings" class="p-6 space-y-6">
+            <!-- Enable toggle -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('super.settings.logArchiveEnabled') }}</label>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input v-model="logArchiveEnabled" type="checkbox" class="sr-only peer" />
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-gray-500 peer-checked:bg-primary-600"></div>
+              </label>
+            </div>
+
+            <!-- Retention days -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.logArchiveRetentionDays') }}</label>
+              <input v-model.number="logArchiveRetentionDays" type="number" min="1" max="3650" class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+
+            <!-- Archive retention days -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.logArchiveArchiveRetentionDays') }}</label>
+              <input v-model.number="logArchiveArchiveRetentionDays" type="number" min="1" max="3650" class="w-full max-w-xs px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+
+            <!-- Archive audit log -->
+            <div class="flex items-center gap-3">
+              <input v-model="logArchiveAuditEnabled" type="checkbox" id="archiveAudit" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <label for="archiveAudit" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('super.settings.logArchiveAuditEnabled') }}</label>
+            </div>
+
+            <!-- Archive error log -->
+            <div class="flex items-center gap-3">
+              <input v-model="logArchiveErrorEnabled" type="checkbox" id="archiveError" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <label for="archiveError" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('super.settings.logArchiveErrorEnabled') }}</label>
+            </div>
+
+            <!-- Allow user archive delete -->
+            <div class="flex items-center gap-3">
+              <input v-model="logArchiveAllowUserDelete" type="checkbox" id="allowUserDelete" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+              <label for="allowUserDelete" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('super.settings.logArchiveAllowUserDelete') }}</label>
+            </div>
+
+            <div class="pt-2 flex items-center gap-3">
+              <button type="submit" :disabled="savingLogArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                <Loader2 v-if="savingLogArchive" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ savingLogArchive ? $t('common.saving') : $t('common.save') }}
+              </button>
+              <button type="button" @click="triggerArchiveNow" :disabled="triggeringArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
+                <Loader2 v-if="triggeringArchive" class="w-4 h-4 animate-spin" />
+                <RefreshCw v-else class="w-4 h-4" />
+                {{ $t('super.settings.logArchiveRunNow') }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Backup Defaults -->
+        <div v-if="activeSection === 'backup-defaults'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Archive class="w-5 h-5 text-primary-500" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Backup Defaults</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure default backup storage cluster for the platform. Per-account overrides are managed in Billing &gt; Resource Limits.</p>
+          </div>
+          <form @submit.prevent="saveBackupDefaults" class="p-6 space-y-6">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Default Backup Cluster</label>
+              <select
+                v-model="defaultBackupClusterId"
+                class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              >
+                <option value="">Auto (first available cluster)</option>
+                <option v-for="cluster in storageClusters" :key="cluster.id" :value="cluster.id">
+                  {{ cluster.label }}{{ cluster.region ? ` (${cluster.region})` : '' }}
+                </option>
+              </select>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">When no cluster is explicitly chosen, backups will use this cluster. If no cluster is selected, the first available storage cluster is used.</p>
+            </div>
+            <div class="pt-2">
+              <button type="submit" :disabled="savingBackupDefaults" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                <Loader2 v-if="savingBackupDefaults" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ savingBackupDefaults ? $t('common.saving') : $t('common.save') }}
               </button>
             </div>
           </form>

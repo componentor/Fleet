@@ -1182,7 +1182,17 @@
       "removeFavicon": "移除图标",
       "brandingSaved": "品牌已保存",
       "logoHint": "推荐：PNG 或 SVG，最大 2 MB",
-      "faviconHint": "推荐：ICO 或 PNG 32x32，最大 500 KB"
+      "faviconHint": "推荐：ICO 或 PNG 32x32，最大 500 KB",
+      "logArchiving": "日志归档",
+      "logArchivingDesc": "自动将旧的审计和错误日志条目归档为压缩文件。",
+      "logArchiveEnabled": "启用自动日志归档",
+      "logArchiveRetentionDays": "归档超过（天）的日志",
+      "logArchiveArchiveRetentionDays": "删除超过（天）的归档",
+      "logArchiveAuditEnabled": "归档审计日志",
+      "logArchiveErrorEnabled": "归档错误日志",
+      "logArchiveAllowUserDelete": "允许账户所有者删除自己的归档",
+      "logArchiveRunNow": "立即运行归档",
+      "logArchiveRunNowSuccess": "归档任务已加入队列"
     },
     "billing": {
       "title": "计费配置",
@@ -1945,5 +1955,23 @@
     "restarting": "容器正在重新启动...",
     "restartingDesc": "平台正在应用更新。API 恢复在线后，此页面将自动刷新。",
     "pinging": "等待中..."
+  },
+  "logArchives": {
+    "title": "日志归档",
+    "dateRange": "日期范围",
+    "records": "记录数",
+    "size": "大小",
+    "status": "状态",
+    "download": "下载",
+    "delete": "删除",
+    "deleteConfirm": "删除此归档？原始日志条目已被移除。此操作无法撤销。",
+    "noArchives": "暂无归档。",
+    "pending": "归档中...",
+    "completed": "已完成",
+    "failed": "失败",
+    "type": "类型",
+    "auditLog": "审计日志",
+    "errorLog": "错误日志",
+    "createdAt": "归档时间"
   }
 }
