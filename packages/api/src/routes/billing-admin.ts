@@ -94,6 +94,9 @@ const resourceLimitsSchema = z.object({
   maxNfsStorageGb: z.number().int().min(0).nullable().optional(),
   maxTotalCpuCores: z.number().int().min(0).nullable().optional(),
   maxTotalMemoryMb: z.number().int().min(0).nullable().optional(),
+  maxBackupStorageGb: z.number().int().min(0).nullable().optional(),
+  backupClusterId: z.string().uuid().nullable().optional(),
+  maxContainerDiskMb: z.number().int().min(0).nullable().optional(),
 }).openapi('ResourceLimitsRequest');
 
 const overrideSchema = z.object({
@@ -618,6 +621,8 @@ billingAdmin.openapi(getGlobalResourceLimitsRoute, (async (c: any) => {
     maxNfsStorageGb: null,
     maxTotalCpuCores: null,
     maxTotalMemoryMb: null,
+    maxBackupStorageGb: null,
+    backupClusterId: null,
   });
 }) as any);
 
@@ -667,6 +672,8 @@ billingAdmin.openapi(getAccountResourceLimitsRoute, (async (c: any) => {
       maxNfsStorageGb: override?.maxNfsStorageGb ?? global?.maxNfsStorageGb ?? null,
       maxTotalCpuCores: override?.maxTotalCpuCores ?? global?.maxTotalCpuCores ?? null,
       maxTotalMemoryMb: override?.maxTotalMemoryMb ?? global?.maxTotalMemoryMb ?? null,
+      maxBackupStorageGb: override?.maxBackupStorageGb ?? global?.maxBackupStorageGb ?? null,
+      backupClusterId: override?.backupClusterId ?? global?.backupClusterId ?? null,
     },
   });
 }) as any);

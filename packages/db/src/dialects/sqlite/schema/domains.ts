@@ -18,6 +18,7 @@ export const dnsZones = sqliteTable('dns_zones', {
     .notNull(),
   domain: text('domain').notNull(),
   verified: integer('verified', { mode: 'boolean' }).default(false),
+  verificationToken: text('verification_token'),
   nameservers: text('nameservers', { mode: 'json' }).$default(() => ([])),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

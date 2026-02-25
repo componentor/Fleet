@@ -19,6 +19,9 @@ export const backups = mysqlTable('backups', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   serviceId: varchar('service_id', { length: 36 }).references(() => services.id, { onDelete: 'set null' }),
+  parentId: varchar('parent_id', { length: 36 }), // FK to level-0 backup in incremental chain
+  level: int('level').default(0), // 0 = full, 1+ = incremental
+  clusterId: varchar('cluster_id', { length: 36 }), // Storage cluster used for this backup
   type: varchar('type', { length: 255 }).default('manual'),
   status: varchar('status', { length: 255 }).default('pending'),
   storagePath: varchar('storage_path', { length: 255 }),
@@ -30,6 +33,7 @@ export const backups = mysqlTable('backups', {
 }, (table) => [
   index('idx_backups_account_id').on(table.accountId),
   index('idx_backups_service_id').on(table.serviceId),
+  index('idx_backups_parent_id').on(table.parentId),
 ]);
 
 export const backupSchedules = mysqlTable('backup_schedules', {
@@ -38,6 +42,7 @@ export const backupSchedules = mysqlTable('backup_schedules', {
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
   serviceId: varchar('service_id', { length: 36 }).references(() => services.id, { onDelete: 'set null' }),
+  clusterId: varchar('cluster_id', { length: 36 }), // Storage cluster for backups created by this schedule
   cron: varchar('cron', { length: 255 }).notNull(),
   retentionDays: int('retention_days').default(30),
   retentionCount: int('retention_count').default(10),
@@ -51,7 +56,7 @@ export const backupSchedules = mysqlTable('backup_schedules', {
   index('idx_backup_schedules_service_id').on(table.serviceId),
 ]);
 
-export const backupsRelations = relations(backups, ({ one }) => ({
+export const backupsRelations = relations(backups, ({ one, many }) => ({
   account: one(accounts, {
     fields: [backups.accountId],
     references: [accounts.id],
@@ -60,6 +65,12 @@ export const backupsRelations = relations(backups, ({ one }) => ({
     fields: [backups.serviceId],
     references: [services.id],
   }),
+  parent: one(backups, {
+    fields: [backups.parentId],
+    references: [backups.id],
+    relationName: 'backupChain',
+  }),
+  children: many(backups, { relationName: 'backupChain' }),
 }));
 
 export const backupSchedulesRelations = relations(

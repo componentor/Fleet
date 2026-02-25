@@ -386,7 +386,12 @@ async function fetchImageTags(serviceName: string, image: string) {
       `/marketplace/image-tags?image=${encodeURIComponent(image)}`,
     )
     // Build full image:tag strings for the dropdown
-    availableTags.value[serviceName] = result.tags.map((tag) => `${imageBase}:${tag}`)
+    const fullTags = result.tags.map((tag) => `${imageBase}:${tag}`)
+    availableTags.value[serviceName] = fullTags
+    // Default to latest tag from Docker Hub
+    if (fullTags.length > 0 && fullTags[0] !== undefined) {
+      imageVersions.value[serviceName] = fullTags[0]
+    }
   } catch {
     // Graceful fallback — just show the default
     availableTags.value[serviceName] = [image]

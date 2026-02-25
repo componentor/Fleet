@@ -126,6 +126,9 @@ export const apiKeysRelations = _schema.apiKeysRelations;
 // errors.ts
 export const errorLog = _schema.errorLog as typeof PgSchema.errorLog;
 
+// log-archives.ts
+export const logArchives = _schema.logArchives as typeof PgSchema.logArchives;
+
 // webhook_events (from billing.ts)
 export const webhookEvents = _schema.webhookEvents as typeof PgSchema.webhookEvents;
 

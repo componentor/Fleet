@@ -98,10 +98,16 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
     devDependencies:
       '@types/dockerode':
         specifier: ^3.3.34
         version: 3.3.47
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       tsup:
         specifier: ^8.3.6
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
@@ -171,6 +177,9 @@ importers:
       stripe:
         specifier: ^17.5.0
         version: 17.7.0
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
       yaml:
         specifier: ^2.8.2
         version: 2.8.2
@@ -193,6 +202,9 @@ importers:
       '@types/ssh2':
         specifier: ^1.15.5
         version: 1.15.5
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
@@ -1664,6 +1676,9 @@ packages:
 
   '@types/web-bluetooth@0.0.21':
     resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@vitejs/plugin-vue@5.2.4':
     resolution: {integrity: sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA==}
@@ -4791,6 +4806,10 @@ snapshots:
 
   '@types/web-bluetooth@0.0.21': {}
 
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 22.19.11
+
   '@vitejs/plugin-vue@5.2.4(vite@6.4.1(@types/node@25.2.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))(vue@3.5.28(typescript@5.9.3))':
     dependencies:
       vite: 6.4.1(@types/node@25.2.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
@@ -4804,6 +4823,14 @@ snapshots:
       '@vitest/utils': 4.0.18
       chai: 6.2.2
       tinyrainbow: 3.0.3
+
+  '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))':
+    dependencies:
+      '@vitest/spy': 4.0.18
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 6.4.1(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
 
   '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@25.2.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
@@ -6233,7 +6260,7 @@ snapshots:
   vitest@4.0.18(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:
       '@vitest/expect': 4.0.18
-      '@vitest/mocker': 4.0.18(vite@6.4.1(@types/node@25.2.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
+      '@vitest/mocker': 4.0.18(vite@6.4.1(@types/node@22.19.11)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
       '@vitest/pretty-format': 4.0.18
       '@vitest/runner': 4.0.18
       '@vitest/snapshot': 4.0.18

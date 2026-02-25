@@ -60,7 +60,7 @@ export const useServicesStore = defineStore('services', () => {
     }
   }
 
-  async function deleteService(id: string) {
+  async function deleteService(id: string, opts?: { deleteVolumes?: boolean }) {
     // Optimistic: remove from local state immediately
     const previous = services.value
     services.value = services.value.filter((s) => s.id !== id)
@@ -68,7 +68,8 @@ export const useServicesStore = defineStore('services', () => {
       currentService.value = null
     }
     try {
-      await api.del(`/services/${id}`)
+      const qs = opts?.deleteVolumes ? '?deleteVolumes=true' : ''
+      await api.del(`/services/${id}${qs}`)
     } catch (err) {
       // Rollback on failure
       services.value = previous
@@ -76,7 +77,7 @@ export const useServicesStore = defineStore('services', () => {
     }
   }
 
-  async function deleteStack(stackId: string) {
+  async function deleteStack(stackId: string, opts?: { deleteVolumes?: boolean }) {
     // Optimistic: remove all services in this stack immediately
     const previous = services.value
     services.value = services.value.filter((s) => s.stackId !== stackId)
@@ -84,7 +85,8 @@ export const useServicesStore = defineStore('services', () => {
       currentService.value = null
     }
     try {
-      await api.del(`/services/stack/${stackId}`)
+      const qs = opts?.deleteVolumes ? '?deleteVolumes=true' : ''
+      await api.del(`/services/stack/${stackId}${qs}`)
     } catch (err) {
       // Rollback on failure
       services.value = previous

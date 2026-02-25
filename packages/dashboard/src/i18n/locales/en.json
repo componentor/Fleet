@@ -1186,7 +1186,17 @@
       "removeFavicon": "Remove Favicon",
       "brandingSaved": "Branding saved",
       "logoHint": "Recommended: PNG or SVG, max 2 MB",
-      "faviconHint": "Recommended: ICO or PNG 32x32, max 500 KB"
+      "faviconHint": "Recommended: ICO or PNG 32x32, max 500 KB",
+      "logArchiving": "Log Archiving",
+      "logArchivingDesc": "Automatically archive old audit and error log entries to compressed files.",
+      "logArchiveEnabled": "Enable automatic log archiving",
+      "logArchiveRetentionDays": "Archive logs older than (days)",
+      "logArchiveArchiveRetentionDays": "Delete archives older than (days)",
+      "logArchiveAuditEnabled": "Archive audit log",
+      "logArchiveErrorEnabled": "Archive error log",
+      "logArchiveAllowUserDelete": "Allow account owners to delete their own archives",
+      "logArchiveRunNow": "Run Archive Now",
+      "logArchiveRunNowSuccess": "Archive job queued successfully"
     },
     "billing": {
       "title": "Billing Configuration",
@@ -1870,6 +1880,19 @@
     "jobRemoved": "Job removed",
     "jobPromoted": "Job promoted to waiting"
   },
+  "confirmDelete": {
+    "title": "Delete Service",
+    "message": "Are you sure you want to delete",
+    "titleStack": "Delete Stack",
+    "messageStack": "Are you sure you want to delete stack",
+    "cannotBeUndone": "This action cannot be undone.",
+    "deleteVolumes": "Also delete related storage volumes",
+    "deleteVolumesHint": "Permanently deletes all data stored in the volumes",
+    "deleteVolumesWarning": "Warning: All data in the associated volumes will be permanently deleted. This cannot be recovered.",
+    "cancel": "Cancel",
+    "deleting": "Deleting...",
+    "confirm": "Delete"
+  },
   "updates": {
     "title": "Platform Updates",
     "checkForUpdates": "Check for Updates",
@@ -1936,5 +1959,23 @@
     "restarting": "Containers are restarting...",
     "restartingDesc": "The platform is applying the update. This page will automatically refresh once the API is back online.",
     "pinging": "Waiting..."
+  },
+  "logArchives": {
+    "title": "Log Archives",
+    "dateRange": "Date Range",
+    "records": "Records",
+    "size": "Size",
+    "status": "Status",
+    "download": "Download",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this archive? The original log entries have already been removed. This cannot be undone.",
+    "noArchives": "No archives yet.",
+    "pending": "Archiving...",
+    "completed": "Completed",
+    "failed": "Failed",
+    "type": "Type",
+    "auditLog": "Audit Log",
+    "errorLog": "Error Log",
+    "createdAt": "Archived At"
   }
 }

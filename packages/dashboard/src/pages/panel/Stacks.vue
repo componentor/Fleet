@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronRight, ArrowRight, AlertTriangle, Box,
   CheckCircle2, XCircle, Clock
 } from 'lucide-vue-next'
+import ConfirmDeleteModal from '@/components/ConfirmDeleteModal.vue'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
@@ -22,7 +23,7 @@ const { canWrite } = useRole()
 const searchQuery = ref('')
 const actionLoading = ref<string | null>(null)
 const expandedStacks = ref<Set<string>>(new Set())
-const confirmDelete = ref<string | null>(null)
+const deletingStack = ref<StackGroup | null>(null)
 
 interface StackGroup {
   stackId: string
@@ -187,13 +188,18 @@ async function restartStack(stack: StackGroup) {
   }
 }
 
-async function deleteStack(stack: StackGroup) {
-  confirmDelete.value = null
+async function confirmDeleteStack(deleteVolumes: boolean) {
+  const stack = deletingStack.value
+  if (!stack) return
+  actionLoading.value = stack.stackId
   try {
-    await store.deleteStack(stack.stackId)
+    await store.deleteStack(stack.stackId, { deleteVolumes })
+    deletingStack.value = null
     toast.success(t('stacks.deleteSuccess'))
   } catch {
     toast.error(t('stacks.deleteFailed'))
+  } finally {
+    actionLoading.value = null
   }
 }
 
@@ -327,8 +333,7 @@ onMounted(() => {
                 <span class="hidden sm:inline">{{ $t('stacks.restartAll') }}</span>
               </button>
               <button
-                v-if="confirmDelete !== stack.stackId"
-                @click="confirmDelete = stack.stackId"
+                @click="deletingStack = stack"
                 :disabled="actionLoading === stack.stackId"
                 class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 transition-colors disabled:opacity-50"
                 :title="$t('stacks.deleteStack')"
@@ -336,23 +341,6 @@ onMounted(() => {
                 <Trash2 class="w-3.5 h-3.5" />
                 <span class="hidden sm:inline">{{ $t('stacks.deleteStack') }}</span>
               </button>
-              <template v-else>
-                <button
-                  @click="deleteStack(stack)"
-                  :disabled="actionLoading === stack.stackId"
-                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
-                >
-                  <Loader2 v-if="actionLoading === stack.stackId" class="w-3.5 h-3.5 animate-spin" />
-                  <Trash2 v-else class="w-3.5 h-3.5" />
-                  {{ $t('stacks.confirmDelete') }}
-                </button>
-                <button
-                  @click="confirmDelete = null"
-                  class="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors"
-                >
-                  {{ $t('stacks.cancel') }}
-                </button>
-              </template>
             </div>
           </div>
 
@@ -399,4 +387,16 @@ onMounted(() => {
       </div>
     </div>
   </div>
+
+  <!-- Delete stack confirmation modal -->
+  <ConfirmDeleteModal
+    :show="!!deletingStack"
+    :title="t('confirmDelete.titleStack', 'Delete Stack')"
+    :message="t('confirmDelete.messageStack', 'Are you sure you want to delete stack')"
+    :item-name="deletingStack?.name || ''"
+    :show-volume-toggle="true"
+    :loading="!!actionLoading"
+    @confirm="confirmDeleteStack"
+    @cancel="deletingStack = null"
+  />
 </template>

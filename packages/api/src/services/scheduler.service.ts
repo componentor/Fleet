@@ -146,6 +146,36 @@ class SchedulerService {
       },
     );
 
+    // Log archiving — daily at 1:30 AM UTC
+    await getMaintenanceQueue().add(
+      'log-archive',
+      { type: 'log-archive' },
+      {
+        repeat: { pattern: '30 1 * * *' },
+        jobId: 'system:log-archive',
+      },
+    );
+
+    // Log archive cleanup — daily at 1:45 AM UTC
+    await getMaintenanceQueue().add(
+      'log-archive-cleanup',
+      { type: 'log-archive-cleanup' },
+      {
+        repeat: { pattern: '45 1 * * *' },
+        jobId: 'system:log-archive-cleanup',
+      },
+    );
+
+    // Backup retention cleanup — daily at 3:30 AM UTC
+    await getMaintenanceQueue().add(
+      'backup-retention-cleanup',
+      { type: 'backup-retention-cleanup' },
+      {
+        repeat: { pattern: '30 3 * * *' },
+        jobId: 'system:backup-retention-cleanup',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -156,7 +186,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 13 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 16 system jobs (BullMQ)`,
     );
   }
 

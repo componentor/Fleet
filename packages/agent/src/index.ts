@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
 import { execSync } from 'node:child_process'
+import { WebSocketServer } from 'ws'
 import { NodeMonitor } from './monitor.js'
 import { NfsManager } from './nfs.js'
+import { handleExecRequest, handleExecStreamRequest, handleExecInputRequest, handleExecWebSocket } from './exec.js'
 import { logger } from './logger.js'
 
 function detectNodeId(): string {
@@ -68,7 +70,7 @@ logger.info(`Starting Fleet agent for node: ${NODE_ID}`)
 monitor = new NodeMonitor(API_URL, NODE_ID, NODE_AUTH_TOKEN)
 nfs = new NfsManager()
 
-// Health check HTTP endpoint for Docker healthcheck
+// HTTP server for health checks and exec proxy
 healthServer = createServer((req, res) => {
   if (req.url === '/health' && req.method === 'GET') {
     const status = monitor?.isHealthy() ?? false
@@ -79,14 +81,73 @@ healthServer = createServer((req, res) => {
       uptime: Math.floor(process.uptime()),
       consecutiveFailures: monitor?.getConsecutiveFailures() ?? 0,
     }))
+  } else if (req.url === '/exec' && req.method === 'POST') {
+    handleExecRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
+      logger.error({ err }, 'Exec request handler error')
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal error' }))
+      }
+    })
+  } else if (req.url === '/exec-stream' && req.method === 'POST') {
+    handleExecStreamRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
+      logger.error({ err }, 'Exec stream handler error')
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal error' }))
+      }
+    })
+  } else if (req.url === '/exec-input' && req.method === 'POST') {
+    handleExecInputRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
+      logger.error({ err }, 'Exec input handler error')
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal error' }))
+      }
+    })
   } else {
     res.writeHead(404)
     res.end()
   }
 })
 
+// WebSocket server for interactive terminal sessions
+const wss = new WebSocketServer({ noServer: true })
+
+healthServer.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url!, `http://${req.headers.host}`)
+
+  if (url.pathname === '/ws/exec') {
+    // Verify auth token
+    const token = url.searchParams.get('token')
+    if (NODE_AUTH_TOKEN && token !== NODE_AUTH_TOKEN) {
+      socket.destroy()
+      return
+    }
+
+    const containerId = url.searchParams.get('containerId')
+    if (!containerId) {
+      socket.destroy()
+      return
+    }
+
+    // Collect shells to try
+    const shell = url.searchParams.get('shell')
+    const shells = shell ? [shell] : ['/bin/sh', '/bin/bash', '/bin/ash']
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      handleExecWebSocket(ws, containerId, shells).catch((err) => {
+        logger.error({ err, containerId }, 'WebSocket exec handler error')
+        ws.close(1011, 'Internal error')
+      })
+    })
+  } else {
+    socket.destroy()
+  }
+})
+
 healthServer.listen(HEALTH_PORT, () => {
-  logger.info(`Health check server listening on port ${HEALTH_PORT}`)
+  logger.info(`Health/exec server listening on port ${HEALTH_PORT}`)
 })
 
 // Start health reporting

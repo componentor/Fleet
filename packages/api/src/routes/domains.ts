@@ -322,6 +322,7 @@ dnsRoutes.openapi(createZoneRoute, (async (c: any) => {
     accountId,
     domain,
     verified: false,
+    verificationToken,
     nameservers: resolvedNameservers,
   });
 
@@ -371,7 +372,20 @@ dnsRoutes.openapi(getZoneRoute, (async (c: any) => {
     return c.json({ error: 'Zone not found' }, 404);
   }
 
-  return c.json(zone);
+  // For unverified zones, include the CNAME target so the UI can show DNS instructions
+  if (!zone.verified) {
+    const account = c.get('account');
+    const platformDomain = await getPlatformDomain();
+    const cnameTarget = `${account?.slug ?? accountId}.${platformDomain}`;
+    return c.json({ ...zone, cnameTarget });
+  }
+
+  // Check if this zone has a matching domain registration (purchased domain)
+  const registration = await db.query.domainRegistrations.findFirst({
+    where: eq(domainRegistrations.domain, zone.domain),
+  });
+
+  return c.json({ ...zone, isPurchased: !!registration });
 }) as any);
 
 // DELETE /zones/:id
@@ -433,14 +447,15 @@ dnsRoutes.openapi(verifyZoneRoute, (async (c: any) => {
     return c.json({ message: 'Domain is already verified', verified: true });
   }
 
+  // Use the stored token, fall back to client-sent token for backwards compatibility
   const data = c.req.valid('json');
-  const token = data?.token;
+  const token = zone.verificationToken ?? data?.token;
 
   if (!token) {
     return c.json(
       {
         error:
-          'Verification token is required. Provide the token that was returned when the zone was created.',
+          'Verification token is missing. Try removing and re-adding the domain.',
       },
       400,
     );

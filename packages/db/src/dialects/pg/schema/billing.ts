@@ -130,6 +130,8 @@ export const resourceLimits = pgTable('resource_limits', {
   maxContainerDiskMb: integer('max_container_disk_mb'),
   maxTotalCpuCores: integer('max_total_cpu_cores'),
   maxTotalMemoryMb: integer('max_total_memory_mb'),
+  maxBackupStorageGb: integer('max_backup_storage_gb'), // Separate backup quota
+  backupClusterId: uuid('backup_cluster_id'), // Account-level backup cluster override
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),

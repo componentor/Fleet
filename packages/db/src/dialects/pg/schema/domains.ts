@@ -21,6 +21,7 @@ export const dnsZones = pgTable('dns_zones', {
     .notNull(),
   domain: varchar('domain', { length: 255 }).notNull(),
   verified: boolean('verified').default(false),
+  verificationToken: varchar('verification_token', { length: 255 }),
   nameservers: jsonb('nameservers').default([]),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

@@ -18,6 +18,8 @@ export const storageClusters = sqliteTable('storage_clusters', {
   objectProvider: text('object_provider').default('local').notNull(),
   status: text('status').default('inactive').notNull(),
   replicationFactor: integer('replication_factor').default(3),
+  allowServices: integer('allow_services', { mode: 'boolean' }).default(true).notNull(),
+  allowBackups: integer('allow_backups', { mode: 'boolean' }).default(true).notNull(),
   config: text('config', { mode: 'json' }).$default(() => ({})),
   objectConfig: text('object_config', { mode: 'json' }).$default(() => ({})),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

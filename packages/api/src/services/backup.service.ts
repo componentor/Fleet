@@ -1,13 +1,13 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile as fsReadFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile as fsReadFile, readdir, rm, stat, writeFile, copyFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
-import { db, backups, backupSchedules, services, insertReturning, updateReturning, deleteReturning, eq, and, isNull } from '@fleet/db';
+import { db, backups, backupSchedules, services, resourceLimits, platformSettings, storageClusters, insertReturning, updateReturning, deleteReturning, eq, and, isNull, sql, desc } from '@fleet/db';
 import { getBackupQueue, isQueueAvailable } from './queue.service.js';
 import { storageManager } from './storage/storage-manager.js';
 import { STORAGE_BUCKETS } from './storage/storage-provider.js';
@@ -15,6 +15,9 @@ import { logger } from './logger.js';
 
 const BACKUP_ENCRYPTION_ALGO = 'aes-256-gcm';
 const BACKUP_IV_LENGTH = 12;
+const BACKUP_IMAGE = 'debian:bookworm-slim';
+const MAX_CHAIN_LENGTH = 7; // force new full backup after 7 incrementals
+const DEFAULT_BACKUP_QUOTA_GB = 50;
 
 function getEncryptionKey(): Buffer | null {
   const hex = process.env['ENCRYPTION_KEY'];
@@ -28,6 +31,172 @@ const BACKUP_DIR = process.env['BACKUP_DIR'] ?? '/app/data/backups';
 const NFS_BACKUP_DIR = process.env['NFS_BACKUP_DIR'] ?? '/srv/nfs/backups';
 
 export class BackupService {
+  // ── Quota Methods ──────────────────────────────────────────────────────────
+
+  /**
+   * Get total backup storage used by an account (in bytes).
+   */
+  async getAccountBackupUsage(accountId: string): Promise<number> {
+    const [result] = await db
+      .select({ total: sql<number>`coalesce(sum(${backups.sizeBytes}), 0)` })
+      .from(backups)
+      .where(and(eq(backups.accountId, accountId), eq(backups.status, 'completed')));
+    return Number(result?.total ?? 0);
+  }
+
+  /**
+   * Get backup storage limit for an account (in bytes).
+   * Falls back: account override → global default → DEFAULT_BACKUP_QUOTA_GB.
+   */
+  async getAccountBackupLimit(accountId: string): Promise<number> {
+    // Account-specific limit
+    const accountLimits = await db.query.resourceLimits.findFirst({
+      where: eq(resourceLimits.accountId, accountId),
+    });
+    if (accountLimits?.maxBackupStorageGb != null) {
+      return accountLimits.maxBackupStorageGb * 1024 * 1024 * 1024;
+    }
+    // Global default (accountId is null)
+    const globalLimits = await db.query.resourceLimits.findFirst({
+      where: isNull(resourceLimits.accountId),
+    });
+    if (globalLimits?.maxBackupStorageGb != null) {
+      return globalLimits.maxBackupStorageGb * 1024 * 1024 * 1024;
+    }
+    return DEFAULT_BACKUP_QUOTA_GB * 1024 * 1024 * 1024;
+  }
+
+  /**
+   * Get backup quota info for an account.
+   */
+  async getBackupQuota(accountId: string) {
+    const [usedBytes, limitBytes] = await Promise.all([
+      this.getAccountBackupUsage(accountId),
+      this.getAccountBackupLimit(accountId),
+    ]);
+    const usedGb = Math.round((usedBytes / (1024 * 1024 * 1024)) * 100) / 100;
+    const limitGb = Math.round((limitBytes / (1024 * 1024 * 1024)) * 100) / 100;
+    const percentUsed = limitBytes > 0 ? Math.round((usedBytes / limitBytes) * 10000) / 100 : 0;
+    return { usedBytes, limitBytes, usedGb, limitGb, percentUsed };
+  }
+
+  /**
+   * Enforce backup quota — throws if account is over limit.
+   */
+  private async enforceBackupQuota(accountId: string): Promise<void> {
+    const { usedBytes, limitBytes, percentUsed } = await this.getBackupQuota(accountId);
+    if (usedBytes >= limitBytes) {
+      throw new Error(
+        `Backup quota exceeded: ${percentUsed}% used (${Math.round(usedBytes / 1024 / 1024)}MB / ${Math.round(limitBytes / 1024 / 1024)}MB)`,
+      );
+    }
+  }
+
+  // ── Cluster Resolution ────────────────────────────────────────────────────
+
+  /**
+   * Resolve which storage cluster to use for a backup.
+   * Priority: explicit → account override → platform default → first cluster → null (local).
+   */
+  async resolveBackupCluster(accountId: string, requestedClusterId?: string): Promise<string | null> {
+    // 1. Explicit cluster requested — must allow backups
+    if (requestedClusterId) {
+      const cluster = await db.query.storageClusters.findFirst({
+        where: and(eq(storageClusters.id, requestedClusterId), eq(storageClusters.allowBackups, true)),
+      });
+      if (cluster) return cluster.id;
+    }
+
+    // 2. Account-level override — validate it still allows backups
+    const accountLimits = await db.query.resourceLimits.findFirst({
+      where: eq(resourceLimits.accountId, accountId),
+    });
+    if (accountLimits?.backupClusterId) {
+      const overrideCluster = await db.query.storageClusters.findFirst({
+        where: and(eq(storageClusters.id, accountLimits.backupClusterId), eq(storageClusters.allowBackups, true)),
+      });
+      if (overrideCluster) return overrideCluster.id;
+      // Fall through if override cluster no longer allows backups
+    }
+
+    // 3. Platform default — validate it still allows backups
+    const setting = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'limits:defaultBackupClusterId'),
+    });
+    if (setting?.value) {
+      const defaultCluster = await db.query.storageClusters.findFirst({
+        where: and(eq(storageClusters.id, String(setting.value)), eq(storageClusters.allowBackups, true)),
+      });
+      if (defaultCluster) return defaultCluster.id;
+      // Fall through if default cluster no longer allows backups
+    }
+
+    // 4. First available backup-capable cluster
+    const firstCluster = await db.query.storageClusters.findFirst({
+      where: eq(storageClusters.allowBackups, true),
+    });
+    if (firstCluster) return firstCluster.id;
+
+    // 5. No backup-capable clusters — local/NFS
+    return null;
+  }
+
+  // ── Incremental Chain Detection ───────────────────────────────────────────
+
+  /**
+   * Detect if we can create an incremental backup for this account+service.
+   * Returns chain info or null (create a full backup).
+   */
+  private async getChainInfo(
+    accountId: string,
+    serviceId: string | null,
+  ): Promise<{
+    parentId: string;
+    nextLevel: number;
+    parentBackup: typeof backups.$inferSelect;
+  } | null> {
+    // Find most recent completed level-0 (full) backup for this account+service
+    const conditions = [
+      eq(backups.accountId, accountId),
+      eq(backups.status, 'completed'),
+      eq(backups.level, 0),
+    ];
+    if (serviceId) {
+      conditions.push(eq(backups.serviceId, serviceId));
+    } else {
+      conditions.push(isNull(backups.serviceId));
+    }
+
+    const fullBackup = await db.query.backups.findFirst({
+      where: and(...conditions),
+      orderBy: (b, { desc: d }) => d(b.createdAt),
+    });
+
+    if (!fullBackup) return null;
+
+    // Count existing incrementals in this chain
+    const chainBackups = await db.query.backups.findMany({
+      where: and(
+        eq(backups.parentId, fullBackup.id),
+        eq(backups.status, 'completed'),
+      ),
+    });
+
+    const chainLength = chainBackups.length;
+    if (chainLength >= MAX_CHAIN_LENGTH) return null; // Force a new full backup
+
+    // Find the most recent backup in the chain (could be the full or the latest incremental)
+    const latestInChain = chainBackups.length > 0
+      ? chainBackups.sort((a, b) => (b.level ?? 0) - (a.level ?? 0))[0]!
+      : fullBackup;
+
+    return {
+      parentId: fullBackup.id,
+      nextLevel: chainLength + 1,
+      parentBackup: latestInChain,
+    };
+  }
+
   /**
    * Create a backup for an account, optionally scoped to a specific service.
    */
@@ -35,12 +204,19 @@ export class BackupService {
     accountId: string,
     serviceId?: string,
     storageBackend: string = 'nfs',
+    options?: { clusterId?: string; expiresAt?: Date },
   ): Promise<{
     id: string;
     status: string;
     storagePath: string | null;
     sizeBytes: number;
   }> {
+    // Enforce backup quota
+    await this.enforceBackupQuota(accountId);
+
+    // Resolve backup cluster
+    const clusterId = await this.resolveBackupCluster(accountId, options?.clusterId ?? undefined);
+
     const backupId = randomUUID();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupName = serviceId
@@ -61,6 +237,10 @@ export class BackupService {
       storageBackend,
       sizeBytes: 0,
       contents: [],
+      level: 0,
+      parentId: null,
+      clusterId,
+      expiresAt: options?.expiresAt ?? null,
     });
 
     if (!backup) {
@@ -76,6 +256,7 @@ export class BackupService {
         accountId,
         serviceId,
         storageBackend,
+        clusterId,
       }, { attempts: 2, backoff: { type: 'exponential', delay: 5000 } });
     } else {
       // Fallback: run in-process (local dev without Valkey)
@@ -113,7 +294,9 @@ export class BackupService {
       backupId = existingBackupId;
       backupPath = existingBackupPath;
     } else {
-      // Standalone call — create a new record
+      // Standalone call — enforce quota and create a new record
+      await this.enforceBackupQuota(accountId);
+
       backupId = randomUUID();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupName = serviceId
@@ -122,6 +305,8 @@ export class BackupService {
 
       const baseDir = storageBackend === 'nfs' ? NFS_BACKUP_DIR : BACKUP_DIR;
       backupPath = join(baseDir, accountId, backupName);
+
+      const clusterId = await this.resolveBackupCluster(accountId);
 
       await insertReturning(backups, {
         id: backupId,
@@ -133,6 +318,9 @@ export class BackupService {
         storageBackend,
         sizeBytes: 0,
         contents: [],
+        level: 0,
+        parentId: null,
+        clusterId,
       });
     }
 
@@ -157,6 +345,22 @@ export class BackupService {
       await db
         .update(backups)
         .set({ status: 'in_progress' })
+        .where(eq(backups.id, backupId));
+
+      // Detect incremental chain
+      const chainInfo = await this.getChainInfo(accountId, serviceId);
+      const isIncremental = chainInfo !== null;
+      const backupLevel = isIncremental ? chainInfo.nextLevel : 0;
+      const parentId = isIncremental ? chainInfo.parentId : null;
+
+      if (isIncremental) {
+        logger.info({ backupId, parentId, level: backupLevel }, 'Creating incremental backup');
+      }
+
+      // Update backup record with chain info
+      await db
+        .update(backups)
+        .set({ level: backupLevel, parentId })
         .where(eq(backups.id, backupId));
 
       // Create working directory (temp if using object storage, backupPath for legacy)
@@ -188,20 +392,27 @@ export class BackupService {
             logger.warn({ volume: vol.source, serviceId }, 'Skipping backup: unsafe volume source');
             continue;
           }
+
+          // Restore .snar from previous backup in chain if incremental
+          const snarName = `snapshot-${vol.source.replace(/[/\\]/g, '_')}.snar`;
+          const snarPath = join(workDir, snarName);
+          if (isIncremental) {
+            await this.restoreSnarFile(chainInfo.parentBackup, vol.source, snarPath, useObjectStorage);
+          }
+
           const archiveName = `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`;
           const localArchivePath = join(workDir, archiveName);
           try {
             await this.execToFile('docker', [
               'run',
               '--rm',
-              '-v',
-              `${vol.source}:/source:ro`,
-              'alpine',
+              '-v', `${vol.source}:/source:ro`,
+              '-v', `${workDir}:/work`,
+              BACKUP_IMAGE,
               'tar',
-              'czf',
-              '-',
-              '-C',
-              '/source',
+              `--listed-incremental=/work/${snarName}`,
+              '-czf', '-',
+              '-C', '/source',
               '.',
             ], localArchivePath);
 
@@ -219,6 +430,18 @@ export class BackupService {
               path: useObjectStorage ? objectKey : localArchivePath,
               objectKey: useObjectStorage ? objectKey : undefined,
               encrypted: wasEncrypted,
+            });
+
+            // Save the .snar file as a content item (needed for next incremental)
+            const snarObjectKey = `${objectKeyPrefix}/${snarName}`;
+            if (useObjectStorage) {
+              await this.uploadToObjectStorage(snarPath, snarObjectKey);
+            }
+            contents.push({
+              type: 'snar',
+              name: snarName,
+              path: useObjectStorage ? snarObjectKey : snarPath,
+              objectKey: useObjectStorage ? snarObjectKey : undefined,
             });
           } catch (err) {
             logger.error({ err, volume: vol.source }, `Failed to backup volume ${vol.source}`);
@@ -240,6 +463,8 @@ export class BackupService {
             replicas: service.replicas,
           },
           timestamp: new Date().toISOString(),
+          backupLevel,
+          parentId,
         };
 
         await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
@@ -265,19 +490,24 @@ export class BackupService {
 
           const serviceVolumes = (service.volumes as Array<{ source: string; target: string }>) ?? [];
           for (const vol of serviceVolumes) {
+            const snarName = `snapshot-${vol.source.replace(/[/\\]/g, '_')}.snar`;
+            const snarPath = join(svcDir, snarName);
+            if (isIncremental) {
+              await this.restoreSnarFile(chainInfo.parentBackup, vol.source, snarPath, useObjectStorage);
+            }
+
             const archiveName = `volume-${vol.source.replace(/[/\\]/g, '_')}.tar.gz`;
             try {
               await this.execToFile('docker', [
                 'run',
                 '--rm',
-                '-v',
-                `${vol.source}:/source:ro`,
-                'alpine',
+                '-v', `${vol.source}:/source:ro`,
+                '-v', `${svcDir}:/work`,
+                BACKUP_IMAGE,
                 'tar',
-                'czf',
-                '-',
-                '-C',
-                '/source',
+                `--listed-incremental=/work/${snarName}`,
+                '-czf', '-',
+                '-C', '/source',
                 '.',
               ], join(svcDir, archiveName));
 
@@ -295,6 +525,18 @@ export class BackupService {
                 path: useObjectStorage ? objectKey : join(svcDir, archiveName),
                 objectKey: useObjectStorage ? objectKey : undefined,
                 encrypted: wasEncrypted,
+              });
+
+              // Save .snar
+              const snarObjectKey = `${objectKeyPrefix}/${service.id}/${snarName}`;
+              if (useObjectStorage) {
+                await this.uploadToObjectStorage(snarPath, snarObjectKey);
+              }
+              contents.push({
+                type: 'snar',
+                name: snarName,
+                path: useObjectStorage ? snarObjectKey : snarPath,
+                objectKey: useObjectStorage ? snarObjectKey : undefined,
               });
             } catch (err) {
               logger.error(
@@ -320,6 +562,8 @@ export class BackupService {
             replicas: s.replicas,
           })),
           timestamp: new Date().toISOString(),
+          backupLevel,
+          parentId,
         };
 
         await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
@@ -355,6 +599,8 @@ export class BackupService {
           storageBackend: useObjectStorage ? 'object' : (backupPath.startsWith(NFS_BACKUP_DIR) ? 'nfs' : 'local'),
           storagePath: useObjectStorage ? objectKeyPrefix : backupPath,
           contents,
+          level: backupLevel,
+          parentId,
         })
         .where(eq(backups.id, backupId));
     } catch (err) {
@@ -375,7 +621,7 @@ export class BackupService {
   }
 
   /**
-   * Restore from a backup.
+   * Restore from a backup. If the backup is incremental, walks the full chain.
    */
   async restoreBackup(backupId: string, accountId: string): Promise<{ message: string }> {
     const backup = await db.query.backups.findFirst({
@@ -394,9 +640,41 @@ export class BackupService {
       throw new Error('Backup has no storage path');
     }
 
-    const backupContents = (backup.contents as Array<{ type: string; name: string; path: string; objectKey?: string; encrypted?: boolean }>) ?? [];
-    const isObjectBacked = backup.storageBackend === 'object';
-    const tempDir = isObjectBacked ? join(tmpdir(), `fleet-restore-${backupId}`) : null;
+    // Build restore chain: for incremental backups, we need to restore from level-0 up
+    const restoreChain: (typeof backup)[] = [];
+
+    if ((backup.level ?? 0) > 0 && backup.parentId) {
+      // Walk the chain: find the level-0 parent and all incrementals in order up to this level
+      const parentBackup = await db.query.backups.findFirst({
+        where: and(eq(backups.id, backup.parentId), eq(backups.accountId, accountId)),
+      });
+      if (!parentBackup || parentBackup.status !== 'completed') {
+        throw new Error('Parent backup in chain is missing or incomplete — cannot restore incremental backup');
+      }
+      restoreChain.push(parentBackup);
+
+      // Find all intermediate incrementals (level 1 to backup.level - 1) in this chain
+      if ((backup.level ?? 0) > 1) {
+        const intermediates = await db.query.backups.findMany({
+          where: and(
+            eq(backups.parentId, backup.parentId),
+            eq(backups.accountId, accountId),
+            eq(backups.status, 'completed'),
+          ),
+        });
+        const sorted = intermediates
+          .filter((b) => (b.level ?? 0) > 0 && (b.level ?? 0) < (backup.level ?? 0))
+          .sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
+        restoreChain.push(...sorted);
+      }
+      restoreChain.push(backup);
+    } else {
+      restoreChain.push(backup);
+    }
+
+    logger.info({ backupId, chainLength: restoreChain.length, levels: restoreChain.map((b) => b.level) }, 'Restoring backup chain');
+
+    const tempDir = join(tmpdir(), `fleet-restore-${backupId}`);
 
     // Mark backup as restoring
     await db
@@ -405,72 +683,11 @@ export class BackupService {
       .where(eq(backups.id, backupId));
 
     try {
-      if (tempDir) {
-        await mkdir(tempDir, { recursive: true });
-      }
+      await mkdir(tempDir, { recursive: true });
 
-      // Restore volume data
-      const storagePath = backup.storagePath;
-      for (const item of backupContents) {
-        if (item.type === 'volume') {
-          // Extract volume name from the content entry
-          const volumeName = item.name.includes('/')
-            ? item.name.split('/').pop()!
-            : item.name;
-
-          // Validate volume name — must be a safe Docker named volume
-          if (!volumeName || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(volumeName) || volumeName.includes('..')) {
-            logger.error({ volumeName, item }, 'Skipping restore: invalid volume name');
-            continue;
-          }
-
-          let archivePath: string;
-
-          if (isObjectBacked && item.objectKey) {
-            // Download from object storage to temp directory
-            archivePath = join(tempDir!, `${randomUUID()}.tar.gz`);
-            try {
-              const buffer = await storageManager.objects.getObjectBuffer(
-                STORAGE_BUCKETS.BACKUPS,
-                item.objectKey,
-              );
-              await writeFile(archivePath, buffer);
-            } catch (err) {
-              logger.error({ err, objectKey: item.objectKey }, 'Failed to download backup archive from object storage');
-              continue;
-            }
-          } else {
-            // Legacy filesystem path — validate it's within the backup directory
-            const resolvedItemPath = resolve(item.path);
-            const safeDirPrefix = storagePath.endsWith('/') ? storagePath : storagePath + '/';
-            if (resolvedItemPath !== storagePath && !resolvedItemPath.startsWith(safeDirPrefix)) {
-              logger.error({ itemPath: item.path, storagePath }, 'Skipping restore: path outside backup directory');
-              continue;
-            }
-            archivePath = resolvedItemPath;
-          }
-
-          try {
-            // Decrypt if the backup was encrypted
-            if (item.encrypted) {
-              await this.decryptFile(archivePath);
-            }
-
-            await this.execFromFile('docker', [
-              'run',
-              '--rm',
-              '-i',
-              '-v',
-              `${volumeName}:/target`,
-              'alpine',
-              'sh',
-              '-c',
-              'cd /target && tar xzf -',
-            ], archivePath);
-          } catch (err) {
-            logger.error({ err, volume: volumeName }, `Failed to restore volume ${volumeName}`);
-          }
-        }
+      // Restore each backup in the chain in order
+      for (const chainBackup of restoreChain) {
+        await this.restoreSingleBackup(chainBackup, tempDir);
       }
 
       // Mark as completed
@@ -479,7 +696,9 @@ export class BackupService {
         .set({ status: 'completed' })
         .where(eq(backups.id, backupId));
 
-      return { message: 'Backup restored successfully' };
+      return { message: restoreChain.length > 1
+        ? `Backup restored successfully (applied ${restoreChain.length} backups in chain)`
+        : 'Backup restored successfully' };
     } catch (err) {
       await db
         .update(backups)
@@ -488,8 +707,81 @@ export class BackupService {
       throw err;
     } finally {
       // Clean up temp directory
-      if (tempDir) {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  /**
+   * Restore a single backup's volume data. Used by restoreBackup for each step in the chain.
+   */
+  private async restoreSingleBackup(
+    backup: typeof backups.$inferSelect,
+    tempDir: string,
+  ): Promise<void> {
+    const backupContents = (backup.contents as Array<{ type: string; name: string; path: string; objectKey?: string; encrypted?: boolean }>) ?? [];
+    const isObjectBacked = backup.storageBackend === 'object';
+    const storagePath = backup.storagePath ?? '';
+
+    for (const item of backupContents) {
+      if (item.type !== 'volume') continue;
+
+      // Extract volume name from the content entry
+      const volumeName = item.name.includes('/')
+        ? item.name.split('/').pop()!
+        : item.name;
+
+      // Validate volume name — must be a safe Docker named volume
+      if (!volumeName || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(volumeName) || volumeName.includes('..')) {
+        logger.error({ volumeName, item }, 'Skipping restore: invalid volume name');
+        continue;
+      }
+
+      let archivePath: string;
+
+      if (isObjectBacked && item.objectKey) {
+        // Download from object storage to temp directory
+        archivePath = join(tempDir, `${randomUUID()}.tar.gz`);
+        try {
+          const buffer = await storageManager.objects.getObjectBuffer(
+            STORAGE_BUCKETS.BACKUPS,
+            item.objectKey,
+          );
+          await writeFile(archivePath, buffer);
+        } catch (err) {
+          logger.error({ err, objectKey: item.objectKey }, 'Failed to download backup archive from object storage');
+          continue;
+        }
+      } else {
+        // Legacy filesystem path — validate it's within the backup directory
+        const resolvedItemPath = resolve(item.path);
+        const safeDirPrefix = storagePath.endsWith('/') ? storagePath : storagePath + '/';
+        if (resolvedItemPath !== storagePath && !resolvedItemPath.startsWith(safeDirPrefix)) {
+          logger.error({ itemPath: item.path, storagePath }, 'Skipping restore: path outside backup directory');
+          continue;
+        }
+        archivePath = resolvedItemPath;
+      }
+
+      try {
+        // Decrypt if the backup was encrypted
+        if (item.encrypted) {
+          await this.decryptFile(archivePath);
+        }
+
+        // Use GNU tar with --listed-incremental=/dev/null to process incremental metadata
+        await this.execFromFile('docker', [
+          'run',
+          '--rm',
+          '-i',
+          '-v', `${volumeName}:/target`,
+          BACKUP_IMAGE,
+          'tar',
+          '--listed-incremental=/dev/null',
+          '-xzf', '-',
+          '-C', '/target',
+        ], archivePath);
+      } catch (err) {
+        logger.error({ err, volume: volumeName, backupId: backup.id, level: backup.level }, `Failed to restore volume ${volumeName}`);
       }
     }
   }
@@ -567,6 +859,7 @@ export class BackupService {
     retentionDays?: number;
     retentionCount?: number;
     storageBackend?: string;
+    clusterId?: string;
   }) {
     const [schedule] = await insertReturning(backupSchedules, {
       accountId: data.accountId,
@@ -575,6 +868,7 @@ export class BackupService {
       retentionDays: data.retentionDays ?? 30,
       retentionCount: data.retentionCount ?? 10,
       storageBackend: data.storageBackend ?? 'nfs',
+      clusterId: data.clusterId ?? null,
       enabled: true,
     });
 
@@ -592,6 +886,7 @@ export class BackupService {
       retentionDays?: number;
       retentionCount?: number;
       storageBackend?: string;
+      clusterId?: string;
       enabled?: boolean;
     },
   ) {
@@ -665,6 +960,7 @@ export class BackupService {
       schedule.accountId,
       schedule.serviceId ?? undefined,
       schedule.storageBackend ?? 'nfs',
+      { clusterId: schedule.clusterId ?? undefined },
     );
   }
 
@@ -795,20 +1091,81 @@ export class BackupService {
 
   /**
    * Calculate total size of a directory in bytes.
+   * Uses du -sb (Linux), du -sk (macOS fallback), or recursive stat.
    */
   private async calculateDirSize(dirPath: string): Promise<number> {
+    // Try du -sb (Linux GNU coreutils)
     try {
       const { stdout } = await execFileAsync('du', ['-sb', dirPath]);
       const sizeStr = stdout.trim().split('\t')[0];
       return parseInt(sizeStr ?? '0', 10);
     } catch {
-      // Fallback: try stat on the directory itself
+      // Fallback: du -sk (macOS / BSD) — outputs KB
       try {
-        const stats = await stat(dirPath);
-        return Number(stats.size);
+        const { stdout } = await execFileAsync('du', ['-sk', dirPath]);
+        const sizeStr = stdout.trim().split('\t')[0];
+        return parseInt(sizeStr ?? '0', 10) * 1024;
       } catch {
-        return 0;
+        // Final fallback: recursive readdir + stat
+        return this.calculateDirSizeRecursive(dirPath);
       }
+    }
+  }
+
+  /**
+   * Recursively calculate directory size by statting each file.
+   */
+  private async calculateDirSizeRecursive(dirPath: string): Promise<number> {
+    let total = 0;
+    try {
+      const entries = await readdir(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          total += await this.calculateDirSizeRecursive(fullPath);
+        } else {
+          const fileStat = await stat(fullPath);
+          total += fileStat.size;
+        }
+      }
+    } catch {
+      // Directory doesn't exist or not readable
+    }
+    return total;
+  }
+
+  /**
+   * Restore a .snar file from a previous backup in the chain.
+   * Copies the .snar content item from the parent backup to the target path.
+   */
+  private async restoreSnarFile(
+    parentBackup: typeof backups.$inferSelect,
+    volumeName: string,
+    targetPath: string,
+    useObjectStorage: boolean,
+  ): Promise<void> {
+    const parentContents = (parentBackup.contents as Array<{ type: string; name: string; path: string; objectKey?: string }>) ?? [];
+    const snarName = `snapshot-${volumeName.replace(/[/\\]/g, '_')}.snar`;
+    const snarItem = parentContents.find((c) => c.type === 'snar' && c.name === snarName);
+
+    if (!snarItem) {
+      logger.warn({ parentBackupId: parentBackup.id, volumeName }, 'No .snar file found in parent backup — creating full backup for this volume');
+      return;
+    }
+
+    try {
+      if (parentBackup.storageBackend === 'object' && snarItem.objectKey) {
+        const buffer = await storageManager.objects.getObjectBuffer(
+          STORAGE_BUCKETS.BACKUPS,
+          snarItem.objectKey,
+        );
+        await writeFile(targetPath, buffer);
+      } else {
+        // Filesystem — copy the .snar file
+        await copyFile(snarItem.path, targetPath);
+      }
+    } catch (err) {
+      logger.warn({ err, parentBackupId: parentBackup.id, volumeName }, 'Failed to restore .snar file — will create full backup for this volume');
     }
   }
 

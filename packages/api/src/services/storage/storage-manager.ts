@@ -20,11 +20,15 @@ export interface StorageClusterConfig {
   objectConfig: Record<string, any>;
 }
 
+export type ClusterPurpose = 'services' | 'backups';
+
 export interface ClusterEntry {
   id: string;
   name: string;
   region: string | null;
   scope: string;
+  allowServices: boolean;
+  allowBackups: boolean;
   config: StorageClusterConfig;
   volumeProvider: VolumeStorageProvider;
   objectProvider: ObjectStorageProvider;
@@ -85,18 +89,26 @@ class StorageManager {
   }
 
   /**
-   * Resolve the best cluster for a given region.
+   * Resolve the best cluster for a given region, optionally filtered by purpose.
    *
    * Resolution order:
    * 1. If `region` is set → find a cluster with `scope = 'regional'` and matching `region`
    * 2. If no regional match → fall back to any `scope = 'global'` cluster
    * 3. If nothing → fall back to `defaultClusterId`
+   *
+   * When `purpose` is set, only clusters with the matching capability are considered.
    */
-  getClusterForRegion(region: string | null): ClusterEntry | undefined {
+  getClusterForRegion(region: string | null, purpose?: ClusterPurpose): ClusterEntry | undefined {
+    const matchesPurpose = (entry: ClusterEntry) => {
+      if (purpose === 'services' && !entry.allowServices) return false;
+      if (purpose === 'backups' && !entry.allowBackups) return false;
+      return true;
+    };
+
     if (region) {
       // 1. Try regional match
       for (const entry of this.clusters.values()) {
-        if (entry.scope === 'regional' && entry.region === region) {
+        if (entry.scope === 'regional' && entry.region === region && matchesPurpose(entry)) {
           return entry;
         }
       }
@@ -104,13 +116,25 @@ class StorageManager {
 
     // 2. Try global cluster
     for (const entry of this.clusters.values()) {
-      if (entry.scope === 'global') {
+      if (entry.scope === 'global' && matchesPurpose(entry)) {
         return entry;
       }
     }
 
-    // 3. Fall back to default
-    return this.defaultClusterId ? this.clusters.get(this.defaultClusterId) : undefined;
+    // 3. Fall back to default (only if it matches purpose)
+    const defaultEntry = this.defaultClusterId ? this.clusters.get(this.defaultClusterId) : undefined;
+    if (defaultEntry && matchesPurpose(defaultEntry)) return defaultEntry;
+
+    return purpose ? undefined : defaultEntry;
+  }
+
+  /** Return all clusters that match a given purpose. */
+  getClustersForPurpose(purpose: ClusterPurpose): ClusterEntry[] {
+    return this.getAllClusters().filter((entry) => {
+      if (purpose === 'services') return entry.allowServices;
+      if (purpose === 'backups') return entry.allowBackups;
+      return true;
+    });
   }
 
   // ── Initialization ─────────────────────────────────────────────────────
@@ -144,6 +168,8 @@ class StorageManager {
           name: cluster.name ?? 'default',
           region: cluster.region ?? null,
           scope: cluster.scope ?? 'regional',
+          allowServices: cluster.allowServices ?? true,
+          allowBackups: cluster.allowBackups ?? true,
           config: clusterConfig,
           volumeProvider,
           objectProvider,
@@ -192,6 +218,8 @@ class StorageManager {
         name: 'default',
         region: null,
         scope: 'regional',
+        allowServices: true,
+        allowBackups: true,
         config: fallbackConfig,
         volumeProvider,
         objectProvider,
@@ -247,6 +275,8 @@ class StorageManager {
       name: cluster.name ?? 'default',
       region: cluster.region ?? null,
       scope: cluster.scope ?? 'regional',
+      allowServices: cluster.allowServices ?? true,
+      allowBackups: cluster.allowBackups ?? true,
       config: clusterConfig,
       volumeProvider,
       objectProvider,
@@ -274,8 +304,11 @@ class StorageManager {
       await this.enforceStorageQuota(accountId, sizeGb);
     }
 
-    // Resolve cluster
-    const cluster = this.getClusterForRegion(region ?? null) ?? this.getDefaultCluster();
+    // Resolve cluster (only service-capable clusters)
+    const cluster = this.getClusterForRegion(region ?? null, 'services') ?? this.getDefaultCluster();
+    if (!cluster.allowServices) {
+      throw new Error('No storage cluster available for services in the requested region');
+    }
     const result = await cluster.volumeProvider.createVolume(name, sizeGb, nodeId);
 
     // Track in DB

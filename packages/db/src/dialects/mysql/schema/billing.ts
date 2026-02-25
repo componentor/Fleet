@@ -130,6 +130,8 @@ export const resourceLimits = mysqlTable('resource_limits', {
   maxContainerDiskMb: int('max_container_disk_mb'),
   maxTotalCpuCores: int('max_total_cpu_cores'),
   maxTotalMemoryMb: int('max_total_memory_mb'),
+  maxBackupStorageGb: int('max_backup_storage_gb'), // Separate backup quota
+  backupClusterId: varchar('backup_cluster_id', { length: 36 }), // Account-level backup cluster override
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),

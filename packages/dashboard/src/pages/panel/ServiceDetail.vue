@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin } from 'lucide-vue-next'
+import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive } from 'lucide-vue-next'
+import ConfirmDeleteModal from '../../components/ConfirmDeleteModal.vue'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
@@ -59,6 +60,7 @@ const selectedContainerId = ref('')
 const service = ref<any>(null)
 const loading = ref(true)
 const actionLoading = ref('')
+const showDeleteModal = ref(false)
 const error = ref('')
 const logs = ref('')
 const logsLoading = ref(false)
@@ -451,6 +453,7 @@ const scheduleRetentionDays = ref(30)
 const scheduleRetentionCount = ref(10)
 const addingSchedule = ref(false)
 const backupError = ref('')
+const backupQuota = ref<{ usedBytes: number; limitBytes: number; usedGb: number; limitGb: number; percentUsed: number } | null>(null)
 
 async function fetchServiceBackups() {
   backupsLoading.value = true
@@ -458,6 +461,7 @@ async function fetchServiceBackups() {
     const [b, s] = await Promise.all([
       api.get<any[]>(`/backups?serviceId=${serviceId}`),
       api.get<any[]>(`/backups/schedules?serviceId=${serviceId}`),
+      api.get('/backups/quota').then((q: any) => { backupQuota.value = q }).catch(() => {}),
     ])
     serviceBackups.value = b
     serviceSchedules.value = s
@@ -476,10 +480,23 @@ async function createServiceBackup() {
     await api.post('/backups', { serviceId, storageBackend: 'nfs' })
     await fetchServiceBackups()
   } catch (err: any) {
-    backupError.value = err?.body?.error || 'Failed to create backup'
+    const msg = err?.body?.error || 'Failed to create backup'
+    backupError.value = msg
   } finally {
     creatingBackup.value = false
   }
+}
+
+function backupTypeLabel(backup: any) {
+  const level = backup.level ?? 0
+  if (level === 0) return 'Full'
+  return `Incremental (L${level})`
+}
+
+function quotaBarColor(percent: number) {
+  if (percent >= 90) return 'bg-red-500'
+  if (percent >= 70) return 'bg-yellow-500'
+  return 'bg-primary-500'
 }
 
 async function restoreServiceBackup(backupId: string) {
@@ -825,11 +842,11 @@ async function syncStatus() {
   }
 }
 
-async function deleteService() {
-  if (!confirm('Are you sure you want to delete this service? This action cannot be undone.')) return
+async function confirmDeleteService(deleteVolumes: boolean) {
   actionLoading.value = 'delete'
   try {
-    await store.deleteService(serviceId)
+    await store.deleteService(serviceId, { deleteVolumes })
+    showDeleteModal.value = false
     router.push('/panel/services')
   } catch {
     toast.error(t('service.deleteFailed', 'Failed to delete service'))
@@ -1282,7 +1299,7 @@ onUnmounted(() => {
             Sync
           </button>
           <button
-            @click="deleteService"
+            @click="showDeleteModal = true"
             :disabled="!!actionLoading"
             class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm font-medium disabled:opacity-50"
           >
@@ -2108,6 +2125,25 @@ onUnmounted(() => {
 
         <!-- Backups -->
         <div v-if="activeTab === 'backups'">
+          <!-- Quota bar -->
+          <div v-if="backupQuota" class="mb-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <HardDrive class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Backup Storage</span>
+              </div>
+              <span class="text-sm text-gray-500 dark:text-gray-400">
+                {{ backupQuota.usedGb.toFixed(2) }} GB / {{ backupQuota.limitGb }} GB ({{ Math.round(backupQuota.percentUsed) }}%)
+              </span>
+            </div>
+            <div class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                :class="['h-full rounded-full transition-all', quotaBarColor(backupQuota.percentUsed)]"
+                :style="{ width: Math.min(backupQuota.percentUsed, 100) + '%' }"
+              />
+            </div>
+          </div>
+
           <div v-if="backupError" class="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <p class="text-sm text-red-700 dark:text-red-300">{{ backupError }}</p>
           </div>
@@ -2188,6 +2224,7 @@ onUnmounted(() => {
                   <thead>
                     <tr class="border-b border-gray-200 dark:border-gray-700">
                       <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                      <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
                       <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Size</th>
                       <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                       <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
@@ -2196,6 +2233,11 @@ onUnmounted(() => {
                   <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                     <tr v-for="backup in serviceBackups" :key="backup.id" class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                       <td class="px-6 py-3.5 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ formatDate(backup.createdAt) }}</td>
+                      <td class="px-6 py-3.5 text-sm">
+                        <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', (backup.level ?? 0) === 0 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300']">
+                          {{ backupTypeLabel(backup) }}
+                        </span>
+                      </td>
                       <td class="px-6 py-3.5 text-sm text-gray-600 dark:text-gray-400">{{ formatSize(backup.sizeBytes) }}</td>
                       <td class="px-6 py-3.5 text-sm">
                         <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', backup.status === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : backup.status === 'in_progress' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
@@ -2217,9 +2259,14 @@ onUnmounted(() => {
                 <div v-for="backup in serviceBackups" :key="backup.id" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-4 space-y-2.5">
                   <div class="flex items-center justify-between">
                     <span class="text-sm text-gray-900 dark:text-white">{{ formatDate(backup.createdAt) }}</span>
-                    <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', backup.status === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : backup.status === 'in_progress' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
-                      {{ backup.status }}
-                    </span>
+                    <div class="flex items-center gap-2">
+                      <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', (backup.level ?? 0) === 0 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300']">
+                        {{ backupTypeLabel(backup) }}
+                      </span>
+                      <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', backup.status === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : backup.status === 'in_progress' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                        {{ backup.status }}
+                      </span>
+                    </div>
                   </div>
                   <div class="flex items-center justify-between">
                     <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatSize(backup.sizeBytes) }}</span>
@@ -2711,5 +2758,17 @@ onUnmounted(() => {
       </div>
     </template>
   </div>
+
+  <!-- Delete confirmation modal -->
+  <ConfirmDeleteModal
+    :show="showDeleteModal"
+    :title="t('confirmDelete.title', 'Delete Service')"
+    :message="t('confirmDelete.message', 'Are you sure you want to delete')"
+    :item-name="service?.name || ''"
+    :show-volume-toggle="true"
+    :loading="actionLoading === 'delete'"
+    @confirm="confirmDeleteService"
+    @cancel="showDeleteModal = false"
+  />
 </template>
 

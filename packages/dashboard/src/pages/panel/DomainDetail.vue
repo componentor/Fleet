@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Loader2, Shield, Edit2, X as XIcon, AlertTriangle } from 'lucide-vue-next'
+import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Loader2, Shield, Edit2, X as XIcon, AlertTriangle, Copy, Check, ShieldCheck } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const route = useRoute()
@@ -28,16 +28,18 @@ const newRecord = ref({
 
 // Verify
 const verifying = ref(false)
-const verifyToken = ref('')
+const copyFeedback = ref('')
 
 // Nameserver editing
 const editingNameservers = ref(false)
 const savingNameservers = ref(false)
 const editedNameservers = ref<string[]>([])
-const registration = ref<any>(null)
 
 const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']
 const showPriority = computed(() => ['MX', 'SRV'].includes(newRecord.value.type))
+
+/** Whether this domain was purchased through Fleet (has full DNS management) */
+const isPurchased = computed(() => !!zone.value?.isPurchased)
 
 async function fetchZone() {
   loading.value = true
@@ -87,13 +89,17 @@ async function deleteRecord(recordId: string) {
 }
 
 async function verifyDomain() {
-  if (!verifyToken.value) return
   verifying.value = true
   error.value = ''
   try {
-    await api.post(`/dns/zones/${zoneId.value}/verify`, { token: verifyToken.value })
-    await fetchZone()
-    verifyToken.value = ''
+    const result = await api.post<any>(`/dns/zones/${zoneId.value}/verify`, {
+      token: zone.value?.verificationToken,
+    })
+    if (result.verified) {
+      await fetchZone()
+    } else {
+      error.value = 'Verification failed. Please check your DNS records and try again.'
+    }
   } catch (err: any) {
     error.value = err?.body?.error || 'Verification failed'
   } finally {
@@ -101,14 +107,10 @@ async function verifyDomain() {
   }
 }
 
-async function fetchRegistration() {
-  if (!zone.value) return
-  try {
-    const registrations = await api.get<any[]>('/domains/registrations')
-    registration.value = registrations.find((r: any) => r.domain === zone.value.domain) ?? null
-  } catch {
-    // Not accessible or no registrations
-  }
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text)
+  copyFeedback.value = text
+  setTimeout(() => { copyFeedback.value = '' }, 2000)
 }
 
 function startEditingNameservers() {
@@ -159,7 +161,7 @@ function formatDate(ts: any) {
 }
 
 onMounted(() => {
-  fetchZone().then(() => fetchRegistration())
+  fetchZone()
 })
 </script>
 
@@ -190,11 +192,22 @@ onMounted(() => {
                 <Clock v-else class="w-3 h-3" />
                 {{ zone.verified ? 'Verified' : 'Pending Verification' }}
               </span>
+              <span
+                :class="[
+                  'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+                  isPurchased
+                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                ]"
+              >
+                {{ isPurchased ? 'Purchased' : 'External' }}
+              </span>
               <span class="text-xs text-gray-400 dark:text-gray-500">Created {{ formatDate(zone.createdAt) }}</span>
             </div>
           </div>
         </div>
         <button
+          v-if="isPurchased"
           @click="showAddForm = true"
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
@@ -213,226 +226,263 @@ onMounted(() => {
         <p class="text-sm text-red-700 dark:text-red-300">{{ error }}</p>
       </div>
 
-      <!-- Verification section (if not verified) -->
-      <div v-if="!zone.verified" class="mb-6 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800 rounded-xl p-6">
-        <div class="flex items-start gap-3">
-          <Shield class="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
-          <div class="flex-1">
-            <h3 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-1">Domain Verification Required</h3>
-            <p class="text-sm text-yellow-700 dark:text-yellow-300 mb-3">Enter the verification token that was provided when you added this domain.</p>
-            <form @submit.prevent="verifyDomain" class="flex items-end gap-3">
-              <div class="flex-1 max-w-md">
+      <!-- Verification section (if not verified) — DNS instructions -->
+      <div v-if="!zone.verified" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Configure DNS Records</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Add these records at your DNS provider to verify ownership.</p>
+        </div>
+        <div class="p-6 space-y-6">
+          <!-- Step 1: CNAME -->
+          <div v-if="zone.cnameTarget" class="space-y-2">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Step 1: Add a CNAME record</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Point your domain to:</p>
+            <div class="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+              <code class="flex-1 text-sm font-mono text-gray-900 dark:text-white">{{ zone.cnameTarget }}</code>
+              <button @click="copyToClipboard(zone.cnameTarget)" class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                <Check v-if="copyFeedback === zone.cnameTarget" class="w-4 h-4 text-green-500" />
+                <Copy v-else class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 2: TXT -->
+          <div v-if="zone.verificationToken" class="space-y-2">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ zone.cnameTarget ? 'Step 2' : 'Step 1' }}: Add a TXT record</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              Add a TXT record at <code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">_fleet-verify.{{ zone.domain }}</code> with value:
+            </p>
+            <div class="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+              <code class="flex-1 text-sm font-mono text-gray-900 dark:text-white break-all">fleet-verify={{ zone.verificationToken }}</code>
+              <button @click="copyToClipboard(`fleet-verify=${zone.verificationToken}`)" class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors shrink-0">
+                <Check v-if="copyFeedback === `fleet-verify=${zone.verificationToken}`" class="w-4 h-4 text-green-500" />
+                <Copy v-else class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button
+              @click="verifyDomain"
+              :disabled="verifying"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Loader2 v-if="verifying" class="w-4 h-4 animate-spin" />
+              <ShieldCheck v-else class="w-4 h-4" />
+              Verify Domain
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Purchased domain: Nameservers + DNS Records management -->
+      <template v-if="isPurchased">
+        <!-- Nameservers -->
+        <div class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Nameservers</h3>
+            <button
+              v-if="!editingNameservers"
+              @click="startEditingNameservers"
+              class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              <Edit2 class="w-3.5 h-3.5" />
+              Edit
+            </button>
+          </div>
+
+          <!-- Display mode -->
+          <div v-if="!editingNameservers" class="flex flex-wrap gap-2">
+            <span
+              v-for="ns in (zone.nameservers?.length ? zone.nameservers : ['ns1.fleet.local', 'ns2.fleet.local'])"
+              :key="ns"
+              class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm font-mono text-gray-700 dark:text-gray-300"
+            >
+              {{ ns }}
+            </span>
+          </div>
+
+          <!-- Edit mode -->
+          <div v-else class="space-y-3">
+            <div class="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2">
+              <AlertTriangle class="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+              <p class="text-xs text-amber-700 dark:text-amber-300">
+                If you use custom nameservers, DNS records managed in Fleet will no longer resolve for this domain. You will need to configure records at your new DNS provider.
+              </p>
+            </div>
+
+            <div v-for="(ns, index) in editedNameservers" :key="index" class="flex items-center gap-2">
+              <input
+                v-model="editedNameservers[index]"
+                type="text"
+                :placeholder="`ns${index + 1}.example.com`"
+                class="flex-1 max-w-md px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              />
+              <button
+                v-if="editedNameservers.length > 2"
+                @click="removeNameserver(index)"
+                class="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <XIcon class="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              v-if="editedNameservers.length < 13"
+              @click="addNameserver"
+              class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              <Plus class="w-3.5 h-3.5" />
+              Add Nameserver
+            </button>
+
+            <div class="flex items-center gap-3 pt-2">
+              <button
+                @click="saveNameservers"
+                :disabled="savingNameservers"
+                class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                {{ savingNameservers ? 'Saving...' : 'Save Nameservers' }}
+              </button>
+              <button
+                @click="cancelEditingNameservers"
+                class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add record form -->
+        <div v-if="showAddForm" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Add DNS Record</h3>
+          <form @submit.prevent="addRecord" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Type</label>
+                <select
+                  v-model="newRecord.type"
+                  class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                >
+                  <option v-for="t in recordTypes" :key="t" :value="t">{{ t }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
                 <input
-                  v-model="verifyToken"
+                  v-model="newRecord.name"
                   type="text"
-                  placeholder="Verification token"
+                  :placeholder="zone.domain"
                   required
-                  class="w-full px-3.5 py-2.5 rounded-lg border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm font-mono"
+                  class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
                 />
               </div>
-              <button type="submit" :disabled="verifying || !verifyToken" class="px-4 py-2.5 rounded-lg bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                {{ verifying ? 'Verifying...' : 'Verify' }}
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Content</label>
+                <input
+                  v-model="newRecord.content"
+                  type="text"
+                  :placeholder="newRecord.type === 'A' ? '192.168.1.1' : newRecord.type === 'CNAME' ? 'target.example.com' : 'value'"
+                  required
+                  class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">TTL</label>
+                <input
+                  v-model.number="newRecord.ttl"
+                  type="number"
+                  min="60"
+                  max="86400"
+                  class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                />
+              </div>
+            </div>
+            <div v-if="showPriority" class="max-w-xs">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Priority</label>
+              <input
+                v-model.number="newRecord.priority"
+                type="number"
+                min="0"
+                max="65535"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div class="flex items-center gap-3 pt-2">
+              <button type="submit" :disabled="addingRecord" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ addingRecord ? 'Adding...' : 'Add Record' }}
               </button>
-            </form>
+              <button type="button" @click="showAddForm = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Records table -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">DNS Records</h2>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-gray-200 dark:border-gray-700">
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Content</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">TTL</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Priority</th>
+                  <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                <tr v-if="records.length === 0">
+                  <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+                    No DNS records. Click "Add Record" to create one.
+                  </td>
+                </tr>
+                <tr
+                  v-for="record in records"
+                  :key="record.id"
+                  class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                >
+                  <td class="px-6 py-4">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                      {{ record.type }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm font-mono text-gray-900 dark:text-white">{{ record.name }}</td>
+                  <td class="px-6 py-4 text-sm font-mono text-gray-600 dark:text-gray-400 max-w-xs truncate">{{ record.content }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ record.ttl }}s</td>
+                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ record.priority ?? '--' }}</td>
+                  <td class="px-6 py-4 text-right">
+                    <button
+                      @click="deleteRecord(record.id)"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
+      </template>
 
-      <!-- Nameservers -->
-      <div class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Nameservers</h3>
-          <button
-            v-if="!editingNameservers"
-            @click="startEditingNameservers"
-            class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-          >
-            <Edit2 class="w-3.5 h-3.5" />
-            Edit
-          </button>
-        </div>
-
-        <!-- Display mode -->
-        <div v-if="!editingNameservers" class="flex flex-wrap gap-2">
-          <span
-            v-for="ns in (zone.nameservers?.length ? zone.nameservers : ['ns1.fleet.local', 'ns2.fleet.local'])"
-            :key="ns"
-            class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm font-mono text-gray-700 dark:text-gray-300"
-          >
-            {{ ns }}
-          </span>
-          <span v-if="registration" class="ml-2 inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded text-xs">
-            Registered through Fleet
-          </span>
-        </div>
-
-        <!-- Edit mode -->
-        <div v-else class="space-y-3">
-          <div class="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2">
-            <AlertTriangle class="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-            <p class="text-xs text-amber-700 dark:text-amber-300">
-              If you use custom nameservers, DNS records managed in Fleet will no longer resolve for this domain. You will need to configure records at your new DNS provider.
+      <!-- External domain: just show verified status info -->
+      <div v-if="!isPurchased && zone.verified" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+        <div class="flex items-start gap-3">
+          <CheckCircle2 class="w-5 h-5 text-green-500 mt-0.5 shrink-0" />
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-1">Domain Verified</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+              This external domain is verified and ready to use. DNS records and nameservers are managed at your DNS provider.
             </p>
           </div>
-
-          <div v-for="(ns, index) in editedNameservers" :key="index" class="flex items-center gap-2">
-            <input
-              v-model="editedNameservers[index]"
-              type="text"
-              :placeholder="`ns${index + 1}.example.com`"
-              class="flex-1 max-w-md px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
-            />
-            <button
-              v-if="editedNameservers.length > 2"
-              @click="removeNameserver(index)"
-              class="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-            >
-              <XIcon class="w-4 h-4" />
-            </button>
-          </div>
-
-          <button
-            v-if="editedNameservers.length < 13"
-            @click="addNameserver"
-            class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-          >
-            <Plus class="w-3.5 h-3.5" />
-            Add Nameserver
-          </button>
-
-          <div class="flex items-center gap-3 pt-2">
-            <button
-              @click="saveNameservers"
-              :disabled="savingNameservers"
-              class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
-            >
-              {{ savingNameservers ? 'Saving...' : 'Save Nameservers' }}
-            </button>
-            <button
-              @click="cancelEditingNameservers"
-              class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Add record form -->
-      <div v-if="showAddForm" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-        <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Add DNS Record</h3>
-        <form @submit.prevent="addRecord" class="space-y-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Type</label>
-              <select
-                v-model="newRecord.type"
-                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-              >
-                <option v-for="t in recordTypes" :key="t" :value="t">{{ t }}</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
-              <input
-                v-model="newRecord.name"
-                type="text"
-                :placeholder="zone.domain"
-                required
-                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Content</label>
-              <input
-                v-model="newRecord.content"
-                type="text"
-                :placeholder="newRecord.type === 'A' ? '192.168.1.1' : newRecord.type === 'CNAME' ? 'target.example.com' : 'value'"
-                required
-                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">TTL</label>
-              <input
-                v-model.number="newRecord.ttl"
-                type="number"
-                min="60"
-                max="86400"
-                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-              />
-            </div>
-          </div>
-          <div v-if="showPriority" class="max-w-xs">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Priority</label>
-            <input
-              v-model.number="newRecord.priority"
-              type="number"
-              min="0"
-              max="65535"
-              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
-            />
-          </div>
-          <div class="flex items-center gap-3 pt-2">
-            <button type="submit" :disabled="addingRecord" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              {{ addingRecord ? 'Adding...' : 'Add Record' }}
-            </button>
-            <button type="button" @click="showAddForm = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <!-- Records table -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">DNS Records</h2>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full">
-            <thead>
-              <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Content</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">TTL</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Priority</th>
-                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-              <tr v-if="records.length === 0">
-                <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  No DNS records. Click "Add Record" to create one.
-                </td>
-              </tr>
-              <tr
-                v-for="record in records"
-                :key="record.id"
-                class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-              >
-                <td class="px-6 py-4">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                    {{ record.type }}
-                  </span>
-                </td>
-                <td class="px-6 py-4 text-sm font-mono text-gray-900 dark:text-white">{{ record.name }}</td>
-                <td class="px-6 py-4 text-sm font-mono text-gray-600 dark:text-gray-400 max-w-xs truncate">{{ record.content }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ record.ttl }}s</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ record.priority ?? '--' }}</td>
-                <td class="px-6 py-4 text-right">
-                  <button
-                    @click="deleteRecord(record.id)"
-                    class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                  >
-                    <Trash2 class="w-3.5 h-3.5" />
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </template>

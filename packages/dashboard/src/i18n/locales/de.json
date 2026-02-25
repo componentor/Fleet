@@ -1182,7 +1182,17 @@
       "removeFavicon": "Favicon entfernen",
       "brandingSaved": "Branding gespeichert",
       "logoHint": "Empfohlen: PNG oder SVG, max. 2 MB",
-      "faviconHint": "Empfohlen: ICO oder PNG 32x32, max. 500 KB"
+      "faviconHint": "Empfohlen: ICO oder PNG 32x32, max. 500 KB",
+      "logArchiving": "Protokollarchivierung",
+      "logArchivingDesc": "Alte Audit- und Fehlerprotokolle automatisch in komprimierte Dateien archivieren.",
+      "logArchiveEnabled": "Automatische Protokollarchivierung aktivieren",
+      "logArchiveRetentionDays": "Protokolle älter als (Tage) archivieren",
+      "logArchiveArchiveRetentionDays": "Archive älter als (Tage) löschen",
+      "logArchiveAuditEnabled": "Audit-Protokoll archivieren",
+      "logArchiveErrorEnabled": "Fehlerprotokoll archivieren",
+      "logArchiveAllowUserDelete": "Kontoinhabern erlauben, eigene Archive zu löschen",
+      "logArchiveRunNow": "Archivierung jetzt ausführen",
+      "logArchiveRunNowSuccess": "Archivierungsauftrag wurde in die Warteschlange gestellt"
     },
     "billing": {
       "title": "Abrechnungskonfiguration",
@@ -1866,6 +1876,19 @@
     "jobRemoved": "Aufgabe entfernt",
     "jobPromoted": "Aufgabe auf wartend gesetzt"
   },
+  "confirmDelete": {
+    "title": "Dienst löschen",
+    "message": "Sind Sie sicher, dass Sie löschen möchten",
+    "titleStack": "Stack löschen",
+    "messageStack": "Sind Sie sicher, dass Sie den Stack löschen möchten",
+    "cannotBeUndone": "Diese Aktion kann nicht rückgängig gemacht werden.",
+    "deleteVolumes": "Zugehörige Speichervolumes ebenfalls löschen",
+    "deleteVolumesHint": "Löscht dauerhaft alle in den Volumes gespeicherten Daten",
+    "deleteVolumesWarning": "Warnung: Alle Daten in den zugehörigen Volumes werden dauerhaft gelöscht. Dies kann nicht wiederhergestellt werden.",
+    "cancel": "Abbrechen",
+    "deleting": "Wird gelöscht...",
+    "confirm": "Löschen"
+  },
   "updates": {
     "title": "Plattform-Updates",
     "checkForUpdates": "Nach Updates suchen",
@@ -1932,5 +1955,23 @@
     "restarting": "Container werden neu gestartet...",
     "restartingDesc": "Die Plattform wendet das Update an. Diese Seite wird automatisch aktualisiert, sobald die API wieder erreichbar ist.",
     "pinging": "Warten..."
+  },
+  "logArchives": {
+    "title": "Protokollarchive",
+    "dateRange": "Zeitraum",
+    "records": "Einträge",
+    "size": "Größe",
+    "status": "Status",
+    "download": "Herunterladen",
+    "delete": "Löschen",
+    "deleteConfirm": "Dieses Archiv löschen? Die ursprünglichen Protokolleinträge wurden bereits entfernt. Dies kann nicht rückgängig gemacht werden.",
+    "noArchives": "Noch keine Archive.",
+    "pending": "Archivierung...",
+    "completed": "Abgeschlossen",
+    "failed": "Fehlgeschlagen",
+    "type": "Typ",
+    "auditLog": "Audit-Protokoll",
+    "errorLog": "Fehlerprotokoll",
+    "createdAt": "Archiviert am"
   }
 }

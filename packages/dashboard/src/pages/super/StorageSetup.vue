@@ -31,6 +31,8 @@ const locations = ref<{ locationKey: string; label: string }[]>([])
 const clusterName = ref('')
 const clusterScope = ref<'regional' | 'global'>('regional')
 const clusterRegion = ref<string | null>(null)
+const clusterAllowServices = ref(true)
+const clusterAllowBackups = ref(true)
 const editingClusterId = ref<string | null>(null) // non-null = editing existing cluster
 
 // Wizard state
@@ -259,11 +261,15 @@ function startWizard(existingCluster?: any) {
       selectedObjectProvider.value = existingCluster.objectProvider as any
     }
     replicationFactor.value = existingCluster.replicationFactor ?? 3
+    clusterAllowServices.value = existingCluster.allowServices ?? true
+    clusterAllowBackups.value = existingCluster.allowBackups ?? true
   } else {
     editingClusterId.value = null
     clusterName.value = ''
     clusterScope.value = 'regional'
     clusterRegion.value = null
+    clusterAllowServices.value = true
+    clusterAllowBackups.value = true
   }
 }
 
@@ -487,6 +493,8 @@ async function initializeCluster() {
       replicationFactor: isDistributed ? replicationFactor.value : 1,
       config: volumeConfig,
       objectConfig,
+      allowServices: clusterAllowServices.value,
+      allowBackups: clusterAllowBackups.value,
     }
 
     const result = await api.post('/admin/storage/cluster', clusterConfig) as any
@@ -897,6 +905,7 @@ async function attachNewNode() {
                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Provider</th>
                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Object Storage</th>
                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Nodes</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Capabilities</th>
                 <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Status</th>
                 <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Actions</th>
               </tr>
@@ -919,6 +928,19 @@ async function attachNewNode() {
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 capitalize">{{ cl.provider }}</td>
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 capitalize">{{ cl.objectProvider }}</td>
                 <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ cl.storageNodes?.length ?? 0 }}</td>
+                <td class="px-6 py-4">
+                  <div class="flex flex-wrap gap-1">
+                    <span v-if="cl.allowServices !== false" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                      Services
+                    </span>
+                    <span v-if="cl.allowBackups !== false" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                      Backups
+                    </span>
+                    <span v-if="cl.allowServices === false && cl.allowBackups === false" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+                      None
+                    </span>
+                  </div>
+                </td>
                 <td class="px-6 py-4">
                   <span
                     class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
@@ -1485,6 +1507,43 @@ async function attachNewNode() {
                 <p class="font-medium">Global replication</p>
                 <p class="mt-0.5">Data replicates to all nodes across regions. Writes are slow (cross-region), reads are fast (local). Ideal for large file distribution like game updates or CDN assets.</p>
               </div>
+            </div>
+          </div>
+
+          <!-- Cluster Capabilities -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 space-y-4">
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Cluster Capabilities</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Choose what this cluster can be used for. Existing volumes and backups remain accessible even if a capability is disabled.</p>
+
+            <div class="space-y-3">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  v-model="clusterAllowServices"
+                  type="checkbox"
+                  class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">Services & Volumes</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">Allow this cluster to host service volumes and user deployments</p>
+                </div>
+              </label>
+
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  v-model="clusterAllowBackups"
+                  type="checkbox"
+                  class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">Backups</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">Allow this cluster to store backup archives</p>
+                </div>
+              </label>
+            </div>
+
+            <div v-if="!clusterAllowServices && !clusterAllowBackups" class="flex items-start gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <AlertTriangle class="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <p class="text-xs text-red-700 dark:text-red-300">This cluster won't accept any new volumes or backups. Existing resources will remain accessible.</p>
             </div>
           </div>
         </div>

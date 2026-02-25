@@ -69,6 +69,8 @@ const resourceLimitsForm = ref({
   maxNfsStorageGb: null as number | null,
   maxTotalCpuCores: null as number | null,
   maxTotalMemoryMb: null as number | null,
+  maxBackupStorageGb: null as number | null,
+  maxContainerDiskMb: null as number | null,
 })
 
 // ─── Subscriptions ───────────────────────────────────────────
@@ -775,6 +777,14 @@ onMounted(() => { fetchAll() })
             <div>
               <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Total Memory Pool (MB)</label>
               <input v-model.number="resourceLimitsForm.maxTotalMemoryMb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Backup Storage (GB)</label>
+              <input v-model.number="resourceLimitsForm.maxBackupStorageGb" type="number" min="0" placeholder="50 (default)" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Container Disk (MB)</label>
+              <input v-model.number="resourceLimitsForm.maxContainerDiskMb" type="number" min="0" placeholder="Unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
           </div>
           <div class="pt-2 flex justify-end">
