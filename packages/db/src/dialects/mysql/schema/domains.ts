@@ -21,6 +21,7 @@ export const dnsZones = mysqlTable('dns_zones', {
     .notNull(),
   domain: varchar('domain', { length: 255 }).notNull(),
   verified: boolean('verified').default(false),
+  verificationToken: varchar('verification_token', { length: 255 }),
   nameservers: json('nameservers').$default(() => ([])),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

@@ -140,6 +140,7 @@ sqlite.exec(`
     account_id TEXT NOT NULL REFERENCES accounts(id),
     domain TEXT NOT NULL,
     verified INTEGER DEFAULT 0,
+    verification_token TEXT,
     nameservers TEXT DEFAULT '[]',
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())

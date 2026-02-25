@@ -127,6 +127,13 @@
       "when": 1773100000000,
       "tag": "0017_add_purge_config",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1773200000000,
+      "tag": "0018_add_verification_token",
+      "breakpoints": true
     }
   ]
 }
