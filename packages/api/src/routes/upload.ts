@@ -49,6 +49,7 @@ const deployRoute = createRoute({
             sslEnabled: z.string().optional(),
             env: z.string().optional(),
             ports: z.string().optional(),
+            volumes: z.string().optional(),
           }),
         },
       },
@@ -82,12 +83,14 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
 
   let env: Record<string, string> = {};
   let ports: Array<{ target: number; published: number; protocol: string }> = [];
+  let volumes: Array<{ source: string; target: string; readonly: boolean }> = [];
 
   try {
     if (body['env']) env = JSON.parse(body['env'] as string);
     if (body['ports']) ports = JSON.parse(body['ports'] as string);
+    if (body['volumes']) volumes = JSON.parse(body['volumes'] as string);
   } catch {
-    return c.json({ error: 'Invalid JSON in env or ports field' }, 400);
+    return c.json({ error: 'Invalid JSON in env, ports, or volumes field' }, 400);
   }
 
   if (!file || !(file instanceof File)) {
@@ -141,6 +144,7 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
       replicas: detection.buildMethod === 'none' ? 0 : replicas,
       env,
       ports,
+      volumes,
       domain,
       sslEnabled,
       sourceType: 'upload',
@@ -171,7 +175,11 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
           published: p.published ?? 0,
           protocol: p.protocol || 'tcp',
         })),
-        volumes: [],
+        volumes: volumes.map((v) => ({
+          source: v.source,
+          target: v.target,
+          readonly: v.readonly ?? false,
+        })),
         labels: {
           ...traefikLabels,
           'fleet.account-id': accountId,
