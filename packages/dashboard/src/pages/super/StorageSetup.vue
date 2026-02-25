@@ -896,8 +896,8 @@ async function attachNewNode() {
     <!-- Current Status (when not in wizard mode) -->
     <template v-if="!showWizard && !loading">
 
-      <!-- Multi-Cluster List -->
-      <div v-if="clusters.length > 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+      <!-- Cluster List -->
+      <div v-if="clusters.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage Clusters</h2>
           <button
@@ -1011,14 +1011,14 @@ async function attachNewNode() {
 
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
           <div class="flex items-center gap-3 mb-3">
-            <Network class="w-5 h-5" :class="clusterData?.platformVolumeMode === 'distributed' ? 'text-green-600 dark:text-green-400' : 'text-gray-400'" />
-            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">Manager Storage</h3>
+            <Network class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">Active Cluster</h3>
           </div>
-          <p class="text-lg font-semibold capitalize" :class="clusterData?.platformVolumeMode === 'distributed' ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'">
-            {{ clusterData?.platformVolumeMode === 'distributed' ? 'Global' : 'Local' }}
+          <p class="text-lg font-semibold text-gray-900 dark:text-white">
+            {{ clusterData?.cluster?.name ?? 'default' }}
           </p>
-          <p v-if="clusterData?.cluster?.provider !== 'local' && clusterData?.platformVolumeMode !== 'distributed'" class="text-xs text-yellow-600 mt-1">
-            Platform volumes not yet migrated
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 capitalize">
+            {{ clusterData?.cluster?.scope ?? 'regional' }}{{ clusterData?.cluster?.region ? ` — ${clusterData.cluster.region}` : '' }}
           </p>
         </div>
 
