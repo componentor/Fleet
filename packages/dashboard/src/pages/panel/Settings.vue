@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Settings, Save, AlertTriangle, Loader2, Calendar, ShieldX } from 'lucide-vue-next'
+import { Settings, Save, AlertTriangle, Loader2, Calendar, ShieldX, Package, Plus, Trash2, Github } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 import { useRole } from '@/composables/useRole'
@@ -118,6 +118,66 @@ async function revokeDeletion() {
 }
 
 
+// Registry credentials
+const registryCreds = ref<Array<{ id: string; registry: string; username: string; createdAt: string | null }>>([])
+const registryCredsLoading = ref(false)
+const newRegRegistry = ref('')
+const newRegUsername = ref('')
+const newRegPassword = ref('')
+const addingReg = ref(false)
+const connectingGithub = ref(false)
+
+async function loadRegistryCreds() {
+  try {
+    const data = await api.get<{ credentials: typeof registryCreds.value }>('/registry-credentials/account')
+    registryCreds.value = data.credentials
+  } catch {}
+}
+
+async function addRegistryCred() {
+  if (!newRegRegistry.value || !newRegUsername.value || !newRegPassword.value) return
+  addingReg.value = true
+  try {
+    await api.post('/registry-credentials/account', {
+      registry: newRegRegistry.value,
+      username: newRegUsername.value,
+      password: newRegPassword.value,
+    })
+    newRegRegistry.value = ''
+    newRegUsername.value = ''
+    newRegPassword.value = ''
+    await loadRegistryCreds()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to add credential'
+  } finally {
+    addingReg.value = false
+  }
+}
+
+async function deleteRegistryCred(id: string) {
+  if (!confirm('Remove this registry credential?')) return
+  try {
+    await api.del(`/registry-credentials/account/${id}`)
+    await loadRegistryCreds()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to remove credential'
+  }
+}
+
+async function connectGithubPackages() {
+  connectingGithub.value = true
+  try {
+    await api.post('/registry-credentials/account/github', {})
+    await loadRegistryCreds()
+    success.value = 'GitHub Packages connected'
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to connect GitHub Packages'
+  } finally {
+    connectingGithub.value = false
+  }
+}
+
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
 }
@@ -129,6 +189,7 @@ function daysUntil(dateStr: string): number {
 
 onMounted(() => {
   loadAccount()
+  loadRegistryCreds()
 })
 </script>
 
@@ -208,6 +269,84 @@ onMounted(() => {
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- Registry Credentials -->
+      <div v-if="canAdmin" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Package class="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Registry Credentials</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage private Docker registry credentials for deploying from registries</p>
+        </div>
+        <div class="p-6 space-y-5">
+          <!-- Add credential form -->
+          <div class="space-y-3">
+            <div class="grid grid-cols-3 gap-3">
+              <input
+                v-model="newRegRegistry"
+                type="text"
+                placeholder="ghcr.io"
+                class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+              <input
+                v-model="newRegUsername"
+                type="text"
+                placeholder="Username"
+                class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+              <input
+                v-model="newRegPassword"
+                type="password"
+                placeholder="Password / Token"
+                class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                @click="addRegistryCred"
+                :disabled="addingReg || !newRegRegistry || !newRegUsername || !newRegPassword"
+                class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="addingReg" class="w-3.5 h-3.5 animate-spin" />
+                <Plus v-else class="w-3.5 h-3.5" />
+                Add Credential
+              </button>
+              <button
+                @click="connectGithubPackages"
+                :disabled="connectingGithub"
+                class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="connectingGithub" class="w-3.5 h-3.5 animate-spin" />
+                <Github v-else class="w-3.5 h-3.5" />
+                Connect GitHub Packages
+              </button>
+            </div>
+          </div>
+
+          <!-- Existing credentials -->
+          <div v-if="registryCreds.length > 0" class="space-y-2">
+            <div
+              v-for="cred in registryCreds"
+              :key="cred.id"
+              class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50"
+            >
+              <div>
+                <span class="text-sm font-medium text-gray-900 dark:text-white font-mono">{{ cred.registry }}</span>
+                <span class="text-sm text-gray-500 dark:text-gray-400 ml-2">({{ cred.username }})</span>
+              </div>
+              <button
+                @click="deleteRegistryCred(cred.id)"
+                class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                title="Remove"
+              >
+                <Trash2 class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <p v-else class="text-xs text-gray-400 dark:text-gray-500">No registry credentials configured. Add one to deploy from private registries.</p>
+        </div>
       </div>
 
       <!-- Danger zone -->

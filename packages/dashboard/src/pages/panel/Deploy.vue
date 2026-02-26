@@ -22,6 +22,9 @@ import {
   Shield,
   MapPin,
   HardDrive,
+  Package,
+  Copy,
+  RefreshCw,
 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
@@ -55,7 +58,7 @@ const authStore = useAuthStore()
 const api = useApi()
 const volumeManager = useVolumeManager()
 
-const deployMethod = ref<'github' | 'docker' | 'upload' | null>(null)
+const deployMethod = ref<'github' | 'docker' | 'upload' | 'registry' | null>(null)
 
 // Region selection (shared across all deploy methods)
 const regions = ref<Array<{ key: string; label: string; nodeCount: number }>>([])
@@ -161,6 +164,79 @@ const uploadServiceName = ref('')
 const uploadBuildFile = ref('')
 const uploadDragOver = ref(false)
 const uploadLoading = ref(false)
+
+// Registry form state
+const registryServiceName = ref('')
+const registryImage = ref('')
+const registryTag = ref('latest')
+const registryPollEnabled = ref(false)
+const registryPollInterval = ref(300)
+const registryLoading = ref(false)
+const availableRegistries = ref<Array<{ registry: string; username: string; scope: 'platform' | 'account' }>>([])
+const selectedRegistry = ref<string>('')
+const webhookUrl = ref('')
+
+async function fetchAvailableRegistries() {
+  try {
+    const data = await api.get<{ registries: typeof availableRegistries.value }>('/registry-credentials/available')
+    availableRegistries.value = data.registries
+  } catch {}
+}
+
+function generateWebhookUrl(serviceId: string) {
+  const base = window.location.origin
+  return `${base}/api/v1/deployments/registry/webhook/${serviceId}`
+}
+
+const fullRegistryImage = computed(() => {
+  const reg = selectedRegistry.value
+  const img = registryImage.value
+  const tag = registryTag.value || 'latest'
+  if (!img) return ''
+  if (reg && reg !== 'docker.io') return `${reg}/${img}:${tag}`
+  return `${img}:${tag}`
+})
+
+function confirmRegistryDeploy() {
+  if (!registryServiceName.value || !registryImage.value) return
+  validationErrors.value = {}
+  const nameErr = validateServiceName(registryServiceName.value)
+  if (nameErr) { validationErrors.value.registryServiceName = nameErr; return }
+  const domErr = validateDomain(domain.value)
+  if (domErr) { validationErrors.value.domain = domErr; return }
+  openConfirmModal(
+    { name: registryServiceName.value, image: fullRegistryImage.value, domain: domain.value, method: 'Registry' },
+    executeRegistryDeploy,
+  )
+}
+
+async function executeRegistryDeploy() {
+  registryLoading.value = true
+  error.value = ''
+  try {
+    await store.createService({
+      name: registryServiceName.value,
+      image: fullRegistryImage.value,
+      replicas: replicas.value,
+      domain: domain.value || undefined,
+      region: selectedRegion.value || undefined,
+      envVars: buildEnvVarsPayload(),
+      volumes: buildVolumesPayload(),
+      sourceType: 'registry',
+      registryPollEnabled: registryPollEnabled.value,
+      registryPollInterval: registryPollInterval.value,
+    } as any)
+    router.push('/panel/services')
+  } catch (err: any) {
+    error.value = err?.body?.error || err?.message || 'Deployment failed'
+  } finally {
+    registryLoading.value = false
+  }
+}
+
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text)
+}
 
 // Volume state (shared across deploy methods)
 const deployVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
@@ -442,6 +518,9 @@ watch(
         checkGithubStatus()
       }
     }
+    if (method === 'registry') {
+      fetchAvailableRegistries()
+    }
     // Reset volumes when switching deploy method
     deployVolumes.value = []
   },
@@ -487,7 +566,7 @@ onMounted(() => {
     </div>
 
     <!-- Deploy method selection -->
-    <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl">
+    <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 max-w-6xl">
       <button
         @click="deployMethod = 'docker'"
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all group"
@@ -526,6 +605,19 @@ onMounted(() => {
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ $t('deploy.fromUpload') }}</h3>
         <p class="text-sm text-gray-500 dark:text-gray-400">
           {{ $t('deploy.fromUploadDesc') }}
+        </p>
+      </button>
+
+      <button
+        @click="deployMethod = 'registry'"
+        class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-left hover:border-amber-300 dark:hover:border-amber-600 hover:shadow-md transition-all group"
+      >
+        <div class="w-12 h-12 rounded-lg bg-amber-600 flex items-center justify-center mb-4">
+          <Package class="w-6 h-6 text-white" />
+        </div>
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">From Registry</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+          Deploy from a Docker registry with optional auto-deploy on push
         </p>
       </button>
 
@@ -1233,6 +1325,225 @@ onMounted(() => {
         </div>
       </div>
     </div>
+    <!-- Registry deploy form -->
+    <div v-if="deployMethod === 'registry'" class="max-w-2xl">
+      <button
+        @click="deployMethod = null; error = ''"
+        class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors"
+      >
+        &larr; {{ $t('deploy.backToOptions') }}
+      </button>
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Deploy from Registry</h2>
+        </div>
+        <form @submit.prevent="confirmRegistryDeploy" class="p-6 space-y-5">
+          <!-- Service Name -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.serviceName') }}</label>
+            <input
+              v-model="registryServiceName"
+              type="text"
+              placeholder="my-app"
+              required
+              :class="['w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm', validationErrors.registryServiceName ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600']"
+            />
+            <p v-if="validationErrors.registryServiceName" class="mt-1 text-xs text-red-500">{{ validationErrors.registryServiceName }}</p>
+          </div>
+
+          <!-- Registry selector -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Registry</label>
+            <select
+              v-model="selectedRegistry"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            >
+              <option value="">Docker Hub (public)</option>
+              <option value="docker.io">Docker Hub (authenticated)</option>
+              <option v-for="reg in availableRegistries.filter(r => r.registry !== 'docker.io')" :key="reg.registry" :value="reg.registry">
+                {{ reg.registry }} ({{ reg.scope === 'account' ? 'your credential' : 'platform' }})
+              </option>
+            </select>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Select a registry or leave as Docker Hub for public images</p>
+          </div>
+
+          <!-- Image name & tag -->
+          <div class="grid grid-cols-3 gap-4">
+            <div class="col-span-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Image</label>
+              <input
+                v-model="registryImage"
+                type="text"
+                :placeholder="selectedRegistry ? 'org/app' : 'nginx'"
+                required
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Tag</label>
+              <input
+                v-model="registryTag"
+                type="text"
+                placeholder="latest"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              />
+            </div>
+          </div>
+
+          <!-- Full image preview -->
+          <div v-if="fullRegistryImage" class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700">
+            <p class="text-xs text-gray-500 dark:text-gray-400">Full image reference:</p>
+            <p class="text-sm font-mono text-gray-900 dark:text-white mt-0.5">{{ fullRegistryImage }}</p>
+          </div>
+
+          <!-- Replicas & Domain -->
+          <div class="grid grid-cols-2 gap-5">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.replicas') }}</label>
+              <input
+                v-model.number="replicas"
+                type="number"
+                min="1"
+                max="100"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.domainOptional') }}</label>
+              <DomainPicker
+                :model-value="domain"
+                @update:model-value="domain = $event"
+                placeholder="app.example.com"
+              />
+            </div>
+          </div>
+
+          <!-- Region Selector -->
+          <div v-if="regions.length > 0">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <span class="inline-flex items-center gap-1.5">
+                <MapPin class="w-3.5 h-3.5" />
+                Region
+              </span>
+            </label>
+            <select
+              v-model="selectedRegion"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            >
+              <option :value="null">Auto (any region)</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'node' : 'nodes' }})</option>
+            </select>
+          </div>
+
+          <!-- Auto-deploy: Tag polling -->
+          <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Auto-deploy on push</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Automatically redeploy when a new image is pushed to the registry
+                </p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                <input v-model="registryPollEnabled" type="checkbox" class="sr-only peer" />
+                <div class="w-9 h-5 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600"></div>
+              </label>
+            </div>
+
+            <div v-if="registryPollEnabled" class="space-y-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <!-- Polling interval -->
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  <span class="inline-flex items-center gap-1">
+                    <RefreshCw class="w-3 h-3" />
+                    Poll interval
+                  </span>
+                </label>
+                <select
+                  v-model.number="registryPollInterval"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                >
+                  <option :value="60">Every 1 minute</option>
+                  <option :value="300">Every 5 minutes</option>
+                  <option :value="900">Every 15 minutes</option>
+                  <option :value="1800">Every 30 minutes</option>
+                </select>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">How often to check for new image digests</p>
+              </div>
+
+              <!-- Webhook URL info -->
+              <div class="rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 p-3">
+                <p class="text-xs font-medium text-blue-800 dark:text-blue-200 mb-1">Webhook URL (available after deploy)</p>
+                <p class="text-xs text-blue-600 dark:text-blue-400">
+                  After deployment, a webhook URL will be generated for your service. You can configure your registry to send push notifications to this URL for instant deploys.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Environment Variables -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('deploy.envVars') }}</label>
+              <button type="button" @click="addEnvVar" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
+              </button>
+            </div>
+            <div v-for="(env, i) in envVars" :key="i" class="flex items-center gap-2 mb-2">
+              <input v-model="env.key" type="text" :placeholder="$t('deploy.keyPlaceholder')" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <input v-model="env.value" type="text" :placeholder="$t('deploy.valuePlaceholder')" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
+              <button type="button" @click="removeEnvVar(i)" class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><X class="w-4 h-4" /></button>
+            </div>
+            <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noEnvVars') }}</p>
+          </div>
+
+          <!-- Persistent Storage -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <span class="inline-flex items-center gap-1.5">
+                  <HardDrive class="w-3.5 h-3.5" />
+                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
+                </span>
+              </label>
+              <button type="button" @click="addDeployVolume" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
+              </button>
+            </div>
+            <div v-if="deployVolumes.length > 0" class="space-y-2">
+              <InlineVolumeCreator
+                v-for="(vol, i) in deployVolumes"
+                :key="i"
+                :model-value="vol"
+                :account-volumes="volumeManager.accountVolumes.value"
+                :storage-quota="volumeManager.storageQuota.value"
+                :create-loading="volumeManager.createLoading.value"
+                :suggested-name="registryServiceName ? volumeManager.suggestedVolumeName(registryServiceName) : undefined"
+                @update:model-value="deployVolumes[i] = $event"
+                @volume-created="handleDeployVolumeCreated(i, $event)"
+                @remove="removeDeployVolume(i)"
+              />
+            </div>
+            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
+              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
+            </p>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button
+              type="submit"
+              :disabled="registryLoading || !registryServiceName || !registryImage"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Loader2 v-if="registryLoading" class="w-4 h-4 animate-spin" />
+              <Rocket v-else class="w-4 h-4" />
+              {{ registryLoading ? $t('deploy.deploying') : $t('deploy.deploy') }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Confirmation Modal -->
     <Teleport to="body">
       <div v-if="showConfirmModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">

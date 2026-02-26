@@ -82,6 +82,10 @@ interface BackupRetentionCleanupData {
   type: 'backup-retention-cleanup';
 }
 
+interface RegistryPollData {
+  type: 'registry-poll';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -100,7 +104,8 @@ type MaintenanceJobData =
   | DataPurgeData
   | LogArchiveData
   | LogArchiveCleanupData
-  | BackupRetentionCleanupData;
+  | BackupRetentionCleanupData
+  | RegistryPollData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -1738,6 +1743,109 @@ async function enforceBackupRetention(): Promise<void> {
   }
 }
 
+async function pollRegistryDigests(): Promise<void> {
+  try {
+    const { getRegistryAuthForImage } = await import('../services/docker.service.js');
+    const { parseImageRef, getImageDigest } = await import('../services/registry.service.js');
+    const { insertReturning } = await import('@fleet/db');
+
+    // Find all services with registry polling enabled
+    const pollServices = await db.query.services.findMany({
+      where: and(
+        eq(services.registryPollEnabled, true),
+        isNull(services.deletedAt),
+      ),
+      columns: {
+        id: true,
+        name: true,
+        image: true,
+        accountId: true,
+        dockerServiceId: true,
+        registryPollInterval: true,
+        registryPollDigest: true,
+      },
+    });
+
+    if (pollServices.length === 0) return;
+
+    for (const svc of pollServices) {
+      try {
+        const imageRef = parseImageRef(svc.image);
+
+        // Get registry auth (account-specific → platform-wide fallback)
+        const auth = await getRegistryAuthForImage(svc.accountId, svc.image);
+
+        const digest = await getImageDigest(
+          imageRef,
+          auth ? { username: auth.username, password: auth.password } : undefined,
+        );
+
+        if (!digest) continue;
+
+        // Compare with stored digest
+        if (svc.registryPollDigest && svc.registryPollDigest !== digest) {
+          logger.info(
+            { serviceId: svc.id, name: svc.name, oldDigest: svc.registryPollDigest, newDigest: digest },
+            'Registry poll detected new image digest — triggering redeploy',
+          );
+
+          // Update stored digest
+          await db.update(services)
+            .set({ registryPollDigest: digest, updatedAt: new Date() })
+            .where(eq(services.id, svc.id));
+
+          // Create deployment record
+          const { deployments } = await import('@fleet/db');
+          const [deployment] = await insertReturning(deployments, {
+            serviceId: svc.id,
+            status: 'deploying',
+            imageTag: svc.image,
+            trigger: 'poll',
+            log: `Registry poll detected new digest: ${digest}\n`,
+          });
+
+          // Force-update Docker service to pull new image
+          if (svc.dockerServiceId) {
+            try {
+              await dockerService.updateService(svc.dockerServiceId, {
+                image: svc.image,
+              }, auth);
+
+              if (deployment) {
+                await db.update(deployments)
+                  .set({ status: 'succeeded', completedAt: new Date(), log: deployment.log + 'Image updated successfully.\n' })
+                  .where(eq(deployments.id, deployment.id));
+              }
+            } catch (deployErr) {
+              logger.error({ err: deployErr, serviceId: svc.id }, 'Failed to update Docker service after registry poll');
+              if (deployment) {
+                await db.update(deployments)
+                  .set({ status: 'failed', completedAt: new Date(), log: deployment.log + `Deploy failed: ${String(deployErr)}\n` })
+                  .where(eq(deployments.id, deployment.id));
+              }
+            }
+          }
+        } else if (!svc.registryPollDigest) {
+          // First poll — store initial digest without deploying
+          await db.update(services)
+            .set({ registryPollDigest: digest, updatedAt: new Date() })
+            .where(eq(services.id, svc.id));
+        }
+      } catch (err) {
+        logger.error({ err, serviceId: svc.id }, 'Registry poll failed for service');
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, 'Registry digest polling failed');
+    logToErrorTable({
+      level: 'error',
+      message: `Registry digest polling failed: ${String(err)}`,
+      stack: err instanceof Error ? err.stack : undefined,
+      metadata: { worker: 'maintenance', task: 'registry_poll' },
+    });
+  }
+}
+
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
   switch (job.name) {
     case 'health-check':
@@ -1793,6 +1901,9 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'backup-retention-cleanup':
       await enforceBackupRetention();
+      break;
+    case 'registry-poll':
+      await pollRegistryDigests();
       break;
   }
 }

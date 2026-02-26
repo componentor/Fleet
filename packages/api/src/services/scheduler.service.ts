@@ -176,6 +176,17 @@ class SchedulerService {
       },
     );
 
+    // Registry digest polling — every 60 seconds
+    // Checks services with registryPollEnabled for new image digests
+    await getMaintenanceQueue().add(
+      'registry-poll',
+      { type: 'registry-poll' },
+      {
+        repeat: { every: 60 * 1000 },
+        jobId: 'system:registry-poll',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -186,7 +197,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 16 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 17 system jobs (BullMQ)`,
     );
   }
 
