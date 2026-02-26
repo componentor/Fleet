@@ -4,13 +4,17 @@ import { useI18n } from 'vue-i18n'
 import LandingNavbar from '@/components/landing/LandingNavbar.vue'
 import type { NavLink } from '@/components/landing/LandingNavbar.vue'
 import LandingFooter from '@/components/landing/LandingFooter.vue'
+import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
+const { brandTitle } = useBranding()
 
-const platformName = import.meta.env.VITE_PLATFORM_NAME || 'Fleet'
 const contactEmail = import.meta.env.VITE_CONTACT_EMAIL || 'privacy@fleet.app'
 
-const vars = { platformName, platformNameUpper: platformName.toUpperCase(), contactEmail }
+const vars = computed(() => {
+  const name = brandTitle.value || 'Fleet'
+  return { platformName: name, platformNameUpper: name.toUpperCase(), contactEmail }
+})
 
 const navLinks = computed<NavLink[]>(() => [
   { label: t('landing.nav.home'), href: '/', routerLink: true },
@@ -21,14 +25,14 @@ const navLinks = computed<NavLink[]>(() => [
 
 const sections = computed(() => [
   { id: 'info-collect', title: t('landing.privacy.infoCollect.title'), body: t('landing.privacy.infoCollect.body') },
-  { id: 'how-we-use', title: t('landing.privacy.howWeUse.title'), body: t('landing.privacy.howWeUse.body', vars) },
+  { id: 'how-we-use', title: t('landing.privacy.howWeUse.title'), body: t('landing.privacy.howWeUse.body', vars.value) },
   { id: 'data-storage', title: t('landing.privacy.dataStorage.title'), body: t('landing.privacy.dataStorage.body') },
   { id: 'third-party', title: t('landing.privacy.thirdParty.title'), body: t('landing.privacy.thirdParty.body') },
   { id: 'data-retention', title: t('landing.privacy.dataRetention.title'), body: t('landing.privacy.dataRetention.body') },
   { id: 'your-rights', title: t('landing.privacy.yourRights.title'), body: t('landing.privacy.yourRights.body') },
   { id: 'cookies', title: t('landing.privacy.cookies.title'), body: t('landing.privacy.cookies.body') },
-  { id: 'changes', title: t('landing.privacy.changes.title'), body: t('landing.privacy.changes.body', vars) },
-  { id: 'contact', title: t('landing.privacy.contact.title'), body: t('landing.privacy.contact.body', vars) },
+  { id: 'changes', title: t('landing.privacy.changes.title'), body: t('landing.privacy.changes.body', vars.value) },
+  { id: 'contact', title: t('landing.privacy.contact.title'), body: t('landing.privacy.contact.body', vars.value) },
 ])
 </script>
 

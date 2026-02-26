@@ -49,6 +49,10 @@ const readonly = computed({
   set: (val: boolean) => emit('update:modelValue', { ...props.modelValue, readonly: val }),
 })
 
+const selectedVolume = computed(() =>
+  props.modelValue.source ? props.accountVolumes.find((v) => v.name === props.modelValue.source) : null,
+)
+
 const remainingGb = computed(() => {
   if (!props.storageQuota) return null
   return Math.max(0, props.storageQuota.limitGb - props.storageQuota.usedGb)
@@ -74,7 +78,7 @@ watch(
 
 async function handleCreate() {
   if (!newName.value || nameError.value) return
-  emit('volumeCreated', { name: newName.value, displayName: newName.value, sizeGb: newSize.value })
+  emit('volumeCreated', { name: newName.value, displayName: newName.value, sizeGb: newSize.value, usedGb: 0, availableGb: newSize.value })
 }
 
 // When the parent sets source to a real volume (after creation), close create mode
@@ -102,7 +106,7 @@ watch(
         >
           <option value="">{{ $t('deploy.selectVolume') || 'Select volume...' }}</option>
           <option v-for="vol in accountVolumes" :key="vol.name" :value="vol.name">
-            {{ vol.displayName }} ({{ vol.sizeGb }}GB)
+            {{ vol.displayName }} ({{ vol.usedGb?.toFixed(1) ?? 0 }}/{{ vol.sizeGb }}GB)
           </option>
           <option v-if="modelValue.source && !accountVolumes.find((v) => v.name === modelValue.source)" :value="modelValue.source">
             {{ modelValue.source }}
@@ -110,6 +114,24 @@ watch(
           <option disabled>──────────</option>
           <option value="__create__">+ {{ $t('deploy.createNewVolume') || 'Create New Volume' }}</option>
         </select>
+
+        <!-- Selected volume usage -->
+        <div v-if="selectedVolume && !createMode" class="mt-1.5">
+          <div class="flex items-baseline justify-between mb-0.5">
+            <span class="text-[10px] text-gray-500 dark:text-gray-400">{{ selectedVolume.usedGb?.toFixed(1) ?? 0 }} / {{ selectedVolume.sizeGb }} GB used</span>
+          </div>
+          <div class="h-1 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+            <div
+              class="h-full rounded-full transition-all duration-500"
+              :class="selectedVolume.sizeGb > 0 && (selectedVolume.usedGb ?? 0) / selectedVolume.sizeGb > 0.9
+                ? 'bg-red-500'
+                : selectedVolume.sizeGb > 0 && (selectedVolume.usedGb ?? 0) / selectedVolume.sizeGb > 0.7
+                  ? 'bg-amber-500'
+                  : 'bg-primary-500'"
+              :style="{ width: selectedVolume.sizeGb > 0 ? `${Math.min(100, ((selectedVolume.usedGb ?? 0) / selectedVolume.sizeGb) * 100)}%` : '0%' }"
+            />
+          </div>
+        </div>
 
         <!-- Inline creation form -->
         <div v-if="createMode" class="mt-2 space-y-2">

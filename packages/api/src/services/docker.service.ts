@@ -4,7 +4,7 @@ import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
 import { logger } from './logger.js';
-import { db, registryCredentials, eq, and } from '@fleet/db';
+import { db, registryCredentials, eq } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
 
 const PLATFORM_CERTS_VOLUME = 'fleet-platform-certs';
@@ -2052,20 +2052,16 @@ function parseRegistryFromImage(image: string): string {
 }
 
 /**
- * Look up stored registry credentials for a given image.
+ * Look up platform-wide registry credentials for a given image.
  * Returns undefined if no matching credential exists (public pull).
  */
 export async function getRegistryAuthForImage(
-  accountId: string,
   image: string,
 ): Promise<{ username: string; password: string; serveraddress: string } | undefined> {
   const registry = parseRegistryFromImage(image);
 
   const cred = await db.query.registryCredentials.findFirst({
-    where: and(
-      eq(registryCredentials.accountId, accountId),
-      eq(registryCredentials.registry, registry),
-    ),
+    where: eq(registryCredentials.registry, registry),
   });
 
   if (!cred) return undefined;

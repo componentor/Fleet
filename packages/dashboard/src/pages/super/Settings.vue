@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -27,10 +27,10 @@ const sections = [
   { id: 'branding', label: () => t('super.settings.branding') },
   { id: 'log-archiving', label: () => t('super.settings.logArchiving') },
   { id: 'backup-defaults', label: () => 'Backup Defaults' },
+  { id: 'registry', label: () => 'Registry Credentials' },
 ]
 
 // General settings
-const platformName = ref('')
 const platformDomain = ref('')
 const platformUrl = ref('')
 const supportEmail = ref('')
@@ -122,11 +122,21 @@ const defaultBackupClusterId = ref('')
 const storageClusters = ref<Array<{ id: string; label: string; region: string | null }>>([])
 const savingBackupDefaults = ref(false)
 
+// Registry credentials
+const registryCreds = ref<Array<{ id: string; registry: string; username: string; createdAt: string | null }>>([])
+const loadingCreds = ref(false)
+const addingCred = ref(false)
+const showAddCred = ref(false)
+const newCredRegistry = ref('')
+const newCredUsername = ref('')
+const newCredPassword = ref('')
+const credError = ref('')
+const connectingGithub = ref(false)
+
 async function fetchSettings() {
   loading.value = true
   try {
     const data = await api.get<Record<string, any>>('/settings')
-    platformName.value = data['platform:name'] as string ?? ''
     // platform:domain may be stored JSON-stringified by setup wizard
     const rawDomain = data['platform:domain']
     platformDomain.value = typeof rawDomain === 'string'
@@ -527,6 +537,69 @@ async function saveBackupDefaults() {
   }
 }
 
+async function fetchRegistryCreds() {
+  loadingCreds.value = true
+  try {
+    const res = await api.get<{ credentials: typeof registryCreds.value }>('/registry-credentials')
+    registryCreds.value = res.credentials
+  } catch {
+    // silent
+  } finally {
+    loadingCreds.value = false
+  }
+}
+
+async function addCredential() {
+  if (!newCredRegistry.value || !newCredUsername.value || !newCredPassword.value) return
+  addingCred.value = true
+  credError.value = ''
+  try {
+    await api.post('/registry-credentials', {
+      registry: newCredRegistry.value,
+      username: newCredUsername.value,
+      password: newCredPassword.value,
+    })
+    success.value = 'Registry credential added'
+    setTimeout(() => { success.value = '' }, 3000)
+    showAddCred.value = false
+    newCredRegistry.value = ''
+    newCredUsername.value = ''
+    newCredPassword.value = ''
+    await fetchRegistryCreds()
+  } catch (err: any) {
+    credError.value = err?.body?.error || 'Failed to add credential'
+  } finally {
+    addingCred.value = false
+  }
+}
+
+async function connectGithubPackages() {
+  connectingGithub.value = true
+  credError.value = ''
+  try {
+    await api.post('/registry-credentials/github', {})
+    success.value = 'GitHub Packages connected'
+    setTimeout(() => { success.value = '' }, 3000)
+    await fetchRegistryCreds()
+  } catch (err: any) {
+    credError.value = err?.body?.error || 'Failed to connect GitHub Packages'
+  } finally {
+    connectingGithub.value = false
+  }
+}
+
+async function removeCredential(id: string) {
+  if (!confirm('Remove this registry credential?')) return
+  try {
+    await api.del(`/registry-credentials/${id}`)
+    success.value = 'Credential removed'
+    setTimeout(() => { success.value = '' }, 3000)
+    await fetchRegistryCreds()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to remove credential'
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -537,6 +610,7 @@ onMounted(() => {
   fetchBranding()
   fetchLogArchiveSettings()
   fetchBackupDefaults()
+  fetchRegistryCreds()
 })
 </script>
 
@@ -587,16 +661,6 @@ onMounted(() => {
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('super.settings.generalSettingsDesc') }}</p>
           </div>
           <div class="p-6 space-y-5">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformName') }}</label>
-              <div class="flex items-center gap-2 max-w-lg">
-                <input v-model="platformName" type="text" placeholder="Fleet" @keydown.enter="saveGeneralField('platform:name', platformName)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                <button @click="saveGeneralField('platform:name', platformName)" :disabled="savingField === 'general:platform:name'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'general:platform:name'" class="w-4 h-4 animate-spin" />
-                  <Save v-else class="w-4 h-4" />
-                </button>
-              </div>
-            </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.rootDomain') }}</label>
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ $t('super.settings.rootDomainDesc') }}</p>
@@ -1325,6 +1389,116 @@ onMounted(() => {
               </button>
             </div>
           </form>
+        </div>
+
+        <!-- Registry Credentials -->
+        <div v-if="activeSection === 'registry'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <KeyRound class="w-5 h-5 text-primary-500" />
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Registry Credentials</h2>
+                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage Docker registry credentials for pulling private images during deployments.</p>
+              </div>
+              <button
+                @click="showAddCred = !showAddCred"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+              >
+                <Plus class="w-4 h-4" />
+                Add Credential
+              </button>
+            </div>
+          </div>
+          <div class="p-6 space-y-4">
+            <div v-if="credError" class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p class="text-sm text-red-700 dark:text-red-300">{{ credError }}</p>
+            </div>
+
+            <!-- Add credential form -->
+            <div v-if="showAddCred" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600 space-y-3">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Registry</label>
+                  <input v-model="newCredRegistry" type="text" placeholder="ghcr.io" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+                  <input v-model="newCredUsername" type="text" placeholder="username" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Password / Token</label>
+                  <input v-model="newCredPassword" type="password" placeholder="••••••••" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="addCredential"
+                  :disabled="addingCred || !newCredRegistry || !newCredUsername || !newCredPassword"
+                  class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="addingCred" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                  {{ addingCred ? 'Adding...' : 'Add' }}
+                </button>
+                <button @click="showAddCred = false" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <!-- Quick connect GitHub -->
+            <div class="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+              <Github class="w-5 h-5 text-gray-700 dark:text-gray-300 shrink-0" />
+              <div class="flex-1">
+                <p class="text-sm font-medium text-gray-900 dark:text-white">GitHub Packages</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Auto-connect using your linked GitHub account's access token.</p>
+              </div>
+              <button
+                @click="connectGithubPackages"
+                :disabled="connectingGithub"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="connectingGithub" class="w-4 h-4 animate-spin" />
+                Connect
+              </button>
+            </div>
+
+            <!-- Existing credentials -->
+            <div v-if="loadingCreds" class="flex items-center justify-center py-6">
+              <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+            </div>
+            <div v-else-if="registryCreds.length > 0" class="space-y-2">
+              <div
+                v-for="cred in registryCreds"
+                :key="cred.id"
+                class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600"
+              >
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                    <KeyRound class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ cred.registry }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ cred.username }}</p>
+                  </div>
+                </div>
+                <button
+                  @click="removeCredential(cred.id)"
+                  class="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  title="Remove credential"
+                >
+                  <Trash2 class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div v-else class="text-center py-6">
+              <KeyRound class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+              <p class="text-sm text-gray-500 dark:text-gray-400">No registry credentials configured.</p>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Add credentials to pull images from private registries.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

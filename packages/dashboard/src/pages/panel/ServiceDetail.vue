@@ -1384,7 +1384,7 @@ onUnmounted(() => {
             </div>
             <div v-if="(service.volumes as any[])?.length" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Storage</p>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 mb-2">
                 <p class="text-lg font-bold text-gray-900 dark:text-white">{{ (service.volumes as any[]).length }} vol{{ (service.volumes as any[]).length !== 1 ? 's' : '' }}</p>
                 <span
                   v-if="(service as any).dockerStatus?.volumeDrivers?.length"
@@ -1395,6 +1395,20 @@ onUnmounted(() => {
                 >
                   {{ (service as any).dockerStatus.volumeDrivers[0].driverType || (service as any).dockerStatus.volumeDrivers[0].driver }}
                 </span>
+              </div>
+              <div v-for="vol in (service.volumes as any[])" :key="vol.source" class="mt-1.5">
+                <div v-if="volumeManager.accountVolumes.value.find(v => v.name === vol.source)" class="text-xs">
+                  <div class="flex items-baseline justify-between mb-0.5">
+                    <span class="text-gray-500 dark:text-gray-400 font-mono truncate">{{ vol.source }}</span>
+                    <span class="text-gray-400 dark:text-gray-500 shrink-0 ml-1">{{ (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.usedGb ?? 0).toFixed(1) }}/{{ volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb ?? 0 }} GB</span>
+                  </div>
+                  <div class="h-1 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+                    <div
+                      class="h-full rounded-full bg-primary-500 transition-all duration-500"
+                      :style="{ width: (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb ?? 0) > 0 ? `${Math.min(100, ((volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.usedGb ?? 0) / (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb ?? 1)) * 100)}%` : '0%' }"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>

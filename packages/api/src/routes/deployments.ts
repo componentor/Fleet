@@ -530,7 +530,7 @@ authenticatedRoutes.openapi(rollbackRoute, (async (c: any) => {
   // Update Docker service with the old image
   if (svc.dockerServiceId) {
     try {
-      const rollbackAuth = await getRegistryAuthForImage(svc.accountId, deployment.imageTag);
+      const rollbackAuth = await getRegistryAuthForImage(deployment.imageTag);
       await dockerService.updateService(svc.dockerServiceId, {
         image: deployment.imageTag,
       }, rollbackAuth);

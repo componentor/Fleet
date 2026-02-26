@@ -75,9 +75,7 @@ async function upsertSetting(key: string, value: unknown): Promise<void> {
 // Shared helper: resolve the platform root domain (DB → env → fallback)
 // ────────────────────────────────────────────────────────────────────────────
 export async function getPlatformDomain(): Promise<string> {
-  // Env var takes priority (set at deploy time, cannot be accidentally cleared via UI)
-  if (process.env['PLATFORM_DOMAIN']) return process.env['PLATFORM_DOMAIN'];
-
+  // DB takes priority — the admin may have updated the domain via the settings UI
   try {
     const dbVal = await getSetting('platform:domain');
     if (dbVal != null) {
@@ -86,8 +84,11 @@ export async function getPlatformDomain(): Promise<string> {
       if (typeof parsed === 'string' && parsed.length > 0) return parsed;
     }
   } catch {
-    // DB may not be available
+    // DB may not be available — fall through to env
   }
+
+  // Env var as fallback (set at deploy time)
+  if (process.env['PLATFORM_DOMAIN']) return process.env['PLATFORM_DOMAIN'];
 
   return 'fleet.local';
 }
