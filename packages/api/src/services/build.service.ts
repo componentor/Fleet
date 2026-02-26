@@ -358,7 +358,7 @@ export class BuildService {
       this.events.emit(`build:${buildId}`, info);
 
       await mkdir(workDir, { recursive: true });
-      await this.exec('cp', ['-a', `${sourceDir}/.`, workDir], workDir);
+      await this.exec('cp', ['-r', `${sourceDir}/.`, workDir], workDir);
 
       // Write auto-generated Dockerfile if provided
       if (generatedDockerfile) {
@@ -471,7 +471,7 @@ export class BuildService {
       this.events.emit(`build:${buildId}`, info);
 
       await mkdir(workDir, { recursive: true });
-      await this.exec('cp', ['-a', `${sourceDir}/.`, workDir], workDir);
+      await this.exec('cp', ['-r', `${sourceDir}/.`, workDir], workDir);
 
       // 2. Build using docker compose
       info.status = 'building';
