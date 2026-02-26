@@ -102,11 +102,14 @@ const billingConfigSchema = z.object({
   allowUserChoice: z.boolean().optional(),
   allowedCycles: z.array(z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly'])).min(1).optional(),
   cycleDiscounts: z.record(
-    z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+    z.string(),
     z.object({
       type: z.enum(['fixed', 'percentage']),
       value: z.number().min(0),
     }),
+  ).refine(
+    (obj) => Object.keys(obj).every(k => ['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly'].includes(k)),
+    { message: 'Keys must be valid billing cycles (daily, weekly, monthly, quarterly, half_yearly, yearly)' },
   ).optional(),
   trialDays: z.number().int().min(0).optional(),
   suspensionGraceDays: z.number().int().min(1).optional(),
