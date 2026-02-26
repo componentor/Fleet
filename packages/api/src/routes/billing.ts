@@ -450,10 +450,6 @@ authed.openapi(checkoutRoute, (async (c: any) => {
 
   const { billingModel, billingCycle, planId, successUrl, cancelUrl } = c.req.valid('json');
 
-  if (billingModel === 'usage' || billingModel === 'hybrid') {
-    return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
-  }
-
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
     return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
@@ -852,29 +848,35 @@ authed.openapi(updateConfigRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
-  if (data.billingModel === 'usage' || data.billingModel === 'hybrid') {
-    return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
-  }
-
   const existing = await db.query.billingConfig.findFirst();
 
+  let result;
   if (existing) {
     const [updated] = await updateReturning(billingConfig, {
       ...data,
       updatedAt: new Date(),
     }, eq(billingConfig.id, existing.id));
-    return c.json(updated);
+    result = updated;
+  } else {
+    const [created] = await insertReturning(billingConfig, {
+      billingModel: data.billingModel ?? 'fixed',
+      allowUserChoice: data.allowUserChoice ?? false,
+      allowedCycles: data.allowedCycles ?? ['monthly', 'yearly'],
+      cycleDiscounts: data.cycleDiscounts ?? {},
+      trialDays: data.trialDays ?? 0,
+    });
+    result = created;
   }
 
-  const [created] = await insertReturning(billingConfig, {
-    billingModel: data.billingModel ?? 'fixed',
-    allowUserChoice: data.allowUserChoice ?? false,
-    allowedCycles: data.allowedCycles ?? ['monthly', 'yearly'],
-    cycleDiscounts: data.cycleDiscounts ?? {},
-    trialDays: data.trialDays ?? 0,
-  });
+  // Auto-create metered Stripe prices when switching to usage or hybrid billing
+  const effectiveModel = data.billingModel ?? existing?.billingModel ?? 'fixed';
+  if (effectiveModel === 'usage' || effectiveModel === 'hybrid') {
+    stripeSyncService.ensureMeteredPrices().catch((err) => {
+      logger.error({ err }, 'Failed to auto-create metered Stripe prices');
+    });
+  }
 
-  return c.json(created, 201);
+  return c.json(result, existing ? 200 : 201);
 }) as any);
 
 // GET /price-preview — calculate price for a specific cycle

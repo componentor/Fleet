@@ -133,7 +133,8 @@ class UsageService {
 
   /**
    * Bulk-collect bandwidth deltas for all running services.
-   * Uses Docker container stats + Valkey for delta tracking.
+   * Reads agent-reported snapshots from Valkey (works across all Swarm nodes),
+   * then computes deltas against previous values.
    * Returns a map of dockerServiceId → deltaBytes.
    */
   private async collectBulkBandwidth(
@@ -151,7 +152,7 @@ class UsageService {
 
       if (dockerServiceIds.length === 0) return result;
 
-      // Bulk-fetch tasks for all fleet services
+      // Bulk-fetch tasks for all fleet services via Swarm API (works cluster-wide)
       const allTasks = await dockerService.listTasks({
         'desired-state': ['running'],
       });
@@ -175,23 +176,42 @@ class UsageService {
 
       if (allContainerIds.length === 0) return result;
 
-      // Fetch network stats for all containers with concurrency limit
+      // Read current snapshots from Valkey (written by node agents via heartbeat)
+      const SNAPSHOT_PREFIX = 'fleet:bw:snapshot:';
+      const snapshotKeys = allContainerIds.map((cid) => `${SNAPSHOT_PREFIX}${cid}`);
+      const snapshots = snapshotKeys.length > 0 ? await valkey.mget(...snapshotKeys) : [];
+
+      // Build current totals from agent snapshots
       const statsByContainer = new Map<string, number>();
-      for (let i = 0; i < allContainerIds.length; i += STATS_CONCURRENCY) {
-        const batch = allContainerIds.slice(i, i + STATS_CONCURRENCY);
-        const batchResults = await Promise.all(
-          batch.map((cid) => dockerService.getContainerNetworkBytes(cid)),
-        );
-        for (const r of batchResults) {
-          if (r) statsByContainer.set(r.containerId, r.rxBytes + r.txBytes);
+      for (let idx = 0; idx < allContainerIds.length; idx++) {
+        const raw = snapshots[idx];
+        if (!raw) continue;
+        try {
+          const snap = JSON.parse(raw) as { rx: number; tx: number };
+          statsByContainer.set(allContainerIds[idx]!, snap.rx + snap.tx);
+        } catch { /* malformed snapshot */ }
+      }
+
+      // If agent snapshots are missing (old agents), fall back to direct Docker stats
+      // (only works for containers on the local node — better than nothing)
+      const missingContainers = allContainerIds.filter((cid) => !statsByContainer.has(cid));
+      if (missingContainers.length > 0) {
+        for (let i = 0; i < missingContainers.length; i += STATS_CONCURRENCY) {
+          const batch = missingContainers.slice(i, i + STATS_CONCURRENCY);
+          const batchResults = await Promise.all(
+            batch.map((cid) => dockerService.getContainerNetworkBytes(cid)),
+          );
+          for (const r of batchResults) {
+            if (r) statsByContainer.set(r.containerId, r.rxBytes + r.txBytes);
+          }
         }
       }
 
-      // Read previous values from Valkey (pipeline for performance)
-      const keys = allContainerIds.map((cid) => `${BANDWIDTH_KEY_PREFIX}${cid}`);
-      const prevValues = keys.length > 0 ? await valkey.mget(...keys) : [];
+      // Read previous delta-tracking values from Valkey
+      const deltaKeys = allContainerIds.map((cid) => `${BANDWIDTH_KEY_PREFIX}${cid}`);
+      const prevValues = deltaKeys.length > 0 ? await valkey.mget(...deltaKeys) : [];
 
-      // Write new values to Valkey (pipeline)
+      // Compute deltas and write new values
       const pipeline = valkey.pipeline();
       const deltaByContainer = new Map<string, number>();
 
