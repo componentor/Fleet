@@ -52,13 +52,37 @@ import registryCredentialRoutes from './routes/registry-credentials.js';
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
 // Ensure CORS_ORIGIN, APP_URL, and all secrets are identical across instances.
+function logValidationError(result: { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } }, c: { req: { method: string; url: string; header: (name: string) => string | undefined }; get: (key: never) => unknown }) {
+  const details = result.error.issues.map((i) => `${i.path.map(String).join('.')}: ${i.message}`);
+  let userId: string | null = null;
+  try {
+    const user = c.get('user' as never) as { userId?: string } | undefined;
+    userId = user?.userId ?? null;
+  } catch { /* auth may not have run yet */ }
+
+  db.insert(errorLog)
+    .values({
+      level: 'warn',
+      message: `Validation failed: ${details.join('; ')}`,
+      stack: null,
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      statusCode: 400,
+      userId,
+      ip: null,
+      userAgent: c.req.header('user-agent') ?? null,
+      metadata: { details },
+    })
+    .catch((dbErr) => logger.error({ dbErr }, 'Failed to write validation error to error_log'));
+
+  return details;
+}
+
 export const app = new OpenAPIHono({
   defaultHook: (result, c) => {
     if (!result.success) {
-      return c.json({
-        error: 'Validation failed',
-        details: result.error.issues.map((i) => `${(i.path as (string | number)[]).join('.')}: ${i.message}`),
-      }, 400);
+      const details = logValidationError(result, c);
+      return c.json({ error: 'Validation failed', details }, 400);
     }
   },
 });
@@ -240,10 +264,8 @@ async function verifyWsToken(token: string) {
 const api = new OpenAPIHono({
   defaultHook: (result, c) => {
     if (!result.success) {
-      return c.json({
-        error: 'Validation failed',
-        details: result.error.issues.map((i) => `${(i.path as (string | number)[]).join('.')}: ${i.message}`),
-      }, 400);
+      const details = logValidationError(result, c);
+      return c.json({ error: 'Validation failed', details }, 400);
     }
   },
 });

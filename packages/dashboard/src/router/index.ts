@@ -294,11 +294,35 @@ const setupRoutes: RouteRecordRaw[] = [
   },
 ]
 
-const routes: RouteRecordRaw[] = [
+const landingRoutes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/panel',
+    name: 'home',
+    component: () => import('@/pages/landing/HomeView.vue'),
+    meta: { public: true, landing: true },
   },
+  {
+    path: '/docs',
+    name: 'docs',
+    component: () => import('@/pages/landing/DocsView.vue'),
+    meta: { public: true, landing: true },
+  },
+  {
+    path: '/privacy',
+    name: 'privacy',
+    component: () => import('@/pages/landing/PrivacyView.vue'),
+    meta: { public: true, landing: true },
+  },
+  {
+    path: '/terms',
+    name: 'terms',
+    component: () => import('@/pages/landing/TermsView.vue'),
+    meta: { public: true, landing: true },
+  },
+]
+
+const routes: RouteRecordRaw[] = [
+  ...landingRoutes,
   ...authRoutes,
   ...superRoutes,
   ...panelRoutes,
@@ -314,6 +338,13 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+  scrollBehavior(to, _from, savedPosition) {
+    if (to.hash) {
+      return { el: to.hash, behavior: 'smooth' }
+    }
+    if (savedPosition) return savedPosition
+    return { top: 0 }
+  },
 })
 
 // Handle chunk load failures during rolling deployments.
@@ -371,7 +402,7 @@ router.beforeEach(async (to) => {
 
   // Allow public routes
   if (to.meta.public) {
-    if (isAuthenticated && to.name === 'login') {
+    if (isAuthenticated && (to.name === 'login' || to.name === 'home')) {
       return { path: '/panel' }
     }
     return

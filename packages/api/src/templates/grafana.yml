@@ -17,7 +17,7 @@ variables:
 
 services:
   - name: grafana
-    image: grafana/grafana-oss:11.4
+    image: grafana/grafana-oss:11.6.5
     ports:
       - target: 3000
         published: 3000
@@ -29,7 +29,7 @@ services:
         target: /var/lib/grafana
 
   - name: grafana-prometheus
-    image: prom/prometheus:v2.54
+    image: prom/prometheus:v2.55.1
     ports:
       - target: 9090
         published: 9090
