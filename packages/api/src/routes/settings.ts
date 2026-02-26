@@ -12,6 +12,7 @@ import { logger } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
+import { dockerService } from '../services/docker.service.js';
 
 const UPLOAD_BASE = process.env['UPLOAD_BASE_PATH']
   ?? (process.env['NODE_ENV'] === 'production' ? '/srv/nfs/uploads' : join(process.cwd(), 'data', 'uploads'));
@@ -68,6 +69,49 @@ async function upsertSetting(key: string, value: unknown): Promise<void> {
       .where(eq(platformSettings.id, existing.id));
   } else {
     await db.insert(platformSettings).values({ key, value });
+  }
+}
+
+/**
+ * Update Traefik labels on fleet_api and fleet_dashboard Docker Swarm services
+ * so Traefik routes the new domain and requests a Let's Encrypt certificate.
+ */
+async function updateFleetServiceDomain(newDomain: string): Promise<void> {
+  const serviceConfigs = [
+    {
+      name: 'fleet_api',
+      router: 'api',
+      rule: `Host(\`${newDomain}\`) && PathPrefix(\`/api\`)`,
+      port: 3000,
+    },
+    {
+      name: 'fleet_dashboard',
+      router: 'dashboard',
+      rule: `Host(\`${newDomain}\`)`,
+      port: 80,
+      extraLabels: { 'traefik.http.routers.dashboard.priority': '1' },
+    },
+  ];
+
+  for (const cfg of serviceConfigs) {
+    const services = await dockerService.listServices({ name: [cfg.name] });
+    const svc = services.find((s: any) => s.Spec?.Name === cfg.name);
+    if (!svc) {
+      logger.warn({ service: cfg.name }, `${cfg.name} not found — skipping Traefik label update`);
+      continue;
+    }
+
+    const labels: Record<string, string> = {
+      'traefik.enable': 'true',
+      [`traefik.http.routers.${cfg.router}.rule`]: cfg.rule,
+      [`traefik.http.routers.${cfg.router}.entrypoints`]: 'websecure',
+      [`traefik.http.routers.${cfg.router}.tls.certresolver`]: 'letsencrypt',
+      [`traefik.http.services.${cfg.router}.loadbalancer.server.port`]: String(cfg.port),
+      ...cfg.extraLabels,
+    };
+
+    await dockerService.updateService((svc as any).ID, { labels });
+    logger.info({ service: cfg.name, domain: newDomain }, `Updated Traefik labels on ${cfg.name}`);
   }
 }
 
@@ -517,6 +561,25 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
     }
 
     await invalidateCache('GET:/settings/*');
+
+    // If the platform domain changed, update Traefik labels on fleet_api and fleet_dashboard
+    // so Traefik requests a new Let's Encrypt cert for the new domain.
+    const domainEntry = entries.find(([k]) => k === 'platform:domain');
+    if (domainEntry) {
+      const rawDomain = domainEntry[1];
+      const newDomain = typeof rawDomain === 'string'
+        ? (rawDomain.startsWith('"') ? JSON.parse(rawDomain) : rawDomain)
+        : String(rawDomain);
+
+      if (newDomain && newDomain.length > 0) {
+        try {
+          await updateFleetServiceDomain(newDomain);
+          logger.info({ newDomain, changedBy: user.userId }, 'Fleet service Traefik labels updated for new domain');
+        } catch (err) {
+          logger.error({ err, newDomain }, 'Failed to update fleet service Traefik labels — manual service update may be needed');
+        }
+      }
+    }
 
     logger.info({ keys: entries.map(([k]) => k), changedBy: user.userId }, 'Platform settings updated');
     return c.json({ message: 'Platform settings updated', updated: entries.map(([k]) => k) });
