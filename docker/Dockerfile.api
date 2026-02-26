@@ -26,7 +26,7 @@ COPY --from=build /app/packages/db/src/migrations ./dist/migrations
 COPY --from=build /app/packages/api/src/templates ./templates
 COPY docker/entrypoint-api.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-RUN mkdir -p /app/data /srv/fleet-objects && chown fleet:fleet /app/data /srv/fleet-objects
+RUN mkdir -p /app/data /srv/fleet-objects /srv/nfs/uploads /srv/nfs/backups /srv/nfs/log-archives && chown -R fleet:fleet /app/data /srv/fleet-objects /srv/nfs
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:3000/health || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
