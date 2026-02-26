@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Key, Plus, Trash2, Loader2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
+const { t } = useI18n()
 const api = useApi()
 const { canWrite } = useRole()
 
@@ -38,19 +40,19 @@ async function addKey() {
     newKeyContent.value = ''
     await fetchKeys()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to add SSH key'
+    error.value = err?.body?.error || t('ssh.addFailed')
   } finally {
     adding.value = false
   }
 }
 
 async function removeKey(keyId: string) {
-  if (!confirm('Remove this SSH key?')) return
+  if (!confirm(t('ssh.confirmRemove'))) return
   try {
     await api.del(`/ssh/keys/${keyId}`)
     await fetchKeys()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to remove SSH key'
+    error.value = err?.body?.error || t('ssh.removeFailed')
   }
 }
 
@@ -68,7 +70,7 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <Key class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">SSH Access</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('ssh.title') }}</h1>
     </div>
 
     <div v-if="error" class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -79,25 +81,25 @@ onMounted(() => {
       <!-- Add key form -->
       <div v-if="canWrite" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Add SSH Key</h3>
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('ssh.add') }}</h3>
         </div>
         <form @submit.prevent="addKey" class="p-6 space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('ssh.name') }}</label>
             <input
               v-model="newKeyName"
               type="text"
-              placeholder="My laptop key"
+              :placeholder="t('ssh.namePlaceholder')"
               required
               class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Public Key</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('ssh.publicKey') }}</label>
             <textarea
               v-model="newKeyContent"
               rows="3"
-              placeholder="ssh-ed25519 AAAA..."
+              :placeholder="t('ssh.publicKeyPlaceholder')"
               required
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
             ></textarea>
@@ -109,7 +111,7 @@ onMounted(() => {
           >
             <Loader2 v-if="adding" class="w-4 h-4 animate-spin" />
             <Plus v-else class="w-4 h-4" />
-            {{ adding ? 'Adding...' : 'Add Key' }}
+            {{ adding ? t('ssh.adding') : t('ssh.addKey') }}
           </button>
         </form>
       </div>
@@ -124,16 +126,16 @@ onMounted(() => {
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fingerprint</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Added</th>
-                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('ssh.name') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('ssh.fingerprint') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('ssh.addedAt') }}</th>
+                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('common.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-if="sshKeys.length === 0">
                 <td colspan="4" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  No SSH keys added yet.
+                  {{ t('ssh.noKeysAdded') }}
                 </td>
               </tr>
               <tr
@@ -150,7 +152,7 @@ onMounted(() => {
                     class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                   >
                     <Trash2 class="w-3.5 h-3.5" />
-                    Remove
+                    {{ t('ssh.remove') }}
                   </button>
                 </td>
               </tr>

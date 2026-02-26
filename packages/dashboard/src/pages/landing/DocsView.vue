@@ -7,16 +7,22 @@ import DocsSidebar from '@/components/landing/DocsSidebar.vue'
 import CodeBlock from '@/components/landing/CodeBlock.vue'
 import { sidebarSections, commandGroups } from '@/data/docs'
 import { useI18n } from 'vue-i18n'
+import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
+const { brandGithubUrl } = useBranding()
 
-
-const navLinks = computed<NavLink[]>(() => [
-  { label: t('landing.nav.features'), href: '/#features' },
-  { label: t('landing.nav.pricing'), href: '/#pricing' },
-  { label: t('landing.docs.title'), href: '/docs', routerLink: true },
-  { label: t('landing.nav.github'), href: 'https://github.com/fleet', external: true },
-])
+const navLinks = computed<NavLink[]>(() => {
+  const links: NavLink[] = [
+    { label: t('landing.nav.features'), href: '/#features' },
+    { label: t('landing.nav.pricing'), href: '/#pricing' },
+    { label: t('landing.docs.title'), href: '/docs', routerLink: true },
+  ]
+  if (brandGithubUrl.value) {
+    links.push({ label: t('landing.nav.github'), href: brandGithubUrl.value, external: true })
+  }
+  return links
+})
 
 const activeSection = ref('getting-started')
 const sidebarOpen = ref(false)
@@ -28,6 +34,10 @@ function handleSidebarClickOutside(e: MouseEvent) {
   }
 }
 
+function getBannerHeight() {
+  return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--banner-height') || '0', 10)
+}
+
 function navigateTo(id: string) {
   activeSection.value = id
   sidebarOpen.value = false
@@ -35,7 +45,8 @@ function navigateTo(id: string) {
   nextTick(() => {
     const el = document.getElementById(id)
     if (el) {
-      const offset = window.innerWidth < 1024 ? 128 : 80
+      const bannerH = getBannerHeight()
+      const offset = (window.innerWidth < 1024 ? 128 : 80) + bannerH
       const top = el.getBoundingClientRect().top + window.scrollY - offset
       window.scrollTo({ top, behavior: 'smooth' })
     }
@@ -46,9 +57,10 @@ function navigateTo(id: string) {
 function handleScroll() {
   const sections = document.querySelectorAll('[data-section]')
   let current = 'getting-started'
+  const threshold = 100 + getBannerHeight()
   sections.forEach((section) => {
     const rect = section.getBoundingClientRect()
-    if (rect.top <= 100) {
+    if (rect.top <= threshold) {
       current = section.getAttribute('data-section') ?? current
     }
   })

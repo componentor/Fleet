@@ -52,6 +52,12 @@ const authRoutes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
+    path: '/verify-email-change',
+    name: 'verify-email-change',
+    component: () => import('@/pages/auth/VerifyEmailChange.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/r/:slug',
     name: 'reseller-signup',
     component: () => import('@/pages/auth/ResellerSignup.vue'),
@@ -155,6 +161,11 @@ const superRoutes: RouteRecordRaw[] = [
         name: 'super-job-detail',
         component: () => import('@/pages/super/JobDetail.vue'),
         props: true,
+      },
+      {
+        path: 'profile',
+        name: 'super-profile',
+        component: () => import('@/pages/panel/Profile.vue'),
       },
     ],
   },
@@ -402,7 +413,7 @@ router.beforeEach(async (to) => {
 
   // Allow public routes
   if (to.meta.public) {
-    if (isAuthenticated && (to.name === 'login' || to.name === 'home')) {
+    if (isAuthenticated && to.name === 'login') {
       return { path: '/panel' }
     }
     return

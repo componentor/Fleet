@@ -23,18 +23,18 @@ const dashArray = computed(() => {
   return `${filled} ${circumference - filled}`
 })
 
-const colorClass = computed(() => {
-  if (props.color) return props.color
+// Unique ID per instance for SVG gradient reference
+const uid = `gauge-${Math.random().toString(36).slice(2, 9)}`
+
+const gradientStops = computed(() => {
   if (props.highIsGood) {
-    // High = good (e.g. uptime): green at top, red at bottom
-    if (animated.value >= 80) return 'text-green-500'
-    if (animated.value >= 50) return 'text-amber-500'
-    return 'text-red-500'
+    if (animated.value >= 80) return ['#22c55e', '#10b981'] // green → emerald
+    if (animated.value >= 50) return ['#f59e0b', '#f97316'] // amber → orange
+    return ['#ef4444', '#e11d48']                           // red → rose
   }
-  // High = bad (e.g. disk usage): red at top, green at bottom
-  if (animated.value >= 90) return 'text-red-500'
-  if (animated.value >= 70) return 'text-amber-500'
-  return 'text-primary-500'
+  if (animated.value >= 90) return ['#ef4444', '#e11d48']   // red → rose
+  if (animated.value >= 70) return ['#f59e0b', '#f97316']   // amber → orange
+  return ['#6366f1', '#8b5cf6']                             // indigo → violet
 })
 
 onMounted(() => {
@@ -57,6 +57,12 @@ onMounted(() => {
   <div class="flex flex-col items-center gap-2">
     <div class="relative w-20 h-20">
       <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90">
+        <defs>
+          <linearGradient :id="uid" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" :stop-color="gradientStops[0]" />
+            <stop offset="100%" :stop-color="gradientStops[1]" />
+          </linearGradient>
+        </defs>
         <!-- Background track -->
         <circle
           cx="18" cy="18" :r="radius"
@@ -69,11 +75,10 @@ onMounted(() => {
         <circle
           cx="18" cy="18" :r="radius"
           fill="none"
-          stroke="currentColor"
+          :stroke="`url(#${uid})`"
           stroke-width="3"
           stroke-linecap="round"
           :stroke-dasharray="dashArray"
-          :class="colorClass"
           style="transition: stroke-dasharray 0.3s ease"
         />
       </svg>

@@ -1124,6 +1124,22 @@ auth.get('/github', oauthRateLimit, async (c) => {
     scope: 'user:email repo read:packages',
   });
 
+  // If user is already logged in (has valid refresh cookie), store their userId
+  // so the callback can link the OAuth provider to their existing account
+  let linkToUserId: string | undefined;
+  const refreshToken = getCookie(c, 'fleet_refresh');
+  if (refreshToken && returnTo.startsWith('/panel/profile')) {
+    try {
+      const secret = JWT_SECRET_KEY();
+      const { payload } = await jwtVerify(refreshToken, secret);
+      if (payload['type'] === 'refresh' && payload['userId']) {
+        linkToUserId = payload['userId'] as string;
+      }
+    } catch {
+      // Invalid token — proceed as normal login flow
+    }
+  }
+
   // Generate a random nonce and store state in Valkey for CSRF protection
   const nonce = crypto.randomBytes(16).toString('hex');
   try {
@@ -1131,7 +1147,7 @@ auth.get('/github', oauthRateLimit, async (c) => {
     if (!valkey) {
       return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
     }
-    await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ returnTo }));
+    await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ returnTo, linkToUserId }));
     params.set('state', nonce);
   } catch {
     return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
@@ -1147,6 +1163,7 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
 
   // Verify state nonce from Valkey for CSRF protection, then extract returnTo
   let returnTo = '';
+  let linkToUserId: string | undefined;
   if (!stateParam) {
     return c.redirect('/auth/callback?error=Invalid+OAuth+state');
   }
@@ -1162,6 +1179,7 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
     await valkey.del(`oauth:state:${stateParam}`);
     const parsed = JSON.parse(stored);
     returnTo = parsed.returnTo || '';
+    linkToUserId = parsed.linkToUserId;
   } catch {
     return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
   }
@@ -1247,6 +1265,34 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
     }
 
     const providerUserId = String(githubUser.id);
+
+    // Profile linking flow — user is already logged in and wants to connect GitHub
+    if (linkToUserId) {
+      const existingLink = await db.query.oauthProviders.findFirst({
+        where: (op, { and, eq }) =>
+          and(eq(op.provider, 'github'), eq(op.providerUserId, providerUserId)),
+      });
+
+      if (existingLink && existingLink.userId !== linkToUserId) {
+        return c.redirect(`${returnTo || '/panel/profile'}#error=This+GitHub+account+is+linked+to+another+user`);
+      }
+
+      if (existingLink) {
+        // Already linked to this user — just update token
+        await db.update(oauthProviders)
+          .set({ accessToken: encrypt(tokenData.access_token!) })
+          .where(eq(oauthProviders.id, existingLink.id));
+      } else {
+        await db.insert(oauthProviders).values({
+          userId: linkToUserId,
+          provider: 'github',
+          providerUserId,
+          accessToken: encrypt(tokenData.access_token!),
+        });
+      }
+
+      return c.redirect(`${returnTo || '/panel/profile'}#connected=github`);
+    }
 
     // Check if OAuth link exists
     const existingOAuth = await db.query.oauthProviders.findFirst({
@@ -1379,6 +1425,7 @@ auth.get('/google', oauthRateLimit, async (c) => {
     return c.json({ error: 'Google OAuth is not configured' }, 500);
   }
 
+  const returnTo = c.req.query('returnTo') || '';
   const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/google/callback`;
   const params = new URLSearchParams({
     client_id: clientId,
@@ -1387,6 +1434,22 @@ auth.get('/google', oauthRateLimit, async (c) => {
     scope: 'openid email profile',
   });
 
+  // If user is already logged in (has valid refresh cookie), store their userId
+  // so the callback can link the OAuth provider to their existing account
+  let linkToUserId: string | undefined;
+  const refreshToken = getCookie(c, 'fleet_refresh');
+  if (refreshToken && returnTo.startsWith('/panel/profile')) {
+    try {
+      const secret = JWT_SECRET_KEY();
+      const { payload } = await jwtVerify(refreshToken, secret);
+      if (payload['type'] === 'refresh' && payload['userId']) {
+        linkToUserId = payload['userId'] as string;
+      }
+    } catch {
+      // Invalid token — proceed as normal login flow
+    }
+  }
+
   // Generate a random nonce and store in Valkey for CSRF protection
   const nonce = crypto.randomBytes(16).toString('hex');
   try {
@@ -1394,7 +1457,7 @@ auth.get('/google', oauthRateLimit, async (c) => {
     if (!valkey) {
       return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
     }
-    await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ provider: 'google' }));
+    await valkey.setex(`oauth:state:${nonce}`, 300, JSON.stringify({ provider: 'google', returnTo, linkToUserId }));
     params.set('state', nonce);
   } catch {
     return c.redirect('/auth/callback?error=OAuth+state+storage+unavailable');
@@ -1409,6 +1472,8 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
   const stateParam = c.req.query('state') || '';
 
   // Verify state nonce from Valkey for CSRF protection (required)
+  let returnTo = '';
+  let linkToUserId: string | undefined;
   if (!stateParam) {
     return c.redirect('/auth/callback?error=Invalid+OAuth+state');
   }
@@ -1422,8 +1487,16 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
       return c.redirect('/auth/callback?error=Invalid+OAuth+state');
     }
     await valkey.del(`oauth:state:${stateParam}`);
+    const parsed = JSON.parse(stored);
+    returnTo = parsed.returnTo || '';
+    linkToUserId = parsed.linkToUserId;
   } catch {
     return c.redirect('/auth/callback?error=OAuth+state+verification+unavailable');
+  }
+
+  // Validate returnTo is a safe relative path (prevent open redirect)
+  if (returnTo && (!returnTo.startsWith('/') || returnTo.startsWith('//'))) {
+    returnTo = '';
   }
 
   if (!code) {
@@ -1484,6 +1557,33 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
     }
 
     const providerUserId = googleUser.id;
+
+    // Profile linking flow — user is already logged in and wants to connect Google
+    if (linkToUserId) {
+      const existingLink = await db.query.oauthProviders.findFirst({
+        where: (op, { and, eq }) =>
+          and(eq(op.provider, 'google'), eq(op.providerUserId, providerUserId)),
+      });
+
+      if (existingLink && existingLink.userId !== linkToUserId) {
+        return c.redirect(`${returnTo || '/panel/profile'}#error=This+Google+account+is+linked+to+another+user`);
+      }
+
+      if (existingLink) {
+        await db.update(oauthProviders)
+          .set({ accessToken: encrypt(tokenData.access_token!) })
+          .where(eq(oauthProviders.id, existingLink.id));
+      } else {
+        await db.insert(oauthProviders).values({
+          userId: linkToUserId,
+          provider: 'google',
+          providerUserId,
+          accessToken: encrypt(tokenData.access_token!),
+        });
+      }
+
+      return c.redirect(`${returnTo || '/panel/profile'}#connected=google`);
+    }
 
     // Check if OAuth link exists
     const existingOAuth = await db.query.oauthProviders.findFirst({

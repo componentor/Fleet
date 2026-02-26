@@ -64,6 +64,7 @@ const createPlanSchema = z.object({
   containerLimit: z.number().int().min(0),
   storageLimit: z.number().int().min(0),
   bandwidthLimit: z.number().int().min(0).optional(),
+  maxUsersPerAccount: z.number().int().min(0).optional(),
   priceCents: z.number().int().min(0),
 }).openapi('CreatePlanRequest');
 

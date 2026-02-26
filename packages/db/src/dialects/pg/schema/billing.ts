@@ -28,6 +28,7 @@ export const billingPlans = pgTable('billing_plans', {
   containerLimit: integer('container_limit').notNull(),
   storageLimit: integer('storage_limit').notNull(),
   bandwidthLimit: integer('bandwidth_limit'),
+  maxUsersPerAccount: integer('max_users_per_account'),
   priceCents: integer('price_cents').notNull(),
   stripeProductId: varchar('stripe_product_id'),
   stripePriceIds: jsonb('stripe_price_ids').default({}),
@@ -51,6 +52,8 @@ export const subscriptions = pgTable('subscriptions', {
   currentPeriodStart: timestamp('current_period_start'),
   currentPeriodEnd: timestamp('current_period_end'),
   cancelledAt: timestamp('cancelled_at'),
+  billedByAccountId: uuid('billed_by_account_id')
+    .references(() => accounts.id, { onDelete: 'set null' }),
   pastDueSince: timestamp('past_due_since'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -175,6 +178,12 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   account: one(accounts, {
     fields: [subscriptions.accountId],
     references: [accounts.id],
+    relationName: 'subscription_account',
+  }),
+  billedByAccount: one(accounts, {
+    fields: [subscriptions.billedByAccountId],
+    references: [accounts.id],
+    relationName: 'subscription_billedBy',
   }),
   plan: one(billingPlans, {
     fields: [subscriptions.planId],

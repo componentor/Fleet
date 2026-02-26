@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { verify } from 'argon2';
-import { db, accounts, userAccounts, users, services, auditLog, logArchives, platformSettings, insertReturning, updateReturning, deleteReturning, countSql, eq, like, and, or, isNull, isNotNull, desc, gte, lte, safeTransaction } from '@fleet/db';
+import { db, accounts, userAccounts, users, services, auditLog, logArchives, platformSettings, billingPlans, subscriptions, billingConfig, insertReturning, updateReturning, deleteReturning, countSql, eq, like, and, or, isNull, isNotNull, desc, gte, lte, safeTransaction } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin, requireOwner } from '../middleware/rbac.js';
@@ -82,6 +82,15 @@ const idAndChildIdParamSchema = z.object({
   id: z.string().openapi({ description: 'Account ID' }),
   childId: z.string().openapi({ description: 'Child account ID' }),
 });
+
+const createSubAccountSchema = z.object({
+  name: z.string().min(1).max(255),
+  planId: z.string().uuid(),
+  billingCycle: z.string().min(1),
+  inheritBilling: z.boolean(),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+}).openapi('CreateSubAccountRequest');
 
 const activityQuerySchema = z.object({
   page: z.string().optional(),
@@ -360,6 +369,23 @@ const getActivityRoute = createRoute({
         totalPages: z.number(),
       }),
     }), 'Paginated audit log'),
+    ...standardErrors,
+  },
+});
+
+const createSubAccountRoute = createRoute({
+  method: 'post',
+  path: '/{id}/sub-accounts',
+  tags: ['Accounts'],
+  summary: 'Create a sub-account with billing plan',
+  security: bearerSecurity,
+  middleware: [tenantMiddleware] as const,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(createSubAccountSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Created sub-account with subscription'),
     ...standardErrors,
   },
 });
@@ -955,6 +981,24 @@ accountRoutes.openapi(inviteMemberRoute, (async (c: any) => {
     return c.json({ error: 'Cannot invite at a role equal to or higher than your own' }, 403);
   }
 
+  // Enforce max users per account from billing plan
+  const accountSub = await db.query.subscriptions.findFirst({
+    where: (s: any, { and, eq: e }: any) => and(e(s.accountId, account.id), e(s.status, 'active')),
+    with: { plan: true },
+  });
+  const maxUsers = (accountSub as any)?.plan?.maxUsersPerAccount;
+  if (maxUsers && maxUsers > 0) {
+    const memberCount = await db.select({ count: countSql() })
+      .from(userAccounts)
+      .where(eq(userAccounts.accountId, account.id));
+    const currentCount = Number(memberCount[0]?.count ?? 0);
+    if (currentCount >= maxUsers) {
+      return c.json({
+        error: `Account has reached the maximum of ${maxUsers} members for your plan. Upgrade to add more.`
+      }, 403);
+    }
+  }
+
   const targetUser = await db.query.users.findFirst({
     where: and(eq(users.email, email), isNull(users.deletedAt)),
   });
@@ -1234,6 +1278,234 @@ accountRoutes.openapi(getActivityRoute, (async (c: any) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
+}) as any);
+
+// POST /:id/sub-accounts — create a sub-account with billing plan
+accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
+  const user = c.get('user');
+  const parentAccount = c.get('account');
+  if (!parentAccount) {
+    return c.json({ error: 'Parent account not found' }, 404);
+  }
+
+  const parentId = parentAccount.id;
+  const data = c.req.valid('json');
+  const { name, planId, billingCycle, inheritBilling, successUrl, cancelUrl } = data;
+
+  // Verify user is owner or admin on the parent account
+  if (!user.isSuper) {
+    const membership = await db.query.userAccounts.findFirst({
+      where: (ua: any, { and, eq: e }: any) =>
+        and(e(ua.userId, user.userId), e(ua.accountId, parentId)),
+    });
+    if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
+      return c.json({ error: 'You must be an owner or admin to create sub-accounts' }, 403);
+    }
+  }
+
+  // Look up the parent's full record for path/depth/billing
+  const parent = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, parentId), isNull(accounts.deletedAt)),
+  });
+  if (!parent) {
+    return c.json({ error: 'Parent account not found' }, 404);
+  }
+
+  // Look up the selected plan
+  const plan = await db.query.billingPlans.findFirst({
+    where: eq(billingPlans.id, planId),
+  });
+  if (!plan) {
+    return c.json({ error: 'Plan not found' }, 404);
+  }
+
+  // Validate billing cycle against config
+  const bConfig = await db.query.billingConfig.findFirst();
+  const allowedCycles = (bConfig?.allowedCycles ?? ['monthly', 'yearly']) as string[];
+  if (!allowedCycles.includes(billingCycle)) {
+    return c.json({ error: 'Invalid billing cycle' }, 400);
+  }
+
+  // If inherit billing, verify parent has an active subscription with stripeCustomerId
+  if (inheritBilling && !plan.isFree) {
+    if (!parent.stripeCustomerId) {
+      return c.json({ error: 'Parent account has no payment method on file. Set up billing on the parent account first.' }, 400);
+    }
+    const parentSub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.accountId, parentId), eq(subscriptions.status, 'active')),
+    });
+    if (!parentSub) {
+      return c.json({ error: 'Parent account has no active subscription. Set up billing on the parent account first.' }, 400);
+    }
+  }
+
+  // If own billing for a paid plan, require redirect URLs
+  if (!inheritBilling && !plan.isFree) {
+    if (!successUrl || !cancelUrl) {
+      return c.json({ error: 'successUrl and cancelUrl are required for paid plans with own billing' }, 400);
+    }
+  }
+
+  // Create the sub-account
+  const parentPath = parent.path ?? parent.slug ?? '';
+  const depth = (parent.depth ?? 0) + 1;
+  const childSlug = slugify(name) + '-' + Date.now().toString(36);
+  const childPath = parentPath ? `${parentPath}.${childSlug}` : childSlug;
+
+  const existingSlug = await db.query.accounts.findFirst({
+    where: and(eq(accounts.slug, childSlug), isNull(accounts.deletedAt)),
+  });
+  if (existingSlug) {
+    return c.json({ error: 'Account slug already exists' }, 409);
+  }
+
+  let account: any;
+  let subscription: any;
+
+  if (inheritBilling) {
+    // Parent pays for child
+    await safeTransaction(async (tx) => {
+      [account] = await tx.insert(accounts).values({
+        name,
+        slug: childSlug,
+        parentId,
+        path: childPath,
+        depth,
+        stripeCustomerId: plan.isFree ? null : parent.stripeCustomerId,
+        status: 'active',
+      }).returning();
+
+      if (!account) throw new Error('Failed to create account');
+
+      await tx.insert(userAccounts).values({
+        userId: user.userId,
+        accountId: account.id,
+        role: 'owner',
+      });
+
+      // Create subscription directly
+      if (plan.isFree) {
+        [subscription] = await tx.insert(subscriptions).values({
+          accountId: account.id,
+          planId,
+          billingModel: 'fixed',
+          billingCycle,
+          status: 'active',
+        }).returning();
+      } else {
+        // Get Stripe price ID for the cycle
+        const priceIds = (plan.stripePriceIds ?? {}) as Record<string, string>;
+        const priceId = priceIds[billingCycle];
+        if (!priceId) {
+          throw new Error(`No Stripe price configured for ${billingCycle} cycle`);
+        }
+
+        // Create Stripe subscription on parent's customer
+        const { stripeService } = await import('../services/stripe.service.js');
+        const stripeSub = await stripeService.createDirectSubscription({
+          customerId: parent.stripeCustomerId!,
+          priceId,
+          metadata: {
+            accountId: account.id,
+            billedByAccountId: parentId,
+            billingModel: 'fixed',
+            billingCycle,
+            planId,
+          },
+        });
+
+        [subscription] = await tx.insert(subscriptions).values({
+          accountId: account.id,
+          planId,
+          billingModel: 'fixed',
+          billingCycle,
+          stripeSubscriptionId: stripeSub.id,
+          stripeCustomerId: parent.stripeCustomerId,
+          billedByAccountId: parentId,
+          status: stripeSub.status === 'active' ? 'active' : 'incomplete',
+        }).returning();
+      }
+    });
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.ACCOUNT_CREATED,
+      description: `Created sub-account '${name}' with billing inherited from parent`,
+      resourceType: 'account',
+      resourceId: account.id,
+      resourceName: name,
+    });
+
+    return c.json({ account, subscription }, 201);
+  }
+
+  // Own billing
+  await safeTransaction(async (tx) => {
+    [account] = await tx.insert(accounts).values({
+      name,
+      slug: childSlug,
+      parentId,
+      path: childPath,
+      depth,
+      status: 'active',
+    }).returning();
+
+    if (!account) throw new Error('Failed to create account');
+
+    await tx.insert(userAccounts).values({
+      userId: user.userId,
+      accountId: account.id,
+      role: 'owner',
+    });
+
+    if (plan.isFree) {
+      [subscription] = await tx.insert(subscriptions).values({
+        accountId: account.id,
+        planId,
+        billingModel: 'fixed',
+        billingCycle,
+        status: 'active',
+      }).returning();
+    }
+  });
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.ACCOUNT_CREATED,
+    description: `Created sub-account '${name}'`,
+    resourceType: 'account',
+    resourceId: account.id,
+    resourceName: name,
+  });
+
+  // For free plans, we're done
+  if (plan.isFree) {
+    return c.json({ account, subscription }, 201);
+  }
+
+  // For paid plans with own billing, create a checkout session
+  const { stripeService } = await import('../services/stripe.service.js');
+  const { stripeSyncService } = await import('../services/stripe-sync.service.js');
+
+  // Create Stripe customer for the child account
+  let childStripeCustomerId = account.stripeCustomerId;
+  if (!childStripeCustomerId) {
+    const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+    childStripeCustomerId = customer.id;
+    await db.update(accounts).set({ stripeCustomerId: childStripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, account.id));
+  }
+
+  const result = await stripeSyncService.createCheckoutSession({
+    accountId: account.id,
+    billingModel: 'fixed',
+    billingCycle,
+    planId,
+    stripeCustomerId: childStripeCustomerId,
+    successUrl: successUrl!,
+    cancelUrl: cancelUrl!,
+  });
+
+  return c.json({ account, checkoutUrl: result.url }, 201);
 }) as any);
 
 // ── Account-scoped log archives ──

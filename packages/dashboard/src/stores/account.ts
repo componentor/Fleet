@@ -16,8 +16,11 @@ export const useAccountStore = defineStore('account', () => {
       const data = await api.get<Account[]>('/accounts')
       accounts.value = data
 
-      // Set current account if not set
-      if (!currentAccount.value && data.length > 0) {
+      if (currentAccount.value) {
+        // Refresh current account from fresh data (e.g. after name change)
+        const updated = data.find((a) => a.id === currentAccount.value!.id)
+        if (updated) currentAccount.value = updated
+      } else if (data.length > 0) {
         const savedId = localStorage.getItem('fleet_account_id')
         const saved = savedId ? data.find((a) => a.id === savedId) : null
         currentAccount.value = saved ?? data[0]!

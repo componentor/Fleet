@@ -7,7 +7,7 @@ import LandingFooter from '@/components/landing/LandingFooter.vue'
 import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
-const { brandTitle } = useBranding()
+const { brandTitle, brandGithubUrl } = useBranding()
 
 const contactEmail = import.meta.env.VITE_CONTACT_EMAIL || 'privacy@fleet.app'
 
@@ -16,12 +16,17 @@ const vars = computed(() => {
   return { platformName: name, platformNameUpper: name.toUpperCase(), contactEmail }
 })
 
-const navLinks = computed<NavLink[]>(() => [
-  { label: t('landing.nav.home'), href: '/', routerLink: true },
-  { label: 'Docs', href: '/docs', routerLink: true },
-  { label: t('landing.footer.terms'), href: '/terms', routerLink: true },
-  { label: t('landing.nav.github'), href: 'https://github.com/fleet', external: true },
-])
+const navLinks = computed<NavLink[]>(() => {
+  const links: NavLink[] = [
+    { label: t('landing.nav.home'), href: '/', routerLink: true },
+    { label: 'Docs', href: '/docs', routerLink: true },
+    { label: t('landing.footer.terms'), href: '/terms', routerLink: true },
+  ]
+  if (brandGithubUrl.value) {
+    links.push({ label: t('landing.nav.github'), href: brandGithubUrl.value, external: true })
+  }
+  return links
+})
 
 const sections = computed(() => [
   { id: 'info-collect', title: t('landing.privacy.infoCollect.title'), body: t('landing.privacy.infoCollect.body') },

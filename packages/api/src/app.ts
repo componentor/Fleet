@@ -16,7 +16,7 @@ import { rateLimiter } from './middleware/rate-limit.js';
 import { auditMiddleware } from './middleware/audit.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/accounts.js';
-import userRoutes from './routes/users.js';
+import userRoutes, { userPublicRoutes } from './routes/users.js';
 import serviceRoutes from './routes/services.js';
 import deploymentRoutes from './routes/deployments.js';
 import dnsRoutes from './routes/domains.js';
@@ -276,6 +276,7 @@ api.use('*', auditMiddleware);
 api.route('/auth', authRoutes);
 api.route('/accounts', accountRoutes);
 api.route('/users', userRoutes);
+api.route('/users', userPublicRoutes);
 api.route('/services', serviceRoutes);
 api.route('/deployments', deploymentRoutes);
 api.route('/dns', dnsRoutes);
@@ -962,12 +963,14 @@ app.get('/api/v1/branding/info', brandingRateLimit, async (c) => {
   const logoFilename = settings['branding:logoFilename'] as string | undefined;
   const faviconFilename = settings['branding:faviconFilename'] as string | undefined;
   const title = settings['branding:title'] as string | undefined;
+  const githubUrl = settings['branding:githubUrl'] as string | undefined;
 
   c.header('Cache-Control', 'public, max-age=300');
   return c.json({
     title: title ?? null,
     logoUrl: logoFilename ? '/api/v1/branding/logo' : null,
     faviconUrl: faviconFilename ? '/api/v1/branding/favicon' : null,
+    githubUrl: githubUrl ?? null,
   });
 });
 

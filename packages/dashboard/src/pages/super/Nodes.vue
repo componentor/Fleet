@@ -317,7 +317,13 @@ onMounted(() => {
                 </div>
               </td>
               <td class="px-6 py-4 text-sm">
-                <span class="flex items-center gap-1.5">
+                <span
+                  :class="[
+                    'inline-flex items-center gap-1.5',
+                    node.status === 'active' ? 'text-green-700 dark:text-green-400' :
+                    node.status === 'draining' ? 'text-yellow-700 dark:text-yellow-400' : 'text-red-700 dark:text-red-400'
+                  ]"
+                >
                   <span
                     :class="[
                       'w-2 h-2 rounded-full',

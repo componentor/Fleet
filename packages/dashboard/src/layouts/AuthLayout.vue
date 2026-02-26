@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { Sun, Moon } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -54,15 +55,15 @@ onMounted(async () => {
     <!-- Logo -->
     <div class="mb-8 text-center relative z-10 animate-fade-in-up">
       <template v-if="resellerBranding.found">
-        <div class="flex items-center justify-center gap-2 mb-2">
+        <RouterLink to="/" class="flex items-center justify-center gap-2 mb-2">
           <img v-if="resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" class="h-10 w-auto max-w-[200px] object-contain" />
           <h1 v-else class="text-3xl font-bold" :style="resellerBranding.brandPrimaryColor ? { color: resellerBranding.brandPrimaryColor } : {}">
             {{ resellerBranding.brandName }}
           </h1>
-        </div>
+        </RouterLink>
       </template>
       <template v-else>
-        <div class="flex items-center justify-center gap-2 mb-2">
+        <RouterLink to="/" class="flex items-center justify-center gap-2 mb-2">
           <template v-if="logoSrc()">
             <img :src="logoSrc()!" :alt="brandTitle" class="h-10 w-auto max-w-[200px] object-contain" />
           </template>
@@ -74,7 +75,7 @@ onMounted(async () => {
             </div>
           </template>
           <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</h1>
-        </div>
+        </RouterLink>
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('authLayout.tagline') }}</p>
       </template>
     </div>

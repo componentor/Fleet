@@ -105,6 +105,7 @@ const brandLogoSet = ref(false)
 const brandFaviconSet = ref(false)
 const brandLogoFile = ref<File | null>(null)
 const brandFaviconFile = ref<File | null>(null)
+const brandGithubUrlInput = ref('')
 const savingBranding = ref(false)
 
 // Log Archiving settings
@@ -277,6 +278,7 @@ async function fetchBranding() {
   try {
     const data = await api.get<any>('/settings/branding')
     brandTitleInput.value = data.title ?? ''
+    brandGithubUrlInput.value = data.githubUrl ?? ''
     brandLogoSet.value = data.logoSet ?? false
     brandFaviconSet.value = data.faviconSet ?? false
     brandLogoPreview.value = data.logoUrl ?? null
@@ -309,6 +311,7 @@ async function saveBranding() {
   try {
     const formData = new FormData()
     formData.append('title', brandTitleInput.value)
+    formData.append('githubUrl', brandGithubUrlInput.value)
     if (brandLogoFile.value) formData.append('logo', brandLogoFile.value)
     if (brandFaviconFile.value) formData.append('favicon', brandFaviconFile.value)
     await api.upload('/settings/branding', formData)
@@ -1233,6 +1236,13 @@ onMounted(() => {
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.brandTitle') }}</label>
               <input v-model="brandTitleInput" type="text" placeholder="Fleet" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+            </div>
+
+            <!-- GitHub URL -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">GitHub Repository URL</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Shown on the landing page nav, hero, footer, and CTA. Leave empty to hide GitHub links.</p>
+              <input v-model="brandGithubUrlInput" type="url" placeholder="https://github.com/your-org/your-repo" class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
             </div>
 
             <!-- Logo -->

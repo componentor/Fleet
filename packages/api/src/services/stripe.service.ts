@@ -509,6 +509,24 @@ export class StripeService {
   }
 
   /**
+   * Create a Stripe subscription directly using the customer's default payment method.
+   * Used for "parent pays for child" billing where checkout redirect is not needed.
+   */
+  async createDirectSubscription(params: {
+    customerId: string;
+    priceId: string;
+    metadata: Record<string, string>;
+  }): Promise<Stripe.Subscription> {
+    return (await getStripe()).subscriptions.create({
+      customer: params.customerId,
+      items: [{ price: params.priceId }],
+      metadata: params.metadata,
+      payment_behavior: 'default_incomplete',
+      expand: ['latest_invoice.payment_intent'],
+    });
+  }
+
+  /**
    * Create a Stripe Express login link so a reseller can view their Connect dashboard.
    */
   async createConnectLoginLink(

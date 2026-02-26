@@ -1013,10 +1013,17 @@ authed.openapi(resourceLimitsRoute, (async (c: any) => {
   });
 
   let override = null;
+  let maxUsersPerAccount: number | null = null;
   if (accountId) {
     override = await db.query.resourceLimits.findFirst({
       where: eq(resourceLimits.accountId, accountId),
     });
+
+    const accountSub = await db.query.subscriptions.findFirst({
+      where: (s: any, { and, eq: e }: any) => and(e(s.accountId, accountId), e(s.status, 'active')),
+      with: { plan: true },
+    });
+    maxUsersPerAccount = (accountSub as any)?.plan?.maxUsersPerAccount ?? null;
   }
 
   return c.json({
@@ -1029,6 +1036,7 @@ authed.openapi(resourceLimitsRoute, (async (c: any) => {
     maxNfsStorageGb: override?.maxNfsStorageGb ?? global?.maxNfsStorageGb ?? null,
     maxTotalCpuCores: override?.maxTotalCpuCores ?? global?.maxTotalCpuCores ?? null,
     maxTotalMemoryMb: override?.maxTotalMemoryMb ?? global?.maxTotalMemoryMb ?? null,
+    maxUsersPerAccount,
   });
 }) as any);
 
@@ -1342,14 +1350,24 @@ billing.post('/webhook', async (c) => {
           }
         }
       } else if (session.customer && session.subscription) {
-        const account = await db.query.accounts.findFirst({
-          where: and(eq(accounts.stripeCustomerId, session.customer), isNull(accounts.deletedAt)),
-        });
+        // Prefer metadata.accountId (exact match) over stripeCustomerId (ambiguous when parent pays for child)
+        let account: any = null;
+        if (session.metadata?.accountId) {
+          account = await db.query.accounts.findFirst({
+            where: and(eq(accounts.id, session.metadata.accountId), isNull(accounts.deletedAt)),
+          });
+        }
+        if (!account) {
+          account = await db.query.accounts.findFirst({
+            where: and(eq(accounts.stripeCustomerId, session.customer), isNull(accounts.deletedAt)),
+          });
+        }
 
         if (account) {
           const billingModel = (session.metadata?.billingModel ?? 'fixed') as string;
           const billingCycle = session.metadata?.billingCycle ?? 'monthly';
           const planId = session.metadata?.planId ?? null;
+          const billedByAccountId = session.metadata?.billedByAccountId ?? null;
 
           // Wrap subscription creation + account update in a transaction
           await safeTransaction(async (tx) => {
@@ -1372,6 +1390,7 @@ billing.post('/webhook', async (c) => {
               billingCycle,
               stripeSubscriptionId: session.subscription!,
               stripeCustomerId: session.customer!,
+              billedByAccountId,
               status: 'active',
             });
 
