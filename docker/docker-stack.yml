@@ -80,6 +80,7 @@ services:
       - /opt/fleet/config/env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - fleet_uploads:/srv/nfs/uploads
     networks:
       - fleet_internal
       - fleet_public
@@ -310,6 +311,8 @@ volumes:
   valkey_data:
     driver: local
   registry_data:
+    driver: local
+  fleet_uploads:
     driver: local
   fleet_certs:
     driver: local
