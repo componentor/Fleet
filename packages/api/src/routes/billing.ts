@@ -450,10 +450,6 @@ authed.openapi(checkoutRoute, (async (c: any) => {
 
   const { billingModel, billingCycle, planId, successUrl, cancelUrl } = c.req.valid('json');
 
-  if (billingModel === 'usage' || billingModel === 'hybrid') {
-    return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
-  }
-
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
     return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
@@ -851,10 +847,6 @@ authed.openapi(updateConfigRoute, (async (c: any) => {
   }
 
   const data = c.req.valid('json');
-
-  if (data.billingModel === 'usage' || data.billingModel === 'hybrid') {
-    return c.json({ error: 'Usage-based billing is not yet available. Please select a fixed plan.' }, 400);
-  }
 
   const existing = await db.query.billingConfig.findFirst();
 
