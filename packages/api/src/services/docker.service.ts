@@ -4,7 +4,7 @@ import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { storageManager } from './storage/storage-manager.js';
 import { logger } from './logger.js';
-import { db, registryCredentials, eq } from '@fleet/db';
+import { db, registryCredentials, eq, and, isNull } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
 
 const PLATFORM_CERTS_VOLUME = 'fleet-platform-certs';
@@ -2052,16 +2052,34 @@ function parseRegistryFromImage(image: string): string {
 }
 
 /**
- * Look up platform-wide registry credentials for a given image.
+ * Look up registry credentials for a given image.
+ * If accountId is provided, checks account-specific credentials first,
+ * then falls back to platform-wide (accountId IS NULL).
  * Returns undefined if no matching credential exists (public pull).
  */
 export async function getRegistryAuthForImage(
+  accountId: string | null,
   image: string,
 ): Promise<{ username: string; password: string; serveraddress: string } | undefined> {
   const registry = parseRegistryFromImage(image);
 
+  // Account-specific first
+  if (accountId) {
+    const accountCred = await db.query.registryCredentials.findFirst({
+      where: and(eq(registryCredentials.accountId, accountId), eq(registryCredentials.registry, registry)),
+    });
+    if (accountCred) {
+      return {
+        username: accountCred.username,
+        password: decrypt(accountCred.password),
+        serveraddress: `https://${accountCred.registry}`,
+      };
+    }
+  }
+
+  // Fall back to platform-wide
   const cred = await db.query.registryCredentials.findFirst({
-    where: eq(registryCredentials.registry, registry),
+    where: and(isNull(registryCredentials.accountId), eq(registryCredentials.registry, registry)),
   });
 
   if (!cred) return undefined;

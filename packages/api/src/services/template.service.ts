@@ -511,7 +511,7 @@ export class TemplateService {
         const primaryPort = svcDef.ports?.[0]?.target ?? 80;
         const traefikLabels = buildTraefikLabels(swarmName, resolvedDomain, true, primaryPort);
 
-        const templateAuth = await getRegistryAuthForImage(image);
+        const templateAuth = await getRegistryAuthForImage(accountId, image);
         const result = await dockerService.createService({
           name: swarmName,
           image,

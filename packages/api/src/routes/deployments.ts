@@ -262,6 +262,143 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
   return c.json({ message: `Triggered ${results.length} deployment(s)`, results });
 }) as any);
 
+// --- Registry Push Webhook (unauthenticated, token-verified) ---
+
+const registryWebhookRoute = createRoute({
+  method: 'post',
+  path: '/registry/webhook/{serviceId}',
+  tags: ['Deployments'],
+  summary: 'Registry push webhook for auto-deploy (token-verified)',
+  security: noSecurity,
+  request: {
+    params: z.object({ serviceId: z.string().uuid() }),
+    query: z.object({ token: z.string().max(128).optional() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Webhook processed'),
+    ...standardErrors,
+  },
+});
+
+webhookRoutes.openapi(registryWebhookRoute, (async (c: any) => {
+  const { serviceId } = c.req.valid('param');
+  const { token } = c.req.valid('query');
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), isNull(services.deletedAt)),
+  });
+
+  if (!svc || !svc.registryWebhookSecret) {
+    return c.json({ error: 'Service not found or webhook not configured' }, 404);
+  }
+
+  // Verify webhook authenticity via query token or HMAC signature
+  const { createHmac, timingSafeEqual } = await import('node:crypto');
+  const rawBody = await c.req.text();
+
+  // Limit body size to prevent abuse (1MB max)
+  if (rawBody.length > 1_048_576) {
+    return c.json({ error: 'Request body too large' }, 413);
+  }
+
+  /** Timing-safe string comparison to prevent timing attacks */
+  function safeCompare(a: string, b: string): boolean {
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  }
+
+  let verified = false;
+
+  // Method 1: Token in query string (timing-safe comparison)
+  if (token && svc.registryWebhookSecret && token.length > 0) {
+    verified = safeCompare(token, svc.registryWebhookSecret);
+  }
+
+  // Method 2: Docker Hub X-Hub-Signature
+  if (!verified) {
+    const hubSig = c.req.header('X-Hub-Signature');
+    if (hubSig) {
+      const expected = 'sha256=' + createHmac('sha256', svc.registryWebhookSecret).update(rawBody).digest('hex');
+      verified = safeCompare(hubSig, expected);
+    }
+  }
+
+  // Method 3: GitHub/GHCR X-Hub-Signature-256
+  if (!verified) {
+    const ghSig = c.req.header('X-Hub-Signature-256');
+    if (ghSig) {
+      const expected = 'sha256=' + createHmac('sha256', svc.registryWebhookSecret).update(rawBody).digest('hex');
+      verified = safeCompare(ghSig, expected);
+    }
+  }
+
+  if (!verified) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  // Check account status
+  const account = await db.query.accounts.findFirst({
+    where: eq(accounts.id, svc.accountId),
+    columns: { id: true, status: true },
+  });
+  if (!account || account.status === 'suspended' || account.status === 'deleted') {
+    return c.json({ error: 'Account suspended or deleted' }, 403);
+  }
+
+  // Create deployment record
+  const [deployment] = await insertReturning(deployments, {
+    serviceId: svc.id,
+    status: 'deploying',
+    imageTag: svc.image,
+    trigger: 'webhook',
+    log: `Registry push webhook received\n`,
+    startedAt: new Date(),
+  });
+
+  if (!deployment) {
+    return c.json({ error: 'Failed to create deployment record' }, 500);
+  }
+
+  // Update Docker service with force pull
+  if (svc.dockerServiceId) {
+    try {
+      const registryAuth = await getRegistryAuthForImage(svc.accountId, svc.image);
+      await dockerService.updateService(svc.dockerServiceId, {
+        image: svc.image,
+      }, registryAuth);
+
+      await db.update(deployments)
+        .set({ status: 'succeeded', completedAt: new Date(), log: deployment.log + 'Image updated successfully.\n' })
+        .where(eq(deployments.id, deployment.id));
+
+      await db.update(services)
+        .set({ status: 'running', updatedAt: new Date() })
+        .where(eq(services.id, svc.id));
+    } catch (err) {
+      logger.error({ err, serviceId: svc.id }, 'Registry webhook deploy failed');
+      await db.update(deployments)
+        .set({ status: 'failed', completedAt: new Date(), log: deployment.log + `Deploy failed: ${String(err)}\n` })
+        .where(eq(deployments.id, deployment.id));
+
+      await db.update(services)
+        .set({ status: 'failed', updatedAt: new Date() })
+        .where(eq(services.id, svc.id));
+    }
+  }
+
+  eventService.log({
+    eventType: EventTypes.DEPLOYMENT_TRIGGERED,
+    description: `Registry webhook triggered redeploy for '${svc.name}'`,
+    resourceType: 'deployment',
+    resourceId: deployment.id,
+    resourceName: svc.name,
+    accountId: svc.accountId,
+    source: 'webhook',
+  });
+
+  return c.json({ message: 'Deployment triggered', deploymentId: deployment.id });
+}) as any);
+
 // --- Authenticated Deployment Routes ---
 const authenticatedRoutes = new OpenAPIHono<{
   Variables: {
@@ -530,7 +667,7 @@ authenticatedRoutes.openapi(rollbackRoute, (async (c: any) => {
   // Update Docker service with the old image
   if (svc.dockerServiceId) {
     try {
-      const rollbackAuth = await getRegistryAuthForImage(deployment.imageTag);
+      const rollbackAuth = await getRegistryAuthForImage(accountId, deployment.imageTag);
       await dockerService.updateService(svc.dockerServiceId, {
         image: deployment.imageTag,
       }, rollbackAuth);
