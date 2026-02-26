@@ -4,13 +4,17 @@ import { useI18n } from 'vue-i18n'
 import LandingNavbar from '@/components/landing/LandingNavbar.vue'
 import type { NavLink } from '@/components/landing/LandingNavbar.vue'
 import LandingFooter from '@/components/landing/LandingFooter.vue'
+import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
+const { brandTitle } = useBranding()
 
-const platformName = import.meta.env.VITE_PLATFORM_NAME || 'Fleet'
 const contactEmail = import.meta.env.VITE_CONTACT_EMAIL || 'legal@fleet.app'
 
-const vars = { platformName, platformNameUpper: platformName.toUpperCase(), contactEmail }
+const vars = computed(() => {
+  const name = brandTitle.value || 'Fleet'
+  return { platformName: name, platformNameUpper: name.toUpperCase(), contactEmail }
+})
 
 const navLinks = computed<NavLink[]>(() => [
   { label: t('landing.nav.home'), href: '/', routerLink: true },
@@ -20,18 +24,18 @@ const navLinks = computed<NavLink[]>(() => [
 ])
 
 const sections = computed(() => [
-  { id: 'description', title: t('landing.terms.description.title'), body: t('landing.terms.description.body', vars) },
+  { id: 'description', title: t('landing.terms.description.title'), body: t('landing.terms.description.body', vars.value) },
   { id: 'account', title: t('landing.terms.account.title'), body: t('landing.terms.account.body') },
   { id: 'acceptable-use', title: t('landing.terms.acceptableUse.title'), body: t('landing.terms.acceptableUse.body') },
   { id: 'availability', title: t('landing.terms.availability.title'), body: t('landing.terms.availability.body') },
-  { id: 'billing', title: t('landing.terms.billing.title'), body: t('landing.terms.billing.body', vars) },
-  { id: 'ip', title: t('landing.terms.ip.title'), body: t('landing.terms.ip.body', vars) },
+  { id: 'billing', title: t('landing.terms.billing.title'), body: t('landing.terms.billing.body', vars.value) },
+  { id: 'ip', title: t('landing.terms.ip.title'), body: t('landing.terms.ip.body', vars.value) },
   { id: 'data-privacy', title: t('landing.terms.dataPrivacy.title'), body: t('landing.terms.dataPrivacy.body') },
   { id: 'termination', title: t('landing.terms.termination.title'), body: t('landing.terms.termination.body') },
-  { id: 'liability', title: t('landing.terms.liability.title'), body: t('landing.terms.liability.body', vars) },
+  { id: 'liability', title: t('landing.terms.liability.title'), body: t('landing.terms.liability.body', vars.value) },
   { id: 'governing-law', title: t('landing.terms.governingLaw.title'), body: t('landing.terms.governingLaw.body') },
   { id: 'changes', title: t('landing.terms.changes.title'), body: t('landing.terms.changes.body') },
-  { id: 'contact', title: t('landing.terms.contact.title'), body: t('landing.terms.contact.body', vars) },
+  { id: 'contact', title: t('landing.terms.contact.title'), body: t('landing.terms.contact.body', vars.value) },
 ])
 </script>
 
