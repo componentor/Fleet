@@ -20,6 +20,7 @@ const { user } = useAuth()
 
 const domains = ref<any[]>([])
 const activityFeed = ref<any[]>([])
+const volumesList = ref<any[]>([])
 const loading = ref(true)
 const showWelcome = ref(false)
 
@@ -251,6 +252,9 @@ onMounted(async () => {
       api.get<{ usedGb: number; limitGb: number }>('/storage/volumes/quota')
         .then(data => { storageQuota.value = data })
         .catch(() => {}),
+      api.get<any[]>('/storage/volumes')
+        .then(data => { volumesList.value = data ?? [] })
+        .catch(() => {}),
       api.get<any>('/billing/usage')
         .then(data => { billingUsage.value = data })
         .catch(() => {}),
@@ -405,6 +409,37 @@ onMounted(async () => {
               :high-is-good="gauge.highIsGood"
               :detail="gauge.detail"
             />
+          </div>
+        </div>
+
+        <!-- Volume usage breakdown -->
+        <div v-if="volumesList.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-8 transition-all duration-200 hover:shadow-md">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.volumeUsage') || 'Volume Usage' }}</h3>
+            <router-link to="/panel/storage" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ $t('dashboard.viewAll') || 'View all' }}</router-link>
+          </div>
+          <div class="space-y-3">
+            <div v-for="vol in volumesList" :key="vol.name" class="flex items-center gap-4">
+              <div class="w-28 sm:w-36 shrink-0 truncate">
+                <span class="text-sm font-mono text-gray-900 dark:text-white truncate">{{ vol.displayName || vol.name }}</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+                  <div
+                    class="h-full rounded-full transition-all duration-700"
+                    :class="vol.sizeGb > 0 && (vol.usedGb ?? 0) / vol.sizeGb > 0.9
+                      ? 'bg-red-500'
+                      : vol.sizeGb > 0 && (vol.usedGb ?? 0) / vol.sizeGb > 0.7
+                        ? 'bg-amber-500'
+                        : 'bg-primary-500'"
+                    :style="{ width: vol.sizeGb > 0 ? `${Math.min(100, ((vol.usedGb ?? 0) / vol.sizeGb) * 100)}%` : '0%' }"
+                  />
+                </div>
+              </div>
+              <div class="w-24 sm:w-28 text-right shrink-0">
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ (vol.usedGb ?? 0).toFixed(1) }} / {{ vol.sizeGb }} GB</span>
+              </div>
+            </div>
           </div>
         </div>
 

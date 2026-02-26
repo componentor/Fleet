@@ -75,9 +75,16 @@ async function createVolume() {
   }
 }
 
-const usedStorageGb = computed(() =>
+const allocatedStorageGb = computed(() =>
   volumes.value.reduce((sum: number, v: any) => sum + (v.sizeGb ?? 0), 0),
 )
+
+const actualUsedStorageGb = computed(() =>
+  volumes.value.reduce((sum: number, v: any) => sum + (v.usedGb ?? 0), 0),
+)
+
+// For quota calculations, use allocated (sizeGb)
+const usedStorageGb = allocatedStorageGb
 
 const remainingStorageGb = computed(() =>
   maxStorageGb.value !== null ? Math.max(0, maxStorageGb.value - usedStorageGb.value) : null,
@@ -269,6 +276,42 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
+    <!-- Storage summary -->
+    <div v-if="!loading && volumes.length > 0" class="mb-6 flex flex-wrap items-center gap-6 px-5 py-4 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
+          <HardDrive class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.actualUsed') || 'Actual Used' }}</p>
+          <p class="text-lg font-bold text-gray-900 dark:text-white">{{ actualUsedStorageGb.toFixed(1) }} GB</p>
+        </div>
+      </div>
+      <div class="h-8 w-px bg-gray-200 dark:bg-gray-700 hidden sm:block" />
+      <div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.allocated') || 'Allocated' }}</p>
+        <p class="text-lg font-bold text-gray-900 dark:text-white">{{ allocatedStorageGb }} GB</p>
+      </div>
+      <div v-if="maxStorageGb !== null" class="h-8 w-px bg-gray-200 dark:bg-gray-700 hidden sm:block" />
+      <div v-if="maxStorageGb !== null">
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.limit') || 'Limit' }}</p>
+        <p class="text-lg font-bold text-gray-900 dark:text-white">{{ maxStorageGb }} GB</p>
+      </div>
+      <div class="ml-auto hidden sm:block">
+        <div class="w-48">
+          <div class="flex items-baseline justify-between mb-1">
+            <span class="text-xs text-gray-500 dark:text-gray-400">{{ Math.round(allocatedStorageGb > 0 ? (actualUsedStorageGb / allocatedStorageGb) * 100 : 0) }}% {{ t('storage.used') || 'used' }}</span>
+          </div>
+          <div class="h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+            <div
+              class="h-full rounded-full bg-primary-500 transition-all duration-700"
+              :style="{ width: allocatedStorageGb > 0 ? `${Math.min(100, (actualUsedStorageGb / allocatedStorageGb) * 100)}%` : '0%' }"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loading" class="flex items-center justify-center py-20">
       <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
     </div>
@@ -279,6 +322,7 @@ onBeforeUnmount(() => {
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.name') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.usage') || 'Usage' }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.driver') }}</th>
               <th v-if="regions.length > 1" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Region</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Services</th>
@@ -288,7 +332,7 @@ onBeforeUnmount(() => {
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="volumes.length === 0">
-              <td :colspan="regions.length > 1 ? 6 : 5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+              <td :colspan="regions.length > 1 ? 7 : 6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 {{ t('storagePage.noVolumes') }}
               </td>
             </tr>
@@ -298,6 +342,25 @@ onBeforeUnmount(() => {
               class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
             >
               <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white font-mono">{{ volume.name }}</td>
+              <td class="px-6 py-4">
+                <div class="min-w-[120px]">
+                  <div class="flex items-baseline justify-between mb-1">
+                    <span class="text-xs font-medium text-gray-900 dark:text-white">{{ (volume.usedGb ?? 0).toFixed(1) }} GB</span>
+                    <span class="text-xs text-gray-400 dark:text-gray-500">/ {{ volume.sizeGb }} GB</span>
+                  </div>
+                  <div class="h-1.5 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-500"
+                      :class="volume.sizeGb > 0 && (volume.usedGb ?? 0) / volume.sizeGb > 0.9
+                        ? 'bg-red-500'
+                        : volume.sizeGb > 0 && (volume.usedGb ?? 0) / volume.sizeGb > 0.7
+                          ? 'bg-amber-500'
+                          : 'bg-primary-500'"
+                      :style="{ width: volume.sizeGb > 0 ? `${Math.min(100, ((volume.usedGb ?? 0) / volume.sizeGb) * 100)}%` : '0%' }"
+                    />
+                  </div>
+                </div>
+              </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ volume.driver || 'local' }}</td>
               <td v-if="regions.length > 1" class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                 {{ regionLabel(volume.region) }}

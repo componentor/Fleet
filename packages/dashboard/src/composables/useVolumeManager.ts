@@ -22,6 +22,8 @@ export interface VolumeInfo {
   name: string
   displayName: string
   sizeGb: number
+  usedGb: number
+  availableGb: number
 }
 
 export interface StorageQuota {
@@ -46,6 +48,8 @@ export function useVolumeManager() {
         name: v.name,
         displayName: v.displayName ?? v.name.replace(/^vol-[a-f0-9-]+-/, ''),
         sizeGb: v.sizeGb ?? 0,
+        usedGb: v.usedGb ?? 0,
+        availableGb: v.availableGb ?? (v.sizeGb ?? 0) - (v.usedGb ?? 0),
       }))
     } catch {
       // ignore
@@ -77,6 +81,8 @@ export function useVolumeManager() {
         name: vol.name,
         displayName: vol.displayName ?? name,
         sizeGb: vol.sizeGb ?? sizeGb,
+        usedGb: vol.usedGb ?? 0,
+        availableGb: vol.availableGb ?? (vol.sizeGb ?? sizeGb),
       }
     } catch (err: any) {
       createError.value = err?.body?.error || 'Failed to create volume'
