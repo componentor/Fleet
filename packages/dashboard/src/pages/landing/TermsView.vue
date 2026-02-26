@@ -7,7 +7,7 @@ import LandingFooter from '@/components/landing/LandingFooter.vue'
 import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
-const { brandTitle } = useBranding()
+const { brandTitle, brandGithubUrl } = useBranding()
 
 const contactEmail = import.meta.env.VITE_CONTACT_EMAIL || 'legal@fleet.app'
 
@@ -16,12 +16,17 @@ const vars = computed(() => {
   return { platformName: name, platformNameUpper: name.toUpperCase(), contactEmail }
 })
 
-const navLinks = computed<NavLink[]>(() => [
-  { label: t('landing.nav.home'), href: '/', routerLink: true },
-  { label: 'Docs', href: '/docs', routerLink: true },
-  { label: t('landing.footer.privacy'), href: '/privacy', routerLink: true },
-  { label: t('landing.nav.github'), href: 'https://github.com/fleet', external: true },
-])
+const navLinks = computed<NavLink[]>(() => {
+  const links: NavLink[] = [
+    { label: t('landing.nav.home'), href: '/', routerLink: true },
+    { label: 'Docs', href: '/docs', routerLink: true },
+    { label: t('landing.footer.privacy'), href: '/privacy', routerLink: true },
+  ]
+  if (brandGithubUrl.value) {
+    links.push({ label: t('landing.nav.github'), href: brandGithubUrl.value, external: true })
+  }
+  return links
+})
 
 const sections = computed(() => [
   { id: 'description', title: t('landing.terms.description.title'), body: t('landing.terms.description.body', vars.value) },

@@ -8,6 +8,7 @@ let fetchPromise: Promise<void> | null = null
 const brandTitle = ref<string>('Fleet')
 const brandLogoUrl = ref<string | null>(null)
 const brandFaviconUrl = ref<string | null>(null)
+const brandGithubUrl = ref<string | null>(null)
 const loaded = ref(false)
 
 function applyBranding() {
@@ -38,6 +39,7 @@ async function fetchBranding() {
         brandTitle.value = data.title || 'Fleet'
         brandLogoUrl.value = data.logoUrl
         brandFaviconUrl.value = data.faviconUrl
+        brandGithubUrl.value = data.githubUrl ?? null
         applyBranding()
       } catch { /* invalid cache */ }
     }
@@ -48,6 +50,7 @@ async function fetchBranding() {
       brandTitle.value = data.title || 'Fleet'
       brandLogoUrl.value = data.logoUrl
       brandFaviconUrl.value = data.faviconUrl
+      brandGithubUrl.value = data.githubUrl ?? null
       localStorage.setItem('fleet_branding', JSON.stringify(data))
       applyBranding()
     }
@@ -76,6 +79,7 @@ export function useBranding() {
     brandTitle,
     brandLogoUrl: brandLogoUrl as typeof brandLogoUrl,
     brandFaviconUrl,
+    brandGithubUrl,
     loaded,
     refresh,
     /** Full URL for logo image src */

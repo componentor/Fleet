@@ -1022,6 +1022,13 @@ settings.openapi(uploadBrandingRoute, (async (c: any) => {
     saved.push('title');
   }
 
+  // Process githubUrl
+  const githubUrl = body['githubUrl'] as string | undefined;
+  if (githubUrl !== undefined) {
+    await upsertSetting('branding:githubUrl', githubUrl || null);
+    saved.push('githubUrl');
+  }
+
   await invalidateCache('GET:/settings/*');
   logger.info({ saved, changedBy: user.userId }, 'Branding updated');
   return c.json({ message: 'Branding updated', saved });
@@ -1037,6 +1044,7 @@ settings.openapi(getBrandingRoute, (async (c: any) => {
   const logoFilename = await getSetting('branding:logoFilename') as string | null;
   const faviconFilename = await getSetting('branding:faviconFilename') as string | null;
   const title = await getSetting('branding:title') as string | null;
+  const githubUrl = await getSetting('branding:githubUrl') as string | null;
 
   return c.json({
     title: title ?? null,
@@ -1044,6 +1052,7 @@ settings.openapi(getBrandingRoute, (async (c: any) => {
     faviconUrl: faviconFilename ? '/api/v1/branding/favicon' : null,
     logoSet: !!logoFilename,
     faviconSet: !!faviconFilename,
+    githubUrl: githubUrl ?? null,
   });
 }) as any);
 

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useBranding } from '@/composables/useBranding'
+import { useAuthStore } from '@/stores/auth'
 
 export interface NavLink {
   label: string
@@ -20,13 +21,17 @@ const props = withDefaults(defineProps<{
   showGetStarted: true,
 })
 
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const { theme, toggle } = useTheme()
 const { brandTitle, logoSrc } = useBranding()
+const authStore = useAuthStore()
+const isLoggedIn = computed(() => authStore.isAuthenticated)
 
 const isScrolled = ref(false)
 const mobileMenuOpen = ref(false)
 const navRef = ref<HTMLElement | null>(null)
+const demoBanner = ref<HTMLElement | null>(null)
+const bannerHeight = ref(36)
 
 function handleScroll() {
   isScrolled.value = window.scrollY > 20
@@ -46,15 +51,35 @@ function changeLocale(newLocale: string) {
 onMounted(() => {
   window.addEventListener('scroll', handleScroll)
   document.addEventListener('click', handleClickOutside)
+
+  nextTick(() => {
+    if (demoBanner.value) {
+      const h = demoBanner.value.offsetHeight
+      bannerHeight.value = h
+      document.documentElement.style.setProperty('--banner-height', `${h}px`)
+    }
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll)
   document.removeEventListener('click', handleClickOutside)
+  document.documentElement.style.removeProperty('--banner-height')
 })
 </script>
 
 <template>
+  <!-- Demo banner (fixed) -->
+  <div ref="demoBanner" class="fixed top-0 left-0 right-0 z-[60] shadow-sm bg-amber-400">
+    <div class="flex items-center justify-center gap-2 py-2 px-4">
+      <svg class="h-4 w-4 text-amber-900 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <span class="text-sm font-semibold text-amber-950 tracking-wide">{{ $t('landing.demo.banner') }}</span>
+    </div>
+  </div>
+  <div :style="{ height: bannerHeight + 'px' }"></div>
+
   <nav
     ref="navRef"
     :class="[
@@ -130,20 +155,28 @@ onUnmounted(() => {
               <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" />
             </svg>
           </button>
-          <router-link
-            v-if="showGetStarted"
-            to="/login"
-            class="rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-semibold text-surface-600 dark:text-surface-300 transition-all hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white"
-          >
-            {{ $t('landing.nav.login') }}
-          </router-link>
-          <router-link
-            v-if="showGetStarted"
-            to="/get-started"
-            class="rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
-          >
-            {{ $t('landing.nav.getStarted') }}
-          </router-link>
+          <template v-if="isLoggedIn">
+            <router-link
+              to="/panel"
+              class="rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
+            >
+              {{ $t('nav.dashboard') }}
+            </router-link>
+          </template>
+          <template v-else-if="showGetStarted">
+            <router-link
+              to="/login"
+              class="rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-semibold text-surface-600 dark:text-surface-300 transition-all hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white"
+            >
+              {{ $t('landing.nav.login') }}
+            </router-link>
+            <router-link
+              to="/get-started"
+              class="rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
+            >
+              {{ $t('landing.nav.getStarted') }}
+            </router-link>
+          </template>
         </div>
 
         <!-- Mobile: theme toggle + menu button -->
@@ -214,23 +247,33 @@ onUnmounted(() => {
           <option value="de" class="bg-white dark:bg-surface-900 text-gray-900 dark:text-surface-200">Deutsch</option>
           <option value="zh" class="bg-white dark:bg-surface-900 text-gray-900 dark:text-surface-200">中文</option>
         </select>
-        <router-link
-          v-if="showGetStarted"
-          to="/login"
-          class="mx-3 mt-2 block rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-center text-sm font-semibold text-surface-600 dark:text-surface-300"
-          @click="mobileMenuOpen = false"
-        >
-          {{ $t('landing.nav.login') }}
-        </router-link>
-        <router-link
-          v-if="showGetStarted"
-          to="/get-started"
-          class="mx-3 mt-2 block rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-2 text-center text-sm font-semibold text-white"
-          @click="mobileMenuOpen = false"
-        >
-          {{ $t('landing.nav.getStarted') }}
-        </router-link>
+        <template v-if="isLoggedIn">
+          <router-link
+            to="/panel"
+            class="mx-3 mt-2 block rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-2 text-center text-sm font-semibold text-white"
+            @click="mobileMenuOpen = false"
+          >
+            {{ $t('nav.dashboard') }}
+          </router-link>
+        </template>
+        <template v-else-if="showGetStarted">
+          <router-link
+            to="/login"
+            class="mx-3 mt-2 block rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-center text-sm font-semibold text-surface-600 dark:text-surface-300"
+            @click="mobileMenuOpen = false"
+          >
+            {{ $t('landing.nav.login') }}
+          </router-link>
+          <router-link
+            to="/get-started"
+            class="mx-3 mt-2 block rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-2 text-center text-sm font-semibold text-white"
+            @click="mobileMenuOpen = false"
+          >
+            {{ $t('landing.nav.getStarted') }}
+          </router-link>
+        </template>
       </div>
     </div>
   </nav>
 </template>
+

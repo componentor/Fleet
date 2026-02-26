@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useBranding } from '@/composables/useBranding'
 
-const { brandTitle, logoSrc } = useBranding()
+const { brandTitle, logoSrc, brandGithubUrl } = useBranding()
 </script>
 
 <template>
@@ -30,7 +30,8 @@ const { brandTitle, logoSrc } = useBranding()
         <!-- Links -->
         <div class="flex items-center gap-8">
           <a
-            href="https://github.com/fleet"
+            v-if="brandGithubUrl"
+            :href="brandGithubUrl"
             target="_blank"
             rel="noopener noreferrer"
             class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"

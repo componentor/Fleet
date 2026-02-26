@@ -321,7 +321,7 @@ watch(currentStep, (step) => {
 
     <!-- Logo -->
     <div class="mb-6 text-center relative z-10 animate-fade-in-up">
-      <div class="flex items-center justify-center gap-2 mb-2">
+      <router-link to="/" class="flex items-center justify-center gap-2 mb-2">
         <template v-if="logoSrc()">
           <img :src="logoSrc()!" :alt="brandTitle" class="h-10 w-auto max-w-[200px] object-contain" />
         </template>
@@ -333,7 +333,7 @@ watch(currentStep, (step) => {
           </div>
         </template>
         <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</h1>
-      </div>
+      </router-link>
     </div>
 
     <!-- Progress steps (visible on steps 1-3) -->

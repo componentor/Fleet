@@ -11,6 +11,7 @@ import {
   Users,
   Store,
   Shield,
+  UserCircle,
   Settings,
   CreditCard,
   LogOut,
@@ -124,8 +125,8 @@ function changeLocale(newLocale: string) {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink to="/admin" class="flex items-center gap-2">
+      <div class="flex items-center h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
+        <RouterLink to="/" class="flex items-center gap-2">
           <img v-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" class="h-8 w-auto max-w-[140px] object-contain" />
           <svg v-else class="w-8 h-8 shrink-0" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
             <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4f46e5"/></linearGradient></defs>
@@ -134,9 +135,14 @@ function changeLocale(newLocale: string) {
           </svg>
           <span class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</span>
         </RouterLink>
-        <span class="text-xs font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">
-          {{ $t('nav.admin') }}
-        </span>
+      </div>
+
+      <!-- Power Admin banner -->
+      <div class="px-3 py-2 text-white text-center shrink-0 sidebar-banner-shimmer">
+        <div class="flex items-center justify-center gap-1.5" style="text-shadow: 0 1px 3px rgba(0,0,0,0.35);">
+          <Shield class="w-3.5 h-3.5" />
+          <span class="text-xs font-semibold tracking-wide uppercase">{{ $t('nav.admin') }}</span>
+        </div>
       </div>
 
       <nav class="mt-4 px-3 space-y-1 overflow-y-auto flex-1">
@@ -178,7 +184,7 @@ function changeLocale(newLocale: string) {
           @click="goToPanel"
           class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
-          <Shield class="w-5 h-5 shrink-0" />
+          <UserCircle class="w-5 h-5 shrink-0" />
           {{ $t('nav.switchToPanel') }}
         </button>
       </div>
@@ -263,6 +269,14 @@ function changeLocale(newLocale: string) {
                 <p class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ user?.name }}</p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ user?.email }}</p>
               </div>
+              <RouterLink
+                to="/admin/profile"
+                class="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                @click="userMenuOpen = false"
+              >
+                <UserCircle class="w-4 h-4" />
+                {{ $t('nav.profile') }}
+              </RouterLink>
               <button
                 @click="handleLogout"
                 class="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700"
@@ -289,3 +303,60 @@ function changeLocale(newLocale: string) {
     <CommandPalette />
   </div>
 </template>
+
+<style scoped>
+@property --shimmer-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@property --shimmer-x {
+  syntax: '<percentage>';
+  initial-value: -15%;
+  inherits: false;
+}
+
+.sidebar-banner-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(from var(--shimmer-angle) at var(--shimmer-x) 50%, #c2410c, #ea580c, #f97316, #ea580c, #c2410c);
+  animation: sidebar-rotate 10s linear infinite, sidebar-drift 7s ease-in-out infinite alternate;
+}
+
+.sidebar-banner-shimmer > * {
+  position: relative;
+  z-index: 1;
+}
+
+.sidebar-banner-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 60%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,0.15) 50%, transparent);
+  animation: sidebar-glint 10s linear infinite;
+  pointer-events: none;
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+@keyframes sidebar-rotate {
+  to { --shimmer-angle: 360deg; }
+}
+
+@keyframes sidebar-drift {
+  from { --shimmer-x: -25%; }
+  to { --shimmer-x: -5%; }
+}
+
+@keyframes sidebar-glint {
+  0% { transform: translateX(-100%); opacity: 0; }
+  5% { opacity: 1; }
+  35% { opacity: 1; }
+  40% { transform: translateX(250%); opacity: 0; }
+  100% { transform: translateX(250%); opacity: 0; }
+}
+</style>

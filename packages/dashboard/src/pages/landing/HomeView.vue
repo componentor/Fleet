@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LandingNavbar from '@/components/landing/LandingNavbar.vue'
 import type { NavLink } from '@/components/landing/LandingNavbar.vue'
 import LandingFooter from '@/components/landing/LandingFooter.vue'
+import { useBranding } from '@/composables/useBranding'
 
 const { t } = useI18n()
-
-const demoBanner = ref<HTMLElement | null>(null)
-const bannerHeight = ref(36)
+const { brandGithubUrl } = useBranding()
 
 onMounted(async () => {
   // Fetch dynamic plans from API
@@ -26,15 +25,6 @@ onMounted(async () => {
     plansLoaded.value = true
   }
 
-  // Measure demo banner and set CSS variable for navbar offset
-  nextTick(() => {
-    if (demoBanner.value) {
-      const h = demoBanner.value.offsetHeight
-      bannerHeight.value = h
-      document.documentElement.style.setProperty('--banner-height', `${h}px`)
-    }
-  })
-
   // Intersection Observer for fade-in animations
   const observer = new IntersectionObserver(
     (entries) => {
@@ -51,7 +41,6 @@ onMounted(async () => {
 
   onUnmounted(() => {
     observer.disconnect()
-    document.documentElement.style.removeProperty('--banner-height')
   })
 })
 
@@ -208,28 +197,22 @@ const plans = computed(() => {
   }))
 })
 
-const navLinks = computed<NavLink[]>(() => [
-  { label: t('landing.nav.features'), href: '#features' },
-  { label: t('landing.nav.pricing'), href: '#pricing' },
-  { label: 'Docs', href: '/docs', routerLink: true },
-  { label: 'API', href: '/api/docs', external: true },
-  { label: t('landing.nav.github'), href: 'https://github.com/fleet', external: true },
-])
+const navLinks = computed<NavLink[]>(() => {
+  const links: NavLink[] = [
+    { label: t('landing.nav.features'), href: '#features' },
+    { label: t('landing.nav.pricing'), href: '#pricing' },
+    { label: 'Docs', href: '/docs', routerLink: true },
+    { label: 'API', href: '/api/docs', external: true },
+  ]
+  if (brandGithubUrl.value) {
+    links.push({ label: t('landing.nav.github'), href: brandGithubUrl.value, external: true })
+  }
+  return links
+})
 </script>
 
 <template>
   <div class="min-h-screen bg-white dark:bg-surface-950 text-surface-700 dark:text-surface-200">
-    <!-- Demo Banner (fixed) + spacer -->
-    <div ref="demoBanner" class="fixed top-0 left-0 right-0 z-[60] bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 shadow-sm">
-      <div class="flex items-center justify-center gap-2 py-2 px-4">
-        <svg class="h-4 w-4 text-amber-900 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-        <span class="text-sm font-semibold text-amber-950 tracking-wide">{{ $t('landing.demo.banner') }}</span>
-      </div>
-    </div>
-    <div :style="{ height: bannerHeight + 'px' }"></div>
-
     <LandingNavbar :nav-links="navLinks" />
 
     <!-- Hero Section -->
@@ -277,7 +260,8 @@ const navLinks = computed<NavLink[]>(() => [
             </svg>
           </router-link>
           <a
-            href="https://github.com/fleet"
+            v-if="brandGithubUrl"
+            :href="brandGithubUrl"
             target="_blank"
             rel="noopener noreferrer"
             class="inline-flex items-center gap-2 rounded-xl border border-surface-300 dark:border-surface-700 bg-white/50 dark:bg-surface-900/50 px-8 py-3.5 text-base font-semibold text-surface-600 dark:text-surface-300 transition-all hover:border-surface-400 dark:hover:border-surface-600 hover:bg-surface-50 dark:hover:bg-surface-800/50 hover:text-gray-900 dark:hover:text-white"
@@ -459,7 +443,8 @@ const navLinks = computed<NavLink[]>(() => [
                 </svg>
               </router-link>
               <a
-                href="https://github.com/fleet"
+                v-if="brandGithubUrl"
+                :href="brandGithubUrl"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-2 text-base font-semibold text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"

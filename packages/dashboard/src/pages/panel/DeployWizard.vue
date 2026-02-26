@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 import {
   ArrowLeft, ArrowRight, Rocket, Loader2, CheckCircle2,
@@ -12,19 +13,20 @@ import DomainPicker from '@/components/DomainPicker.vue'
 import { useDomainPicker } from '@/composables/useDomainPicker'
 
 const props = defineProps<{ slug: string }>()
+const { t } = useI18n()
 const api = useApi()
 const router = useRouter()
 const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 
 // ── Step management ──
 const currentStep = ref(1)
-const steps = [
-  { number: 1, label: 'Overview', icon: Package },
-  { number: 2, label: 'Configure', icon: Shield },
-  { number: 3, label: 'Storage', icon: HardDrive },
-  { number: 4, label: 'Resources', icon: Cpu },
-  { number: 5, label: 'Deploy', icon: Rocket },
-]
+const steps = computed(() => [
+  { number: 1, label: t('deployWizard.steps.overview'), icon: Package },
+  { number: 2, label: t('deployWizard.steps.configure'), icon: Shield },
+  { number: 3, label: t('deployWizard.steps.storage'), icon: HardDrive },
+  { number: 4, label: t('deployWizard.steps.resources'), icon: Cpu },
+  { number: 5, label: t('deployWizard.steps.deploy'), icon: Rocket },
+])
 
 // ── Template data ──
 const template = ref<any>(null)
@@ -125,8 +127,8 @@ const templateVolumes = computed(() => {
 const hasVolumes = computed(() => templateVolumes.value.length > 0)
 
 const visibleSteps = computed(() => {
-  if (hasVolumes.value) return steps
-  return steps.filter((s) => s.number !== 3)
+  if (hasVolumes.value) return steps.value
+  return steps.value.filter((s) => s.number !== 3)
 })
 
 const groupedVolumeNames = computed(() => {
@@ -342,13 +344,13 @@ const estimatedMonthlyCost = computed(() => {
 // ── Service role descriptions ──
 function getServiceRole(svc: any): string {
   const img = (svc.image ?? '').toLowerCase()
-  if (/postgres/.test(img)) return 'PostgreSQL Database'
-  if (/mysql/.test(img)) return 'MySQL Database'
-  if (/mariadb/.test(img)) return 'MariaDB Database'
-  if (/mongo/.test(img)) return 'MongoDB Database'
-  if (/redis|valkey/.test(img)) return 'Redis Cache'
-  if (/clickhouse/.test(img)) return 'ClickHouse Analytics DB'
-  return 'Application'
+  if (/postgres/.test(img)) return t('deployWizard.roles.postgres')
+  if (/mysql/.test(img)) return t('deployWizard.roles.mysql')
+  if (/mariadb/.test(img)) return t('deployWizard.roles.mariadb')
+  if (/mongo/.test(img)) return t('deployWizard.roles.mongo')
+  if (/redis|valkey/.test(img)) return t('deployWizard.roles.redis')
+  if (/clickhouse/.test(img)) return t('deployWizard.roles.clickhouse')
+  return t('deployWizard.roles.application')
 }
 
 function getServiceIcon(svc: any) {
@@ -447,7 +449,7 @@ async function fetchTemplate() {
       fetchStorageData()
     }
   } catch (err: any) {
-    templateError.value = err?.message ?? 'Failed to load template'
+    templateError.value = err?.message ?? t('deployWizard.errors.failedToLoadTemplate')
   } finally {
     templateLoading.value = false
   }
@@ -610,7 +612,7 @@ async function executeDeploy() {
     // Start polling for progress
     startPolling()
   } catch (err: any) {
-    deployError.value = err?.body?.error || err?.message || 'Deployment failed'
+    deployError.value = err?.body?.error || err?.message || t('deployWizard.errors.deploymentFailed')
   } finally {
     deploying.value = false
   }
@@ -668,8 +670,8 @@ onUnmounted(() => {
       </button>
       <Rocket class="w-7 h-7 text-primary-600 dark:text-primary-400" />
       <div>
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Deploy {{ template?.name ?? '...' }}</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400">Step-by-step deployment wizard</p>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('deployWizard.title', { name: template?.name ?? '...' }) }}</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('deployWizard.subtitle') }}</p>
       </div>
     </div>
 
@@ -683,7 +685,7 @@ onUnmounted(() => {
       <AlertTriangle class="w-12 h-12 text-red-400 mx-auto mb-4" />
       <p class="text-sm text-red-600 dark:text-red-400">{{ templateError }}</p>
       <button @click="goBack" class="mt-4 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors">
-        Back to Marketplace
+        {{ t('deployWizard.backToMarketplace') }}
       </button>
     </div>
 
@@ -754,7 +756,7 @@ onUnmounted(() => {
           </div>
 
           <div class="p-6">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">What's included</h3>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ t('deployWizard.whatsIncluded') }}</h3>
             <div class="grid gap-3">
               <div
                 v-for="svc in serviceDefinitions"
@@ -794,7 +796,7 @@ onUnmounted(() => {
               <div class="flex items-start gap-2">
                 <Info class="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                 <p class="text-xs text-blue-700 dark:text-blue-300">
-                  All {{ serviceDefinitions.length }} services will be deployed on a shared network and can communicate with each other automatically. Credentials and connection details are pre-configured.
+                  {{ t('deployWizard.multiServiceInfo', { count: serviceDefinitions.length }) }}
                 </p>
               </div>
             </div>
@@ -805,8 +807,8 @@ onUnmounted(() => {
                 <div class="flex items-start gap-2">
                   <CheckCircle2 class="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
                   <div>
-                    <p class="text-sm font-medium text-green-800 dark:text-green-200">Ready for one-click deploy</p>
-                    <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">This template has no required configuration. All secrets are auto-generated.</p>
+                    <p class="text-sm font-medium text-green-800 dark:text-green-200">{{ t('deployWizard.readyForOneClick') }}</p>
+                    <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">{{ t('deployWizard.noRequiredConfig') }}</p>
                   </div>
                 </div>
                 <button
@@ -816,12 +818,12 @@ onUnmounted(() => {
                 >
                   <Loader2 v-if="deploying" class="w-4 h-4 animate-spin" />
                   <Rocket v-else class="w-4 h-4" />
-                  {{ deploying ? 'Deploying...' : 'Quick Deploy' }}
+                  {{ deploying ? t('deployWizard.deploying') : t('deployWizard.quickDeploy') }}
                 </button>
               </div>
               <!-- Quick deploy volume strategy -->
               <div v-if="templateVolumes.length >= 2" class="mt-3 pt-3 border-t border-green-200 dark:border-green-800 flex items-center gap-3">
-                <span class="text-xs font-medium text-green-800 dark:text-green-200">Storage:</span>
+                <span class="text-xs font-medium text-green-800 dark:text-green-200">{{ t('deployWizard.storage.label') }}:</span>
                 <div class="flex gap-1.5">
                   <button
                     @click="quickDeployVolumeStrategy = 'shared'"
@@ -832,7 +834,7 @@ onUnmounted(() => {
                         : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
                     ]"
                   >
-                    Shared volume
+                    {{ t('deployWizard.storage.sharedVolume') }}
                   </button>
                   <button
                     @click="quickDeployVolumeStrategy = 'split'"
@@ -843,7 +845,7 @@ onUnmounted(() => {
                         : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
                     ]"
                   >
-                    Separate volumes
+                    {{ t('deployWizard.storage.separateVolumes') }}
                   </button>
                 </div>
               </div>
@@ -859,9 +861,9 @@ onUnmounted(() => {
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
               <Globe class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Application Settings</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.config.applicationSettings') }}</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your application's basic settings.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.config.applicationSettingsDesc') }}</p>
           </div>
           <div class="p-6 space-y-4">
             <div v-for="v in appVariables" :key="v.name">
@@ -890,7 +892,7 @@ onUnmounted(() => {
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
                 :placeholder="v.default ?? ''"
               />
-              <p v-if="v.required !== false && !config[v.name]?.trim()" class="mt-1 text-xs text-red-500">This field is required</p>
+              <p v-if="v.required !== false && !config[v.name]?.trim()" class="mt-1 text-xs text-red-500">{{ t('deployWizard.config.fieldRequired') }}</p>
             </div>
           </div>
         </div>
@@ -900,9 +902,9 @@ onUnmounted(() => {
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
               <Link class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Domain Configuration</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.config.domainConfiguration') }}</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Optionally assign domains to your services. You can also configure this later.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.config.domainConfigurationDesc') }}</p>
           </div>
           <div class="p-6 space-y-4">
             <div v-for="svc in webFacingServices" :key="svc.name">
@@ -912,7 +914,7 @@ onUnmounted(() => {
               <DomainPicker
                 :model-value="serviceDomains[svc.name] ?? ''"
                 @update:model-value="serviceDomains[svc.name] = $event"
-                placeholder="Leave empty for no domain"
+                :placeholder="t('deployWizard.config.domainPlaceholder')"
               />
             </div>
           </div>
@@ -923,9 +925,9 @@ onUnmounted(() => {
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
               <Shield class="w-5 h-5 text-green-600 dark:text-green-400" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Security & Credentials</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.config.securityCredentials') }}</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Passwords and secrets are auto-generated. You can customize them below.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.config.securityCredentialsDesc') }}</p>
           </div>
           <div class="p-6 space-y-4">
             <div v-for="v in securityVariables" :key="v.name">
@@ -945,7 +947,7 @@ onUnmounted(() => {
                       type="button"
                       @click="showPassword[v.name] = !showPassword[v.name]"
                       class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                      :title="showPassword[v.name] ? 'Hide' : 'Show'"
+                      :title="showPassword[v.name] ? t('deployWizard.config.hide') : t('deployWizard.config.show')"
                     >
                       <EyeOff v-if="showPassword[v.name]" class="w-4 h-4" />
                       <Eye v-else class="w-4 h-4" />
@@ -955,7 +957,7 @@ onUnmounted(() => {
                       @click="copyToClipboard(v.name)"
                       class="p-1.5 rounded transition-colors"
                       :class="copied[v.name] ? 'text-green-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'"
-                      title="Copy"
+                      :title="t('deployWizard.config.copy')"
                     >
                       <Check v-if="copied[v.name]" class="w-4 h-4" />
                       <Copy v-else class="w-4 h-4" />
@@ -964,7 +966,7 @@ onUnmounted(() => {
                       type="button"
                       @click="regeneratePassword(v.name)"
                       class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                      title="Regenerate"
+                      :title="t('deployWizard.config.regenerate')"
                     >
                       <RefreshCw class="w-3.5 h-3.5" />
                     </button>
@@ -976,7 +978,7 @@ onUnmounted(() => {
               <div class="flex items-start gap-2">
                 <CheckCircle2 class="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
                 <p class="text-xs text-green-700 dark:text-green-300">
-                  All passwords are securely generated. Save them somewhere safe — you'll need them to connect to your services.
+                  {{ t('deployWizard.config.passwordsSafetyNotice') }}
                 </p>
               </div>
             </div>
@@ -986,7 +988,7 @@ onUnmounted(() => {
         <!-- No variables -->
         <div v-if="appVariables.length === 0 && securityVariables.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-center">
           <CheckCircle2 class="w-10 h-10 text-green-500 mx-auto mb-3" />
-          <p class="text-sm text-gray-600 dark:text-gray-400">This template has no configuration — it's ready to deploy with defaults!</p>
+          <p class="text-sm text-gray-600 dark:text-gray-400">{{ t('deployWizard.config.noConfiguration') }}</p>
         </div>
       </div>
 
@@ -996,18 +998,18 @@ onUnmounted(() => {
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
               <HardDrive class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage Configuration</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.storage.title') }}</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure volumes for persistent data. Create new volumes or attach existing ones.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.storage.description') }}</p>
           </div>
 
           <div class="p-6 space-y-5">
             <!-- Storage quota bar -->
             <div v-if="storageQuota" class="p-4 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700">
               <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-medium text-gray-600 dark:text-gray-400">Storage Usage</span>
+                <span class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('deployWizard.storage.storageUsage') }}</span>
                 <span class="text-xs font-mono text-gray-500 dark:text-gray-400">
-                  {{ storageQuota.usedGb.toFixed(1) }} + {{ totalNewStorageGb }} GB new / {{ storageQuota.limitGb }} GB limit
+                  {{ t('deployWizard.storage.quotaSummary', { used: storageQuota.usedGb.toFixed(1), new: totalNewStorageGb, limit: storageQuota.limitGb }) }}
                 </span>
               </div>
               <div class="w-full h-2.5 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
@@ -1027,7 +1029,7 @@ onUnmounted(() => {
               </div>
               <div class="flex items-center justify-between mt-1.5">
                 <span class="text-xs text-gray-400">
-                  {{ remainingAfterDeploy !== null ? (remainingAfterDeploy >= 0 ? remainingAfterDeploy.toFixed(1) + ' GB remaining' : 'Over limit by ' + Math.abs(remainingAfterDeploy).toFixed(1) + ' GB') : '' }}
+                  {{ remainingAfterDeploy !== null ? (remainingAfterDeploy >= 0 ? t('deployWizard.storage.gbRemaining', { amount: remainingAfterDeploy.toFixed(1) }) : t('deployWizard.storage.overLimitBy', { amount: Math.abs(remainingAfterDeploy).toFixed(1) })) : '' }}
                 </span>
               </div>
             </div>
@@ -1037,9 +1039,9 @@ onUnmounted(() => {
               <div class="flex items-start gap-3">
                 <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                 <div class="flex-1">
-                  <p class="text-sm font-medium text-red-800 dark:text-red-300">Storage quota exceeded</p>
+                  <p class="text-sm font-medium text-red-800 dark:text-red-300">{{ t('deployWizard.storage.quotaExceeded') }}</p>
                   <p class="text-xs text-red-600 dark:text-red-400 mt-1">
-                    Reduce volume sizes, use existing volumes, or upgrade your plan to continue.
+                    {{ t('deployWizard.storage.quotaExceededDesc') }}
                   </p>
                 </div>
                 <button
@@ -1047,14 +1049,14 @@ onUnmounted(() => {
                   class="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium transition-colors"
                 >
                   <ExternalLink class="w-3 h-3" />
-                  Upgrade Plan
+                  {{ t('deployWizard.storage.upgradePlan') }}
                 </button>
               </div>
             </div>
 
             <!-- Volume sharing toggle (when 2+ volumes) -->
             <div v-if="templateVolumes.length >= 2" class="flex items-center gap-3">
-              <span class="text-xs font-medium text-gray-600 dark:text-gray-400">Volume strategy:</span>
+              <span class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('deployWizard.storage.volumeStrategy') }}:</span>
               <div class="flex gap-1.5">
                 <button
                   @click="setAllShared(false)"
@@ -1065,7 +1067,7 @@ onUnmounted(() => {
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
                   ]"
                 >
-                  Separate volumes
+                  {{ t('deployWizard.storage.separateVolumes') }}
                 </button>
                 <button
                   @click="setAllShared(true)"
@@ -1076,7 +1078,7 @@ onUnmounted(() => {
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
                   ]"
                 >
-                  Shared volume
+                  {{ t('deployWizard.storage.sharedVolume') }}
                 </button>
               </div>
             </div>
@@ -1088,7 +1090,7 @@ onUnmounted(() => {
                 <div>
                   <div class="flex items-center gap-2">
                     <Link2 class="w-4 h-4 text-blue-500" />
-                    <p class="text-sm font-semibold text-gray-900 dark:text-white">Shared Volume</p>
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.storage.sharedVolume') }}</p>
                   </div>
                   <div class="mt-1.5 space-y-1">
                     <div v-for="svc in allServicesForGroup(group)" :key="svc.name + svc.volume"
@@ -1109,7 +1111,7 @@ onUnmounted(() => {
                   {{ vn }}
                   <button v-if="group.volumeNames.length > 1" @click="unlinkVolume(vn)"
                     class="ml-0.5 p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
-                    title="Unlink">
+                    :title="t('deployWizard.storage.unlink')">
                     <X class="w-2.5 h-2.5" />
                   </button>
                 </span>
@@ -1126,7 +1128,7 @@ onUnmounted(() => {
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
                   ]"
                 >
-                  Create New
+                  {{ t('deployWizard.storage.createNew') }}
                 </button>
                 <button
                   @click="group.mode = 'existing'"
@@ -1139,13 +1141,13 @@ onUnmounted(() => {
                     existingVolumes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
                   ]"
                 >
-                  Use Existing{{ existingVolumes.length === 0 ? ' (none available)' : '' }}
+                  {{ existingVolumes.length === 0 ? t('deployWizard.storage.useExistingNone') : t('deployWizard.storage.useExisting') }}
                 </button>
               </div>
 
               <!-- Create New: size input -->
               <div v-if="group.mode === 'create'" class="flex items-center gap-3">
-                <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Size (GB)</label>
+                <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">{{ t('deployWizard.storage.sizeGb') }}</label>
                 <input
                   v-model.number="group.sizeGb"
                   type="number"
@@ -1154,7 +1156,7 @@ onUnmounted(() => {
                   class="w-24 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
                 <span class="text-xs text-gray-400">
-                  {{ storageQuota ? `(max ${Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb))} GB available)` : '' }}
+                  {{ storageQuota ? t('deployWizard.storage.maxAvailable', { amount: Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) }) : '' }}
                 </span>
               </div>
 
@@ -1164,7 +1166,7 @@ onUnmounted(() => {
                   v-model="group.existingVolumeName"
                   class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="">Select a volume...</option>
+                  <option value="">{{ t('deployWizard.storage.selectVolume') }}</option>
                   <option v-for="ev in existingVolumes" :key="ev.name" :value="ev.name">
                     {{ ev.displayName }} ({{ ev.sizeGb }} GB)
                   </option>
@@ -1178,7 +1180,7 @@ onUnmounted(() => {
                 <div>
                   <p class="text-sm font-semibold text-gray-900 dark:text-white font-mono">{{ vol.name }}</p>
                   <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Used by: <span v-for="(svc, i) in vol.usedBy" :key="svc.name">{{ i > 0 ? ', ' : '' }}<span class="font-medium">{{ svc.name }}</span> ({{ svc.target }})</span>
+                    {{ t('deployWizard.storage.usedBy') }}: <span v-for="(svc, i) in vol.usedBy" :key="svc.name">{{ i > 0 ? ', ' : '' }}<span class="font-medium">{{ svc.name }}</span> ({{ svc.target }})</span>
                   </p>
                 </div>
                 <!-- Link button (only when other ungrouped volumes exist) -->
@@ -1186,14 +1188,14 @@ onUnmounted(() => {
                   <button
                     @click.stop="linkDropdownOpen = linkDropdownOpen === vol.name ? null : vol.name"
                     class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                    title="Link with another volume"
+                    :title="t('deployWizard.storage.linkWithAnother')"
                   >
                     <Link2 class="w-4 h-4" />
                   </button>
                   <!-- Link dropdown -->
                   <div v-if="linkDropdownOpen === vol.name"
                     class="absolute right-0 top-full mt-1 z-10 w-48 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1">
-                    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Link with</p>
+                    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('deployWizard.storage.linkWith') }}</p>
                     <button v-for="other in ungroupedVolumes.filter(v => v.name !== vol.name)" :key="other.name"
                       @click="linkVolumes(vol.name, other.name)"
                       class="w-full px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-mono transition-colors"
@@ -1215,7 +1217,7 @@ onUnmounted(() => {
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
                   ]"
                 >
-                  Create New
+                  {{ t('deployWizard.storage.createNew') }}
                 </button>
                 <button
                   @click="volumeConfigs[vol.name]!.mode = 'existing'"
@@ -1228,13 +1230,13 @@ onUnmounted(() => {
                     existingVolumes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
                   ]"
                 >
-                  Use Existing{{ existingVolumes.length === 0 ? ' (none available)' : '' }}
+                  {{ existingVolumes.length === 0 ? t('deployWizard.storage.useExistingNone') : t('deployWizard.storage.useExisting') }}
                 </button>
               </div>
 
               <!-- Create New: size input -->
               <div v-if="volumeConfigs[vol.name]?.mode === 'create'" class="flex items-center gap-3">
-                <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Size (GB)</label>
+                <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">{{ t('deployWizard.storage.sizeGb') }}</label>
                 <input
                   v-model.number="volumeConfigs[vol.name]!.sizeGb"
                   type="number"
@@ -1243,7 +1245,7 @@ onUnmounted(() => {
                   class="w-24 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
                 <span class="text-xs text-gray-400">
-                  {{ storageQuota ? `(max ${Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb))} GB available)` : '' }}
+                  {{ storageQuota ? t('deployWizard.storage.maxAvailable', { amount: Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) }) : '' }}
                 </span>
               </div>
 
@@ -1253,7 +1255,7 @@ onUnmounted(() => {
                   v-model="volumeConfigs[vol.name]!.existingVolumeName"
                   class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="">Select a volume...</option>
+                  <option value="">{{ t('deployWizard.storage.selectVolume') }}</option>
                   <option v-for="ev in existingVolumes" :key="ev.name" :value="ev.name">
                     {{ ev.displayName }} ({{ ev.sizeGb }} GB)
                   </option>
@@ -1270,9 +1272,9 @@ onUnmounted(() => {
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
               <Cpu class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Resource Allocation</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.resources.title') }}</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure replicas, CPU, and memory for each service. Leave CPU/Memory at 0 to use platform defaults.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.resources.description') }}</p>
           </div>
 
           <div class="p-6 space-y-4">
@@ -1280,7 +1282,7 @@ onUnmounted(() => {
               <p class="text-xs font-semibold text-gray-900 dark:text-white mb-3 font-mono">{{ svcName }}</p>
               <div class="grid grid-cols-3 gap-3">
                 <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Replicas</label>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('deployWizard.resources.replicas') }}</label>
                   <input
                     v-model.number="res.replicas"
                     type="number"
@@ -1290,26 +1292,26 @@ onUnmounted(() => {
                   />
                 </div>
                 <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">CPU (millicores)</label>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('deployWizard.resources.cpuMillicores') }}</label>
                   <input
                     v-model.number="res.cpuLimit"
                     type="number"
                     min="0"
                     step="100"
                     :max="resourceLimits?.maxCpuPerContainer || 16000"
-                    placeholder="Default"
+                    :placeholder="t('deployWizard.resources.default')"
                     class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
                 <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Memory (MB)</label>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('deployWizard.resources.memoryMb') }}</label>
                   <input
                     v-model.number="res.memoryLimit"
                     type="number"
                     min="0"
                     step="64"
                     :max="resourceLimits?.maxMemoryPerContainer || 65536"
-                    placeholder="Default"
+                    :placeholder="t('deployWizard.resources.default')"
                     class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
@@ -1320,7 +1322,7 @@ onUnmounted(() => {
             <div v-if="estimatedMonthlyCost !== null" class="flex items-center gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
               <Info class="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <p class="text-xs text-blue-700 dark:text-blue-300">
-                Estimated monthly cost: ${{ estimatedMonthlyCost.toFixed(2) }}/mo
+                {{ t('deployWizard.resources.estimatedCost', { cost: estimatedMonthlyCost.toFixed(2) }) }}
               </p>
             </div>
           </div>
@@ -1334,7 +1336,7 @@ onUnmounted(() => {
           <div class="flex items-start gap-2">
             <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
             <div>
-              <p class="text-sm font-medium text-red-800 dark:text-red-300">Deployment failed</p>
+              <p class="text-sm font-medium text-red-800 dark:text-red-300">{{ t('deployWizard.errors.deploymentFailed') }}</p>
               <p class="text-sm text-red-700 dark:text-red-400 mt-1">{{ deployError }}</p>
             </div>
           </div>
@@ -1344,13 +1346,13 @@ onUnmounted(() => {
         <template v-if="!deployed && !deploying">
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Review & Deploy</h2>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Everything looks good? Let's deploy your stack.</p>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.review.title') }}</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.review.description') }}</p>
             </div>
             <div class="p-6 space-y-5">
               <!-- Services summary -->
               <div>
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Services</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.services') }}</h3>
                 <div class="space-y-2">
                   <div v-for="svc in serviceDefinitions" :key="svc.name" class="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-750">
                     <component :is="getServiceIcon(svc)" class="w-4 h-4 text-gray-500 dark:text-gray-400" />
@@ -1364,7 +1366,7 @@ onUnmounted(() => {
 
               <!-- Storage summary -->
               <div v-if="hasVolumes">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Storage</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.storage') }}</h3>
                 <div class="space-y-1.5">
                   <!-- Grouped (shared) volumes -->
                   <div v-for="(group, groupId) in volumeShareGroups" :key="groupId"
@@ -1372,14 +1374,14 @@ onUnmounted(() => {
                     <div class="flex items-center justify-between">
                       <div class="flex items-center gap-2">
                         <Link2 class="w-3.5 h-3.5 text-blue-500" />
-                        <span class="text-xs font-medium text-blue-700 dark:text-blue-300">Shared volume</span>
+                        <span class="text-xs font-medium text-blue-700 dark:text-blue-300">{{ t('deployWizard.storage.sharedVolume') }}</span>
                         <span class="text-xs text-blue-600 dark:text-blue-400 font-mono">
                           ({{ group.volumeNames.join(', ') }})
                         </span>
                       </div>
                       <span class="text-sm text-gray-900 dark:text-white">
-                        <template v-if="group.mode === 'create'">New · {{ group.sizeGb }} GB</template>
-                        <template v-else>Existing · {{ existingVolumes.find(v => v.name === group.existingVolumeName)?.displayName || group.existingVolumeName }}</template>
+                        <template v-if="group.mode === 'create'">{{ t('deployWizard.review.newVolume', { size: group.sizeGb }) }}</template>
+                        <template v-else>{{ t('deployWizard.review.existingVolume', { name: existingVolumes.find(v => v.name === group.existingVolumeName)?.displayName || group.existingVolumeName }) }}</template>
                       </span>
                     </div>
                   </div>
@@ -1388,10 +1390,10 @@ onUnmounted(() => {
                     <span class="text-sm text-gray-600 dark:text-gray-400 font-mono">{{ vol.name }}</span>
                     <span class="text-sm text-gray-900 dark:text-white">
                       <template v-if="volumeConfigs[vol.name]?.mode === 'create'">
-                        New · {{ volumeConfigs[vol.name]!.sizeGb }} GB
+                        {{ t('deployWizard.review.newVolume', { size: volumeConfigs[vol.name]!.sizeGb }) }}
                       </template>
                       <template v-else>
-                        Existing · {{ existingVolumes.find(v => v.name === volumeConfigs[vol.name]?.existingVolumeName)?.displayName || volumeConfigs[vol.name]!.existingVolumeName }}
+                        {{ t('deployWizard.review.existingVolume', { name: existingVolumes.find(v => v.name === volumeConfigs[vol.name]?.existingVolumeName)?.displayName || volumeConfigs[vol.name]!.existingVolumeName }) }}
                       </template>
                     </span>
                   </div>
@@ -1400,7 +1402,7 @@ onUnmounted(() => {
 
               <!-- Config summary -->
               <div v-if="Object.keys(config).length > 0">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Configuration</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.configuration') }}</h3>
                 <div class="space-y-1.5">
                   <div v-for="v in (template.variables ?? [])" :key="v.name" class="flex items-center justify-between py-1.5">
                     <span class="text-sm text-gray-600 dark:text-gray-400">{{ v.label }}</span>
@@ -1421,7 +1423,7 @@ onUnmounted(() => {
               class="flex items-center gap-3 px-8 py-4 rounded-xl bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-base font-semibold transition-all hover:shadow-lg hover:shadow-primary-600/25 active:scale-[0.98]"
             >
               <Rocket class="w-5 h-5" />
-              Deploy {{ template.name }}
+              {{ t('deployWizard.review.deployButton', { name: template.name }) }}
             </button>
           </div>
         </template>
@@ -1429,8 +1431,8 @@ onUnmounted(() => {
         <!-- Deploying spinner -->
         <div v-if="deploying && !deployed" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
           <Loader2 class="w-10 h-10 text-primary-600 dark:text-primary-400 animate-spin mx-auto mb-4" />
-          <p class="text-lg font-semibold text-gray-900 dark:text-white">Deploying your stack...</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Setting up services, networks, and volumes</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.progress.deployingStack') }}</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.progress.settingUp') }}</p>
         </div>
 
         <!-- Deployment progress -->
@@ -1442,8 +1444,8 @@ onUnmounted(() => {
                 <CheckCircle2 class="w-7 h-7 text-green-600 dark:text-green-400" />
               </div>
               <div>
-                <p class="text-lg font-semibold text-green-800 dark:text-green-300">All services are running!</p>
-                <p class="text-sm text-green-600 dark:text-green-400">Your {{ template.name }} stack is ready to use.</p>
+                <p class="text-lg font-semibold text-green-800 dark:text-green-300">{{ t('deployWizard.progress.allRunning') }}</p>
+                <p class="text-sm text-green-600 dark:text-green-400">{{ t('deployWizard.progress.stackReady', { name: template.name }) }}</p>
               </div>
             </div>
           </div>
@@ -1456,9 +1458,9 @@ onUnmounted(() => {
               </div>
               <div>
                 <p class="text-lg font-semibold text-red-800 dark:text-red-300">
-                  {{ overallStatus === 'failed' ? 'Deployment failed' : 'Some services failed' }}
+                  {{ overallStatus === 'failed' ? t('deployWizard.errors.deploymentFailed') : t('deployWizard.errors.someServicesFailed') }}
                 </p>
-                <p class="text-sm text-red-600 dark:text-red-400">Check the service details below for more information.</p>
+                <p class="text-sm text-red-600 dark:text-red-400">{{ t('deployWizard.errors.checkDetails') }}</p>
               </div>
             </div>
           </div>
@@ -1466,7 +1468,7 @@ onUnmounted(() => {
           <!-- Service statuses -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Deployment Progress</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.progress.title') }}</h2>
             </div>
             <div class="divide-y divide-gray-200 dark:divide-gray-700">
               <div
@@ -1516,7 +1518,7 @@ onUnmounted(() => {
                   @click="goToServiceDetail(svc.id)"
                   class="text-xs text-primary-600 dark:text-primary-400 hover:underline font-medium flex items-center gap-1"
                 >
-                  Details <ExternalLink class="w-3 h-3" />
+                  {{ t('deployWizard.progress.details') }} <ExternalLink class="w-3 h-3" />
                 </button>
               </div>
             </div>
@@ -1528,13 +1530,13 @@ onUnmounted(() => {
               @click="goBack"
               class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
-              Back to Marketplace
+              {{ t('deployWizard.backToMarketplace') }}
             </button>
             <button
               @click="goToServices"
               class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
             >
-              Go to Services
+              {{ t('deployWizard.goToServices') }}
               <ArrowRight class="w-4 h-4" />
             </button>
           </div>
@@ -1549,14 +1551,14 @@ onUnmounted(() => {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-medium"
         >
           <ArrowLeft class="w-4 h-4" />
-          Back
+          {{ t('deployWizard.nav.back') }}
         </button>
         <button
           @click="nextStep"
           :disabled="!canProceed"
           class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          {{ currentStep === 4 ? 'Review & Deploy' : 'Continue' }}
+          {{ currentStep === 4 ? t('deployWizard.nav.reviewAndDeploy') : t('deployWizard.nav.continue') }}
           <ArrowRight class="w-4 h-4" />
         </button>
       </div>
@@ -1568,7 +1570,7 @@ onUnmounted(() => {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
         >
           <ArrowLeft class="w-4 h-4" />
-          Back
+          {{ t('deployWizard.nav.back') }}
         </button>
         <div></div>
       </div>

@@ -411,7 +411,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Recent deployments -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
           <GitCommit class="w-4 h-4 text-gray-500 dark:text-gray-400" />
           <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('super.status.recentDeployments') }}</h2>

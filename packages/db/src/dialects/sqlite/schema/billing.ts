@@ -23,6 +23,7 @@ export const billingPlans = sqliteTable('billing_plans', {
   containerLimit: integer('container_limit').notNull(),
   storageLimit: integer('storage_limit').notNull(),
   bandwidthLimit: integer('bandwidth_limit'),
+  maxUsersPerAccount: integer('max_users_per_account'),
   priceCents: integer('price_cents').notNull(),
   stripeProductId: text('stripe_product_id'),
   stripePriceIds: text('stripe_price_ids', { mode: 'json' }).$default(() => ({})),
@@ -46,6 +47,8 @@ export const subscriptions = sqliteTable('subscriptions', {
   currentPeriodStart: integer('current_period_start', { mode: 'timestamp' }),
   currentPeriodEnd: integer('current_period_end', { mode: 'timestamp' }),
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }),
+  billedByAccountId: text('billed_by_account_id')
+    .references(() => accounts.id, { onDelete: 'set null' }),
   pastDueSince: integer('past_due_since', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
@@ -172,6 +175,12 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   account: one(accounts, {
     fields: [subscriptions.accountId],
     references: [accounts.id],
+    relationName: 'subscription_account',
+  }),
+  billedByAccount: one(accounts, {
+    fields: [subscriptions.billedByAccountId],
+    references: [accounts.id],
+    relationName: 'subscription_billedBy',
   }),
   plan: one(billingPlans, {
     fields: [subscriptions.planId],

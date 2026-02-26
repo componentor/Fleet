@@ -176,6 +176,13 @@
       "when": 1773800000000,
       "tag": "0024_registry_deploy_and_account_creds",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1773900000000,
+      "tag": "0025_add_max_users_per_account",
+      "breakpoints": true
     }
   ]
 }

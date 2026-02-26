@@ -28,6 +28,7 @@ export const billingPlans = mysqlTable('billing_plans', {
   containerLimit: int('container_limit').notNull(),
   storageLimit: int('storage_limit').notNull(),
   bandwidthLimit: int('bandwidth_limit'),
+  maxUsersPerAccount: int('max_users_per_account'),
   priceCents: int('price_cents').notNull(),
   stripeProductId: varchar('stripe_product_id', { length: 255 }),
   stripePriceIds: json('stripe_price_ids').$default(() => ({})),

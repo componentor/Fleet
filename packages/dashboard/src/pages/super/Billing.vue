@@ -43,7 +43,8 @@ const planForm = ref({
   name: '', slug: '', description: '', sortOrder: 0,
   isDefault: false, isFree: false, visible: true,
   cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
-  storageLimit: 10, bandwidthLimit: 0, priceCents: 0,
+  storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
+  priceCents: 0,
 })
 
 // ─── Usage Pricing ───────────────────────────────────────────
@@ -126,7 +127,8 @@ function openPlanForm(plan?: any) {
       name: '', slug: '', description: '', sortOrder: 0,
       isDefault: false, isFree: false, visible: true,
       cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
-      storageLimit: 10, bandwidthLimit: 0, priceCents: 0,
+      storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
+      priceCents: 0,
     }
   }
   showPlanForm.value = true
@@ -553,7 +555,7 @@ onMounted(() => { fetchAll() })
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
               <div>
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.cpuLimit') }}</label>
                 <input v-model.number="planForm.cpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
@@ -573,6 +575,10 @@ onMounted(() => { fetchAll() })
               <div>
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.bandwidthLimit') }}</label>
                 <input v-model.number="planForm.bandwidthLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxUsers') }}</label>
+                <input v-model.number="planForm.maxUsersPerAccount" type="number" min="0" placeholder="0 = unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-4">
@@ -604,6 +610,7 @@ onMounted(() => { fetchAll() })
                 <th class="px-6 py-3">{{ t('super.billing.planSlug') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.price') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.cpuMemContainers') }}</th>
+                <th class="px-6 py-3">{{ t('super.billing.maxUsers') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.stripe') }}</th>
                 <th class="px-6 py-3">{{ t('common.actions') }}</th>
               </tr>
@@ -618,6 +625,7 @@ onMounted(() => { fetchAll() })
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono whitespace-nowrap">{{ plan.slug }}</td>
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">{{ formatCents(plan.priceCents) }}/mo</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.maxUsersPerAccount ? plan.maxUsersPerAccount : '∞' }}</td>
                 <td class="px-6 py-4">
                   <span :class="plan.stripeProductId ? 'text-green-600 dark:text-green-400' : 'text-gray-400'" class="text-xs font-medium">
                     {{ plan.stripeProductId ? t('super.billing.synced') : t('super.billing.notSynced') }}

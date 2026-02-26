@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { SquareTerminal, Loader2 } from 'lucide-vue-next'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
 import '@xterm/xterm/css/xterm.css'
+
+const { t } = useI18n()
 
 const STORAGE_KEY = 'fleet_terminal_service'
 
@@ -48,7 +51,7 @@ async function fetchContainers(serviceId: string) {
 function getReplicaLabel(containerId?: string): string | undefined {
   if (terminalContainers.value.length <= 1) return undefined
   const idx = terminalContainers.value.findIndex((c) => c.containerId === containerId)
-  return idx >= 0 ? `replica ${idx + 1}` : undefined
+  return idx >= 0 ? t('terminal.replica', { n: idx + 1, id: containerId?.slice(0, 12) }) : undefined
 }
 
 function connectToService(serviceId: string) {
@@ -94,19 +97,19 @@ onMounted(async () => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <SquareTerminal class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Terminal</h1>
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('terminal.title') }}</h1>
     </div>
 
     <!-- Service selector -->
     <div class="mb-6">
-      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Select Service</label>
+      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('terminal.selectService') }}</label>
       <div class="flex items-center gap-3">
         <select
           v-model="selectedService"
           :disabled="loading"
           class="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
         >
-          <option value="" disabled>{{ loading ? 'Loading services...' : 'Choose a service...' }}</option>
+          <option value="" disabled>{{ loading ? $t('terminal.loadingServices') : $t('terminal.chooseService') }}</option>
           <option v-for="service in servicesStore.services" :key="service.id" :value="service.id">
             {{ service.name }}
           </option>
@@ -123,7 +126,7 @@ onMounted(async () => {
           <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
           <span class="w-3 h-3 rounded-full bg-green-500"></span>
           <span class="ml-2 text-xs text-gray-400">
-            {{ selectedService ? `Terminal - ${servicesStore.services.find(s => s.id === selectedService)?.name || selectedService}` : 'Terminal' }}
+            {{ selectedService ? `${$t('terminal.title')} - ${servicesStore.services.find(s => s.id === selectedService)?.name || selectedService}` : $t('terminal.title') }}
           </span>
           <select
             v-if="terminalContainers.length > 1"
@@ -132,7 +135,7 @@ onMounted(async () => {
             class="ml-2 px-2 py-0.5 rounded border border-gray-600 bg-gray-800 text-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
           >
             <option v-for="(ctr, idx) in terminalContainers" :key="ctr.containerId" :value="ctr.containerId">
-              Replica {{ idx + 1 }} ({{ ctr.containerId.slice(0, 12) }})
+              {{ $t('terminal.replica', { n: idx + 1, id: ctr.containerId.slice(0, 12) }) }}
             </option>
           </select>
         </div>
@@ -146,13 +149,13 @@ onMounted(async () => {
             ]"
           >
             <span :class="['w-1.5 h-1.5 rounded-full', connected ? 'bg-green-400' : 'bg-gray-500']"></span>
-            {{ connected ? 'Connected' : 'Disconnected' }}
+            {{ connected ? $t('terminal.connected') : $t('terminal.disconnected') }}
           </span>
         </div>
       </div>
       <div class="h-[500px] pt-2 px-2 pb-4 bg-[#1a1b26]">
         <div v-if="!selectedService && !terminalCreated" class="h-full flex items-center justify-center">
-          <p class="text-gray-500 text-sm">Select a service to open a terminal session.</p>
+          <p class="text-gray-500 text-sm">{{ $t('terminal.selectPrompt') }}</p>
         </div>
         <div v-else ref="terminalContainer" class="h-full"></div>
       </div>

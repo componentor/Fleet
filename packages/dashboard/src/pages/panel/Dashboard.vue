@@ -171,10 +171,10 @@ const formattedCost = computed(() => {
 })
 
 const stats = computed(() => [
-  { label: t('dashboard.runningServices'), value: String(animatedRunning.value), icon: Box, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20', to: '/panel/services' },
-  { label: t('dashboard.totalServices'), value: String(animatedTotal.value), icon: HardDrive, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-50 dark:bg-purple-900/20', to: '/panel/services' },
-  { label: t('dashboard.domains'), value: String(animatedDomains.value), icon: Globe, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20', to: '/panel/domains' },
-  { label: t('dashboard.estimatedCost'), value: formattedCost.value, icon: DollarSign, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20', to: '/panel/billing' },
+  { label: t('dashboard.runningServices'), value: String(animatedRunning.value), icon: Box, color: 'text-white', bg: 'bg-gradient-to-br from-green-500 to-emerald-600', to: '/panel/services' },
+  { label: t('dashboard.totalServices'), value: String(animatedTotal.value), icon: HardDrive, color: 'text-white', bg: 'bg-gradient-to-br from-purple-500 to-violet-600', to: '/panel/services' },
+  { label: t('dashboard.domains'), value: String(animatedDomains.value), icon: Globe, color: 'text-white', bg: 'bg-gradient-to-br from-blue-500 to-indigo-600', to: '/panel/domains' },
+  { label: t('dashboard.estimatedCost'), value: formattedCost.value, icon: DollarSign, color: 'text-white', bg: 'bg-gradient-to-br from-amber-500 to-orange-600', to: '/panel/billing' },
 ])
 
 const recentServices = computed(() =>
@@ -356,41 +356,41 @@ onMounted(async () => {
           <div class="h-3 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden flex">
             <div
               v-if="healthBreakdown.running > 0"
-              class="bg-green-500 transition-all duration-700 ease-out"
+              class="bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-700 ease-out"
               :style="{ width: healthWidth(healthBreakdown.running) }"
             />
             <div
               v-if="healthBreakdown.deploying > 0"
-              class="bg-yellow-500 transition-all duration-700 ease-out"
+              class="bg-gradient-to-r from-yellow-400 to-amber-500 transition-all duration-700 ease-out"
               :style="{ width: healthWidth(healthBreakdown.deploying) }"
             />
             <div
               v-if="healthBreakdown.stopped > 0"
-              class="bg-gray-400 dark:bg-gray-500 transition-all duration-700 ease-out"
+              class="bg-gradient-to-r from-gray-400 to-gray-500 dark:from-gray-500 dark:to-gray-600 transition-all duration-700 ease-out"
               :style="{ width: healthWidth(healthBreakdown.stopped) }"
             />
             <div
               v-if="healthBreakdown.failed > 0"
-              class="bg-red-500 transition-all duration-700 ease-out"
+              class="bg-gradient-to-r from-red-500 to-rose-600 transition-all duration-700 ease-out"
               :style="{ width: healthWidth(healthBreakdown.failed) }"
             />
           </div>
           <!-- Legend -->
           <div class="flex flex-wrap gap-4 mt-3">
             <div v-if="healthBreakdown.running > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-green-500 to-emerald-500"></span>
               <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.running') }} ({{ healthBreakdown.running }})</span>
             </div>
             <div v-if="healthBreakdown.deploying > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500"></span>
               <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.deploying') }} ({{ healthBreakdown.deploying }})</span>
             </div>
             <div v-if="healthBreakdown.stopped > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-gray-400 dark:bg-gray-500"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-gray-400 to-gray-500"></span>
               <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.stopped') }} ({{ healthBreakdown.stopped }})</span>
             </div>
             <div v-if="healthBreakdown.failed > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-red-500 to-rose-600"></span>
               <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.failed') }} ({{ healthBreakdown.failed }})</span>
             </div>
           </div>
@@ -399,7 +399,7 @@ onMounted(async () => {
         <!-- Resource usage gauges -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-8 transition-all duration-200 hover:shadow-md">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ $t('dashboard.resourceUsage') }}</h3>
-          <div class="flex flex-wrap justify-center sm:justify-start gap-8">
+          <div class="grid grid-cols-3 sm:grid-cols-6 gap-6">
             <ResourceGauge
               v-for="gauge in gauges"
               :key="gauge.label"
@@ -412,11 +412,43 @@ onMounted(async () => {
           </div>
         </div>
 
+        <!-- Quick actions -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+          <router-link
+            to="/panel/deploy"
+            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+          >
+            <Rocket class="w-5 h-5 text-green-500 group-hover:text-green-600 transition-colors" />
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('services.deployNew', 'Deploy') }}</span>
+          </router-link>
+          <router-link
+            to="/panel/services"
+            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+          >
+            <Box class="w-5 h-5 text-purple-500 group-hover:text-purple-600 transition-colors" />
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.services', 'Services') }}</span>
+          </router-link>
+          <router-link
+            to="/panel/domains"
+            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+          >
+            <Globe class="w-5 h-5 text-blue-500 group-hover:text-blue-600 transition-colors" />
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.domains', 'Domains') }}</span>
+          </router-link>
+          <router-link
+            to="/panel/marketplace"
+            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
+          >
+            <Container class="w-5 h-5 text-amber-500 group-hover:text-amber-600 transition-colors" />
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.marketplace', 'Marketplace') }}</span>
+          </router-link>
+        </div>
+
         <!-- Volume usage breakdown -->
         <div v-if="volumesList.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-8 transition-all duration-200 hover:shadow-md">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.volumeUsage') || 'Volume Usage' }}</h3>
-            <router-link to="/panel/storage" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ $t('dashboard.viewAll') || 'View all' }}</router-link>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.volumeUsage') }}</h3>
+            <router-link to="/panel/storage" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ $t('dashboard.viewAll') }}</router-link>
           </div>
           <div class="space-y-3">
             <div v-for="vol in volumesList" :key="vol.name" class="flex items-center gap-4">
@@ -441,38 +473,6 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Quick actions -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-          <router-link
-            to="/panel/deploy"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Rocket class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('services.deployNew', 'Deploy') }}</span>
-          </router-link>
-          <router-link
-            to="/panel/services"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Box class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.services', 'Services') }}</span>
-          </router-link>
-          <router-link
-            to="/panel/domains"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Globe class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.domains', 'Domains') }}</span>
-          </router-link>
-          <router-link
-            to="/panel/marketplace"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Container class="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.marketplace', 'Marketplace') }}</span>
-          </router-link>
         </div>
 
         <!-- Recent services -->

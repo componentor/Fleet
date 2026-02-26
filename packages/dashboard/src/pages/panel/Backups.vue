@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Archive, RotateCw, Trash2, Plus, Clock, Play, Loader2, Filter, HardDrive } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import { useServicesStore } from '@/stores/services'
 
+const { t } = useI18n()
 const api = useApi()
 const { canWrite } = useRole()
 const servicesStore = useServicesStore()
@@ -93,30 +95,30 @@ async function createBackup() {
     createStorageBackend.value = 'nfs'
     await Promise.all([fetchBackups(), fetchQuota()])
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to create backup'
+    error.value = err?.body?.error || t('backups.createFailed')
   } finally {
     creatingBackup.value = false
   }
 }
 
 async function restoreBackup(backupId: string) {
-  if (!confirm('Restore from this backup? This will overwrite current data.')) return
+  if (!confirm(t('backups.confirmRestore'))) return
   error.value = ''
   try {
     await api.post(`/backups/${backupId}/restore`, {})
     await fetchBackups()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to restore backup'
+    error.value = err?.body?.error || t('backups.restoreFailed')
   }
 }
 
 async function deleteBackup(backupId: string) {
-  if (!confirm('Delete this backup?')) return
+  if (!confirm(t('backups.confirmDelete'))) return
   try {
     await api.del(`/backups/${backupId}`)
     await Promise.all([fetchBackups(), fetchQuota()])
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to delete backup'
+    error.value = err?.body?.error || t('backups.deleteFailed')
   }
 }
 
@@ -140,7 +142,7 @@ async function addSchedule() {
     showAddSchedule.value = false
     await fetchSchedules()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to create schedule'
+    error.value = err?.body?.error || t('backups.createScheduleFailed')
   } finally {
     addingSchedule.value = false
   }
@@ -152,17 +154,17 @@ async function runSchedule(scheduleId: string) {
     await api.post(`/backups/schedules/${scheduleId}/run`, {})
     await Promise.all([fetchBackups(), fetchQuota()])
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to run schedule'
+    error.value = err?.body?.error || t('backups.runScheduleFailed')
   }
 }
 
 async function deleteSchedule(scheduleId: string) {
-  if (!confirm('Delete this backup schedule?')) return
+  if (!confirm(t('backups.confirmDeleteSchedule'))) return
   try {
     await api.del(`/backups/schedules/${scheduleId}`)
     await fetchSchedules()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to delete schedule'
+    error.value = err?.body?.error || t('backups.deleteScheduleFailed')
   }
 }
 
@@ -181,12 +183,12 @@ function formatSize(bytes: any) {
 
 function backupTypeLabel(backup: any) {
   const level = backup.level ?? 0
-  if (level === 0) return 'Full'
-  return `Incremental (L${level})`
+  if (level === 0) return t('backups.typeFull')
+  return t('backups.typeIncremental', { level })
 }
 
 function serviceName(serviceId: string | null) {
-  if (!serviceId) return 'Account'
+  if (!serviceId) return t('backups.account')
   const svc = servicesStore.services.find((s) => s.id === serviceId)
   return svc?.name || serviceId.slice(0, 8)
 }
@@ -211,7 +213,7 @@ onMounted(async () => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <Archive class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Backups</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('backups.title') }}</h1>
       </div>
       <button
         v-if="canWrite"
@@ -219,7 +221,7 @@ onMounted(async () => {
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
         <Plus class="w-4 h-4" />
-        Create Backup
+        {{ t('backups.create') }}
       </button>
     </div>
 
@@ -228,10 +230,10 @@ onMounted(async () => {
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
           <HardDrive class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Backup Storage</span>
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('backups.backupStorage') }}</span>
         </div>
         <span class="text-sm text-gray-500 dark:text-gray-400">
-          {{ quota.usedGb.toFixed(2) }} GB / {{ quota.limitGb }} GB ({{ Math.round(quota.percentUsed) }}%)
+          {{ t('backups.quotaUsage', { used: quota.usedGb.toFixed(2), limit: quota.limitGb, percent: Math.round(quota.percentUsed) }) }}
         </span>
       </div>
       <div class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -251,46 +253,46 @@ onMounted(async () => {
       <div v-if="showCreateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="fixed inset-0 bg-black/50" @click="showCreateDialog = false" />
         <div class="relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl p-6 w-full max-w-md">
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Create Backup</h3>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">{{ t('backups.create') }}</h3>
           <form @submit.prevent="createBackup" class="space-y-4">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Service (optional)</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.serviceOptional') }}</label>
               <select
                 v-model="createServiceId"
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               >
-                <option value="">All services (account backup)</option>
+                <option value="">{{ t('backups.allServicesAccount') }}</option>
                 <option v-for="svc in servicesStore.services" :key="svc.id" :value="svc.id">{{ svc.name }}</option>
               </select>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Storage Backend</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.storageBackend') }}</label>
               <select
                 v-model="createStorageBackend"
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               >
-                <option value="nfs">NFS</option>
-                <option value="local">Local</option>
-                <option value="object">Object Storage</option>
+                <option value="nfs">{{ t('backups.storageNfs') }}</option>
+                <option value="local">{{ t('backups.storageLocal') }}</option>
+                <option value="object">{{ t('backups.storageObject') }}</option>
               </select>
             </div>
             <div v-if="backupClusters.length > 1">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Cluster (optional)</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.clusterOptional') }}</label>
               <select
                 v-model="createClusterId"
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               >
-                <option value="">Default</option>
+                <option value="">{{ t('backups.default') }}</option>
                 <option v-for="cl in backupClusters" :key="cl.id" :value="cl.id">{{ cl.name }}{{ cl.region ? ` (${cl.region})` : '' }}</option>
               </select>
             </div>
             <div class="flex justify-end gap-3 pt-2">
               <button type="button" @click="showCreateDialog = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700">
-                Cancel
+                {{ t('backups.cancel') }}
               </button>
               <button type="submit" :disabled="creatingBackup" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="creatingBackup" class="w-4 h-4 animate-spin" />
-                {{ creatingBackup ? 'Creating...' : 'Create' }}
+                {{ creatingBackup ? t('backups.creating') : t('backups.createBtn') }}
               </button>
             </div>
           </form>
@@ -310,7 +312,7 @@ onMounted(async () => {
               : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
           ]"
         >
-          Backups
+          {{ t('backups.tabBackups') }}
         </button>
         <button
           @click="activeTab = 'schedules'"
@@ -321,7 +323,7 @@ onMounted(async () => {
               : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
           ]"
         >
-          Schedules
+          {{ t('backups.tabSchedules') }}
         </button>
       </nav>
     </div>
@@ -336,7 +338,7 @@ onMounted(async () => {
           @change="onServiceFilterChange"
           class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
         >
-          <option value="">All services</option>
+          <option value="">{{ t('backups.allServices') }}</option>
           <option v-for="svc in servicesStore.services" :key="svc.id" :value="svc.id">{{ svc.name }}</option>
         </select>
       </div>
@@ -349,19 +351,19 @@ onMounted(async () => {
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Service</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Size</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Storage</th>
-                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.headerDate') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.service') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.headerType') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.size') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.status') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.headerStorage') }}</th>
+                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.headerActions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-if="filteredBackups.length === 0">
                 <td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  No backups created yet.
+                  {{ t('backups.noBackupsCreated') }}
                 </td>
               </tr>
               <tr
@@ -407,14 +409,14 @@ onMounted(async () => {
                       class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
                     >
                       <RotateCw class="w-3.5 h-3.5" />
-                      Restore
+                      {{ t('backups.restore') }}
                     </button>
                     <button
                       @click="deleteBackup(backup.id)"
                       class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                     >
                       <Trash2 class="w-3.5 h-3.5" />
-                      Delete
+                      {{ t('backups.delete') }}
                     </button>
                   </div>
                 </td>
@@ -433,17 +435,17 @@ onMounted(async () => {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
           <Clock class="w-4 h-4" />
-          Add Schedule
+          {{ t('backups.addSchedule') }}
         </button>
       </div>
 
       <!-- Add schedule form -->
       <div v-if="showAddSchedule" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-        <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">New Backup Schedule</h3>
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ t('backups.newBackupSchedule') }}</h3>
         <form @submit.prevent="addSchedule" class="space-y-4">
           <div class="flex items-end gap-3 flex-wrap">
             <div class="flex-1 min-w-48">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Cron Expression</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.cronExpression') }}</label>
               <input
                 v-model="scheduleCron"
                 type="text"
@@ -453,7 +455,7 @@ onMounted(async () => {
               />
             </div>
             <div class="w-36">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Retention (days)</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.retentionDays') }}</label>
               <input
                 v-model.number="scheduleRetentionDays"
                 type="number"
@@ -463,7 +465,7 @@ onMounted(async () => {
               />
             </div>
             <div class="w-36">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Max Backups</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.maxBackups') }}</label>
               <input
                 v-model.number="scheduleRetentionCount"
                 type="number"
@@ -474,21 +476,21 @@ onMounted(async () => {
             </div>
           </div>
           <div v-if="backupClusters.length > 1" class="w-64">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Cluster (optional)</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('backups.clusterOptional') }}</label>
             <select
               v-model="scheduleClusterId"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             >
-              <option value="">Default</option>
+              <option value="">{{ t('backups.default') }}</option>
               <option v-for="cl in backupClusters" :key="cl.id" :value="cl.id">{{ cl.name }}{{ cl.region ? ` (${cl.region})` : '' }}</option>
             </select>
           </div>
           <div class="flex gap-3">
             <button type="submit" :disabled="addingSchedule" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              {{ addingSchedule ? 'Adding...' : 'Add Schedule' }}
+              {{ addingSchedule ? t('backups.adding') : t('backups.addSchedule') }}
             </button>
             <button type="button" @click="showAddSchedule = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
-              Cancel
+              {{ t('backups.cancel') }}
             </button>
           </div>
         </form>
@@ -499,17 +501,17 @@ onMounted(async () => {
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cron</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Retention</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last Run</th>
-                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.headerCron') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.retention') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.status') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.lastRun') }}</th>
+                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('backups.headerActions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-if="schedules.length === 0">
                 <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  No backup schedules configured.
+                  {{ t('backups.noSchedules') }}
                 </td>
               </tr>
               <tr
@@ -518,7 +520,7 @@ onMounted(async () => {
                 class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
               >
                 <td class="px-6 py-4 text-sm font-mono text-gray-900 dark:text-white">{{ schedule.cron }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ schedule.retentionDays }}d / {{ schedule.retentionCount }} max</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ t('backups.retentionSummary', { days: schedule.retentionDays, count: schedule.retentionCount }) }}</td>
                 <td class="px-6 py-4 text-sm">
                   <span
                     :class="[
@@ -528,7 +530,7 @@ onMounted(async () => {
                         : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                     ]"
                   >
-                    {{ schedule.enabled ? 'Active' : 'Paused' }}
+                    {{ schedule.enabled ? t('backups.active') : t('backups.paused') }}
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(schedule.lastRunAt) }}</td>
@@ -539,13 +541,13 @@ onMounted(async () => {
                       class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
                     >
                       <Play class="w-3.5 h-3.5" />
-                      Run Now
+                      {{ t('backups.runNow') }}
                     </button>
                     <button
                       @click="deleteSchedule(schedule.id)"
                       class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
                     >
-                      Delete
+                      {{ t('backups.delete') }}
                     </button>
                   </div>
                 </td>

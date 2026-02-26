@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Loader2, Shield, Edit2, X as XIcon, AlertTriangle, Copy, Check, ShieldCheck } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const route = useRoute()
 const router = useRouter()
 const api = useApi()
+const { t } = useI18n()
 
 const zoneId = computed(() => route.params.id as string)
 
@@ -49,7 +51,7 @@ async function fetchZone() {
     zone.value = data
     records.value = data.records ?? []
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to load domain'
+    error.value = err?.body?.error || t('domainDetail.failedToLoadDomain')
   } finally {
     loading.value = false
   }
@@ -71,20 +73,20 @@ async function addRecord() {
     showAddForm.value = false
     await fetchZone()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to add record'
+    error.value = err?.body?.error || t('domainDetail.failedToAddRecord')
   } finally {
     addingRecord.value = false
   }
 }
 
 async function deleteRecord(recordId: string) {
-  if (!confirm('Delete this DNS record?')) return
+  if (!confirm(t('domainDetail.confirmDeleteRecord'))) return
   error.value = ''
   try {
     await api.del(`/dns/records/${recordId}`)
     await fetchZone()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to delete record'
+    error.value = err?.body?.error || t('domainDetail.failedToDeleteRecord')
   }
 }
 
@@ -98,10 +100,10 @@ async function verifyDomain() {
     if (result.verified) {
       await fetchZone()
     } else {
-      error.value = 'Verification failed. Please check your DNS records and try again.'
+      error.value = t('domainDetail.verificationFailedDetails')
     }
   } catch (err: any) {
-    error.value = err?.body?.error || 'Verification failed'
+    error.value = err?.body?.error || t('domainDetail.verificationFailed')
   } finally {
     verifying.value = false
   }
@@ -138,7 +140,7 @@ function removeNameserver(index: number) {
 async function saveNameservers() {
   const valid = editedNameservers.value.filter(ns => ns.trim().length > 0)
   if (valid.length < 2) {
-    error.value = 'At least 2 nameservers are required'
+    error.value = t('domainDetail.minNameserversRequired')
     return
   }
   savingNameservers.value = true
@@ -148,7 +150,7 @@ async function saveNameservers() {
     editingNameservers.value = false
     await fetchZone()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to update nameservers'
+    error.value = err?.body?.error || t('domainDetail.failedToUpdateNameservers')
   } finally {
     savingNameservers.value = false
   }
@@ -171,7 +173,7 @@ onMounted(() => {
     <div class="mb-8">
       <router-link to="/panel/domains" class="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-4 transition-colors">
         <ArrowLeft class="w-4 h-4" />
-        Back to Domains
+        {{ t('domainDetail.backToDomains') }}
       </router-link>
 
       <div v-if="zone" class="flex items-center justify-between">
@@ -190,7 +192,7 @@ onMounted(() => {
               >
                 <CheckCircle2 v-if="zone.verified" class="w-3 h-3" />
                 <Clock v-else class="w-3 h-3" />
-                {{ zone.verified ? 'Verified' : 'Pending Verification' }}
+                {{ zone.verified ? t('domainDetail.verified') : t('domainDetail.pendingVerification') }}
               </span>
               <span
                 :class="[
@@ -200,9 +202,9 @@ onMounted(() => {
                     : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                 ]"
               >
-                {{ isPurchased ? 'Purchased' : 'External' }}
+                {{ isPurchased ? t('domainDetail.purchased') : t('domainDetail.external') }}
               </span>
-              <span class="text-xs text-gray-400 dark:text-gray-500">Created {{ formatDate(zone.createdAt) }}</span>
+              <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('domainDetail.created', { date: formatDate(zone.createdAt) }) }}</span>
             </div>
           </div>
         </div>
@@ -212,7 +214,7 @@ onMounted(() => {
           class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
         >
           <Plus class="w-4 h-4" />
-          Add Record
+          {{ t('domainDetail.addRecord') }}
         </button>
       </div>
     </div>
@@ -229,14 +231,14 @@ onMounted(() => {
       <!-- Verification section (if not verified) — DNS instructions -->
       <div v-if="!zone.verified" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Configure DNS Records</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Add these records at your DNS provider to verify ownership.</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domainDetail.configureDnsRecords') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('domainDetail.configureDnsDescription') }}</p>
         </div>
         <div class="p-6 space-y-6">
           <!-- Step 1: CNAME -->
           <div v-if="zone.cnameTarget" class="space-y-2">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Step 1: Add a CNAME record</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">Point your domain to:</p>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('domainDetail.step1AddCname') }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('domainDetail.pointDomainTo') }}</p>
             <div class="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
               <code class="flex-1 text-sm font-mono text-gray-900 dark:text-white">{{ zone.cnameTarget }}</code>
               <button @click="copyToClipboard(zone.cnameTarget)" class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
@@ -248,9 +250,9 @@ onMounted(() => {
 
           <!-- Step 2: TXT -->
           <div v-if="zone.verificationToken" class="space-y-2">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ zone.cnameTarget ? 'Step 2' : 'Step 1' }}: Add a TXT record</h3>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('domainDetail.addTxtRecordStep', { step: zone.cnameTarget ? 2 : 1 }) }}</h3>
             <p class="text-xs text-gray-500 dark:text-gray-400">
-              Add a TXT record at <code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">_fleet-verify.{{ zone.domain }}</code> with value:
+              {{ t('domainDetail.addTxtRecordAt') }} <code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">_fleet-verify.{{ zone.domain }}</code> {{ t('domainDetail.withValue') }}
             </p>
             <div class="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
               <code class="flex-1 text-sm font-mono text-gray-900 dark:text-white break-all">fleet-verify={{ zone.verificationToken }}</code>
@@ -269,7 +271,7 @@ onMounted(() => {
             >
               <Loader2 v-if="verifying" class="w-4 h-4 animate-spin" />
               <ShieldCheck v-else class="w-4 h-4" />
-              Verify Domain
+              {{ t('domainDetail.verifyDomain') }}
             </button>
           </div>
         </div>
@@ -280,14 +282,14 @@ onMounted(() => {
         <!-- Nameservers -->
         <div class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Nameservers</h3>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('domainDetail.nameservers') }}</h3>
             <button
               v-if="!editingNameservers"
               @click="startEditingNameservers"
               class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
             >
               <Edit2 class="w-3.5 h-3.5" />
-              Edit
+              {{ t('domainDetail.edit') }}
             </button>
           </div>
 
@@ -307,7 +309,7 @@ onMounted(() => {
             <div class="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2">
               <AlertTriangle class="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
               <p class="text-xs text-amber-700 dark:text-amber-300">
-                If you use custom nameservers, DNS records managed in Fleet will no longer resolve for this domain. You will need to configure records at your new DNS provider.
+                {{ t('domainDetail.customNameserversWarning') }}
               </p>
             </div>
 
@@ -333,7 +335,7 @@ onMounted(() => {
               class="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
             >
               <Plus class="w-3.5 h-3.5" />
-              Add Nameserver
+              {{ t('domainDetail.addNameserver') }}
             </button>
 
             <div class="flex items-center gap-3 pt-2">
@@ -342,13 +344,13 @@ onMounted(() => {
                 :disabled="savingNameservers"
                 class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                {{ savingNameservers ? 'Saving...' : 'Save Nameservers' }}
+                {{ savingNameservers ? t('domainDetail.saving') : t('domainDetail.saveNameservers') }}
               </button>
               <button
                 @click="cancelEditingNameservers"
                 class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
-                Cancel
+                {{ t('domainDetail.cancel') }}
               </button>
             </div>
           </div>
@@ -356,20 +358,20 @@ onMounted(() => {
 
         <!-- Add record form -->
         <div v-if="showAddForm" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Add DNS Record</h3>
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ t('domainDetail.addDnsRecord') }}</h3>
           <form @submit.prevent="addRecord" class="space-y-4">
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Type</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domainDetail.type') }}</label>
                 <select
                   v-model="newRecord.type"
                   class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
                 >
-                  <option v-for="t in recordTypes" :key="t" :value="t">{{ t }}</option>
+                  <option v-for="rt in recordTypes" :key="rt" :value="rt">{{ rt }}</option>
                 </select>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domainDetail.name') }}</label>
                 <input
                   v-model="newRecord.name"
                   type="text"
@@ -379,7 +381,7 @@ onMounted(() => {
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Content</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domainDetail.content') }}</label>
                 <input
                   v-model="newRecord.content"
                   type="text"
@@ -389,7 +391,7 @@ onMounted(() => {
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">TTL</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domainDetail.ttl') }}</label>
                 <input
                   v-model.number="newRecord.ttl"
                   type="number"
@@ -400,7 +402,7 @@ onMounted(() => {
               </div>
             </div>
             <div v-if="showPriority" class="max-w-xs">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Priority</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domainDetail.priority') }}</label>
               <input
                 v-model.number="newRecord.priority"
                 type="number"
@@ -411,10 +413,10 @@ onMounted(() => {
             </div>
             <div class="flex items-center gap-3 pt-2">
               <button type="submit" :disabled="addingRecord" class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                {{ addingRecord ? 'Adding...' : 'Add Record' }}
+                {{ addingRecord ? t('domainDetail.adding') : t('domainDetail.addRecord') }}
               </button>
               <button type="button" @click="showAddForm = false" class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800">
-                Cancel
+                {{ t('domainDetail.cancel') }}
               </button>
             </div>
           </form>
@@ -423,24 +425,24 @@ onMounted(() => {
         <!-- Records table -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">DNS Records</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domainDetail.dnsRecords') }}</h2>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full">
               <thead>
                 <tr class="border-b border-gray-200 dark:border-gray-700">
-                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Content</th>
-                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">TTL</th>
-                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Priority</th>
-                  <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domainDetail.type') }}</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domainDetail.name') }}</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domainDetail.content') }}</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domainDetail.ttl') }}</th>
+                  <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domainDetail.priority') }}</th>
+                  <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domainDetail.actions') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                 <tr v-if="records.length === 0">
                   <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                    No DNS records. Click "Add Record" to create one.
+                    {{ t('domainDetail.noRecords') }}
                   </td>
                 </tr>
                 <tr
@@ -463,7 +465,7 @@ onMounted(() => {
                       class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                     >
                       <Trash2 class="w-3.5 h-3.5" />
-                      Delete
+                      {{ t('domainDetail.delete') }}
                     </button>
                   </td>
                 </tr>
@@ -478,9 +480,9 @@ onMounted(() => {
         <div class="flex items-start gap-3">
           <CheckCircle2 class="w-5 h-5 text-green-500 mt-0.5 shrink-0" />
           <div>
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-1">Domain Verified</h3>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-1">{{ t('domainDetail.domainVerified') }}</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400">
-              This external domain is verified and ready to use. DNS records and nameservers are managed at your DNS provider.
+              {{ t('domainDetail.externalDomainVerifiedDescription') }}
             </p>
           </div>
         </div>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink, Share2, Settings2 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
+const { t } = useI18n()
 const router = useRouter()
 const api = useApi()
 const { canWrite } = useRole()
@@ -124,7 +126,7 @@ async function searchDomains() {
     searchResults.value = data.results ?? []
     buyStep.value = 'results'
   } catch (err: any) {
-    error.value = err?.body?.error || 'Search failed'
+    error.value = err?.body?.error || t('domains.searchFailed')
   } finally {
     searching.value = false
   }
@@ -157,7 +159,7 @@ async function buyDomain(domain: string) {
       window.location.href = data.url
     }
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to start checkout'
+    error.value = err?.body?.error || t('domains.checkoutFailed')
   } finally {
     purchasing.value = false
   }
@@ -172,7 +174,7 @@ async function addByodDomain() {
     byodZone.value = result
     byodStep.value = 'instructions'
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to add domain'
+    error.value = err?.body?.error || t('domains.addFailed')
   } finally {
     byodAdding.value = false
   }
@@ -190,17 +192,17 @@ async function verifyDomain() {
       byodStep.value = 'verify'
       await fetchDomains()
     } else {
-      error.value = 'Verification failed. Please check your DNS records and try again.'
+      error.value = t('domains.verificationFailedDetail')
     }
   } catch (err: any) {
-    error.value = err?.body?.error || 'Verification failed'
+    error.value = err?.body?.error || t('domains.verificationFailed')
   } finally {
     verifying.value = false
   }
 }
 
 async function deleteDomain(id: string) {
-  if (!confirm('Are you sure you want to delete this domain?')) return
+  if (!confirm(t('domains.confirmDelete'))) return
   try {
     await api.del(`/dns/zones/${id}`)
     await fetchDomains()
@@ -238,14 +240,14 @@ async function claimSubdomain() {
     claimSuccess.value = true
     await fetchDomains()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to claim subdomain'
+    error.value = err?.body?.error || t('domains.claimFailed')
   } finally {
     claimingSubdomain.value = false
   }
 }
 
 async function releaseSubdomain(id: string) {
-  if (!confirm('Are you sure you want to release this subdomain?')) return
+  if (!confirm(t('domains.confirmRelease'))) return
   try {
     await api.del(`/shared-domains/${id}`)
     await fetchDomains()
@@ -255,9 +257,9 @@ async function releaseSubdomain(id: string) {
 }
 
 function formatSubdomainPrice(d: any): string {
-  if (d.pricingType === 'free') return 'Free'
+  if (d.pricingType === 'free') return t('domains.free')
   const formatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: d.currency }).format(d.price / 100)
-  return d.pricingType === 'one_time' ? `${formatted} one-time` : `${formatted}/mo`
+  return d.pricingType === 'one_time' ? t('domains.priceOneTime', { price: formatted }) : t('domains.priceMonthly', { price: formatted })
 }
 
 function resetWizard() {
@@ -322,7 +324,7 @@ onMounted(() => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <Globe class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Domains</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('domains.title') }}</h1>
       </div>
     </div>
 
@@ -337,7 +339,7 @@ onMounted(() => {
             : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
         ]"
       >
-        My Domains
+        {{ t('domains.myDomains') }}
       </button>
       <button
         v-if="canWrite"
@@ -349,7 +351,7 @@ onMounted(() => {
             : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
         ]"
       >
-        Add Domain
+        {{ t('domains.addDomain') }}
       </button>
     </div>
 
@@ -368,17 +370,17 @@ onMounted(() => {
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Domain</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Expires</th>
-                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domains.columnDomain') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domains.columnType') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domains.columnStatus') }}</th>
+                <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domains.columnExpires') }}</th>
+                <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('domains.columnActions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
               <tr v-if="allDomains.length === 0">
                 <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                  No domains yet. Add your first domain to get started.
+                  {{ t('domains.emptyState') }}
                 </td>
               </tr>
               <tr
@@ -395,7 +397,7 @@ onMounted(() => {
                     <ShieldCheck v-if="d.verified" class="w-4 h-4 text-green-500 shrink-0" />
                     <Clock v-else class="w-4 h-4 text-yellow-500 shrink-0" />
                     <span class="text-sm font-medium text-gray-900 dark:text-white">{{ d.domain }}</span>
-                    <span v-if="d.status === 'pending' && d.type === 'external'" class="text-xs text-yellow-600 dark:text-yellow-400">— click to configure DNS</span>
+                    <span v-if="d.status === 'pending' && d.type === 'external'" class="text-xs text-yellow-600 dark:text-yellow-400">— {{ t('domains.clickToConfigureDns') }}</span>
                   </div>
                 </td>
                 <td class="px-6 py-4">
@@ -409,7 +411,7 @@ onMounted(() => {
                           : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                     ]"
                   >
-                    {{ d.type === 'purchased' ? 'Purchased' : d.type === 'subdomain' ? 'Subdomain' : 'External' }}
+                    {{ d.type === 'purchased' ? t('domains.typePurchased') : d.type === 'subdomain' ? t('domains.typeSubdomain') : t('domains.typeExternal') }}
                   </span>
                 </td>
                 <td class="px-6 py-4">
@@ -421,7 +423,7 @@ onMounted(() => {
                         : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
                     ]"
                   >
-                    {{ d.status === 'active' ? 'Active' : 'Pending' }}
+                    {{ d.status === 'active' ? t('domains.statusActive') : t('domains.statusPending') }}
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(d.expiresAt) }}</td>
@@ -431,33 +433,33 @@ onMounted(() => {
                       v-if="d.status === 'active'"
                       @click="openDomainUrl(d.domain)"
                       class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-                      title="Open in new tab"
+                      :title="t('domains.openInNewTab')"
                     >
                       <ExternalLink class="w-3.5 h-3.5" />
-                      Open
+                      {{ t('domains.open') }}
                     </button>
                     <button
                       v-if="d.type === 'external' || d.type === 'purchased'"
                       @click="goToDomainDetail(d)"
                       class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      title="Manage DNS"
+                      :title="t('domains.manageDns')"
                     >
                       <Settings2 class="w-3.5 h-3.5" />
-                      DNS
+                      {{ t('domains.dns') }}
                     </button>
                     <button
                       v-if="d.type === 'external'"
                       @click="deleteDomain(d.id)"
                       class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
                     >
-                      Remove
+                      {{ t('domains.remove') }}
                     </button>
                     <button
                       v-if="d.type === 'subdomain'"
                       @click="releaseSubdomain(d.id)"
                       class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
                     >
-                      Release
+                      {{ t('domains.release') }}
                     </button>
                   </div>
                 </td>
@@ -479,8 +481,8 @@ onMounted(() => {
           <div class="w-12 h-12 rounded-lg bg-primary-600 flex items-center justify-center mb-4">
             <ShoppingCart class="w-6 h-6 text-white" />
           </div>
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Buy a Domain</h3>
-          <p class="text-sm text-gray-500 dark:text-gray-400">Search and purchase a domain directly through us. SSL included automatically.</p>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('domains.buyTitle') }}</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('domains.buyDescription') }}</p>
         </button>
 
         <button
@@ -490,8 +492,8 @@ onMounted(() => {
           <div class="w-12 h-12 rounded-lg bg-blue-600 flex items-center justify-center mb-4">
             <Link class="w-6 h-6 text-white" />
           </div>
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Use Your Own Domain</h3>
-          <p class="text-sm text-gray-500 dark:text-gray-400">Point your existing domain to your Fleet account. SSL included automatically.</p>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('domains.byodTitle') }}</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('domains.byodDescription') }}</p>
         </button>
 
         <button
@@ -501,21 +503,21 @@ onMounted(() => {
           <div class="w-12 h-12 rounded-lg bg-teal-600 flex items-center justify-center mb-4">
             <Share2 class="w-6 h-6 text-white" />
           </div>
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Claim a Subdomain</h3>
-          <p class="text-sm text-gray-500 dark:text-gray-400">Get a subdomain on a platform-provided domain. Instant setup with SSL.</p>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('domains.claimTitle') }}</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('domains.claimDescription') }}</p>
         </button>
       </div>
 
       <!-- Buy Domain Flow -->
       <div v-if="addMode === 'buy'" class="max-w-3xl">
         <button @click="resetWizard()" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors flex items-center gap-1">
-          <ArrowLeft class="w-4 h-4" /> Back to options
+          <ArrowLeft class="w-4 h-4" /> {{ t('domains.backToOptions') }}
         </button>
 
         <!-- Search -->
         <div v-if="buyStep === 'search' || buyStep === 'results'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Search for a Domain</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domains.searchForDomain') }}</h2>
           </div>
           <div class="p-6">
             <div class="relative mb-6">
@@ -523,7 +525,7 @@ onMounted(() => {
               <input
                 v-model="searchQuery"
                 type="text"
-                placeholder="Search for a domain (e.g. mywebsite)"
+                :placeholder="t('domains.searchPlaceholder')"
                 class="w-full pl-10 pr-10 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               />
               <Loader2 v-if="searching" class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-500 animate-spin" />
@@ -551,12 +553,12 @@ onMounted(() => {
                         : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
                     ]"
                   >
-                    {{ result.available ? 'Available' : 'Taken' }}
+                    {{ result.available ? t('domains.available') : t('domains.taken') }}
                   </span>
                 </div>
                 <div class="flex items-center gap-4">
                   <span v-if="result.price" class="text-sm font-semibold text-gray-900 dark:text-white">
-                    {{ formatPrice(result.price.registration) }}/yr
+                    {{ t('domains.pricePerYear', { price: formatPrice(result.price.registration) }) }}
                   </span>
                   <button
                     v-if="result.available"
@@ -566,14 +568,14 @@ onMounted(() => {
                   >
                     <Loader2 v-if="purchasing" class="w-3.5 h-3.5 animate-spin" />
                     <ShoppingCart v-else class="w-3.5 h-3.5" />
-                    Buy
+                    {{ t('domains.buy') }}
                   </button>
                 </div>
               </div>
             </div>
 
             <div v-else-if="buyStep === 'results' && !searching" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
-              No results found. Try a different search term.
+              {{ t('domains.noSearchResults') }}
             </div>
           </div>
         </div>
@@ -582,7 +584,7 @@ onMounted(() => {
       <!-- Claim Subdomain Flow -->
       <div v-if="addMode === 'subdomain'" class="max-w-2xl">
         <button @click="resetWizard()" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors flex items-center gap-1">
-          <ArrowLeft class="w-4 h-4" /> Back to options
+          <ArrowLeft class="w-4 h-4" /> {{ t('domains.backToOptions') }}
         </button>
 
         <!-- Success -->
@@ -591,15 +593,15 @@ onMounted(() => {
             <div class="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-4">
               <Check class="w-8 h-8 text-green-600 dark:text-green-400" />
             </div>
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Subdomain Claimed!</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('domains.subdomainClaimed') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Your subdomain <strong>{{ subdomainInput }}.{{ selectedParent?.domain }}</strong> is ready. SSL will be provisioned automatically.
+              {{ t('domains.subdomainClaimedDesc', { subdomain: `${subdomainInput}.${selectedParent?.domain}` }) }}
             </p>
             <button
               @click="activeTab = 'my-domains'; resetWizard()"
               class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
             >
-              Go to My Domains
+              {{ t('domains.goToMyDomains') }}
             </button>
           </div>
         </div>
@@ -611,14 +613,14 @@ onMounted(() => {
 
         <!-- No available domains -->
         <div v-else-if="availableDomains.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-center">
-          <p class="text-sm text-gray-500 dark:text-gray-400">No shared domains available. Contact your platform administrator.</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('domains.noSharedDomains') }}</p>
         </div>
 
         <!-- Pick parent + enter subdomain -->
         <div v-else class="space-y-6">
           <!-- Step 1: Choose parent domain -->
           <div v-if="!selectedParent" class="space-y-3">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a domain</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domains.chooseDomain') }}</h2>
             <div
               v-for="d in availableDomains"
               :key="d.id"
@@ -628,7 +630,7 @@ onMounted(() => {
               <div>
                 <span class="text-sm font-medium text-gray-900 dark:text-white">*.{{ d.domain }}</span>
                 <p v-if="d.maxPerAccount > 0" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {{ d.myClaimCount }}/{{ d.maxPerAccount }} used
+                  {{ t('domains.claimsUsed', { used: d.myClaimCount, max: d.maxPerAccount }) }}
                 </p>
               </div>
               <span
@@ -648,20 +650,20 @@ onMounted(() => {
           <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <div class="flex items-center justify-between">
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Claim a subdomain</h2>
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domains.claimASubdomain') }}</h2>
                 <button @click="selectedParent = null" class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
-                  Change domain
+                  {{ t('domains.changeDomain') }}
                 </button>
               </div>
             </div>
             <form @submit.prevent="claimSubdomain" class="p-6 space-y-5">
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Subdomain</label>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domains.subdomainLabel') }}</label>
                 <div class="flex items-center">
                   <input
                     v-model="subdomainInput"
                     type="text"
-                    placeholder="myapp"
+                    :placeholder="t('domains.subdomainPlaceholder')"
                     required
                     pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"
                     class="flex-1 px-3.5 py-2.5 rounded-l-lg border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
@@ -670,7 +672,7 @@ onMounted(() => {
                     .{{ selectedParent.domain }}
                   </span>
                 </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Lowercase letters, numbers, and hyphens only.</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('domains.subdomainHint') }}</p>
               </div>
               <div class="flex justify-end">
                 <button
@@ -679,7 +681,7 @@ onMounted(() => {
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
                   <Loader2 v-if="claimingSubdomain" class="w-4 h-4 animate-spin" />
-                  Claim Subdomain
+                  {{ t('domains.claimSubdomainBtn') }}
                 </button>
               </div>
             </form>
@@ -690,22 +692,22 @@ onMounted(() => {
       <!-- BYOD Flow -->
       <div v-if="addMode === 'byod'" class="max-w-2xl">
         <button @click="resetWizard()" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors flex items-center gap-1">
-          <ArrowLeft class="w-4 h-4" /> Back to options
+          <ArrowLeft class="w-4 h-4" /> {{ t('domains.backToOptions') }}
         </button>
 
         <!-- Step 1: Enter domain -->
         <div v-if="byodStep === 'enter'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Use Your Own Domain</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Enter the domain you'd like to connect.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domains.byodTitle') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('domains.byodEnterDesc') }}</p>
           </div>
           <form @submit.prevent="addByodDomain" class="p-6 space-y-5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Domain Name</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('domains.domainName') }}</label>
               <input
                 v-model="byodDomain"
                 type="text"
-                placeholder="app.example.com"
+                :placeholder="t('domains.byodPlaceholder')"
                 required
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               />
@@ -713,7 +715,7 @@ onMounted(() => {
             <div class="flex justify-end">
               <button type="submit" :disabled="byodAdding || !byodDomain.trim()" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <Loader2 v-if="byodAdding" class="w-4 h-4 animate-spin" />
-                Continue
+                {{ t('domains.continue') }}
               </button>
             </div>
           </form>
@@ -722,14 +724,14 @@ onMounted(() => {
         <!-- Step 2: DNS Instructions -->
         <div v-if="byodStep === 'instructions' && byodZone" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Configure DNS Records</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Add these records at your DNS provider to verify ownership.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('domains.configureDns') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('domains.configureDnsDesc') }}</p>
           </div>
           <div class="p-6 space-y-6">
             <!-- CNAME -->
             <div class="space-y-2">
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Step 1: Add a CNAME record</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">Point your domain to:</p>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('domains.step1Cname') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('domains.pointDomainTo') }}</p>
               <div class="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
                 <code class="flex-1 text-sm font-mono text-gray-900 dark:text-white">{{ byodZone.cnameTarget }}</code>
                 <button @click="copyToClipboard(byodZone.cnameTarget)" class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
@@ -741,9 +743,9 @@ onMounted(() => {
 
             <!-- TXT -->
             <div class="space-y-2">
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Step 2: Add a TXT record</h3>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('domains.step2Txt') }}</h3>
               <p class="text-xs text-gray-500 dark:text-gray-400">
-                Add a TXT record at <code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">_fleet-verify.{{ byodZone.domain }}</code> with value:
+                {{ t('domains.addTxtRecordAt') }} <code class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">_fleet-verify.{{ byodZone.domain }}</code> {{ t('domains.withValue') }}
               </p>
               <div class="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
                 <code class="flex-1 text-sm font-mono text-gray-900 dark:text-white break-all">fleet-verify={{ byodZone.verificationToken }}</code>
@@ -762,7 +764,7 @@ onMounted(() => {
               >
                 <Loader2 v-if="verifying" class="w-4 h-4 animate-spin" />
                 <ShieldCheck v-else class="w-4 h-4" />
-                Verify Domain
+                {{ t('domains.verifyDomain') }}
               </button>
             </div>
           </div>
@@ -774,15 +776,15 @@ onMounted(() => {
             <div class="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-4">
               <Check class="w-8 h-8 text-green-600 dark:text-green-400" />
             </div>
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Domain Verified!</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('domains.domainVerified') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Your domain <strong>{{ byodZone?.domain }}</strong> has been verified and is ready to use. SSL will be provisioned automatically when you attach it to a service.
+              {{ t('domains.domainVerifiedDesc', { domain: byodZone?.domain }) }}
             </p>
             <button
               @click="activeTab = 'my-domains'; resetWizard()"
               class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
             >
-              Go to My Domains
+              {{ t('domains.goToMyDomains') }}
             </button>
           </div>
         </div>
