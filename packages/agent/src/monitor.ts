@@ -122,11 +122,37 @@ export class NodeMonitor {
     const memFree = freemem()
     const memUsed = memTotal - memFree
 
-    // Get container count — gracefully handle Docker unavailability
+    // Get container count + per-container bandwidth snapshots
     let containerCount = 0
+    const containerBandwidth: Record<string, { rx: number; tx: number }> = {}
     try {
       const containers = await docker.listContainers()
       containerCount = containers.length
+
+      // Collect network stats for each container (with concurrency limit)
+      const BATCH_SIZE = 20
+      for (let i = 0; i < containers.length; i += BATCH_SIZE) {
+        const batch = containers.slice(i, i + BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(async (c) => {
+            const stats = await docker.getContainer(c.Id).stats({ stream: false }) as any
+            let rx = 0
+            let tx = 0
+            if (stats.networks) {
+              for (const net of Object.values(stats.networks) as any[]) {
+                rx += net.rx_bytes ?? 0
+                tx += net.tx_bytes ?? 0
+              }
+            }
+            return { id: c.Id, rx, tx }
+          }),
+        )
+        for (const r of results) {
+          if (r.status === 'fulfilled') {
+            containerBandwidth[r.value.id] = { rx: r.value.rx, tx: r.value.tx }
+          }
+        }
+      }
     } catch {
       // Docker socket not available
     }
@@ -141,6 +167,7 @@ export class NodeMonitor {
       memUsed,
       memFree,
       containerCount,
+      containerBandwidth,
       diskTotal,
       diskUsed,
       diskFree,

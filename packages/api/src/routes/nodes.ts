@@ -7,6 +7,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
+import { getValkey } from '../services/valkey.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 
 // Heartbeat rate limit: keyed by node ID (not IP) since agents share Docker overlay IPs
@@ -19,6 +20,10 @@ const heartbeatSchema = z.object({
   memUsed: z.number().min(0).optional(),
   memFree: z.number().min(0).optional(),
   containerCount: z.number().int().min(0).max(100000).optional(),
+  containerBandwidth: z.record(z.string(), z.object({
+    rx: z.number().min(0),
+    tx: z.number().min(0),
+  })).optional(),
   diskTotal: z.number().min(0).optional(),
   diskUsed: z.number().min(0).optional(),
   diskFree: z.number().min(0).optional(),
@@ -152,6 +157,27 @@ nodeRoutes.openapi(heartbeatRoute, (async (c: any) => {
     diskFree: hb.diskFree ?? 0,
     diskType: hb.diskType ?? 'unknown',
   });
+
+  // Store per-container bandwidth snapshots in Valkey for usage collection
+  if (hb.containerBandwidth && Object.keys(hb.containerBandwidth).length > 0) {
+    const valkey = await getValkey();
+    if (valkey) {
+      const BW_KEY_PREFIX = 'fleet:bw:snapshot:';
+      const BW_TTL = 600; // 10 minutes — 2x collection interval
+      const pipeline = valkey.pipeline();
+      for (const [containerId, stats] of Object.entries(hb.containerBandwidth as Record<string, { rx: number; tx: number }>)) {
+        pipeline.set(
+          `${BW_KEY_PREFIX}${containerId}`,
+          JSON.stringify({ rx: stats.rx, tx: stats.tx, nodeId: node.id }),
+          'EX',
+          BW_TTL,
+        );
+      }
+      pipeline.exec().catch((err) => {
+        logger.warn({ err }, 'Failed to store container bandwidth in Valkey');
+      });
+    }
+  }
 
   return c.json({ ok: true });
 }) as any);
