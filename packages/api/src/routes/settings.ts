@@ -515,6 +515,8 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
       await upsertSetting(key, value);
     }
 
+    await invalidateCache('GET:/settings/*');
+
     logger.info({ keys: entries.map(([k]) => k), changedBy: user.userId }, 'Platform settings updated');
     return c.json({ message: 'Platform settings updated', updated: entries.map(([k]) => k) });
   }
@@ -580,6 +582,7 @@ settings.openapi(updateStripeRoute, (async (c: any) => {
     await upsertSetting('stripe:webhookSecret', encrypt(data.webhookSecret));
   }
 
+  await invalidateCache('GET:/settings/*');
   logger.info({ changedBy: user.userId }, 'Stripe configuration updated');
   return c.json({ message: 'Stripe configuration updated' });
 }) as any);
@@ -649,6 +652,7 @@ settings.openapi(updateEmailRoute, (async (c: any) => {
     // Reset the cached email provider so the next send picks up new config
     emailService.resetProvider();
 
+    await invalidateCache('GET:/settings/*');
     logger.info({ changedBy: user.userId }, 'Email configuration updated');
     return c.json({ message: 'Email configuration updated' });
   }
@@ -829,6 +833,7 @@ settings.openapi(updateGithubRoute, (async (c: any) => {
   const { invalidateGitHubConfigCache } = await import('../services/github.service.js');
   invalidateGitHubConfigCache();
 
+  await invalidateCache('GET:/settings/*');
   logger.info({ changedBy: user.userId }, 'GitHub configuration updated');
   return c.json({ message: 'GitHub configuration updated' });
 }) as any);
@@ -871,6 +876,7 @@ settings.openapi(updateGoogleRoute, (async (c: any) => {
   const { invalidateGoogleConfigCache } = await import('../services/google.service.js');
   invalidateGoogleConfigCache();
 
+  await invalidateCache('GET:/settings/*');
   logger.info({ changedBy: user.userId }, 'Google configuration updated');
   return c.json({ message: 'Google configuration updated' });
 }) as any);
@@ -952,6 +958,7 @@ settings.openapi(uploadBrandingRoute, (async (c: any) => {
     saved.push('title');
   }
 
+  await invalidateCache('GET:/settings/*');
   logger.info({ saved, changedBy: user.userId }, 'Branding updated');
   return c.json({ message: 'Branding updated', saved });
 }) as any);
@@ -997,6 +1004,7 @@ settings.openapi(deleteBrandingRoute, (async (c: any) => {
     await upsertSetting(settingKey, null);
   }
 
+  await invalidateCache('GET:/settings/*');
   logger.info({ type, changedBy: user.userId }, 'Branding asset removed');
   return c.json({ message: `Branding ${type} removed` });
 }) as any);

@@ -76,6 +76,18 @@ async function handleCreate() {
   if (!newName.value || nameError.value) return
   emit('volumeCreated', { name: newName.value, displayName: newName.value, sizeGb: newSize.value })
 }
+
+// When the parent sets source to a real volume (after creation), close create mode
+watch(
+  () => props.modelValue.source,
+  (val) => {
+    if (val && val !== '__create__' && createMode.value) {
+      createMode.value = false
+      newName.value = ''
+      newSize.value = 5
+    }
+  },
+)
 </script>
 
 <template>
