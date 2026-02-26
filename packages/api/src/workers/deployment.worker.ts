@@ -343,6 +343,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
       await dockerService.updateService(svc.dockerServiceId, {
         image: fullImageTag,
+        replicas: svc.replicas ?? 1,
       }, deployRegistryAuth);
     } else {
       logger.warn({ serviceId: svc.id }, 'No dockerServiceId — image built but cannot deploy to Docker');
