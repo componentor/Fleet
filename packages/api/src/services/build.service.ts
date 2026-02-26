@@ -23,6 +23,8 @@ export interface BuildInfo {
 
 const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
 const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
+const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
+const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
 
 export function scrubSecrets(log: string): string {
   return log
@@ -50,6 +52,19 @@ export function scrubSecrets(log: string): string {
 export class BuildService {
   private activeBuilds = new Map<string, { aborted: boolean; info: BuildInfo; processes: Set<import('node:child_process').ChildProcess> }>();
   private events = new EventEmitter();
+  private registryLoggedIn = false;
+
+  private async loginToRegistry(): Promise<void> {
+    if (this.registryLoggedIn || !REGISTRY_PASSWORD) return;
+    try {
+      await execFileAsync('docker', ['login', REGISTRY, '-u', REGISTRY_USER, '-p', REGISTRY_PASSWORD], {
+        timeout: 15_000,
+      });
+      this.registryLoggedIn = true;
+    } catch (err) {
+      logger.warn({ err }, `Failed to login to registry ${REGISTRY}`);
+    }
+  }
 
   async buildImage(opts: {
     serviceId: string;
@@ -157,6 +172,7 @@ export class BuildService {
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
+      await this.loginToRegistry();
       await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000); // 10 minute timeout
 
       // Done
@@ -396,6 +412,7 @@ export class BuildService {
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
+      await this.loginToRegistry();
       await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000);
 
       // Done
