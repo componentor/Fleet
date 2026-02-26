@@ -2,29 +2,34 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { db, registryCredentials, oauthProviders, insertReturning, eq, and } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
-import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { requireMember } from '../middleware/rbac.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { logger } from '../services/logger.js';
 import { jsonBody, jsonContent, standardErrors, bearerSecurity } from './_schemas.js';
+import { createMiddleware } from 'hono/factory';
+
+/** Only super users can manage platform-wide registry credentials */
+const requireSuper = createMiddleware<{ Variables: { user: AuthUser } }>(async (c, next) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Super admin access required' }, 403);
+  }
+  await next();
+});
 
 const registryCredentialRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
-    account: AccountContext | null;
-    accountId: string | null;
   };
 }>();
 
 registryCredentialRoutes.use('*', authMiddleware);
-registryCredentialRoutes.use('*', tenantMiddleware);
 
-// GET / — List credentials for current account
+// GET / — List platform-wide registry credentials
 const listRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Registry Credentials'],
-  summary: 'List registry credentials',
+  summary: 'List platform-wide registry credentials (super admin only)',
   security: bearerSecurity,
   responses: {
     200: jsonContent(z.object({
@@ -37,16 +42,11 @@ const listRoute = createRoute({
     }), 'List of credentials'),
     ...standardErrors,
   },
-  middleware: [requireMember, requireScope('read')],
+  middleware: [requireSuper, requireScope('read')],
 });
 
 registryCredentialRoutes.openapi(listRoute, (async (c: any) => {
-  const accountId = c.get('accountId');
-  if (!accountId) return c.json({ error: 'Account context required' }, 400);
-
-  const creds = await db.query.registryCredentials.findMany({
-    where: eq(registryCredentials.accountId, accountId),
-  });
+  const creds = await db.query.registryCredentials.findMany();
 
   return c.json({
     credentials: creds.map((cr: any) => ({
@@ -58,12 +58,12 @@ registryCredentialRoutes.openapi(listRoute, (async (c: any) => {
   });
 }) as any);
 
-// POST / — Add a generic registry credential
+// POST / — Add a platform-wide registry credential
 const addRoute = createRoute({
   method: 'post',
   path: '/',
   tags: ['Registry Credentials'],
-  summary: 'Add a registry credential',
+  summary: 'Add a platform-wide registry credential (super admin only)',
   security: bearerSecurity,
   request: {
     body: jsonBody(z.object({
@@ -80,25 +80,18 @@ const addRoute = createRoute({
     }), 'Credential created'),
     ...standardErrors,
   },
-  middleware: [requireMember, requireScope('write')],
+  middleware: [requireSuper, requireScope('write')],
 });
 
 registryCredentialRoutes.openapi(addRoute, (async (c: any) => {
-  const accountId = c.get('accountId');
-  if (!accountId) return c.json({ error: 'Account context required' }, 400);
-
   const { registry, username, password } = c.req.valid('json');
 
   // Check for existing credential for this registry
   const existing = await db.query.registryCredentials.findFirst({
-    where: and(
-      eq(registryCredentials.accountId, accountId),
-      eq(registryCredentials.registry, registry),
-    ),
+    where: eq(registryCredentials.registry, registry),
   });
 
   if (existing) {
-    // Update existing
     await db.update(registryCredentials)
       .set({ username, password: encrypt(password), updatedAt: new Date() })
       .where(eq(registryCredentials.id, existing.id));
@@ -106,7 +99,6 @@ registryCredentialRoutes.openapi(addRoute, (async (c: any) => {
   }
 
   const [cred] = await insertReturning(registryCredentials, {
-    accountId,
     registry,
     username,
     password: encrypt(password),
@@ -115,12 +107,12 @@ registryCredentialRoutes.openapi(addRoute, (async (c: any) => {
   return c.json({ id: cred!.id, registry, username }, 201);
 }) as any);
 
-// POST /github — Auto-connect GitHub Packages
+// POST /github — Auto-connect GitHub Packages (platform-wide)
 const githubRoute = createRoute({
   method: 'post',
   path: '/github',
   tags: ['Registry Credentials'],
-  summary: 'Connect GitHub Packages using linked GitHub account',
+  summary: 'Connect GitHub Packages using linked GitHub account (super admin only)',
   security: bearerSecurity,
   responses: {
     201: jsonContent(z.object({
@@ -130,13 +122,11 @@ const githubRoute = createRoute({
     }), 'GitHub Packages credential created'),
     ...standardErrors,
   },
-  middleware: [requireMember, requireScope('write')],
+  middleware: [requireSuper, requireScope('write')],
 });
 
 registryCredentialRoutes.openapi(githubRoute, (async (c: any) => {
-  const accountId = c.get('accountId');
   const user: AuthUser = c.get('user');
-  if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   // Find the user's GitHub OAuth link
   const oauth = await db.query.oauthProviders.findFirst({
@@ -175,10 +165,7 @@ registryCredentialRoutes.openapi(githubRoute, (async (c: any) => {
 
     // Upsert credential for ghcr.io
     const existing = await db.query.registryCredentials.findFirst({
-      where: and(
-        eq(registryCredentials.accountId, accountId),
-        eq(registryCredentials.registry, 'ghcr.io'),
-      ),
+      where: eq(registryCredentials.registry, 'ghcr.io'),
     });
 
     if (existing) {
@@ -189,7 +176,6 @@ registryCredentialRoutes.openapi(githubRoute, (async (c: any) => {
     }
 
     const [cred] = await insertReturning(registryCredentials, {
-      accountId,
       registry: 'ghcr.io',
       username: ghUser.login,
       password: encrypt(token),
@@ -208,7 +194,7 @@ const deleteRoute = createRoute({
   method: 'delete',
   path: '/{id}',
   tags: ['Registry Credentials'],
-  summary: 'Remove a registry credential',
+  summary: 'Remove a registry credential (super admin only)',
   security: bearerSecurity,
   request: {
     params: z.object({ id: z.string() }),
@@ -217,19 +203,14 @@ const deleteRoute = createRoute({
     200: jsonContent(z.object({ message: z.string() }), 'Credential removed'),
     ...standardErrors,
   },
-  middleware: [requireMember, requireScope('write')],
+  middleware: [requireSuper, requireScope('write')],
 });
 
 registryCredentialRoutes.openapi(deleteRoute, (async (c: any) => {
-  const accountId = c.get('accountId');
   const { id } = c.req.valid('param');
-  if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const cred = await db.query.registryCredentials.findFirst({
-    where: and(
-      eq(registryCredentials.id, id),
-      eq(registryCredentials.accountId, accountId),
-    ),
+    where: eq(registryCredentials.id, id),
   });
 
   if (!cred) return c.json({ error: 'Credential not found' }, 404);

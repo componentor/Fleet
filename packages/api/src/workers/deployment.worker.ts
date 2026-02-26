@@ -340,7 +340,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to prune old containers before deploy');
       }
 
-      const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
+      const deployRegistryAuth = await getRegistryAuthForImage(fullImageTag);
       await dockerService.updateService(svc.dockerServiceId, {
         image: fullImageTag,
       }, deployRegistryAuth);
