@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, supportTickets, supportTicketMessages, users, accounts, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, desc, inArray } from '@fleet/db';
+import { db, supportTickets, supportTicketMessages, users, accounts, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, isNotNull, desc, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
@@ -220,11 +220,18 @@ adminSupportRoutes.openapi(getTicketRoute, (async (c: any) => {
     where: eq(users.id, ticket.createdBy),
   });
 
+  // Get assignee info
+  const assignee = ticket.assignedTo
+    ? await db.query.users.findFirst({ where: eq(users.id, ticket.assignedTo) })
+    : null;
+
   return c.json({
     ...ticket,
     accountName: account?.name ?? null,
     creatorName: creator?.name ?? null,
     creatorEmail: creator?.email ?? null,
+    assigneeName: assignee?.name ?? null,
+    assigneeEmail: assignee?.email ?? null,
     messages: enrichedMessages,
   });
 }) as any);
@@ -465,6 +472,35 @@ adminSupportRoutes.openapi(statsRoute, (async (c: any) => {
     inProgress: inProgress?.count ?? 0,
     total: total?.count ?? 0,
   });
+}) as any);
+
+// GET /assignees — list admin/power users for assignment dropdown
+const assigneesRoute = createRoute({
+  method: 'get',
+  path: '/assignees',
+  tags: ['Admin Support'],
+  summary: 'List admin/power users for ticket assignment',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'List of assignable users'),
+    ...standardErrors,
+  },
+  middleware: [requireAdminPermission('support', 'read')],
+});
+
+adminSupportRoutes.openapi(assigneesRoute, (async (c: any) => {
+  const adminUsers = await db
+    .select({ id: users.id, name: users.name, email: users.email, avatarUrl: users.avatarUrl })
+    .from(users)
+    .where(
+      and(
+        isNull(users.deletedAt),
+        or(eq(users.isSuper, true), isNotNull(users.adminRoleId)),
+      ),
+    )
+    .orderBy(users.name);
+
+  return c.json(adminUsers);
 }) as any);
 
 export default adminSupportRoutes;

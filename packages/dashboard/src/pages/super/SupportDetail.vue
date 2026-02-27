@@ -35,6 +35,8 @@ interface TicketDetail {
   creatorName: string | null
   creatorEmail: string | null
   assignedTo: string | null
+  assigneeName: string | null
+  assigneeEmail: string | null
   closedAt: string | null
   createdAt: string
   updatedAt: string
@@ -54,6 +56,8 @@ const isInternal = ref(false)
 const sending = ref(false)
 const updatingStatus = ref(false)
 const updatingPriority = ref(false)
+const updatingAssignee = ref(false)
+const assignees = ref<{ id: string; name: string | null; email: string | null; avatarUrl: string | null }[]>([])
 const messagesContainer = ref<HTMLElement | null>(null)
 
 const statusOptions = [
@@ -159,6 +163,32 @@ function scrollToBottom() {
   })
 }
 
+async function fetchAssignees() {
+  try {
+    const data = await api.get<{ id: string; name: string | null; email: string | null; avatarUrl: string | null }[]>('/admin/support/assignees')
+    assignees.value = data
+  } catch {
+    // Non-critical
+  }
+}
+
+async function updateAssignee(userId: string | null) {
+  if (!ticket.value) return
+  updatingAssignee.value = true
+  try {
+    await api.patch(`/admin/support/tickets/${props.id}`, { assignedTo: userId })
+    ticket.value.assignedTo = userId
+    const matched = assignees.value.find(a => a.id === userId)
+    ticket.value.assigneeName = matched?.name ?? null
+    ticket.value.assigneeEmail = matched?.email ?? null
+    toast.success('Assignee updated')
+  } catch {
+    // Error handled by useApi toast
+  } finally {
+    updatingAssignee.value = false
+  }
+}
+
 async function fetchTicket() {
   loading.value = true
   try {
@@ -221,6 +251,7 @@ async function sendReply() {
 
 onMounted(() => {
   fetchTicket()
+  fetchAssignees()
 })
 </script>
 
@@ -422,9 +453,17 @@ onMounted(() => {
             <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
               Assigned To
             </label>
-            <p class="text-sm text-gray-900 dark:text-white">
-              {{ ticket.assignedTo ? ticket.assignedTo : 'Unassigned' }}
-            </p>
+            <select
+              :value="ticket.assignedTo ?? ''"
+              @change="updateAssignee(($event.target as HTMLSelectElement).value || null)"
+              :disabled="updatingAssignee"
+              class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
+            >
+              <option value="">Unassigned</option>
+              <option v-for="a in assignees" :key="a.id" :value="a.id">
+                {{ a.name || a.email }}
+              </option>
+            </select>
           </div>
 
           <!-- Ticket info -->
