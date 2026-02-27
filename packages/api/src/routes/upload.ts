@@ -8,7 +8,6 @@ import { requireActiveSubscription } from '../middleware/subscription.js';
 import { dockerService } from '../services/docker.service.js';
 import { uploadService } from '../services/upload.service.js';
 import { logger } from '../services/logger.js';
-import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -234,24 +233,11 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
       buildFile: detection.buildFile ?? undefined,
     };
 
-    if (isQueueAvailable()) {
-      try {
-        await getDeploymentQueue().add('build-and-deploy', jobData, {
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 5000 },
-        });
-      } catch {
-        // Queue add failed — run inline
-        processDeploymentInline(jobData).catch((err) => {
-          logger.error({ err }, 'Inline deployment failed');
-        });
-      }
-    } else {
-      // No workers running — run inline in-process
-      processDeploymentInline(jobData).catch((err) => {
-        logger.error({ err }, 'Inline deployment failed');
-      });
-    }
+    // Upload builds MUST run inline (same process that received the file)
+    // because fleet_uploads is a node-local volume — other replicas can't see the files.
+    processDeploymentInline(jobData).catch((err) => {
+      logger.error({ err }, 'Inline deployment failed');
+    });
 
     return c.json({
       service: { ...svc, sourceType: 'upload', sourcePath },
@@ -368,22 +354,10 @@ uploadRoutes.openapi(rebuildRoute, (async (c: any) => {
       buildFile: detection.buildFile ?? undefined,
     };
 
-    if (isQueueAvailable()) {
-      try {
-        await getDeploymentQueue().add('build-and-deploy', jobData, {
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 5000 },
-        });
-      } catch {
-        processDeploymentInline(jobData).catch((err) => {
-          logger.error({ err }, 'Inline rebuild failed');
-        });
-      }
-    } else {
-      processDeploymentInline(jobData).catch((err) => {
-        logger.error({ err }, 'Inline rebuild failed');
-      });
-    }
+    // Upload rebuilds MUST run inline — files are on this node's local volume only.
+    processDeploymentInline(jobData).catch((err) => {
+      logger.error({ err }, 'Inline rebuild failed');
+    });
 
     return c.json({
       message: 'Rebuild triggered',
