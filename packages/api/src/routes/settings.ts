@@ -588,7 +588,7 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
   const ALLOWED_PLATFORM_PREFIXES = [
     'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
     'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
-    'updates:', 'support:', 'translation:', 'i18n:',
+    'updates:', 'support:', 'translation:', 'i18n:', 'selfhealing:',
   ];
 
   // Detect if any keys are platform-scoped (super admin settings page sends platform:* keys even with an account selected)
@@ -1253,6 +1253,179 @@ settings.openapi(testTranslationRoute, (async (c: any) => {
     logToErrorTable({ level: 'warn', message: `DeepL connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'translation-test' } });
     return c.json({ success: false, message: `DeepL connection failed: ${(err as Error).message}` }, 200);
   }
+}) as any);
+
+// ── Self-Healing settings ──
+
+const selfHealingSettingsSchema = z.object({
+  anthropicApiKey: z.string().min(1).optional(),
+  githubPat: z.string().min(1).optional(),
+  repoOwner: z.string().min(1).optional(),
+  repoName: z.string().min(1).optional(),
+  defaultBranch: z.string().min(1).optional(),
+});
+
+const getSelfHealingRoute = createRoute({
+  method: 'get',
+  path: '/self-healing',
+  tags: ['Settings'],
+  summary: 'Get self-healing configuration (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Self-healing configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateSelfHealingRoute = createRoute({
+  method: 'patch',
+  path: '/self-healing',
+  tags: ['Settings'],
+  summary: 'Configure self-healing (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(selfHealingSettingsSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Self-healing configuration updated'),
+    ...standardErrors,
+  },
+});
+
+const testSelfHealingRoute = createRoute({
+  method: 'post',
+  path: '/self-healing/test',
+  tags: ['Settings'],
+  summary: 'Test self-healing API keys (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Test result'),
+    ...standardErrors,
+  },
+});
+
+// GET /self-healing
+settings.openapi(getSelfHealingRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Only super admins can view self-healing config' }, 403);
+
+  const anthropicApiKey = await getSetting('selfhealing:anthropic_api_key');
+  const githubPat = await getSetting('selfhealing:github_pat');
+  const repoOwner = await getSetting('selfhealing:repo_owner');
+  const repoName = await getSetting('selfhealing:repo_name');
+  const defaultBranch = await getSetting('selfhealing:default_branch');
+  const defaultOptions = await getSetting('selfhealing:default_options');
+
+  return c.json({
+    anthropicConfigured: !!anthropicApiKey,
+    anthropicApiKeyHint: anthropicApiKey ? maskSecret(anthropicApiKey) : null,
+    githubPatConfigured: !!githubPat,
+    githubPatHint: githubPat ? maskSecret(githubPat) : null,
+    repoOwner: repoOwner ?? '',
+    repoName: repoName ?? '',
+    defaultBranch: defaultBranch ?? 'main',
+    defaultOptions: defaultOptions ?? { autoMerge: false, autoRelease: false, autoUpdate: false, releaseType: 'release' },
+  });
+}) as any);
+
+// PATCH /self-healing
+settings.openapi(updateSelfHealingRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Only super admins can configure self-healing' }, 403);
+
+  const data = c.req.valid('json');
+
+  if (data.anthropicApiKey) {
+    await upsertSetting('selfhealing:anthropic_api_key', encrypt(data.anthropicApiKey));
+  }
+  if (data.githubPat) {
+    await upsertSetting('selfhealing:github_pat', encrypt(data.githubPat));
+  }
+  if (data.repoOwner !== undefined) {
+    await upsertSetting('selfhealing:repo_owner', data.repoOwner);
+  }
+  if (data.repoName !== undefined) {
+    await upsertSetting('selfhealing:repo_name', data.repoName);
+  }
+  if (data.defaultBranch !== undefined) {
+    await upsertSetting('selfhealing:default_branch', data.defaultBranch);
+  }
+
+  // Invalidate service config cache
+  const { invalidateConfigCache } = await import('../services/self-healing.service.js');
+  invalidateConfigCache();
+
+  return c.json({ message: 'Self-healing configuration updated' });
+}) as any);
+
+// POST /self-healing/test
+settings.openapi(testSelfHealingRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Only super admins can test self-healing' }, 403);
+
+  const results: { anthropic: { success: boolean; message: string } | null; github: { success: boolean; message: string } | null } = {
+    anthropic: null,
+    github: null,
+  };
+
+  // Test Anthropic API key
+  const encryptedAnthropicKey = await getSetting('selfhealing:anthropic_api_key');
+  if (encryptedAnthropicKey) {
+    try {
+      const apiKey = decrypt(encryptedAnthropicKey as string);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'Hi' }],
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        results.anthropic = { success: true, message: 'Anthropic API key is valid' };
+      } else {
+        const body = await res.text();
+        results.anthropic = { success: false, message: `Anthropic API error: ${res.status} ${body.slice(0, 200)}` };
+      }
+    } catch (err: any) {
+      results.anthropic = { success: false, message: `Anthropic test failed: ${err.message}` };
+    }
+  }
+
+  // Test GitHub PAT
+  const encryptedGithubPat = await getSetting('selfhealing:github_pat');
+  if (encryptedGithubPat) {
+    try {
+      const pat = decrypt(encryptedGithubPat as string);
+      const res = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `token ${pat}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'Fleet-SelfHealing',
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        const data = await res.json() as { login: string };
+        results.github = { success: true, message: `GitHub PAT valid (user: ${data.login})` };
+      } else {
+        results.github = { success: false, message: `GitHub API error: ${res.status}` };
+      }
+    } catch (err: any) {
+      results.github = { success: false, message: `GitHub test failed: ${err.message}` };
+    }
+  }
+
+  return c.json(results);
 }) as any);
 
 export default settings;

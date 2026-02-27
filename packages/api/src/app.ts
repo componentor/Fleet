@@ -6,7 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, users as usersTable } from '@fleet/db';
+import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, selfHealingJobs, users as usersTable } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
 import { logger, logToErrorTable } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
@@ -53,6 +53,7 @@ import adminRoleRoutes from './routes/admin-roles.js';
 import supportRoutes from './routes/support.js';
 import adminSupportRoutes from './routes/admin-support.js';
 import adminI18nRoutes from './routes/admin-i18n.js';
+import selfHealingRoutes from './routes/self-healing.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -374,6 +375,7 @@ api.route('/admin', adminRoleRoutes);
 api.route('/support', supportRoutes);
 api.route('/admin/support', adminSupportRoutes);
 api.route('/admin/i18n', adminI18nRoutes);
+api.route('/admin/self-healing', selfHealingRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(
@@ -1182,6 +1184,143 @@ api.get(
           releaseWsSlot('terminal', sessionAccountId, activeTerminalSessions);
           sessionAccountId = null;
         }
+      },
+    };
+  }),
+);
+
+// ── WebSocket: Self-healing container terminal ──
+api.get(
+  '/terminal/self-healing/:jobId',
+  upgradeWebSocket((c) => {
+    const jobId = c.req.param('jobId');
+    const token = extractWsToken(c);
+    let dockerStream: import('node:stream').Duplex | null = null;
+    let execId: string | null = null;
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+
+          // Only super admins can access self-healing terminals
+          if (!wsUser.isSuper) {
+            ws.close(4003, 'Super admin access required');
+            return;
+          }
+
+          // Look up the job to find the Docker service
+          const job = await db.query.selfHealingJobs.findFirst({
+            where: eq(selfHealingJobs.id, jobId),
+          });
+
+          if (!job?.dockerServiceId) {
+            ws.close(4004, 'Job not found or no container');
+            return;
+          }
+
+          // Find the running container
+          const tasks = await dockerService.getServiceTasks(job.dockerServiceId);
+          const runningTask = tasks.find(
+            (t) => t.status === 'running' && t.containerStatus?.containerId,
+          );
+
+          if (!runningTask?.containerStatus?.containerId) {
+            ws.close(4004, 'No running containers for this job');
+            return;
+          }
+
+          const targetContainer = runningTask.containerStatus.containerId;
+          const targetNodeId = runningTask.nodeId;
+          const localNodeId = await dockerService.getLocalNodeId();
+          const isLocal = targetNodeId === localNodeId;
+
+          if (!isLocal) {
+            const agentUrl = await dockerService.getAgentAddress(targetNodeId);
+            if (!agentUrl) {
+              ws.close(4004, 'No agent on target node');
+              return;
+            }
+
+            const nodeToken = process.env['NODE_AUTH_TOKEN'] || '';
+            const agentWsUrl = agentUrl.replace('http://', 'ws://');
+            const proxyUrl = `${agentWsUrl}/ws/exec?token=${encodeURIComponent(nodeToken)}&containerId=${encodeURIComponent(targetContainer)}`;
+
+            const { default: WebSocket } = await import('ws');
+            const agentWs = new WebSocket(proxyUrl);
+
+            agentWs.on('message', (data: Buffer | string) => {
+              ws.send(typeof data === 'string' ? data : data.toString('utf-8'));
+            });
+            agentWs.on('close', () => ws.close(1000, 'Agent disconnected'));
+            agentWs.on('error', () => ws.close(1011, 'Agent connection failed'));
+
+            dockerStream = {
+              write: (data: any) => { if (agentWs.readyState === WebSocket.OPEN) agentWs.send(data); },
+              destroy: () => { agentWs.close(); },
+            } as any;
+            execId = '__proxy__';
+          } else {
+            let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
+            for (const shell of ['/bin/bash', '/bin/sh', '/bin/ash']) {
+              try {
+                result = await dockerService.execInContainer(targetContainer, [shell]);
+                break;
+              } catch { /* try next */ }
+            }
+            if (!result) {
+              ws.close(4004, 'No shell available in container');
+              return;
+            }
+            dockerStream = result.stream as import('node:stream').Duplex;
+            execId = result.execId;
+
+            dockerStream.on('data', (chunk: Buffer) => ws.send(chunk.toString('utf-8')));
+            dockerStream.on('end', () => ws.close(1000, 'Container stream ended'));
+            dockerStream.on('error', () => ws.close(1011, 'Container error'));
+          }
+
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 25_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS self-healing terminal auth failed');
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      async onMessage(evt: { data: unknown }, _ws: unknown) {
+        if (!dockerStream) return;
+        try {
+          const msg = JSON.parse(
+            typeof evt.data === 'string' ? evt.data : evt.data?.toString?.() ?? '',
+          ) as { type: string; data?: string; cols?: number; rows?: number };
+
+          if (msg.type === 'input' && msg.data) {
+            dockerStream.write(msg.data);
+          } else if (msg.type === 'resize' && msg.cols && msg.rows && execId) {
+            if (execId === '__proxy__') {
+              dockerStream.write(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
+            } else {
+              await dockerService.resizeExec(execId, msg.rows, msg.cols);
+            }
+          }
+        } catch { /* ignore */ }
+      },
+
+      onClose() {
+        if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+        if (dockerStream) { dockerStream.destroy(); dockerStream = null; }
+        execId = null;
       },
     };
   }),

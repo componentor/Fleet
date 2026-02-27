@@ -38,6 +38,7 @@ import {
   PanelLeftOpen,
   Megaphone,
   LifeBuoy,
+  Bot,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -148,6 +149,7 @@ const allNavGroups: NavGroup[] = [
       { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail, section: 'emailTemplates' },
       { nameKey: 'nav.translations', path: '/admin/translations', icon: Languages, superOnly: true },
       { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings, section: 'settings' },
+      { nameKey: 'nav.selfHealing', path: '/admin/self-healing', icon: Bot, superOnly: true },
       { nameKey: 'nav.updates', path: '/admin/updates', icon: Download, section: 'updates' },
     ],
   },

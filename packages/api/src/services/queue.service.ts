@@ -12,6 +12,7 @@ let _deploymentQueue: Queue | null = null;
 let _backupQueue: Queue | null = null;
 let _maintenanceQueue: Queue | null = null;
 let _emailQueue: Queue | null = null;
+let _selfHealingQueue: Queue | null = null;
 let _available = false;
 
 export function isQueueAvailable(): boolean {
@@ -46,6 +47,18 @@ export function getEmailQueue(): Queue {
   return _emailQueue;
 }
 
+export function getSelfHealingQueue(): Queue {
+  if (!_selfHealingQueue) _selfHealingQueue = new Queue('fleet-selfhealing', {
+    connection,
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: 50,
+      removeOnFail: 100,
+    },
+  });
+  return _selfHealingQueue;
+}
+
 // --- Worker Registry ---
 
 const workers: Worker[] = [];
@@ -73,11 +86,13 @@ export async function initWorkers(): Promise<void> {
     { createBackupWorker },
     { createMaintenanceWorker },
     { createEmailWorker },
+    { createSelfHealingWorker },
   ] = await Promise.all([
     import('../workers/deployment.worker.js'),
     import('../workers/backup.worker.js'),
     import('../workers/maintenance.worker.js'),
     import('../workers/email.worker.js'),
+    import('../workers/self-healing.worker.js'),
   ]);
 
   workers.push(
@@ -85,9 +100,10 @@ export async function initWorkers(): Promise<void> {
     createBackupWorker(connection),
     createMaintenanceWorker(connection),
     createEmailWorker(connection),
+    createSelfHealingWorker(connection),
   );
 
-  logger.info(`Queue workers started: ${workers.length} workers across 4 queues`);
+  logger.info(`Queue workers started: ${workers.length} workers across 5 queues`);
 }
 
 /**
@@ -104,5 +120,6 @@ export async function shutdownWorkers(): Promise<void> {
     _backupQueue?.close().catch(() => {}),
     _maintenanceQueue?.close().catch(() => {}),
     _emailQueue?.close().catch(() => {}),
+    _selfHealingQueue?.close().catch(() => {}),
   ]);
 }

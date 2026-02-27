@@ -19,3 +19,4 @@ export * from './log-archives';
 export * from './registry-credentials';
 export * from './admin-roles';
 export * from './support';
+export * from './self-healing';

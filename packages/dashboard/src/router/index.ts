@@ -178,6 +178,11 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/Roles.vue'),
       },
       {
+        path: 'self-healing',
+        name: 'super-self-healing',
+        component: () => import('@/pages/super/SelfHealing.vue'),
+      },
+      {
         path: 'support',
         name: 'super-support',
         component: () => import('@/pages/super/Support.vue'),
