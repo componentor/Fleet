@@ -1404,8 +1404,9 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
     } catch (err) {
       logger.error({ err }, 'Docker service removal failed');
     }
-    // Wait for containers to fully stop before volume cleanup
+    // Wait for tasks to stop, then force-remove leftover containers so volumes are released
     await dockerService.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
+    await dockerService.forceRemoveServiceContainers(svc.dockerServiceId);
   }
 
   // Clean up GitHub webhook
@@ -1435,25 +1436,24 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   // Clean up Docker volumes (only if no other active services reference them)
   const vols = svc.volumes as Array<{ source: string; target: string }> | null;
   if (vols && vols.length > 0) {
-    // Check for sibling services that share the same volumes (e.g., stack members)
-    const siblings = svc.stackId
-      ? await db.query.services.findMany({
-          where: and(
-            eq(services.stackId, svc.stackId),
-            not(eq(services.id, svc.id)),
-            isNull(services.deletedAt),
-          ),
-        })
-      : [];
+    // Check ALL other active services in the account that reference the same volumes
+    const otherServices = await db.query.services.findMany({
+      where: and(
+        eq(services.accountId, accountId),
+        not(eq(services.id, svc.id)),
+        isNull(services.deletedAt),
+      ),
+      columns: { volumes: true },
+    });
 
-    const siblingVols = new Set<string>();
-    for (const s of siblings) {
+    const usedByOthers = new Set<string>();
+    for (const s of otherServices) {
       const sv = s.volumes as Array<{ source: string }> | null;
-      if (sv) for (const v of sv) { if (v.source) siblingVols.add(v.source); }
+      if (sv) for (const v of sv) { if (v.source) usedByOthers.add(v.source); }
     }
 
     for (const v of vols) {
-      if (v.source && !siblingVols.has(v.source)) {
+      if (v.source && !usedByOthers.has(v.source)) {
         await dockerService.removeVolume(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
         });
@@ -2229,13 +2229,35 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
     }
   }
 
-  // Wait for containers to fully stop before removing volumes
+  // Wait for tasks to stop, then force-remove leftover containers so volumes are released
   await Promise.all(
     removedDockerServiceIds.map((id) => dockerService.waitForServiceTasksGone(id).catch(() => {})),
   );
+  await Promise.all(
+    removedDockerServiceIds.map((id) => dockerService.forceRemoveServiceContainers(id)),
+  );
 
-  // Clean up Docker volumes after containers are gone
+  // Check which volumes are still used by other services outside this stack
+  const stackServiceIds = new Set(stackServices.map((s) => s.id));
+  const otherServices = await db.query.services.findMany({
+    where: and(
+      eq(services.accountId, accountId),
+      isNull(services.deletedAt),
+    ),
+    columns: { id: true, volumes: true },
+  });
+
+  const usedByOthers = new Set<string>();
+  for (const s of otherServices) {
+    if (stackServiceIds.has(s.id)) continue; // skip services we just deleted
+    const sv = s.volumes as Array<{ source: string }> | null;
+    if (sv) for (const v of sv) { if (v.source) usedByOthers.add(v.source); }
+  }
+
+  // Clean up Docker volumes after containers are gone (only if not used by other services)
   for (const volName of volumeNames) {
+    if (usedByOthers.has(volName)) continue;
+
     await dockerService.removeVolume(volName).catch((err) => {
       logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
     });
@@ -2247,7 +2269,6 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
       });
     }
   }
-
 
   eventService.log({
     ...eventContext(c),
