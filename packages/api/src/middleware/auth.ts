@@ -9,6 +9,7 @@ export interface AuthUser {
   userId: string;
   email: string;
   isSuper: boolean;
+  adminRoleId?: string;
   impersonatingAccountId?: string;
 }
 
@@ -52,6 +53,7 @@ export const authMiddleware = createMiddleware<{
         userId: payload['userId'] as string,
         email: payload['email'] as string,
         isSuper: payload['isSuper'] as boolean,
+        adminRoleId: payload['adminRoleId'] as string | undefined,
         impersonatingAccountId: payload['impersonatingAccountId'] as string | undefined,
       });
       await next();
@@ -88,6 +90,7 @@ export const authMiddleware = createMiddleware<{
         userId: creator.id,
         email: creator.email ?? '',
         isSuper: creator.isSuper ?? false,
+        adminRoleId: (creator as any).adminRoleId ?? undefined,
       });
       c.set('apiKeyAccountId' as any, candidate.accountId);
       c.set('apiKeyScopes' as any, candidate.scopes ?? ['*']);

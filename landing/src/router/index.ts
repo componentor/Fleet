@@ -24,6 +24,11 @@ const router = createRouter({
       name: 'terms',
       component: () => import('@/views/TermsView.vue'),
     },
+    {
+      path: '/status',
+      name: 'status',
+      component: () => import('@/views/StatusView.vue'),
+    },
   ],
   scrollBehavior(to) {
     if (to.hash) {

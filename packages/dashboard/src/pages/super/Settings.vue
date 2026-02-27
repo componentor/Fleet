@@ -28,6 +28,7 @@ const sections = [
   { id: 'log-archiving', label: () => t('super.settings.logArchiving') },
   { id: 'backup-defaults', label: () => 'Backup Defaults' },
   { id: 'registry', label: () => 'Registry Credentials' },
+  { id: 'support', label: () => 'Support' },
 ]
 
 // General settings
@@ -133,6 +134,10 @@ const newCredUsername = ref('')
 const newCredPassword = ref('')
 const credError = ref('')
 const connectingGithub = ref(false)
+
+// Support
+const supportEnabledSetting = ref(false)
+const savingSupport = ref(false)
 
 async function fetchSettings() {
   loading.value = true
@@ -399,6 +404,32 @@ async function triggerArchiveNow() {
   }
 }
 
+async function fetchSupportSettings() {
+  try {
+    const data = await api.get<Record<string, any>>('/settings')
+    supportEnabledSetting.value = data['support:enabled'] === true
+  } catch {
+    // Not configured
+  }
+}
+
+async function saveSupportSettings() {
+  savingSupport.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings', {
+      'support:enabled': supportEnabledSetting.value,
+    })
+    success.value = t('common.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save'
+  } finally {
+    savingSupport.value = false
+  }
+}
+
 function formatCents(cents: number): string {
   return (cents / 100).toFixed(2)
 }
@@ -614,6 +645,7 @@ onMounted(() => {
   fetchLogArchiveSettings()
   fetchBackupDefaults()
   fetchRegistryCreds()
+  fetchSupportSettings()
 })
 </script>
 
@@ -1507,6 +1539,37 @@ onMounted(() => {
               <KeyRound class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
               <p class="text-sm text-gray-500 dark:text-gray-400">No registry credentials configured.</p>
               <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Add credentials to pull images from private registries.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══════════ Support section ═══════════ -->
+        <div v-if="activeSection === 'support'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Support Tickets</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Enable or disable the support ticket system for end-users.</p>
+          </div>
+          <div class="p-6 space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Enable Support</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">When enabled, users will see a Support link in their panel navigation and can create tickets.</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input v-model="supportEnabledSetting" type="checkbox" class="sr-only peer" />
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-gray-500 peer-checked:bg-primary-600"></div>
+              </label>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                @click="saveSupportSettings"
+                :disabled="savingSupport"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="savingSupport" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                Save
+              </button>
             </div>
           </div>
         </div>

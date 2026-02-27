@@ -170,6 +170,7 @@
     "status": "Status",
     "updates": "Oppdateringer",
     "emailTemplates": "E-postmaler",
+    "statusPosts": "Statusinnlegg",
     "stacks": "Stabler",
     "activity": "Aktivitetslogg",
     "sharedDomains": "Delte domener",
@@ -1807,6 +1808,76 @@
       "database": "Database",
       "cache": "Hurtigbuffer"
     },
+    "statusPosts": {
+      "title": "Statusinnlegg",
+      "newPost": "Nytt innlegg",
+      "editPost": "Rediger innlegg",
+      "icon": "Ikon",
+      "severity": "Alvorlighetsgrad",
+      "affectedServices": "Berørte tjenester",
+      "status": "Status",
+      "draft": "Utkast",
+      "published": "Publisert",
+      "archived": "Arkivert",
+      "translations": "Oversettelser",
+      "autoTranslate": "Auto-oversett",
+      "translating": "Oversetter...",
+      "preview": "Forhåndsvisning",
+      "editor": "Redigering",
+      "save": "Lagre",
+      "delete": "Slett",
+      "confirmDelete": "Er du sikker på at du vil slette dette innlegget? Dette kan ikke angres.",
+      "noTranslation": "Ingen oversettelse ennå",
+      "titlePlaceholder": "Innleggstittel",
+      "bodyPlaceholder": "Skriv statusoppdateringen din i markdown...",
+      "selectPost": "Velg et innlegg fra listen for å redigere.",
+      "noPostsYet": "Ingen statusinnlegg ennå",
+      "all": "Alle",
+      "localesCount": "{count}/{total} språk",
+      "saved": "Innlegg lagret",
+      "deleted": "Innlegg slettet",
+      "translated": "Oversatt til {count} språk",
+      "translateFailed": "Oversettelse feilet for: {locales}",
+      "noApiKey": "Oversettelsestjeneste ikke konfigurert. Legg til en DeepL API-nøkkel i plattforminnstillinger.",
+      "untitled": "Uten tittel",
+      "notPublished": "Ikke publisert",
+      "newPostTitle": "Nytt statusinnlegg",
+      "created": "Innlegg opprettet",
+      "createFailed": "Kunne ikke opprette innlegg",
+      "saveFailed": "Kunne ikke lagre innlegg",
+      "deleteFailed": "Kunne ikke slette innlegg",
+      "deleteTranslationConfirm": "Slette oversettelsen for {locale}?",
+      "translationDeleted": "Oversettelse slettet",
+      "deleteTranslationFailed": "Kunne ikke slette oversettelse",
+      "deleteTranslation": "Slett oversettelse",
+      "metadata": "Metadata",
+      "translationTitle": "Tittel",
+      "body": "Innhold",
+      "prev": "Forrige",
+      "next": "Neste",
+      "icons": {
+        "incident": "Hendelse",
+        "maintenance": "Vedlikehold",
+        "resolved": "Løst",
+        "info": "Info",
+        "outage": "Driftsstans",
+        "degraded": "Degradert"
+      },
+      "severities": {
+        "info": "Info",
+        "warning": "Advarsel",
+        "critical": "Kritisk"
+      },
+      "toolbar": {
+        "bold": "Fet",
+        "italic": "Kursiv",
+        "heading": "Overskrift",
+        "link": "Lenke",
+        "list": "Liste",
+        "code": "Kode",
+        "quote": "Sitat"
+      }
+    },
     "sharedDomains": {
       "title": "Delte domener",
       "add": "Legg til domene",
@@ -2644,6 +2715,7 @@
       "privacy": "Personvern",
       "terms": "Vilkår",
       "discord": "Discord",
+      "status": "Status",
       "rights": "Fleet. Alle rettigheter reservert."
     },
     "privacy": {
@@ -3164,6 +3236,54 @@
         "disablingSftpTitle": "Deaktivere SFTP",
         "disablingSftpDesc": "Hvis du ikke trenger SFTP-tilgang, deaktiver den ved å sette miljøvariabelen:"
       }
+    }
+  },
+  "statusPage": {
+    "title": "Systemstatus",
+    "description": "Gjeldende status og hendelseshistorikk for alle tjenester",
+    "allOperational": "Alle systemer operative",
+    "partialDegradation": "Delvis degradert",
+    "majorOutage": "Større driftsstans",
+    "unknown": "Ukjent",
+    "notConfigured": "Ikke konfigurert",
+    "services": {
+      "api": "API",
+      "docker": "Docker Swarm",
+      "storage": "Lagring",
+      "queue": "Kø"
+    },
+    "healthy": "Frisk",
+    "degraded": "Degradert",
+    "down": "Nede",
+    "responseTime": "{ms}ms",
+    "uptime": {
+      "title": "Driftstid",
+      "days": "{count} dager",
+      "noData": "Ingen data",
+      "percent": "{value}%",
+      "today": "I dag"
+    },
+    "timeline": {
+      "title": "Hendelseshistorikk",
+      "search": "Søk i hendelser...",
+      "empty": "Ingen hendelser rapportert",
+      "noResults": "Ingen hendelser matcher søket",
+      "prev": "Forrige",
+      "next": "Neste",
+      "page": "Side {page} av {total}"
+    },
+    "icons": {
+      "incident": "Hendelse",
+      "maintenance": "Vedlikehold",
+      "resolved": "Løst",
+      "info": "Info",
+      "outage": "Driftsstans",
+      "degraded": "Degradert"
+    },
+    "severity": {
+      "info": "Info",
+      "warning": "Advarsel",
+      "critical": "Kritisk"
     }
   }
 }

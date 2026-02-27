@@ -7,7 +7,7 @@ import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
 import { dockerService } from '../services/docker.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
 import { getPlatformDomain } from './settings.js';
@@ -480,6 +480,7 @@ databaseRoutes.openapi(getTablesRoute, (async (c: any) => {
     return c.json({ tables });
   } catch (err) {
     logger.error({ err }, 'Failed to list tables');
+    logToErrorTable({ level: 'error', message: `Failed to list tables: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'list-tables' } });
     return c.json({ error: 'Failed to list tables' }, 500);
   }
 }) as any);
@@ -589,6 +590,7 @@ databaseRoutes.openapi(getColumnsRoute, (async (c: any) => {
     return c.json({ columns });
   } catch (err) {
     logger.error({ err }, 'Failed to describe table');
+    logToErrorTable({ level: 'error', message: `Failed to describe table: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'describe-table' } });
     return c.json({ error: 'Failed to describe table' }, 500);
   }
 }) as any);
@@ -701,6 +703,7 @@ databaseRoutes.openapi(getTableDataRoute, (async (c: any) => {
     return c.json({ columns, rows, totalRows, page, pageSize });
   } catch (err) {
     logger.error({ err }, 'Failed to fetch table data');
+    logToErrorTable({ level: 'error', message: `Failed to fetch table data: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'fetch-table-data' } });
     return c.json({ error: 'Failed to fetch table data' }, 500);
   }
 }) as any);
@@ -797,6 +800,7 @@ databaseRoutes.openapi(executeQueryRoute, (async (c: any) => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Query execution failed';
       logger.error({ err }, 'MongoDB query failed');
+      logToErrorTable({ level: 'error', message: `MongoDB query failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'mongodb-query' } });
       return c.json({ error: message }, 500);
     }
   }
@@ -827,6 +831,7 @@ databaseRoutes.openapi(executeQueryRoute, (async (c: any) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Query execution failed';
     logger.error({ err }, 'Database query failed');
+    logToErrorTable({ level: 'error', message: `Database query failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-query' } });
     return c.json({ error: message }, 500);
   }
 }) as any);
@@ -879,6 +884,7 @@ databaseRoutes.openapi(insertRowRoute, (async (c: any) => {
       return c.json({ success: true });
     } catch (err) {
       logger.error({ err }, 'MongoDB insert failed');
+      logToErrorTable({ level: 'error', message: `MongoDB insert failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'mongodb-insert' } });
       return c.json({ error: err instanceof Error ? err.message : 'Insert failed' }, 500);
     }
   }
@@ -901,6 +907,7 @@ databaseRoutes.openapi(insertRowRoute, (async (c: any) => {
     return c.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Database insert failed');
+    logToErrorTable({ level: 'error', message: `Database insert failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-insert' } });
     return c.json({ error: err instanceof Error ? err.message : 'Insert failed' }, 500);
   }
 }) as any);
@@ -955,6 +962,7 @@ databaseRoutes.openapi(updateRowRoute, (async (c: any) => {
       return c.json({ success: true });
     } catch (err) {
       logger.error({ err }, 'MongoDB update failed');
+      logToErrorTable({ level: 'error', message: `MongoDB update failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'mongodb-update' } });
       return c.json({ error: err instanceof Error ? err.message : 'Update failed' }, 500);
     }
   }
@@ -981,6 +989,7 @@ databaseRoutes.openapi(updateRowRoute, (async (c: any) => {
     return c.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Database update failed');
+    logToErrorTable({ level: 'error', message: `Database update failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-update' } });
     return c.json({ error: err instanceof Error ? err.message : 'Update failed' }, 500);
   }
 }) as any);
@@ -1031,6 +1040,7 @@ databaseRoutes.openapi(deleteRowRoute, (async (c: any) => {
       return c.json({ success: true });
     } catch (err) {
       logger.error({ err }, 'MongoDB delete failed');
+      logToErrorTable({ level: 'error', message: `MongoDB delete failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'mongodb-delete' } });
       return c.json({ error: err instanceof Error ? err.message : 'Delete failed' }, 500);
     }
   }
@@ -1054,6 +1064,7 @@ databaseRoutes.openapi(deleteRowRoute, (async (c: any) => {
     return c.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Database row delete failed');
+    logToErrorTable({ level: 'error', message: `Database row delete failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-row-delete' } });
     return c.json({ error: err instanceof Error ? err.message : 'Delete failed' }, 500);
   }
 }) as any);
@@ -1100,6 +1111,7 @@ databaseRoutes.openapi(createTableRoute, (async (c: any) => {
       return c.json({ success: true });
     } catch (err) {
       logger.error({ err }, 'MongoDB create collection failed');
+      logToErrorTable({ level: 'error', message: `MongoDB create collection failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'mongodb-create-collection' } });
       return c.json({ error: err instanceof Error ? err.message : 'Create collection failed' }, 500);
     }
   }
@@ -1132,6 +1144,7 @@ databaseRoutes.openapi(createTableRoute, (async (c: any) => {
     return c.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Database create table failed');
+    logToErrorTable({ level: 'error', message: `Database create table failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-create-table' } });
     return c.json({ error: err instanceof Error ? err.message : 'Create table failed' }, 500);
   }
 }) as any);
@@ -1175,6 +1188,7 @@ databaseRoutes.openapi(dropTableRoute, (async (c: any) => {
       return c.json({ success: true });
     } catch (err) {
       logger.error({ err }, 'MongoDB drop collection failed');
+      logToErrorTable({ level: 'error', message: `MongoDB drop collection failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'mongodb-drop-collection' } });
       return c.json({ error: err instanceof Error ? err.message : 'Drop collection failed' }, 500);
     }
   }
@@ -1189,6 +1203,7 @@ databaseRoutes.openapi(dropTableRoute, (async (c: any) => {
     return c.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Database drop table failed');
+    logToErrorTable({ level: 'error', message: `Database drop table failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-drop-table' } });
     return c.json({ error: err instanceof Error ? err.message : 'Drop table failed' }, 500);
   }
 }) as any);
@@ -1349,6 +1364,7 @@ databaseRoutes.openapi(importDatabaseRoute, (async (c: any) => {
     return c.json({ success: true, message: 'Database import completed successfully' });
   } catch (err) {
     logger.error({ err }, 'Database import failed');
+    logToErrorTable({ level: 'error', message: `Database import failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-import' } });
     return c.json({ error: err instanceof Error ? err.message : 'Import failed' }, 500);
   }
 }) as any);
@@ -1429,6 +1445,7 @@ databaseDownloadRoutes.openapi(exportDownloadRoute, (async (c: any) => {
     return c.body(stream as any);
   } catch (err) {
     logger.error({ err }, 'Database export failed');
+    logToErrorTable({ level: 'error', message: `Database export failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'database', operation: 'database-export' } });
     return c.json({ error: 'Export failed' }, 500);
   }
 }) as any);

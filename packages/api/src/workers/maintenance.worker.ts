@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, eq, and, lt, lte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning } from '@fleet/db';
+import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, uptimeSnapshots, eq, and, lt, lte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -86,6 +86,10 @@ interface RegistryPollData {
   type: 'registry-poll';
 }
 
+interface UptimeSnapshotData {
+  type: 'uptime-snapshot';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -105,7 +109,8 @@ type MaintenanceJobData =
   | LogArchiveData
   | LogArchiveCleanupData
   | BackupRetentionCleanupData
-  | RegistryPollData;
+  | RegistryPollData
+  | UptimeSnapshotData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -173,6 +178,7 @@ async function syncServiceStatus(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Service status sync: failed to query Docker — skipping');
+    logToErrorTable({ level: 'error', message: `Service status sync: failed to query Docker: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'service-status-sync' } });
     return;
   }
 
@@ -352,6 +358,7 @@ async function executeScheduledDeletions(): Promise<void> {
             await dockerService.removeService(svc.dockerServiceId);
           } catch (err) {
             logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during account deletion');
+            logToErrorTable({ level: 'error', message: `Failed to remove Docker service during account deletion: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'account-deletion', serviceId: svc.id } });
           }
         }
         await db.update(services).set({
@@ -393,6 +400,7 @@ async function executeScheduledDeletions(): Promise<void> {
               await dockerService.removeService(svc.dockerServiceId);
             } catch (err) {
               logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during descendant deletion');
+              logToErrorTable({ level: 'error', message: `Failed to remove Docker service during descendant deletion: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'account-deletion', serviceId: svc.id } });
             }
           }
           await db.update(services).set({
@@ -607,6 +615,7 @@ async function enforceBillingGracePeriod(): Promise<void> {
             }
           } catch (svcErr) {
             logger.error({ err: svcErr, serviceId: svc.id }, 'Failed to suspend service for billing');
+            logToErrorTable({ level: 'error', message: `Failed to suspend service for billing: ${svcErr instanceof Error ? svcErr.message : String(svcErr)}`, stack: svcErr instanceof Error ? svcErr.stack : null, metadata: { worker: 'maintenance', task: 'billing-grace', serviceId: svc.id } });
           }
         }
 
@@ -634,6 +643,7 @@ async function enforceBillingGracePeriod(): Promise<void> {
           'Account suspended due to billing grace period expiry');
       } catch (err) {
         logger.error({ err, accountId: sub.accountId }, 'Failed to suspend account for billing grace period');
+        logToErrorTable({ level: 'error', message: `Failed to suspend account for billing grace period: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'billing-grace', accountId: sub.accountId } });
       }
     }
   }
@@ -962,6 +972,7 @@ async function executeStorageMigration(migrationId: string): Promise<void> {
     await migrationService.executeMigration(migrationId);
   } catch (err) {
     logger.error({ err, migrationId }, 'Storage migration job failed');
+    logToErrorTable({ level: 'error', message: `Storage migration job failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'storage-migration', migrationId } });
   }
 }
 
@@ -1093,6 +1104,7 @@ async function checkDomainExpiry(): Promise<void> {
                 // If not, Stripe will retry per dunning settings.
               } catch (err) {
                 logger.error({ err, domain: reg.domain, registrationId: reg.id }, 'Failed to create Stripe invoice for domain renewal');
+                logToErrorTable({ level: 'error', message: `Failed to create Stripe invoice for domain renewal: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'domain-renewal', domain: reg.domain, registrationId: reg.id } });
 
                 // Notify owners about the failure
                 const owners = await getOwnerEmails(reg.accountId);
@@ -1198,6 +1210,7 @@ async function checkDomainExpiry(): Promise<void> {
     logger.info({ total: expiring.length, expired: expired.length }, 'Domain expiry check complete');
   } catch (err) {
     logger.error({ err }, 'Domain expiry check failed');
+    logToErrorTable({ level: 'error', message: `Domain expiry check failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'domain-expiry-check' } });
   }
 }
 
@@ -1270,6 +1283,7 @@ async function syncDomainPrices(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Domain price sync failed');
+    logToErrorTable({ level: 'error', message: `Domain price sync failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'domain-price-sync' } });
   }
 }
 
@@ -1281,6 +1295,7 @@ async function pruneDeadContainers(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Container prune failed');
+    logToErrorTable({ level: 'warn', message: `Container prune failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'container-prune' } });
   }
 }
 
@@ -1355,6 +1370,7 @@ async function executeDataPurge(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Data purge failed');
+    logToErrorTable({ level: 'error', message: `Data purge failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'data-purge' } });
   }
 }
 
@@ -1498,6 +1514,7 @@ async function executeLogArchive(): Promise<void> {
           );
         } catch (err) {
           logger.error({ err, archiveId }, 'Failed to create audit log archive');
+          logToErrorTable({ level: 'error', message: `Failed to create audit log archive: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'log-archive', archiveId } });
           await db.update(logArchives)
             .set({ status: 'failed' })
             .where(eq(logArchives.id, archiveId));
@@ -1588,6 +1605,7 @@ async function executeLogArchive(): Promise<void> {
           );
         } catch (err) {
           logger.error({ err, archiveId }, 'Failed to create error log archive');
+          logToErrorTable({ level: 'error', message: `Failed to create error log archive: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'log-archive', archiveId } });
           await db.update(logArchives)
             .set({ status: 'failed' })
             .where(eq(logArchives.id, archiveId));
@@ -1601,6 +1619,7 @@ async function executeLogArchive(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Log archive job failed');
+    logToErrorTable({ level: 'error', message: `Log archive job failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'log-archive' } });
   }
 }
 
@@ -1634,6 +1653,7 @@ async function executeLogArchiveCleanup(): Promise<void> {
     logger.info({ cleaned }, `Log archive cleanup: ${cleaned} expired archive(s) removed`);
   } catch (err) {
     logger.error({ err }, 'Log archive cleanup failed');
+    logToErrorTable({ level: 'warn', message: `Log archive cleanup failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'log-archive-cleanup' } });
   }
 }
 
@@ -1706,6 +1726,7 @@ async function enforceBackupRetention(): Promise<void> {
           totalDeleted++;
         } catch (err) {
           logger.error({ err, backupId: id }, 'Failed to delete backup during retention cleanup');
+          logToErrorTable({ level: 'error', message: `Failed to delete backup during retention cleanup: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'backup-retention', backupId: id } });
         }
       }
     }
@@ -1726,6 +1747,7 @@ async function enforceBackupRetention(): Promise<void> {
         totalDeleted++;
       } catch (err) {
         logger.error({ err, backupId: b.id }, 'Failed to delete expired backup');
+        logToErrorTable({ level: 'error', message: `Failed to delete expired backup: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'backup-retention', backupId: b.id } });
       }
     }
 
@@ -1818,6 +1840,7 @@ async function pollRegistryDigests(): Promise<void> {
               }
             } catch (deployErr) {
               logger.error({ err: deployErr, serviceId: svc.id }, 'Failed to update Docker service after registry poll');
+              logToErrorTable({ level: 'error', message: `Failed to update Docker service after registry poll: ${deployErr instanceof Error ? deployErr.message : String(deployErr)}`, stack: deployErr instanceof Error ? deployErr.stack : null, metadata: { worker: 'maintenance', task: 'registry-poll', serviceId: svc.id } });
               if (deployment) {
                 await db.update(deployments)
                   .set({ status: 'failed', completedAt: new Date(), log: deployment.log + `Deploy failed: ${String(deployErr)}\n` })
@@ -1833,6 +1856,7 @@ async function pollRegistryDigests(): Promise<void> {
         }
       } catch (err) {
         logger.error({ err, serviceId: svc.id }, 'Registry poll failed for service');
+        logToErrorTable({ level: 'warn', message: `Registry poll failed for service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'registry-poll', serviceId: svc.id } });
       }
     }
   } catch (err) {
@@ -1844,6 +1868,55 @@ async function pollRegistryDigests(): Promise<void> {
       metadata: { worker: 'maintenance', task: 'registry_poll' },
     });
   }
+}
+
+async function recordUptimeSnapshot(): Promise<void> {
+  const snapshots: Array<{ service: string; status: string; responseMs: number | null }> = [];
+
+  // API — always healthy if we're executing this
+  snapshots.push({ service: 'api', status: 'healthy', responseMs: null });
+
+  // Docker Swarm
+  try {
+    const t0 = Date.now();
+    await dockerService.getSwarmInfo();
+    snapshots.push({ service: 'docker', status: 'healthy', responseMs: Date.now() - t0 });
+  } catch {
+    snapshots.push({ service: 'docker', status: 'down', responseMs: null });
+  }
+
+  // Valkey (Redis)
+  try {
+    const valkey = await getValkey();
+    if (valkey) {
+      const t0 = Date.now();
+      await valkey.ping();
+      snapshots.push({ service: 'queue', status: 'healthy', responseMs: Date.now() - t0 });
+    } else {
+      snapshots.push({ service: 'queue', status: 'down', responseMs: null });
+    }
+  } catch {
+    snapshots.push({ service: 'queue', status: 'down', responseMs: null });
+  }
+
+  // Storage
+  try {
+    const { storageManager } = await import('../services/storage/storage-manager.js');
+    const health = await storageManager.volumes.getHealth();
+    const status = health.status === 'healthy' ? 'healthy' : health.status === 'degraded' ? 'degraded' : 'down';
+    snapshots.push({ service: 'storage', status, responseMs: null });
+  } catch {
+    snapshots.push({ service: 'storage', status: 'down', responseMs: null });
+  }
+
+  // Insert all snapshots
+  for (const snap of snapshots) {
+    await db.insert(uptimeSnapshots).values(snap);
+  }
+
+  // Prune snapshots older than 90 days
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  await db.delete(uptimeSnapshots).where(lt(uptimeSnapshots.recordedAt, cutoff));
 }
 
 async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void> {
@@ -1904,6 +1977,9 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       break;
     case 'registry-poll':
       await pollRegistryDigests();
+      break;
+    case 'uptime-snapshot':
+      await recordUptimeSnapshot();
       break;
   }
 }

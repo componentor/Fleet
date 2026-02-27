@@ -9,7 +9,13 @@ const { t } = useI18n()
 const api = useApi()
 const authStore = useAuthStore()
 
+interface Role {
+  id: string
+  name: string
+}
+
 const users = ref<any[]>([])
+const roles = ref<Role[]>([])
 const loading = ref(true)
 const error = ref('')
 const page = ref(1)
@@ -28,6 +34,15 @@ async function fetchUsers() {
   }
 }
 
+async function fetchRoles() {
+  try {
+    const data = await api.get<any>('/admin/roles')
+    roles.value = data.data ?? []
+  } catch {
+    roles.value = []
+  }
+}
+
 async function toggleSuper(userId: string, currentlySuper: boolean) {
   const action = currentlySuper ? 'remove super admin status from' : 'grant super admin status to'
   if (!confirm(`Are you sure you want to ${action} this user?`)) return
@@ -43,6 +58,25 @@ async function toggleSuper(userId: string, currentlySuper: boolean) {
   }
 }
 
+async function assignRole(userId: string, roleId: string | null) {
+  error.value = ''
+  try {
+    await api.patch<any>(`/admin/users/${userId}/role`, { adminRoleId: roleId })
+    const idx = users.value.findIndex(u => u.id === userId)
+    if (idx !== -1) {
+      users.value[idx] = { ...users.value[idx], adminRoleId: roleId }
+    }
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to assign role'
+  }
+}
+
+function getRoleName(roleId: string | null): string {
+  if (!roleId) return '--'
+  const role = roles.value.find(r => r.id === roleId)
+  return role?.name ?? '--'
+}
+
 function formatDate(ts: any) {
   if (!ts) return '--'
   const d = new Date(ts)
@@ -51,6 +85,7 @@ function formatDate(ts: any) {
 
 onMounted(() => {
   fetchUsers()
+  fetchRoles()
 })
 </script>
 
@@ -77,13 +112,14 @@ onMounted(() => {
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.users.name') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.users.email') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.users.superAdmin') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Admin Role</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('common.created') }}</th>
               <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('common.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="users.length === 0">
-              <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
+              <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 {{ $t('super.users.noUsersFound') }}
               </td>
             </tr>
@@ -112,6 +148,18 @@ onMounted(() => {
                 >
                   {{ user.isSuper ? $t('common.yes') : $t('common.no') }}
                 </span>
+              </td>
+              <td class="px-6 py-4 text-sm">
+                <span v-if="user.isSuper" class="text-purple-600 dark:text-purple-400 text-xs font-medium">Super Admin</span>
+                <select
+                  v-else
+                  :value="user.adminRoleId ?? ''"
+                  @change="assignRole(user.id, ($event.target as HTMLSelectElement).value || null)"
+                  class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                >
+                  <option value="">No role</option>
+                  <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
+                </select>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(user.createdAt) }}</td>
               <td class="px-6 py-4 text-right">

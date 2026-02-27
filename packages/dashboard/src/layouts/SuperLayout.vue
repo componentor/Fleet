@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
@@ -11,6 +11,7 @@ import {
   Users,
   Store,
   Shield,
+  ShieldCheck,
   UserCircle,
   Settings,
   CreditCard,
@@ -33,16 +34,24 @@ import {
   Handshake,
   ArrowUpCircle,
   ListFilter,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Megaphone,
+  LifeBuoy,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
+import SidebarTooltip from '@/components/SidebarTooltip.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useBranding } from '@/composables/useBranding'
+import { useSidebarCollapse } from '@/composables/useSidebarCollapse'
 import { versionInfo, updateVersion } from '@/composables/useVersionInfo'
+import { useAdminPermissions, type AdminSection } from '@/composables/useAdminPermissions'
 
 const commandPalette = useCommandPalette()
 const { brandTitle, logoSrc } = useBranding()
 const api = useApi()
+const adminPerms = useAdminPermissions()
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -53,8 +62,12 @@ const { user, logout } = useAuth()
 
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
+const { collapsed, toggle: toggleCollapse } = useSidebarCollapse()
 
 onMounted(async () => {
+  // Fetch admin permissions (for nav filtering)
+  adminPerms.fetch()
+
   try {
     const notif = await api.get<any>('/updates/notification')
     updateVersion(
@@ -67,31 +80,59 @@ onMounted(async () => {
   }
 })
 
-const navItems = [
-  { nameKey: 'nav.dashboard', path: '/admin', icon: LayoutDashboard },
-  { nameKey: 'nav.nodes', path: '/admin/nodes', icon: Server },
-  { nameKey: 'nav.status', path: '/admin/status', icon: Activity },
-  { nameKey: 'nav.users', path: '/admin/users', icon: Users },
-  { nameKey: 'nav.accounts', path: '/admin/accounts', icon: Users },
-  { nameKey: 'nav.services', path: '/admin/services', icon: Layers },
-  { nameKey: 'nav.storage', path: '/admin/storage', icon: HardDrive },
-  { nameKey: 'nav.marketplace', path: '/admin/marketplace', icon: Store },
-  { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText },
-  { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug },
-  { nameKey: 'nav.jobs', path: '/admin/jobs', icon: ListFilter },
-  { nameKey: 'nav.billing', path: '/admin/billing', icon: CreditCard },
-  { nameKey: 'nav.resellers', path: '/admin/resellers', icon: Handshake },
-  { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail },
-  { nameKey: 'nav.sharedDomains', path: '/admin/shared-domains', icon: Globe },
-  { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings },
-  { nameKey: 'nav.updates', path: '/admin/updates', icon: Download },
+interface NavItem {
+  nameKey: string
+  path: string
+  icon: any
+  section?: AdminSection
+  superOnly?: boolean
+  children?: NavItem[]
+}
+
+const allNavItems: NavItem[] = [
+  { nameKey: 'nav.dashboard', path: '/admin', icon: LayoutDashboard, section: 'dashboard' },
+  { nameKey: 'nav.nodes', path: '/admin/nodes', icon: Server, section: 'nodes' },
+  {
+    nameKey: 'nav.status', path: '/admin/status', icon: Activity, section: 'status',
+    children: [
+      { nameKey: 'nav.statusPosts', path: '/admin/status-posts', icon: Megaphone, section: 'statusPosts' },
+    ],
+  },
+  { nameKey: 'nav.users', path: '/admin/users', icon: Users, section: 'users' },
+  { nameKey: 'nav.accounts', path: '/admin/accounts', icon: Users, section: 'accounts' },
+  { nameKey: 'nav.services', path: '/admin/services', icon: Layers, section: 'services' },
+  { nameKey: 'nav.storage', path: '/admin/storage', icon: HardDrive, section: 'storage' },
+  { nameKey: 'nav.marketplace', path: '/admin/marketplace', icon: Store, section: 'marketplace' },
+  { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText, section: 'events' },
+  { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug, section: 'errors' },
+  { nameKey: 'nav.jobs', path: '/admin/jobs', icon: ListFilter, section: 'jobs' },
+  { nameKey: 'nav.billing', path: '/admin/billing', icon: CreditCard, section: 'billing' },
+  { nameKey: 'nav.resellers', path: '/admin/resellers', icon: Handshake, section: 'resellers' },
+  { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail, section: 'emailTemplates' },
+  { nameKey: 'nav.sharedDomains', path: '/admin/shared-domains', icon: Globe, section: 'sharedDomains' },
+  { nameKey: 'nav.support', path: '/admin/support', icon: LifeBuoy, section: 'support' },
+  { nameKey: 'nav.roles', path: '/admin/roles', icon: ShieldCheck, superOnly: true },
+  { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings, section: 'settings' },
+  { nameKey: 'nav.updates', path: '/admin/updates', icon: Download, section: 'updates' },
 ]
+
+const navItems = computed(() => {
+  return allNavItems.filter((item) => {
+    if (item.superOnly) return user.value?.isSuper
+    if (!item.section) return true
+    return adminPerms.can(item.section)
+  })
+})
 
 function isActive(path: string) {
   if (path === '/admin') {
     return route.path === '/admin'
   }
   return route.path.startsWith(path)
+}
+
+function isGroupActive(item: NavItem) {
+  return isActive(item.path) || (item.children?.some((c) => isActive(c.path)) ?? false)
 }
 
 async function handleLogout() {
@@ -121,77 +162,142 @@ function changeLocale(newLocale: string) {
     <!-- Sidebar -->
     <aside
       :class="[
-        'fixed inset-y-0 left-0 z-50 w-64 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-200 lg:translate-x-0 flex flex-col',
+        'fixed inset-y-0 left-0 z-50 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-all duration-200 lg:translate-x-0 flex flex-col overflow-hidden',
+        collapsed ? 'w-16' : 'w-64',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div class="flex items-center h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink to="/" class="flex items-center gap-2">
-          <img v-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" class="h-8 w-auto max-w-[140px] object-contain" />
+      <div :class="['flex items-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'justify-center px-2' : 'px-6']">
+        <RouterLink to="/" :class="['flex items-center', collapsed ? 'justify-center' : 'gap-2']">
+          <img v-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
           <svg v-else class="w-8 h-8 shrink-0" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
             <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4f46e5"/></linearGradient></defs>
             <rect width="64" height="64" rx="14" fill="url(#nav-g)"/>
             <text x="32" y="44" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="36" fill="#fff" text-anchor="middle">F</text>
           </svg>
-          <span class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</span>
+          <span v-if="!collapsed" class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</span>
         </RouterLink>
       </div>
 
       <!-- Power Admin banner -->
-      <div class="px-3 py-2 text-white text-center shrink-0 sidebar-banner-shimmer">
-        <div class="flex items-center justify-center gap-1.5" style="text-shadow: 0 1px 3px rgba(0,0,0,0.35);">
-          <Shield class="w-3.5 h-3.5" />
-          <span class="text-xs font-semibold tracking-wide uppercase">{{ $t('nav.admin') }}</span>
+      <div :class="['py-2 text-white shrink-0 sidebar-banner-shimmer', collapsed ? 'px-2' : 'px-[30px]']">
+        <div :class="['flex items-center gap-1.5', collapsed && 'justify-center']" style="text-shadow: 0 1px 3px rgba(0,0,0,0.35);">
+          <Shield class="w-3.5 h-3.5 shrink-0" />
+          <span v-if="!collapsed" class="text-xs font-semibold tracking-wide uppercase">{{ $t('nav.admin') }}</span>
+          <button
+            v-if="!collapsed"
+            @click="toggleCollapse"
+            class="hidden lg:flex ml-auto p-1 rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+            style="text-shadow: none;"
+          >
+            <PanelLeftClose class="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      <nav class="mt-4 px-3 space-y-1 overflow-y-auto flex-1">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.path"
-          :to="item.path"
-          :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px]',
-            isActive(item.path)
-              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
-              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
-          ]"
-          @click="sidebarOpen = false"
-        >
-          <component :is="item.icon" class="w-5 h-5 shrink-0" />
-          {{ $t(item.nameKey) }}
-        </RouterLink>
+      <nav :class="['mt-4 space-y-1 overflow-y-auto flex-1', collapsed ? 'px-2 scrollbar-hide' : 'px-3']">
+        <template v-for="item in navItems" :key="item.path">
+          <SidebarTooltip :label="$t(item.nameKey)" :show="collapsed">
+            <RouterLink
+              :to="item.path"
+              :class="[
+                'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
+                collapsed
+                  ? 'justify-center p-2.5'
+                  : 'gap-3 px-3 py-2.5 border-l-[3px]',
+                isActive(item.path)
+                  ? collapsed
+                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                    : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+                  : collapsed
+                    ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
+              ]"
+              @click="sidebarOpen = false"
+            >
+              <component :is="item.icon" class="w-5 h-5 shrink-0" />
+              <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
+            </RouterLink>
+          </SidebarTooltip>
+
+          <!-- Sub-items (shown when parent or any child is active) -->
+          <template v-if="item.children && !collapsed && isGroupActive(item)">
+            <SidebarTooltip
+              v-for="child in item.children"
+              :key="child.path"
+              :label="$t(child.nameKey)"
+              :show="collapsed"
+            >
+              <RouterLink
+                :to="child.path"
+                :class="[
+                  'flex items-center gap-3 rounded-lg text-sm font-medium transition-all duration-150 pl-8 pr-3 py-2 border-l-[3px]',
+                  isActive(child.path)
+                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
+                ]"
+                @click="sidebarOpen = false"
+              >
+                <component :is="child.icon" class="w-4 h-4 shrink-0" />
+                <span>{{ $t(child.nameKey) }}</span>
+              </RouterLink>
+            </SidebarTooltip>
+          </template>
+        </template>
       </nav>
 
       <!-- Version badge -->
-      <div v-if="versionInfo" class="px-4 py-2 border-t border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink
-          to="/admin/updates"
-          class="flex items-center gap-2 text-xs transition-colors rounded-md px-2 py-1.5 -mx-1"
-          :class="versionInfo.updateAvailable
-            ? 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
-            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
-        >
-          <ArrowUpCircle v-if="versionInfo.updateAvailable" class="w-3.5 h-3.5 shrink-0" />
-          <span class="font-mono">v{{ versionInfo.current }}</span>
-          <span v-if="versionInfo.updateAvailable" class="font-medium ml-auto">{{ versionInfo.latest }} available</span>
-        </RouterLink>
+      <div v-if="versionInfo" :class="['border-t border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'px-1.5 py-2' : 'px-4 py-2']">
+        <SidebarTooltip :label="versionInfo.updateAvailable ? `v${versionInfo.latest} available` : `v${versionInfo.current}`" :show="collapsed">
+          <RouterLink
+            to="/admin/updates"
+            :class="[
+              'flex items-center text-xs transition-colors rounded-md',
+              collapsed ? 'justify-center p-1.5' : 'gap-2 px-2 py-1.5 -mx-1',
+              versionInfo.updateAvailable
+                ? 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
+            ]"
+          >
+            <ArrowUpCircle v-if="versionInfo.updateAvailable" class="w-3.5 h-3.5 shrink-0" />
+            <span v-if="collapsed" class="font-mono text-[10px] leading-tight truncate">{{ versionInfo.current }}</span>
+            <template v-else>
+              <span class="font-mono">v{{ versionInfo.current }}</span>
+              <span v-if="versionInfo.updateAvailable" class="font-medium ml-auto">{{ versionInfo.latest }} available</span>
+            </template>
+          </RouterLink>
+        </SidebarTooltip>
       </div>
 
       <!-- Switch to panel -->
-      <div class="p-3 border-t border-gray-200 dark:border-gray-700 shrink-0">
+      <div :class="['border-t border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'p-2' : 'p-3']">
+        <SidebarTooltip :label="$t('nav.switchToPanel')" :show="collapsed">
+          <button
+            @click="goToPanel"
+            :class="[
+              'flex items-center rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
+              collapsed ? 'justify-center w-full p-2.5' : 'gap-3 w-full px-3 py-2.5',
+            ]"
+          >
+            <UserCircle class="w-5 h-5 shrink-0" />
+            <span v-if="!collapsed">{{ $t('nav.switchToPanel') }}</span>
+          </button>
+        </SidebarTooltip>
+      </div>
+
+      <!-- Collapse toggle (desktop only, collapsed state = own row in sidebar) -->
+      <div v-if="collapsed" class="hidden lg:block p-2 border-t border-gray-200 dark:border-gray-700 shrink-0">
         <button
-          @click="goToPanel"
-          class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          @click="toggleCollapse"
+          class="flex items-center justify-center w-full p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
-          <UserCircle class="w-5 h-5 shrink-0" />
-          {{ $t('nav.switchToPanel') }}
+          <PanelLeftOpen class="w-5 h-5" />
         </button>
       </div>
     </aside>
 
     <!-- Main content -->
-    <div class="lg:pl-64 min-w-0 overflow-x-hidden">
+    <div :class="['min-w-0 overflow-x-hidden transition-all duration-200', collapsed ? 'lg:pl-16' : 'lg:pl-64']">
       <!-- Top header -->
       <header class="sticky top-0 z-30 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
         <!-- Mobile hamburger -->
@@ -235,11 +341,7 @@ function changeLocale(newLocale: string) {
             :title="`Theme: ${theme}`"
           >
             <Sun v-if="theme === 'light'" class="w-5 h-5" />
-            <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
-            <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" />
-            </svg>
+            <Moon v-else class="w-5 h-5" />
           </button>
 
           <!-- Notifications -->

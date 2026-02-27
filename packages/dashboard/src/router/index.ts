@@ -157,9 +157,30 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/Jobs.vue'),
       },
       {
+        path: 'status-posts',
+        name: 'super-status-posts',
+        component: () => import('@/pages/super/StatusPosts.vue'),
+      },
+      {
         path: 'jobs/:queue/:id',
         name: 'super-job-detail',
         component: () => import('@/pages/super/JobDetail.vue'),
+        props: true,
+      },
+      {
+        path: 'roles',
+        name: 'super-roles',
+        component: () => import('@/pages/super/Roles.vue'),
+      },
+      {
+        path: 'support',
+        name: 'super-support',
+        component: () => import('@/pages/super/Support.vue'),
+      },
+      {
+        path: 'support/:id',
+        name: 'super-support-detail',
+        component: () => import('@/pages/super/SupportDetail.vue'),
         props: true,
       },
       {
@@ -286,6 +307,17 @@ const panelRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/panel/Reseller.vue'),
         meta: { requireOwner: true },
       },
+      {
+        path: 'support',
+        name: 'panel-support',
+        component: () => import('@/pages/panel/Support.vue'),
+      },
+      {
+        path: 'support/:id',
+        name: 'panel-support-detail',
+        component: () => import('@/pages/panel/SupportDetail.vue'),
+        props: true,
+      },
     ],
   },
 ]
@@ -316,6 +348,12 @@ const landingRoutes: RouteRecordRaw[] = [
     path: '/docs',
     name: 'docs',
     component: () => import('@/pages/landing/DocsView.vue'),
+    meta: { public: true, landing: true },
+  },
+  {
+    path: '/status',
+    name: 'status',
+    component: () => import('@/pages/landing/StatusView.vue'),
     meta: { public: true, landing: true },
   },
   {

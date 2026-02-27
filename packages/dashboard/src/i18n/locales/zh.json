@@ -170,6 +170,7 @@
     "status": "状态",
     "updates": "更新",
     "emailTemplates": "邮件模板",
+    "statusPosts": "状态公告",
     "stacks": "应用栈",
     "activity": "活动日志",
     "sharedDomains": "共享域名",
@@ -1807,6 +1808,76 @@
       "database": "数据库",
       "cache": "缓存"
     },
+    "statusPosts": {
+      "title": "状态公告",
+      "newPost": "新建公告",
+      "editPost": "编辑公告",
+      "icon": "图标",
+      "severity": "严重程度",
+      "affectedServices": "受影响的服务",
+      "status": "状态",
+      "draft": "草稿",
+      "published": "已发布",
+      "archived": "已归档",
+      "translations": "翻译",
+      "autoTranslate": "自动翻译",
+      "translating": "翻译中...",
+      "preview": "预览",
+      "editor": "编辑器",
+      "save": "保存",
+      "delete": "删除",
+      "confirmDelete": "确定要删除这篇公告吗？此操作无法撤销。",
+      "noTranslation": "暂无翻译",
+      "titlePlaceholder": "公告标题",
+      "bodyPlaceholder": "使用 Markdown 编写状态更新...",
+      "selectPost": "从列表中选择一篇公告进行编辑。",
+      "noPostsYet": "暂无状态公告",
+      "all": "全部",
+      "localesCount": "{count}/{total} 语言",
+      "saved": "公告已保存",
+      "deleted": "公告已删除",
+      "translated": "已翻译到 {count} 种语言",
+      "translateFailed": "翻译失败：{locales}",
+      "noApiKey": "翻译服务未配置。请在平台设置中添加 DeepL API 密钥。",
+      "untitled": "无标题",
+      "notPublished": "未发布",
+      "newPostTitle": "新状态公告",
+      "created": "公告已创建",
+      "createFailed": "创建公告失败",
+      "saveFailed": "保存公告失败",
+      "deleteFailed": "删除公告失败",
+      "deleteTranslationConfirm": "删除 {locale} 翻译？",
+      "translationDeleted": "翻译已删除",
+      "deleteTranslationFailed": "删除翻译失败",
+      "deleteTranslation": "删除翻译",
+      "metadata": "元数据",
+      "translationTitle": "标题",
+      "body": "正文",
+      "prev": "上一页",
+      "next": "下一页",
+      "icons": {
+        "incident": "事件",
+        "maintenance": "维护",
+        "resolved": "已解决",
+        "info": "信息",
+        "outage": "中断",
+        "degraded": "降级"
+      },
+      "severities": {
+        "info": "信息",
+        "warning": "警告",
+        "critical": "严重"
+      },
+      "toolbar": {
+        "bold": "粗体",
+        "italic": "斜体",
+        "heading": "标题",
+        "link": "链接",
+        "list": "列表",
+        "code": "代码",
+        "quote": "引用"
+      }
+    },
     "sharedDomains": {
       "title": "共享域名",
       "add": "添加域名",
@@ -2644,7 +2715,8 @@
       "privacy": "隐私政策",
       "terms": "服务条款",
       "discord": "Discord",
-      "rights": "Fleet。保留所有权利。"
+      "rights": "Fleet。保留所有权利。",
+      "status": "系统状态"
     },
     "privacy": {
       "title": "隐私政策",
@@ -3164,6 +3236,54 @@
         "disablingSftpTitle": "禁用 SFTP",
         "disablingSftpDesc": "如果您不需要 SFTP 访问，可通过设置环境变量来禁用："
       }
+    }
+  },
+  "statusPage": {
+    "title": "系统状态",
+    "description": "所有服务的当前状态和事件历史",
+    "allOperational": "所有系统正常运行",
+    "partialDegradation": "部分服务降级",
+    "majorOutage": "重大故障",
+    "unknown": "未知",
+    "notConfigured": "未配置",
+    "services": {
+      "api": "API",
+      "docker": "Docker Swarm",
+      "storage": "存储",
+      "queue": "队列"
+    },
+    "healthy": "正常",
+    "degraded": "降级",
+    "down": "故障",
+    "responseTime": "{ms}毫秒",
+    "uptime": {
+      "title": "运行时间历史",
+      "days": "{count} 天",
+      "noData": "无数据",
+      "percent": "{value}%",
+      "today": "今天"
+    },
+    "timeline": {
+      "title": "事件历史",
+      "search": "搜索事件...",
+      "empty": "暂无事件报告",
+      "noResults": "没有匹配的事件",
+      "prev": "上一页",
+      "next": "下一页",
+      "page": "第 {page} 页，共 {total} 页"
+    },
+    "icons": {
+      "incident": "事件",
+      "maintenance": "维护",
+      "resolved": "已解决",
+      "info": "信息",
+      "outage": "中断",
+      "degraded": "降级"
+    },
+    "severity": {
+      "info": "信息",
+      "warning": "警告",
+      "critical": "严重"
     }
   }
 }

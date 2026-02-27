@@ -5,7 +5,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { updateService } from '../services/update.service.js';
 import { runMigrations, verifyDatabase } from '@fleet/db/migrate';
 import { runSeeders } from '@fleet/db/seed';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const updateRoutes = new OpenAPIHono<{
@@ -271,6 +271,8 @@ updateRoutes.openapi(checkRoute, (async (c: any) => {
     const result = await updateService.checkForUpdates(includePrerelease);
     return c.json(result);
   } catch (err) {
+    logger.error({ err }, 'Failed to check for updates');
+    logToErrorTable({ level: 'error', message: `Failed to check for updates: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'updates/settings', operation: 'check-updates' } });
     return c.json({ error: `Failed to check for updates: ${String(err)}` }, 500);
   }
 }) as any);
@@ -301,6 +303,8 @@ updateRoutes.openapi(releasesRoute, (async (c: any) => {
       rcEnabled: includeRc,
     });
   } catch (err) {
+    logger.error({ err }, 'Failed to fetch releases');
+    logToErrorTable({ level: 'error', message: `Failed to fetch releases: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'updates/settings', operation: 'list-releases' } });
     return c.json({ error: `Failed to fetch releases: ${String(err)}` }, 500);
   }
 }) as any);
@@ -500,6 +504,8 @@ updateRoutes.openapi(migrateRoute, (async (c: any) => {
       applied: result.applied,
     });
   } catch (err) {
+    logger.error({ err }, 'Migration failed');
+    logToErrorTable({ level: 'error', message: `Migration failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'updates/settings', operation: 'run-migrations' } });
     return c.json({ error: `Migration failed (rolled back): ${String(err)}` }, 500);
   }
 }) as any);
@@ -513,6 +519,8 @@ updateRoutes.openapi(seedRoute, (async (c: any) => {
       executed: result.executed,
     });
   } catch (err) {
+    logger.error({ err }, 'Seeder failed');
+    logToErrorTable({ level: 'error', message: `Seeder failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'updates/settings', operation: 'run-seeders' } });
     return c.json({ error: `Seeder failed: ${String(err)}` }, 500);
   }
 }) as any);

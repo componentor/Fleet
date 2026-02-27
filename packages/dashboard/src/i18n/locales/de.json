@@ -170,6 +170,7 @@
     "status": "Status",
     "updates": "Updates",
     "emailTemplates": "E-Mail-Vorlagen",
+    "statusPosts": "Statusbeiträge",
     "stacks": "Stacks",
     "activity": "Aktivitätsprotokoll",
     "sharedDomains": "Geteilte Domains",
@@ -1807,6 +1808,76 @@
       "database": "Datenbank",
       "cache": "Cache"
     },
+    "statusPosts": {
+      "title": "Statusbeiträge",
+      "newPost": "Neuer Beitrag",
+      "editPost": "Beitrag bearbeiten",
+      "icon": "Symbol",
+      "severity": "Schweregrad",
+      "affectedServices": "Betroffene Dienste",
+      "status": "Status",
+      "draft": "Entwurf",
+      "published": "Veröffentlicht",
+      "archived": "Archiviert",
+      "translations": "Übersetzungen",
+      "autoTranslate": "Auto-übersetzen",
+      "translating": "Übersetze...",
+      "preview": "Vorschau",
+      "editor": "Editor",
+      "save": "Speichern",
+      "delete": "Löschen",
+      "confirmDelete": "Sind Sie sicher, dass Sie diesen Beitrag löschen möchten? Dies kann nicht rückgängig gemacht werden.",
+      "noTranslation": "Noch keine Übersetzung",
+      "titlePlaceholder": "Beitragstitel",
+      "bodyPlaceholder": "Schreiben Sie Ihr Status-Update in Markdown...",
+      "selectPost": "Wählen Sie einen Beitrag aus der Liste zum Bearbeiten.",
+      "noPostsYet": "Noch keine Statusbeiträge",
+      "all": "Alle",
+      "localesCount": "{count}/{total} Sprachen",
+      "saved": "Beitrag gespeichert",
+      "deleted": "Beitrag gelöscht",
+      "translated": "Übersetzt in {count} Sprache(n)",
+      "translateFailed": "Übersetzung fehlgeschlagen für: {locales}",
+      "noApiKey": "Übersetzungsdienst nicht konfiguriert. Fügen Sie einen DeepL API-Schlüssel in den Plattformeinstellungen hinzu.",
+      "untitled": "Ohne Titel",
+      "notPublished": "Nicht veröffentlicht",
+      "newPostTitle": "Neuer Statusbeitrag",
+      "created": "Beitrag erstellt",
+      "createFailed": "Beitrag konnte nicht erstellt werden",
+      "saveFailed": "Beitrag konnte nicht gespeichert werden",
+      "deleteFailed": "Beitrag konnte nicht gelöscht werden",
+      "deleteTranslationConfirm": "Übersetzung für {locale} löschen?",
+      "translationDeleted": "Übersetzung gelöscht",
+      "deleteTranslationFailed": "Übersetzung konnte nicht gelöscht werden",
+      "deleteTranslation": "Übersetzung löschen",
+      "metadata": "Metadaten",
+      "translationTitle": "Titel",
+      "body": "Inhalt",
+      "prev": "Zurück",
+      "next": "Weiter",
+      "icons": {
+        "incident": "Vorfall",
+        "maintenance": "Wartung",
+        "resolved": "Gelöst",
+        "info": "Info",
+        "outage": "Ausfall",
+        "degraded": "Beeinträchtigt"
+      },
+      "severities": {
+        "info": "Info",
+        "warning": "Warnung",
+        "critical": "Kritisch"
+      },
+      "toolbar": {
+        "bold": "Fett",
+        "italic": "Kursiv",
+        "heading": "Überschrift",
+        "link": "Link",
+        "list": "Liste",
+        "code": "Code",
+        "quote": "Zitat"
+      }
+    },
     "sharedDomains": {
       "title": "Geteilte Domains",
       "add": "Domain hinzufügen",
@@ -2644,7 +2715,8 @@
       "privacy": "Datenschutz",
       "terms": "AGB",
       "discord": "Discord",
-      "rights": "Fleet. Alle Rechte vorbehalten."
+      "rights": "Fleet. Alle Rechte vorbehalten.",
+      "status": "Status"
     },
     "privacy": {
       "title": "Datenschutzerklärung",
@@ -3164,6 +3236,54 @@
         "disablingSftpTitle": "SFTP deaktivieren",
         "disablingSftpDesc": "Wenn Sie keinen SFTP-Zugang benötigen, deaktivieren Sie ihn durch Setzen der Umgebungsvariable:"
       }
+    }
+  },
+  "statusPage": {
+    "title": "Systemstatus",
+    "description": "Aktueller Status und Vorfallhistorie für alle Dienste",
+    "allOperational": "Alle Systeme betriebsbereit",
+    "partialDegradation": "Teilweise Beeinträchtigung",
+    "majorOutage": "Größerer Ausfall",
+    "unknown": "Unbekannt",
+    "notConfigured": "Nicht konfiguriert",
+    "services": {
+      "api": "API",
+      "docker": "Docker Swarm",
+      "storage": "Speicher",
+      "queue": "Warteschlange"
+    },
+    "healthy": "Gesund",
+    "degraded": "Beeinträchtigt",
+    "down": "Ausgefallen",
+    "responseTime": "{ms}ms",
+    "uptime": {
+      "title": "Verfügbarkeitshistorie",
+      "days": "{count} Tage",
+      "noData": "Keine Daten",
+      "percent": "{value}%",
+      "today": "Heute"
+    },
+    "timeline": {
+      "title": "Vorfallhistorie",
+      "search": "Vorfälle durchsuchen...",
+      "empty": "Keine Vorfälle gemeldet",
+      "noResults": "Keine Vorfälle entsprechen Ihrer Suche",
+      "prev": "Zurück",
+      "next": "Weiter",
+      "page": "Seite {page} von {total}"
+    },
+    "icons": {
+      "incident": "Vorfall",
+      "maintenance": "Wartung",
+      "resolved": "Gelöst",
+      "info": "Info",
+      "outage": "Ausfall",
+      "degraded": "Beeinträchtigt"
+    },
+    "severity": {
+      "info": "Info",
+      "warning": "Warnung",
+      "critical": "Kritisch"
     }
   }
 }

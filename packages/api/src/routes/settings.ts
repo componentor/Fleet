@@ -8,7 +8,7 @@ import { requireAdmin } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
@@ -540,7 +540,7 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
   const ALLOWED_PLATFORM_PREFIXES = [
     'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
     'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
-    'updates:',
+    'updates:', 'support:',
   ];
 
   // Detect if any keys are platform-scoped (super admin settings page sends platform:* keys even with an account selected)
@@ -577,6 +577,7 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
           logger.info({ newDomain, changedBy: user.userId }, 'Fleet service Traefik labels updated for new domain');
         } catch (err) {
           logger.error({ err, newDomain }, 'Failed to update fleet service Traefik labels — manual service update may be needed');
+          logToErrorTable({ level: 'warn', message: `Traefik label update failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'traefik-label-update' } });
         }
       }
     }
@@ -675,6 +676,7 @@ settings.openapi(testStripeRoute, (async (c: any) => {
     });
   } catch (err) {
     logger.warn({ err }, 'Stripe connection test failed');
+    logToErrorTable({ level: 'warn', message: `Stripe connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'stripe-test' } });
     return c.json({ success: false, message: `Stripe connection failed: ${(err as Error).message}` }, 200);
   }
 }) as any);
@@ -757,6 +759,7 @@ settings.openapi(testEmailRoute, (async (c: any) => {
     return c.json({ success: true, message: `Test email sent (ID: ${result.messageId})` });
   } catch (err) {
     logger.warn({ err, to }, 'Test email failed');
+    logToErrorTable({ level: 'warn', message: `Test email failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'email-test' } });
     return c.json({ success: false, message: `Failed to send test email: ${(err as Error).message}` }, 200);
   }
 }) as any);
@@ -849,6 +852,8 @@ settings.openapi(testRegistrarRoute, (async (c: any) => {
     const results = await provider.searchDomains('test', ['com']);
     return c.json({ success: true, provider: provider.name, results: results.length });
   } catch (err) {
+    logger.error({ err }, 'Registrar connection test failed');
+    logToErrorTable({ level: 'error', message: `Registrar connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'registrar-test' } });
     return c.json({ success: false, error: 'Registrar connection test failed' }, 500);
   }
 }) as any);

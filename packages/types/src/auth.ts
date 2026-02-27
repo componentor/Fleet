@@ -13,6 +13,7 @@ export interface User {
   name: string;
   avatarUrl: string | null;
   isSuper: boolean;
+  adminRoleId: string | null;
   emailVerified: boolean;
   twoFactorEnabled: boolean;
   createdAt: Date;
@@ -47,6 +48,7 @@ export interface JwtPayload {
   userId: string;
   email: string;
   isSuper: boolean;
+  adminRoleId?: string;
 }
 
 export interface AuthTokens {

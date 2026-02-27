@@ -7,6 +7,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { adminRoles } from './admin-roles';
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -15,6 +16,7 @@ export const users = sqliteTable('users', {
   name: text('name'),
   avatarUrl: text('avatar_url'),
   isSuper: integer('is_super', { mode: 'boolean' }).default(false),
+  adminRoleId: text('admin_role_id').references(() => adminRoles.id, { onDelete: 'set null' }),
   emailVerified: integer('email_verified', { mode: 'boolean' }).default(false),
   emailVerifyToken: text('email_verify_token'),
   emailVerifyExpires: integer('email_verify_expires', { mode: 'timestamp' }),
@@ -70,7 +72,11 @@ export const oauthProviders = sqliteTable(
   ],
 );
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
+  adminRole: one(adminRoles, {
+    fields: [users.adminRoleId],
+    references: [adminRoles.id],
+  }),
   userAccounts: many(userAccounts),
   oauthProviders: many(oauthProviders),
 }));

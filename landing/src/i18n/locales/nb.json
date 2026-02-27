@@ -118,7 +118,56 @@
     "privacy": "Personvern",
     "terms": "Vilkår",
     "discord": "Discord",
+    "status": "Status",
     "rights": "Fleet. Alle rettigheter reservert."
+  },
+  "statusPage": {
+    "title": "Systemstatus",
+    "description": "Gjeldende status og hendelseshistorikk for alle tjenester",
+    "allOperational": "Alle systemer er operative",
+    "partialDegradation": "Delvis degradering",
+    "majorOutage": "Stort driftsavbrudd",
+    "unknown": "Ukjent",
+    "notConfigured": "Ikke konfigurert",
+    "services": {
+      "api": "API",
+      "docker": "Docker Swarm",
+      "storage": "Lagring",
+      "queue": "Kø"
+    },
+    "healthy": "Sunn",
+    "degraded": "Degradert",
+    "down": "Nede",
+    "responseTime": "{ms}ms",
+    "uptime": {
+      "title": "Oppetidshistorikk",
+      "days": "{count} dager",
+      "noData": "Ingen data",
+      "percent": "{value}%",
+      "today": "I dag"
+    },
+    "timeline": {
+      "title": "Hendelseshistorikk",
+      "search": "Søk i hendelser...",
+      "empty": "Ingen hendelser rapportert",
+      "noResults": "Ingen hendelser samsvarer med søket ditt",
+      "prev": "Forrige",
+      "next": "Neste",
+      "page": "Side {page} av {total}"
+    },
+    "icons": {
+      "incident": "Hendelse",
+      "maintenance": "Vedlikehold",
+      "resolved": "Løst",
+      "info": "Info",
+      "outage": "Driftsavbrudd",
+      "degraded": "Degradert"
+    },
+    "severity": {
+      "info": "Info",
+      "warning": "Advarsel",
+      "critical": "Kritisk"
+    }
   },
   "privacy": {
     "title": "Personvernerklæring",

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/auth'
 import {
-  Sun, Moon, Monitor, UserPlus, Globe, CheckCircle2, ArrowRight, ArrowLeft,
+  Sun, Moon, UserPlus, Globe, CheckCircle2, ArrowRight, ArrowLeft,
   Loader2, Shield, Crown, Network, Container, AlertTriangle, RefreshCw,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -194,8 +194,7 @@ async function goToDashboard() {
       :title="`Theme: ${theme}`"
     >
       <Sun v-if="theme === 'light'" class="w-5 h-5" />
-      <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
-      <Monitor v-else class="w-5 h-5" />
+      <Moon v-else class="w-5 h-5" />
     </button>
 
     <!-- Header -->

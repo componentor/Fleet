@@ -6,9 +6,9 @@ import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, deployments, eq, and, isNull, errorLog, userAccounts } from '@fleet/db';
+import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, users as usersTable } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
-import { logger } from './services/logger.js';
+import { logger, logToErrorTable } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { securityHeaders } from './middleware/security.js';
@@ -48,6 +48,10 @@ import jobRoutes from './routes/jobs.js';
 import volumeFileRoutes from './routes/volume-files.js';
 import logArchiveRoutes from './routes/log-archives.js';
 import registryCredentialRoutes from './routes/registry-credentials.js';
+import statusPageRoutes from './routes/status-page.js';
+import adminRoleRoutes from './routes/admin-roles.js';
+import supportRoutes from './routes/support.js';
+import adminSupportRoutes from './routes/admin-support.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -309,6 +313,10 @@ api.route('/shared-domains', sharedDomainRoutes);
 api.route('/reseller', resellerRoutes);
 api.route('/log-archives', logArchiveRoutes);
 api.route('/registry-credentials', registryCredentialRoutes);
+api.route('/status-page', statusPageRoutes);
+api.route('/admin', adminRoleRoutes);
+api.route('/support', supportRoutes);
+api.route('/admin/support', adminSupportRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(
@@ -387,6 +395,7 @@ api.get(
           }
         } catch (err) {
           logger.error({ err }, 'WS log auth failed');
+          logToErrorTable({ level: 'warn', message: `WS log auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'log-stream-auth' } });
           ws.close(4003, 'Auth failed');
         }
       },
@@ -660,6 +669,7 @@ api.get(
                 }
               } catch (err) {
                 logger.error({ err }, 'Deploy WS poll error');
+                logToErrorTable({ level: 'error', message: `Deploy WS poll error: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'deploy-poll' } });
               }
             }, 2000);
 
@@ -681,6 +691,7 @@ api.get(
           }
         } catch (err) {
           logger.error({ err }, 'WS deploy auth failed');
+          logToErrorTable({ level: 'warn', message: `WS deploy auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'deploy-auth' } });
           ws.close(4003, 'Auth failed');
         }
       },
@@ -707,6 +718,179 @@ api.get(
         if (trackedAccountId) {
           releaseWsSlot('deploy', trackedAccountId, activeDeployStreams);
           trackedAccountId = null;
+        }
+      },
+    };
+  }),
+);
+
+// ── WebSocket: Support ticket real-time chat ──
+// Shared Valkey subscriber for support ticket fan-out (one Redis connection for all support WS clients)
+type SupportListener = (message: string) => void;
+const supportChannelListeners = new Map<string, Set<SupportListener>>();
+let sharedSupportSubscriber: Awaited<ReturnType<typeof getValkey>> = null;
+let supportSubscriberInitPromise: Promise<boolean> | null = null;
+
+async function initSharedSupportSubscriber(): Promise<boolean> {
+  const valkey = await getValkey();
+  if (!valkey) return false;
+
+  sharedSupportSubscriber = valkey.duplicate();
+  sharedSupportSubscriber.on('message', (channel: string, message: string) => {
+    const listeners = supportChannelListeners.get(channel);
+    if (!listeners) return;
+    for (const listener of listeners) {
+      try { listener(message); } catch { /* individual listener error */ }
+    }
+  });
+
+  sharedSupportSubscriber.on('ready', () => {
+    const channels = [...supportChannelListeners.keys()];
+    if (channels.length > 0) {
+      sharedSupportSubscriber!.subscribe(...channels).catch((err) => {
+        logger.error({ err }, 'Failed to re-subscribe support channels');
+      });
+    }
+  });
+
+  return true;
+}
+
+function ensureSharedSupportSubscriber(): Promise<boolean> {
+  if (!supportSubscriberInitPromise) {
+    supportSubscriberInitPromise = initSharedSupportSubscriber();
+  }
+  return supportSubscriberInitPromise;
+}
+
+function addSupportListener(ticketId: string, listener: SupportListener) {
+  const channel = `support:ticket:${ticketId}`;
+  let listeners = supportChannelListeners.get(channel);
+  const isNewChannel = !listeners || listeners.size === 0;
+  if (!listeners) {
+    listeners = new Set();
+    supportChannelListeners.set(channel, listeners);
+  }
+  listeners.add(listener);
+
+  if (isNewChannel && sharedSupportSubscriber) {
+    sharedSupportSubscriber.subscribe(channel).catch((err) => {
+      logger.error({ err, ticketId }, 'Failed to subscribe to support channel');
+    });
+  }
+}
+
+function removeSupportListener(ticketId: string, listener: SupportListener) {
+  const channel = `support:ticket:${ticketId}`;
+  const listeners = supportChannelListeners.get(channel);
+  if (!listeners) return;
+  listeners.delete(listener);
+
+  if (listeners.size === 0) {
+    supportChannelListeners.delete(channel);
+    if (sharedSupportSubscriber) {
+      sharedSupportSubscriber.unsubscribe(channel).catch(() => {});
+    }
+  }
+}
+
+api.get(
+  '/support/tickets/:ticketId/ws',
+  upgradeWebSocket((c) => {
+    const ticketId = c.req.param('ticketId');
+    const token = extractWsToken(c);
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+    let activeListener: SupportListener | null = null;
+    let isAdminUser = false;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+          if (!ticketId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId)) {
+            ws.close(4001, 'Invalid ticketId');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+          isAdminUser = wsUser.isSuper;
+
+          // Verify the user has access to this ticket
+          const ticket = await db.query.supportTickets.findFirst({
+            where: eq(supportTickets.id, ticketId),
+          });
+
+          if (!ticket) {
+            ws.close(4004, 'Ticket not found');
+            return;
+          }
+
+          // Check if user is an admin (super or has admin role)
+          if (!isAdminUser) {
+            const wsUserRecord = await db.query.users.findFirst({
+              where: eq(usersTable.id, wsUser.userId),
+              columns: { adminRoleId: true },
+            });
+            if (wsUserRecord?.adminRoleId) {
+              isAdminUser = true;
+            }
+          }
+
+          // Non-admin users: verify they belong to the ticket's account
+          if (!isAdminUser) {
+            const membership = await db.query.userAccounts.findFirst({
+              where: and(
+                eq(userAccounts.userId, wsUser.userId),
+                eq(userAccounts.accountId, ticket.accountId),
+              ),
+            });
+            if (!membership) {
+              ws.close(4003, 'Access denied');
+              return;
+            }
+          }
+
+          // Subscribe to Valkey channel for this ticket
+          const hasValkey = await ensureSharedSupportSubscriber();
+          if (hasValkey) {
+            activeListener = (message: string) => {
+              try {
+                const data = JSON.parse(message);
+                // Filter out internal notes for non-admin clients
+                if (!isAdminUser && data.type === 'message' && data.message?.isInternal) {
+                  return;
+                }
+                ws.send(message);
+              } catch { /* ignore malformed */ }
+            };
+            addSupportListener(ticketId, activeListener);
+          }
+
+          // Keepalive pings
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 25_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS support auth failed');
+          logToErrorTable({ level: 'warn', message: `WS support auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'support-auth' } });
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      onClose() {
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
+        if (activeListener) {
+          removeSupportListener(ticketId, activeListener);
+          activeListener = null;
         }
       },
     };
@@ -899,6 +1083,7 @@ api.get(
           }
         } catch (err) {
           logger.error({ err }, 'WS terminal auth failed');
+          logToErrorTable({ level: 'warn', message: `WS terminal auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'terminal-auth' } });
           ws.close(4003, 'Auth failed');
         }
       },

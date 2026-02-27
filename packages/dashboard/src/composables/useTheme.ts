@@ -1,33 +1,43 @@
-import { useColorMode } from '@vueuse/core'
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
-export type ThemeMode = 'system' | 'light' | 'dark'
+export type ThemeMode = 'light' | 'dark'
+
+const STORAGE_KEY = 'fleet_theme'
+
+function detectSystemPreference(): ThemeMode {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function resolveInitialTheme(): ThemeMode {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (stored === 'light' || stored === 'dark') return stored
+  const detected = detectSystemPreference()
+  localStorage.setItem(STORAGE_KEY, detected)
+  return detected
+}
+
+function applyTheme(mode: ThemeMode) {
+  document.documentElement.classList.toggle('dark', mode === 'dark')
+  document.documentElement.classList.toggle('light', mode === 'light')
+}
+
+const theme = ref<ThemeMode>(resolveInitialTheme())
+applyTheme(theme.value)
+
+watch(theme, (val) => {
+  localStorage.setItem(STORAGE_KEY, val)
+  applyTheme(val)
+})
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  theme.value = e.matches ? 'dark' : 'light'
+})
 
 export function useTheme() {
-  const mode = useColorMode({
-    attribute: 'class',
-    modes: {
-      light: 'light',
-      dark: 'dark',
-    },
-    storageKey: 'fleet_theme',
-    initialValue: 'system',
-  })
-
-  const theme = computed<ThemeMode>({
-    get: () => (mode.store.value as ThemeMode) ?? 'system',
-    set: (val: ThemeMode) => {
-      mode.store.value = val
-    },
-  })
-
-  const isDark = computed(() => mode.value === 'dark')
+  const isDark = computed(() => theme.value === 'dark')
 
   function toggle() {
-    const order: ThemeMode[] = ['system', 'light', 'dark']
-    const current = order.indexOf(theme.value)
-    const next = order[(current + 1) % order.length]!
-
+    const next: ThemeMode = theme.value === 'dark' ? 'light' : 'dark'
     if ((document as any).startViewTransition) {
       ;(document as any).startViewTransition(() => { theme.value = next })
     } else {

@@ -5,7 +5,7 @@ import net from 'node:net';
 import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte, desc, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { dockerService } from '../services/docker.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
@@ -566,6 +566,7 @@ adminNodeRoutes.openapi(updateNodeRoute, (async (c: any) => {
       });
     } catch (err) {
       logger.error({ err }, 'Docker node update failed');
+      logToErrorTable({ level: 'error', message: `Docker node update failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'nodes', operation: 'docker-node-update' } });
     }
   }
 
@@ -596,6 +597,7 @@ adminNodeRoutes.openapi(deleteNodeRoute, (async (c: any) => {
       await dockerService.removeNode(node.dockerNodeId, true);
     } catch (err) {
       logger.error({ err }, 'Docker node removal failed');
+      logToErrorTable({ level: 'error', message: `Docker node removal failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'nodes', operation: 'docker-drain-remove' } });
     }
   }
 
@@ -627,6 +629,7 @@ adminNodeRoutes.openapi(drainNodeRoute, (async (c: any) => {
     return c.json({ message: 'Node draining initiated' });
   } catch (err) {
     logger.error({ err }, 'Node drain failed');
+    logToErrorTable({ level: 'error', message: `Node drain failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'nodes', operation: 'drain-node' } });
     return c.json({ error: 'Failed to drain node' }, 500);
   }
 }) as any);
@@ -654,6 +657,7 @@ adminNodeRoutes.openapi(activateNodeRoute, (async (c: any) => {
     return c.json({ message: 'Node activated' });
   } catch (err) {
     logger.error({ err }, 'Node activation failed');
+    logToErrorTable({ level: 'error', message: `Node activation failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'nodes', operation: 'activate-node' } });
     return c.json({ error: 'Failed to activate node' }, 500);
   }
 }) as any);

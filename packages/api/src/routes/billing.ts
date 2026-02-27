@@ -31,7 +31,7 @@ import { usageService } from '../services/usage.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { calculateResellerPricing } from './reseller.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
@@ -42,7 +42,10 @@ async function queueEmail(data: EmailJobData): Promise<void> {
     await getEmailQueue().add('send-email', data);
   } else {
     emailService.sendTemplateEmail(data.templateSlug, data.to, data.variables, data.accountId)
-      .catch((err) => logger.error({ err }, `Failed to send ${data.templateSlug} email`));
+      .catch((err) => {
+        logger.error({ err }, `Failed to send ${data.templateSlug} email`);
+        logToErrorTable({ level: 'error', message: `Failed to send ${data.templateSlug} email: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'queue-email-fallback', templateSlug: data.templateSlug } });
+      });
   }
 }
 
@@ -490,6 +493,7 @@ authed.openapi(checkoutRoute, (async (c: any) => {
     return c.json(result);
   } catch (err) {
     logger.error({ err }, 'Failed to create checkout session');
+    logToErrorTable({ level: 'error', message: `Failed to create checkout session: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'create-checkout-session' } });
     return c.json({ error: 'Checkout failed' }, 400);
   }
 }) as any);
@@ -575,6 +579,7 @@ authed.openapi(cancelSubscriptionRoute, (async (c: any) => {
       await stripeService.cancelSubscriptionAtPeriodEnd(sub.stripeSubscriptionId);
     } catch (err) {
       logger.error({ err }, 'Failed to cancel Stripe subscription');
+      logToErrorTable({ level: 'error', message: `Failed to cancel Stripe subscription: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'cancel-stripe-subscription' } });
       return c.json({ error: 'Failed to cancel subscription' }, 500);
     }
   }
@@ -664,6 +669,7 @@ authed.openapi(getInvoicesRoute, (async (c: any) => {
     return c.json(invoices);
   } catch (err) {
     logger.error({ err }, 'Failed to fetch invoices from Stripe');
+    logToErrorTable({ level: 'error', message: `Failed to fetch invoices from Stripe: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'fetch-invoices' } });
     return c.json({ error: 'Failed to fetch invoices' }, 500);
   }
 }) as any);
@@ -731,6 +737,7 @@ authed.openapi(getPaymentMethodsRoute, (async (c: any) => {
     });
   } catch (err) {
     logger.error({ err }, 'Failed to fetch payment methods');
+    logToErrorTable({ level: 'error', message: `Failed to fetch payment methods: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'fetch-payment-methods' } });
     return c.json({ error: 'Failed to fetch payment methods' }, 500);
   }
 }) as any);
@@ -755,6 +762,7 @@ authed.openapi(setupPaymentMethodRoute, (async (c: any) => {
     return c.json({ clientSecret: intent.client_secret });
   } catch (err) {
     logger.error({ err }, 'Failed to create setup intent');
+    logToErrorTable({ level: 'error', message: `Failed to create setup intent: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'create-setup-intent' } });
     return c.json({ error: 'Failed to create setup intent' }, 500);
   }
 }) as any);
@@ -780,6 +788,7 @@ authed.openapi(setDefaultPaymentMethodRoute, (async (c: any) => {
     return c.json({ message: 'Default payment method updated' });
   } catch (err) {
     logger.error({ err }, 'Failed to set default payment method');
+    logToErrorTable({ level: 'error', message: `Failed to set default payment method: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'set-default-payment-method' } });
     return c.json({ error: 'Failed to update default payment method' }, 500);
   }
 }) as any);
@@ -807,6 +816,7 @@ authed.openapi(deletePaymentMethodRoute, (async (c: any) => {
     return c.json({ message: 'Payment method removed' });
   } catch (err) {
     logger.error({ err }, 'Failed to detach payment method');
+    logToErrorTable({ level: 'error', message: `Failed to detach payment method: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'detach-payment-method' } });
     return c.json({ error: 'Failed to remove payment method' }, 500);
   }
 }) as any);
@@ -873,6 +883,7 @@ authed.openapi(updateConfigRoute, (async (c: any) => {
   if (effectiveModel === 'usage' || effectiveModel === 'hybrid') {
     stripeSyncService.ensureMeteredPrices().catch((err) => {
       logger.error({ err }, 'Failed to auto-create metered Stripe prices');
+      logToErrorTable({ level: 'error', message: `Failed to auto-create metered Stripe prices: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'ensure-metered-prices' } });
     });
   }
 
@@ -1058,6 +1069,7 @@ async function suspendAccountServices(accountId: string) {
         .where(eq(services.id, svc.id));
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to suspend service');
+      logToErrorTable({ level: 'error', message: `Failed to suspend service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'suspend-service', serviceId: svc.id } });
     }
   }
 }
@@ -1083,6 +1095,7 @@ billing.post('/webhook', async (c) => {
     event = await stripeService.constructWebhookEvent(rawBody, signature);
   } catch (err) {
     logger.error({ err }, 'Webhook signature verification failed');
+    logToErrorTable({ level: 'error', message: `Webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'webhook-signature-verification' } });
     return c.json({ error: 'Invalid signature' }, 400);
   }
 
@@ -1140,6 +1153,7 @@ billing.post('/webhook', async (c) => {
                   .where(eq(domRegTable.id, existingRegistration.id));
               } catch (captureErr) {
                 logger.error({ err: captureErr, paymentIntent: paymentIntentId, domain }, 'Failed to capture payment for existing registration');
+                logToErrorTable({ level: 'error', message: `Failed to capture payment for existing registration: ${captureErr instanceof Error ? captureErr.message : String(captureErr)}`, stack: captureErr instanceof Error ? captureErr.stack : null, metadata: { context: 'billing', operation: 'capture-payment-existing-registration', domain, paymentIntent: paymentIntentId } });
               }
             } else if (paymentIntentId) {
               // Duplicate checkout — another payment already captured; cancel this orphaned hold
@@ -1148,6 +1162,7 @@ billing.post('/webhook', async (c) => {
                 logger.info({ paymentIntent: paymentIntentId, domain }, 'Cancelled orphaned payment authorization for duplicate domain checkout');
               } catch (cancelErr) {
                 logger.warn({ err: cancelErr, paymentIntent: paymentIntentId, domain }, 'Failed to cancel orphaned payment authorization (will expire automatically)');
+                logToErrorTable({ level: 'error', message: `Failed to cancel orphaned payment authorization: ${cancelErr instanceof Error ? cancelErr.message : String(cancelErr)}`, stack: cancelErr instanceof Error ? cancelErr.stack : null, metadata: { context: 'billing', operation: 'cancel-orphaned-payment-auth', domain, paymentIntent: paymentIntentId } });
               }
             }
             break;
@@ -1194,6 +1209,7 @@ billing.post('/webhook', async (c) => {
               // CRITICAL: Domain registered but payment not captured — alert admin for manual resolution
               logger.error({ err: captureErr, paymentIntent: paymentIntentId, domain, accountId, registrationId: registration?.id },
                 'CRITICAL: Domain registered but payment capture failed — manual capture required in Stripe dashboard');
+              logToErrorTable({ level: 'fatal', message: `Domain registered but payment capture failed: ${captureErr instanceof Error ? captureErr.message : String(captureErr)}`, stack: captureErr instanceof Error ? captureErr.stack : null, metadata: { context: 'billing', operation: 'domain-registration-capture-payment', domain, accountId, paymentIntent: paymentIntentId, registrationId: registration?.id } });
             }
           }
 
@@ -1206,6 +1222,7 @@ billing.post('/webhook', async (c) => {
           logger.info({ domain, accountId, paymentIntent: paymentIntentId }, 'Domain registered and payment captured');
         } catch (err) {
           logger.error({ err, domain, accountId, paymentIntent: paymentIntentId }, 'Domain registration failed — cancelling payment authorization');
+          logToErrorTable({ level: 'fatal', message: `Domain registration failed in Stripe webhook: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'domain-registration-webhook', domain, accountId, paymentIntent: paymentIntentId } });
 
           // Cancel the authorization hold — no charge, no fees
           if (paymentIntentId) {
@@ -1214,6 +1231,7 @@ billing.post('/webhook', async (c) => {
               logger.info({ paymentIntent: paymentIntentId, domain }, 'Payment authorization cancelled for failed domain registration');
             } catch (cancelErr) {
               logger.error({ err: cancelErr, paymentIntent: paymentIntentId, domain }, 'CRITICAL: Failed to cancel payment authorization — manual cancellation required');
+              logToErrorTable({ level: 'fatal', message: `CRITICAL: Failed to cancel payment authorization for domain registration: ${cancelErr instanceof Error ? cancelErr.message : String(cancelErr)}`, stack: cancelErr instanceof Error ? cancelErr.stack : null, metadata: { context: 'billing', operation: 'cancel-payment-auth-domain-registration', domain, paymentIntent: paymentIntentId } });
             }
           }
 
@@ -1268,11 +1286,13 @@ billing.post('/webhook', async (c) => {
             } catch (captureErr) {
               logger.error({ err: captureErr, paymentIntent: paymentIntentId, registrationId },
                 'CRITICAL: Domain renewed but payment capture failed — manual capture required in Stripe dashboard');
+              logToErrorTable({ level: 'fatal', message: `Domain renewed but payment capture failed: ${captureErr instanceof Error ? captureErr.message : String(captureErr)}`, stack: captureErr instanceof Error ? captureErr.stack : null, metadata: { context: 'billing', operation: 'domain-renewal-capture-payment', registrationId, paymentIntent: paymentIntentId } });
             }
           }
           logger.info({ registrationId, paymentIntent: paymentIntentId }, 'Domain renewed and payment captured');
         } catch (err) {
           logger.error({ err, registrationId, paymentIntent: paymentIntentId }, 'Domain renewal failed — cancelling payment authorization');
+          logToErrorTable({ level: 'fatal', message: `Domain renewal failed in Stripe webhook: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'domain-renewal-webhook', registrationId, paymentIntent: paymentIntentId } });
 
           // Cancel the authorization hold — no charge, no fees
           if (paymentIntentId) {
@@ -1281,6 +1301,7 @@ billing.post('/webhook', async (c) => {
               logger.info({ paymentIntent: paymentIntentId, registrationId }, 'Payment authorization cancelled for failed domain renewal');
             } catch (cancelErr) {
               logger.error({ err: cancelErr, paymentIntent: paymentIntentId, registrationId }, 'CRITICAL: Failed to cancel payment authorization — manual cancellation required');
+              logToErrorTable({ level: 'fatal', message: `CRITICAL: Failed to cancel payment auth for domain renewal: ${cancelErr instanceof Error ? cancelErr.message : String(cancelErr)}`, stack: cancelErr instanceof Error ? cancelErr.stack : null, metadata: { context: 'billing', operation: 'cancel-payment-auth-domain-renewal', registrationId, paymentIntent: paymentIntentId } });
             }
           }
 
@@ -1339,6 +1360,7 @@ billing.post('/webhook', async (c) => {
                 } catch (svcErr) {
                   logger.error({ err: svcErr, serviceId, domain: fullDomain },
                     'Failed to assign domain to service after subdomain payment');
+                  logToErrorTable({ level: 'error', message: `Failed to assign domain to service after subdomain payment: ${svcErr instanceof Error ? svcErr.message : String(svcErr)}`, stack: svcErr instanceof Error ? svcErr.stack : null, metadata: { context: 'billing', operation: 'assign-domain-after-subdomain-payment', serviceId, domain: fullDomain } });
                 }
               }
 
@@ -1347,6 +1369,7 @@ billing.post('/webhook', async (c) => {
             }
           } catch (err) {
             logger.error({ err, claimId }, 'Failed to activate subdomain claim after payment');
+            logToErrorTable({ level: 'error', message: `Failed to activate subdomain claim after payment: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'activate-subdomain-claim', claimId } });
           }
         }
       } else if (session.customer && session.subscription) {
@@ -1464,6 +1487,7 @@ billing.post('/webhook', async (c) => {
           }
         } catch (err) {
           logger.error({ err, registrationId, domain }, 'Domain renewal failed after Stripe payment — manual intervention required');
+          logToErrorTable({ level: 'error', message: `Domain renewal failed after Stripe payment: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'domain-renewal-after-payment', registrationId, domain } });
 
           // Notify account about the failure
           if (accountId) {
@@ -1739,6 +1763,7 @@ billing.post('/webhook', async (c) => {
         }
       } catch (err) {
         logger.error({ err }, 'Failed to check subdomain claim subscription cancellation');
+        logToErrorTable({ level: 'error', message: `Failed to check subdomain claim subscription cancellation: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'check-subdomain-claim-cancellation' } });
       }
 
       break;

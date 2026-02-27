@@ -19,7 +19,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { stripeService } from '../services/stripe.service.js';
 import { invalidateCache } from '../middleware/cache.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -501,6 +501,7 @@ sharedDomainRoutes.openapi(claimSubdomainRoute, (async (c: any) => {
     // Checkout creation failed — clean up the pending claim
     await deleteReturning(subdomainClaims, eq(subdomainClaims.id, pendingClaim.id));
     logger.error({ err, subdomain: fullDomain }, 'Failed to create Stripe checkout for subdomain');
+    logToErrorTable({ level: 'error', message: `Failed to create Stripe checkout for subdomain: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'shared-domains', operation: 'create-stripe-checkout' } });
     return c.json({ error: 'Failed to create payment session' }, 500);
   }
 }) as any);
@@ -601,6 +602,7 @@ sharedDomainRoutes.openapi(deleteClaimRoute, (async (c: any) => {
       await stripeService.cancelSubscription(claim.stripeSubscriptionId);
     } catch (err) {
       logger.error({ err, claimId: id }, 'Failed to cancel Stripe subscription for subdomain claim');
+      logToErrorTable({ level: 'error', message: `Failed to cancel Stripe subscription for subdomain claim: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'shared-domains', operation: 'cancel-stripe-subscription' } });
     }
   }
 
@@ -650,6 +652,7 @@ async function assignDomainToService(serviceId: string, accountId: string, domai
     await invalidateCache(`GET:/services:${accountId}`);
   } catch (err) {
     logger.error({ err, serviceId, domain }, 'Failed to assign domain to service');
+    logToErrorTable({ level: 'error', message: `Failed to assign domain to service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'shared-domains', operation: 'assign-domain-to-service' } });
   }
 }
 
@@ -685,6 +688,7 @@ async function clearServiceDomain(serviceId: string) {
     await invalidateCache(`GET:/services:${svc.accountId}`);
   } catch (err) {
     logger.error({ err, serviceId }, 'Failed to clear service domain');
+    logToErrorTable({ level: 'error', message: `Failed to clear service domain: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'shared-domains', operation: 'clear-service-domain' } });
   }
 }
 

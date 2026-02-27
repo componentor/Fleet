@@ -7,7 +7,7 @@ import { initWorkers, shutdownWorkers } from './services/queue.service.js'
 import { closeValkey } from './services/valkey.service.js'
 import { db, platformSettings, eq } from '@fleet/db'
 import { runMigrations } from '@fleet/db/migrate'
-import { logger } from './services/logger.js'
+import { logger, logToErrorTable } from './services/logger.js'
 
 // Register shutdown handlers early — before any async work
 let server: ReturnType<typeof serve> | undefined
@@ -40,6 +40,7 @@ try {
   if (applied > 0) logger.info({ applied }, 'Database migrations applied')
 } catch (err) {
   logger.error({ err }, 'Database migration failed')
+  logToErrorTable({ level: 'fatal', message: `Database migration failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'migration' } })
 }
 
 // Run database seeders on startup (idempotent — safe to re-run)
@@ -49,6 +50,7 @@ try {
   if (executed > 0) logger.info({ executed }, 'Database seeders executed')
 } catch (err) {
   logger.warn({ err }, 'Database seeder warning (non-fatal)')
+  logToErrorTable({ level: 'error', message: `Database seeder failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'seeder' } })
 }
 
 // Recover from interrupted auto-updates (must run after DB is ready, before serving traffic)
@@ -56,6 +58,7 @@ try {
   await updateService.recoverFromInterruptedUpdate()
 } catch (err) {
   logger.error({ err }, 'Update recovery failed — system may need manual inspection')
+  logToErrorTable({ level: 'error', message: `Update recovery failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'update-recovery' } })
 }
 
 // Load persisted version from DB (survives container restarts after updates)
@@ -117,6 +120,7 @@ try {
   await storageManager.initialize()
 } catch (err) {
   logger.error({ err }, 'Storage manager initialization failed')
+  logToErrorTable({ level: 'error', message: `Storage manager initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'storage-init' } })
 }
 
 // Sync built-in marketplace templates from disk into DB
@@ -125,6 +129,7 @@ try { await templateService.syncBuiltinTemplates() } catch {}
 // Initialize BullMQ workers (deployment, backup, maintenance)
 try { await initWorkers() } catch (err) {
   logger.error({ err }, 'Worker initialization failed')
+  logToErrorTable({ level: 'error', message: `Worker initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'worker-init' } })
 }
 
 // Initialize cross-replica build cancellation via Valkey pub/sub
@@ -136,6 +141,7 @@ try {
 // Initialize background job scheduler (registers repeatable BullMQ jobs)
 try { await schedulerService.initialize() } catch (err) {
   logger.error({ err }, 'Scheduler initialization failed')
+  logToErrorTable({ level: 'error', message: `Scheduler initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'scheduler-init' } })
 }
 
 // Configure Docker Swarm task history limit (auto-clean old failed task records)

@@ -278,6 +278,7 @@ async function manageWebhook(opts: {
     if (opts.existingWebhookId) {
       await githubService.deleteWebhook(token, owner, repo, opts.existingWebhookId).catch((err) => {
         logger.warn({ err, hookId: opts.existingWebhookId }, 'Failed to delete GitHub webhook (may already be removed)');
+        logToErrorTable({ level: 'warn', message: `Failed to delete GitHub webhook: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-github-webhook' } });
       });
     }
     return null;
@@ -884,6 +885,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to register GitHub webhook during service creation — auto-deploy may not work');
+      logToErrorTable({ level: 'warn', message: `GitHub webhook registration failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'create-github-webhook' } });
       // Disable autoDeploy since webhook registration failed
       await db.update(services).set({ autoDeploy: false }).where(eq(services.id, svc.id));
       svc.autoDeploy = false;
@@ -966,6 +968,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     return c.json(response, 201);
   } catch (err) {
     logger.warn({ err }, 'Docker not available — service created but not started');
+    logToErrorTable({ level: 'error', message: `Service creation Docker deployment failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'create-docker-deploy' } });
     await db
       .update(services)
       .set({ status: 'stopped', updatedAt: new Date() })
@@ -1149,6 +1152,7 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
     });
   } catch (err) {
     logger.error({ err }, 'Failed to fetch service stats');
+    logToErrorTable({ level: 'error', message: `Failed to fetch service stats: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'fetch-stats' } });
     return c.json({ error: 'Failed to fetch service stats' }, 500);
   }
 }) as any);
@@ -1232,6 +1236,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
       });
     } catch (err) {
       logger.error({ err }, 'GitHub webhook management failed');
+      logToErrorTable({ level: 'error', message: `GitHub webhook management failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'update-github-webhook' } });
       return c.json({ error: `Failed to ${data.autoDeploy ? 'register' : 'remove'} GitHub webhook: ${(err as Error).message}` }, 400);
     }
   }
@@ -1279,6 +1284,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
               await dockerService.copyVolumeData(oldSource, newVol.source);
             } catch (err) {
               logger.warn({ err, from: oldSource, to: newVol.source }, 'Volume data migration failed — continuing with empty volume');
+              logToErrorTable({ level: 'warn', message: `Volume data migration failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'update-volume-migration' } });
               migrationFailures.push({
                 source: oldSource,
                 target: newVol.source,
@@ -1403,6 +1409,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       await dockerService.removeService(svc.dockerServiceId);
     } catch (err) {
       logger.error({ err }, 'Docker service removal failed');
+      logToErrorTable({ level: 'error', message: `Docker service removal failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-service' } });
     }
     // Wait for tasks to stop, then force-remove leftover containers so volumes are released
     await dockerService.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
@@ -1420,6 +1427,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       });
     } catch (err) {
       logger.warn({ err }, 'Failed to clean up GitHub webhook on service delete');
+      logToErrorTable({ level: 'warn', message: `Failed to clean up GitHub webhook on delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-webhook-cleanup' } });
     }
   }
 
@@ -1430,6 +1438,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       await uploadService.deleteServiceFiles(accountId, serviceId);
     } catch (err) {
       logger.error({ err }, 'Failed to clean up upload source files');
+      logToErrorTable({ level: 'warn', message: `Upload source files cleanup failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-upload-cleanup' } });
     }
   }
 
@@ -1456,12 +1465,14 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       if (v.source && !usedByOthers.has(v.source)) {
         await dockerService.removeVolume(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
+          logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-volume' } });
         });
 
         // Also delete storage volumes (GlusterFS + DB record) when requested
         if (shouldDeleteVolumes) {
           await storageManager.deleteVolume(accountId, v.source).catch((err) => {
             logger.warn({ err, volume: v.source }, 'Failed to delete storage volume on service delete');
+            logToErrorTable({ level: 'warn', message: `Failed to delete storage volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-storage-volume' } });
           });
         }
       }
@@ -1521,6 +1532,7 @@ serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
     return c.json({ message: 'Service restart initiated' });
   } catch (err) {
     logger.error({ err }, 'Service restart failed');
+    logToErrorTable({ level: 'error', message: `Service restart failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'restart-service' } });
     return c.json({ error: 'Failed to restart service' }, 500);
   }
 }) as any);
@@ -1589,11 +1601,13 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       } catch {
         processDeploymentInline(jobData).catch((err) => {
           logger.error({ err }, 'Inline redeploy rebuild failed');
+          logToErrorTable({ level: 'error', message: `Inline redeploy rebuild failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'redeploy-inline-rebuild' } });
         });
       }
     } else {
       processDeploymentInline(jobData).catch((err) => {
         logger.error({ err }, 'Inline redeploy rebuild failed');
+        logToErrorTable({ level: 'error', message: `Inline redeploy rebuild failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'redeploy-inline-rebuild' } });
       });
     }
 
@@ -1775,6 +1789,7 @@ serviceRoutes.openapi(stopServiceRoute, (async (c: any) => {
       await dockerService.scaleService(svc.dockerServiceId, 0);
     } catch (err) {
       logger.error({ err }, 'Docker scale-to-zero failed');
+      logToErrorTable({ level: 'error', message: `Docker scale-to-zero failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stop-scale-to-zero' } });
       return c.json({ error: 'Failed to stop service in Docker' }, 500);
     }
   }
@@ -1954,6 +1969,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
       return c.json({ message: 'Service deployed and started' });
     } catch (err) {
       logger.error({ err }, 'Docker deployment on start failed');
+      logToErrorTable({ level: 'error', message: `Service start deploy failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'start-deploy' } });
       return c.json({ error: 'Failed to deploy service to Docker' }, 500);
     }
   }
@@ -1962,6 +1978,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
     await dockerService.scaleService(svc.dockerServiceId, svc.replicas ?? 1);
   } catch (err) {
     logger.error({ err }, 'Docker scale-up failed');
+    logToErrorTable({ level: 'error', message: `Service start scale-up failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'start-scale-up' } });
     return c.json({ error: 'Failed to start service in Docker' }, 500);
   }
 
@@ -2071,6 +2088,7 @@ serviceRoutes.openapi(volumeMigrateRoute, (async (c: any) => {
     return c.json({ message: 'Volume data migrated successfully' });
   } catch (err) {
     logger.error({ err, from: data.sourceVolume, to: data.targetVolume }, 'Volume migration failed');
+    logToErrorTable({ level: 'error', message: `Volume migration failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'volume-migration' } });
     return c.json({ error: `Volume migration failed: ${(err as Error).message}` }, 500);
   }
 }) as any);
@@ -2135,6 +2153,7 @@ serviceRoutes.openapi(getServiceLogsRoute, (async (c: any) => {
       return c.json({ logs: '', warning: 'Docker service not found — it may have been removed or is not yet deployed.' });
     }
     logger.error({ err }, 'Log fetch failed');
+    logToErrorTable({ level: 'error', message: `Log fetch failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'fetch-logs' } });
     return c.json({ error: 'Failed to fetch logs' }, 500);
   }
 }) as any);
@@ -2200,6 +2219,7 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
       if (svc.dockerServiceId) {
         await dockerService.removeService(svc.dockerServiceId).catch((err) => {
           logger.warn({ err, serviceId: svc.id }, 'Docker removal failed during stack delete');
+          logToErrorTable({ level: 'warn', message: `Docker removal failed during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-removal' } });
         });
         removedDockerServiceIds.push(svc.dockerServiceId);
       }
@@ -2225,6 +2245,7 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
       results.push({ id: svc.id, name: svc.name, success: true });
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to delete stack service');
+      logToErrorTable({ level: 'error', message: `Failed to delete stack service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-service' } });
       results.push({ id: svc.id, name: svc.name, success: false });
     }
   }
@@ -2260,12 +2281,14 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
 
     await dockerService.removeVolume(volName).catch((err) => {
       logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
+      logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-volume' } });
     });
 
     // Also delete storage volumes (GlusterFS + DB record) when requested
     if (shouldDeleteVolumes) {
       await storageManager.deleteVolume(accountId, volName).catch((err) => {
         logger.warn({ err, volume: volName }, 'Failed to delete storage volume during stack delete');
+        logToErrorTable({ level: 'warn', message: `Failed to delete storage volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-storage-volume' } });
       });
     }
   }
@@ -2314,6 +2337,7 @@ serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
       results.push({ id: svc.id, name: svc.name, success: true });
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to restart stack service');
+      logToErrorTable({ level: 'error', message: `Failed to restart stack service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-restart-service' } });
       results.push({ id: svc.id, name: svc.name, success: false });
     }
   }
@@ -2484,6 +2508,7 @@ serviceRoutes.openapi(updateDockerfileRoute, (async (c: any) => {
       await uploadService.writeFile(svc.sourcePath, 'Dockerfile', body.content);
     } catch (err) {
       logger.warn({ err }, 'Failed to write Dockerfile to source directory');
+      logToErrorTable({ level: 'warn', message: `Failed to write Dockerfile to source directory: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'write-dockerfile' } });
     }
   }
 

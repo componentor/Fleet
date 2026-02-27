@@ -5,7 +5,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
 import { requireMember, requireAdmin } from '../middleware/rbac.js';
 import { cache } from '../middleware/cache.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import {
   jsonBody,
@@ -258,6 +258,7 @@ marketplace.openapi(imageTagsRoute, (async (c: any) => {
     return c.json({ tags, defaultTag }, 200);
   } catch (err) {
     logger.error({ err, image }, 'Failed to fetch Docker Hub tags');
+    logToErrorTable({ level: 'warn', message: `Docker Hub tag fetch failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'marketplace', operation: 'docker-hub-tags' } });
     return c.json({ tags: [defaultTag], defaultTag }, 200);
   }
 }) as any);
@@ -312,6 +313,7 @@ marketplace.openapi(deployRoute, (async (c: any) => {
     }
 
     logger.error({ err }, 'Template deployment failed');
+    logToErrorTable({ level: 'error', message: `Template deployment failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'marketplace', operation: 'deploy-template' } });
     return c.json({ error: 'Failed to deploy template' }, 500);
   }
 }) as any);
@@ -352,6 +354,7 @@ marketplace.openapi(createTemplateRoute, (async (c: any) => {
     return c.json(template, 201);
   } catch (err) {
     logger.error({ err }, 'Template creation failed');
+    logToErrorTable({ level: 'error', message: `Template creation failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'marketplace', operation: 'create-template' } });
     return c.json({ error: 'Failed to create template' }, 500);
   }
 }) as any);
@@ -396,6 +399,7 @@ marketplace.openapi(updateTemplateRoute, (async (c: any) => {
     return c.json(updated, 200);
   } catch (err) {
     logger.error({ err }, 'Template update failed');
+    logToErrorTable({ level: 'error', message: `Template update failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'marketplace', operation: 'update-template' } });
     return c.json({ error: 'Failed to update template' }, 500);
   }
 }) as any);
@@ -466,6 +470,7 @@ marketplace.openapi(syncRoute, (async (c: any) => {
     return c.json({ message: 'Templates synced successfully' }, 200);
   } catch (err) {
     logger.error({ err }, 'Template sync failed');
+    logToErrorTable({ level: 'error', message: `Template sync failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'marketplace', operation: 'sync-templates' } });
     return c.json({ error: 'Failed to sync templates' }, 500);
   }
 }) as any);
