@@ -27,6 +27,7 @@ interface Message {
   ticketId: string
   authorId: string
   body: string
+  senderRole: string
   isInternal: boolean
   authorName: string | null
   authorEmail: string | null
@@ -75,8 +76,8 @@ const messagesContainer = ref<HTMLElement | null>(null)
 const replyTextarea = ref<HTMLTextAreaElement | null>(null)
 const previewReply = ref(false)
 
-function isOwnMessage(msg: Message): boolean {
-  return msg.authorId === authStore.user?.id
+function isCustomerMessage(msg: Message): boolean {
+  return msg.senderRole === 'customer'
 }
 
 function insertMarkdown(before: string, after: string = '') {
@@ -384,10 +385,10 @@ onMounted(() => {
             <div
               v-for="msg in ticket.messages"
               :key="msg.id"
-              :class="['flex gap-3', isOwnMessage(msg) ? 'justify-end' : 'justify-start']"
+              :class="['flex gap-3', isCustomerMessage(msg) ? 'justify-end' : 'justify-start']"
             >
               <!-- Avatar (left side for other's messages) -->
-              <div v-if="!isOwnMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-300">
+              <div v-if="!isCustomerMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-300">
                 <img v-if="msg.authorAvatarUrl" :src="msg.authorAvatarUrl" class="w-full h-full object-cover" />
                 <span v-else>{{ authorInitial(msg) }}</span>
               </div>
@@ -398,7 +399,7 @@ onMounted(() => {
                   'max-w-[75%] rounded-2xl px-4 py-3',
                   msg.isInternal
                     ? 'bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700'
-                    : isOwnMessage(msg)
+                    : isCustomerMessage(msg)
                       ? 'bg-primary-600 dark:bg-primary-700 text-white rounded-tr-sm'
                       : 'bg-gray-100 dark:bg-gray-700 rounded-tl-sm',
                 ]"
@@ -408,7 +409,7 @@ onMounted(() => {
                   <span :class="[
                     'text-xs font-semibold',
                     msg.isInternal ? 'text-amber-700 dark:text-amber-300'
-                      : isOwnMessage(msg) ? 'text-primary-200 dark:text-primary-300'
+                      : isCustomerMessage(msg) ? 'text-primary-200 dark:text-primary-300'
                       : 'text-gray-500 dark:text-gray-400',
                   ]">
                     {{ authorDisplayName(msg) }}
@@ -425,7 +426,7 @@ onMounted(() => {
                     'prose prose-sm max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs',
                     msg.isInternal
                       ? 'text-amber-900 dark:text-amber-100 [&_a]:text-primary-600 dark:[&_a]:text-primary-400 [&_code]:bg-amber-100 dark:[&_code]:bg-amber-800'
-                      : isOwnMessage(msg)
+                      : isCustomerMessage(msg)
                         ? 'prose-invert text-white [&_a]:text-blue-200 [&_code]:bg-primary-500 dark:[&_code]:bg-primary-600'
                         : 'dark:prose-invert text-gray-800 dark:text-gray-200 [&_a]:text-primary-600 dark:[&_a]:text-primary-400 [&_code]:bg-gray-200 dark:[&_code]:bg-gray-600',
                   ]"
@@ -435,14 +436,14 @@ onMounted(() => {
                 <!-- Timestamp -->
                 <div :class="['text-[10px] mt-1.5 text-right',
                   msg.isInternal ? 'text-amber-500 dark:text-amber-400'
-                    : isOwnMessage(msg) ? 'text-primary-200 dark:text-primary-300'
+                    : isCustomerMessage(msg) ? 'text-primary-200 dark:text-primary-300'
                     : 'text-gray-400 dark:text-gray-500']">
                   {{ timeAgo(msg.createdAt) }}
                 </div>
               </div>
 
               <!-- Avatar (right side for own messages) -->
-              <div v-if="isOwnMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-xs font-semibold text-primary-700 dark:text-primary-300">
+              <div v-if="isCustomerMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-xs font-semibold text-primary-700 dark:text-primary-300">
                 <img v-if="msg.authorAvatarUrl" :src="msg.authorAvatarUrl" class="w-full h-full object-cover" />
                 <span v-else>{{ authorInitial(msg) }}</span>
               </div>

@@ -43,6 +43,7 @@ export const supportTicketMessages = pgTable('support_ticket_messages', {
     .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
   body: text('body').notNull(),
+  senderRole: varchar('sender_role').default('customer').notNull(),
   isInternal: boolean('is_internal').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

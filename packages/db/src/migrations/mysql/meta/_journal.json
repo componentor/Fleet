@@ -211,6 +211,20 @@
       "when": 1774500000000,
       "tag": "0029_add_status_page",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1774600000000,
+      "tag": "0030_add_self_healing",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1774700000000,
+      "tag": "0031_add_sender_role",
+      "breakpoints": true
     }
   ]
 }

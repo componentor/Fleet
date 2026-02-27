@@ -218,6 +218,20 @@
       "when": 1774300000000,
       "tag": "0030_add_support_tickets",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1774400000000,
+      "tag": "0031_add_self_healing",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1774500000000,
+      "tag": "0032_add_sender_role",
+      "breakpoints": true
     }
   ]
 }

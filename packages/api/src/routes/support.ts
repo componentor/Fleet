@@ -238,6 +238,7 @@ supportRoutes.openapi(createTicketRoute, (async (c: any) => {
     ticketId: ticket!.id,
     authorId: user.userId,
     body: body.body,
+    senderRole: 'customer',
     isInternal: false,
   });
 
@@ -309,6 +310,7 @@ supportRoutes.openapi(addMessageRoute, (async (c: any) => {
     ticketId: id,
     authorId: user.userId,
     body: body.body,
+    senderRole: 'customer',
     isInternal: false,
   });
 

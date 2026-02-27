@@ -345,6 +345,7 @@ adminSupportRoutes.openapi(addMessageRoute, (async (c: any) => {
     ticketId: id,
     authorId: user.userId,
     body: body.body,
+    senderRole: 'admin',
     isInternal,
   });
 

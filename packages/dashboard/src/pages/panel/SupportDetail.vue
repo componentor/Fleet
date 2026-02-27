@@ -11,6 +11,7 @@ interface Message {
   ticketId: string
   authorId: string
   body: string
+  senderRole: string
   isInternal: boolean
   authorName: string | null
   authorEmail: string | null

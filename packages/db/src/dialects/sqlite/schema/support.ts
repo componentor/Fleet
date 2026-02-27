@@ -41,6 +41,7 @@ export const supportTicketMessages = sqliteTable('support_ticket_messages', {
     .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
   body: text('body').notNull(),
+  senderRole: text('sender_role').default('customer').notNull(),
   isInternal: integer('is_internal', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
