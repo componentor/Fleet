@@ -8,7 +8,7 @@ import { dnsManager } from '../services/dns-provider-manager.js';
 import { requireMember } from '../middleware/rbac.js';
 import { randomUUID } from 'crypto';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
@@ -732,6 +732,7 @@ dnsRoutes.openapi(updateNameserversRoute, (async (c: any) => {
     }
   } catch (err) {
     logger.warn({ err, domain: zone.domain }, 'Failed to update nameservers at registrar (DB update succeeded)');
+    logToErrorTable({ level: 'warn', message: `Nameserver update at registrar failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'domains', operation: 'update-nameservers-at-registrar' } });
   }
 
   return c.json({

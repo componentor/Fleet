@@ -183,6 +183,55 @@
       "when": 1773900000000,
       "tag": "0025_add_max_users_per_account",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1774200000000,
+      "tag": "0026_add_admin_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1774300000000,
+      "tag": "0027_add_support_tickets",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1774400000000,
+      "tag": "0028_add_billed_by_account_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1774500000000,
+      "tag": "0029_add_status_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1774600000000,
+      "tag": "0030_add_self_healing",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1774700000000,
+      "tag": "0031_add_sender_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1774800000000,
+      "tag": "0032_add_error_status",
+      "breakpoints": true
     }
   ]
 }

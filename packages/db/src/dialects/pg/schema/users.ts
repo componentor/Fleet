@@ -9,6 +9,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { adminRoles } from './admin-roles';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -17,6 +18,7 @@ export const users = pgTable('users', {
   name: varchar('name', { length: 255 }),
   avatarUrl: varchar('avatar_url'),
   isSuper: boolean('is_super').default(false),
+  adminRoleId: uuid('admin_role_id').references(() => adminRoles.id, { onDelete: 'set null' }),
   emailVerified: boolean('email_verified').default(false),
   emailVerifyToken: varchar('email_verify_token', { length: 255 }),
   emailVerifyExpires: timestamp('email_verify_expires'),
@@ -72,7 +74,11 @@ export const oauthProviders = pgTable(
   ],
 );
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
+  adminRole: one(adminRoles, {
+    fields: [users.adminRoleId],
+    references: [adminRoles.id],
+  }),
   userAccounts: many(userAccounts),
   oauthProviders: many(oauthProviders),
 }));

@@ -35,13 +35,18 @@ import {
   Languages,
   Search,
   SlidersHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  LifeBuoy,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import AdminOverridesPanel from '@/components/AdminOverridesPanel.vue'
+import SidebarTooltip from '@/components/SidebarTooltip.vue'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
+import { useSidebarCollapse } from '@/composables/useSidebarCollapse'
 
 const commandPalette = useCommandPalette()
 const { brandTitle, logoSrc } = useBranding()
@@ -70,45 +75,117 @@ function stopImpersonating() {
 // Reseller branding for sub-accounts
 const resellerBranding = ref<{ found: boolean; brandName?: string; brandLogoUrl?: string; brandPrimaryColor?: string }>({ found: false })
 
-onMounted(async () => {
-  // Super admins always see platform branding, even when viewing sub-accounts
-  if (isSuper) return
-  try {
-    resellerBranding.value = await api.get('/reseller/parent-branding')
-  } catch {
-    // Not a sub-account of a reseller, or reseller program not active
-  }
-})
-
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
 const accountMenuOpen = ref(false)
 const overridesPanelOpen = ref(false)
+const { collapsed, toggle: toggleCollapse } = useSidebarCollapse()
+const supportEnabled = ref(false)
 
-const navItems = [
-  { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
-  { nameKey: 'nav.services', path: '/panel/services', icon: Box },
-  { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
-  { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
-  { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
-  { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
-  { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
-  { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
-  { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
-  { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
-  { nameKey: 'nav.subAccounts', path: '/panel/sub-accounts', icon: UserPlus },
-  { nameKey: 'nav.users', path: '/panel/users', icon: Users },
-  { nameKey: 'nav.activity', path: '/panel/activity', icon: ScrollText },
-  { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
-  { nameKey: 'nav.reseller', path: '/panel/reseller', icon: Handshake, requireOwner: true },
-  { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
+onMounted(async () => {
+  // Load custom locales for language selector
+  try {
+    const stored = localStorage.getItem('fleet_custom_locales')
+    if (stored) customLocales.value = JSON.parse(stored)
+  } catch { /* ignore */ }
+
+  // Super admins always see platform branding, even when viewing sub-accounts
+  if (!isSuper) {
+    try {
+      resellerBranding.value = await api.get('/reseller/parent-branding')
+    } catch {
+      // Not a sub-account of a reseller, or reseller program not active
+    }
+  }
+  // Check if support is enabled
+  try {
+    const res = await api.get<{ enabled: boolean }>('/support/enabled')
+    supportEnabled.value = res.enabled
+  } catch {
+    // Support feature not available
+  }
+})
+
+interface NavItem {
+  nameKey: string
+  path: string
+  icon: any
+  requireAdmin?: boolean
+  requireOwner?: boolean
+  requireSupport?: boolean
+}
+
+interface NavGroup {
+  labelKey: string
+  items: NavItem[]
+}
+
+const allNavGroups: NavGroup[] = [
+  {
+    labelKey: 'nav.group.overview',
+    items: [
+      { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
+    ],
+  },
+  {
+    labelKey: 'nav.group.services',
+    items: [
+      { nameKey: 'nav.services', path: '/panel/services', icon: Box },
+      { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
+      { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
+    ],
+  },
+  {
+    labelKey: 'nav.group.infrastructure',
+    items: [
+      { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
+      { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
+      { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
+      { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
+      { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
+      { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
+    ],
+  },
+  {
+    labelKey: 'nav.group.team',
+    items: [
+      { nameKey: 'nav.subAccounts', path: '/panel/sub-accounts', icon: UserPlus },
+      { nameKey: 'nav.users', path: '/panel/users', icon: Users },
+      { nameKey: 'nav.activity', path: '/panel/activity', icon: ScrollText },
+    ],
+  },
+  {
+    labelKey: 'nav.group.business',
+    items: [
+      { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
+      { nameKey: 'nav.reseller', path: '/panel/reseller', icon: Handshake, requireOwner: true },
+    ],
+  },
+  {
+    labelKey: 'nav.group.other',
+    items: [
+      { nameKey: 'nav.support', path: '/panel/support', icon: LifeBuoy, requireSupport: true },
+      { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
+    ],
+  },
 ]
+
+const navGroups = computed(() => {
+  return allNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (i) => (!i.requireAdmin || canAdmin) && (!i.requireOwner || canOwner) && (!i.requireSupport || supportEnabled.value),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 
 function isActive(path: string) {
   if (path === '/panel') {
     return route.path === '/panel'
   }
-  return route.path.startsWith(path)
+  return route.path === path || route.path.startsWith(path + '/')
 }
 
 async function handleLogout() {
@@ -120,6 +197,8 @@ function handleSwitchAccount(id: string) {
   accountMenuOpen.value = false
   switchAccount(id)
 }
+
+const customLocales = ref<{ code: string; name: string }[]>([])
 
 function changeLocale(newLocale: string) {
   locale.value = newLocale
@@ -139,14 +218,15 @@ function changeLocale(newLocale: string) {
     <!-- Sidebar -->
     <aside
       :class="[
-        'fixed inset-y-0 left-0 z-50 w-64 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-200 lg:translate-x-0 flex flex-col',
+        'fixed inset-y-0 left-0 z-50 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-all duration-200 lg:translate-x-0 flex flex-col overflow-hidden',
+        collapsed ? 'w-16' : 'w-64',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div class="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink to="/" class="flex items-center gap-2">
-          <img v-if="resellerBranding.found && resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" class="h-8 w-auto max-w-[140px] object-contain" />
-          <img v-else-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" class="h-8 w-auto max-w-[140px] object-contain" />
+      <div :class="['flex items-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'justify-center px-2' : 'justify-between px-6']">
+        <RouterLink to="/" :class="['flex items-center', collapsed ? 'justify-center' : 'gap-2']">
+          <img v-if="resellerBranding.found && resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
+          <img v-else-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
           <template v-else>
             <svg class="w-8 h-8 shrink-0" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
               <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4f46e5"/></linearGradient></defs>
@@ -154,57 +234,102 @@ function changeLocale(newLocale: string) {
               <text x="32" y="44" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="36" fill="#fff" text-anchor="middle">F</text>
             </svg>
           </template>
-          <span v-if="resellerBranding.found && resellerBranding.brandName && !resellerBranding.brandLogoUrl" class="text-xl font-bold text-primary-600 dark:text-primary-400">
+          <span v-if="!collapsed && resellerBranding.found && resellerBranding.brandName && !resellerBranding.brandLogoUrl" class="text-xl font-bold text-primary-600 dark:text-primary-400">
             {{ resellerBranding.brandName }}
           </span>
-          <span v-else-if="!resellerBranding.found && !logoSrc()" class="text-xl font-bold text-primary-600 dark:text-primary-400">
+          <span v-else-if="!collapsed && !resellerBranding.found && !logoSrc()" class="text-xl font-bold text-primary-600 dark:text-primary-400">
             {{ brandTitle }}
           </span>
         </RouterLink>
       </div>
 
       <!-- Account banner -->
-      <div class="px-3 py-2 text-white text-center shrink-0 sidebar-banner-shimmer">
-        <div class="flex items-center justify-center gap-1.5" style="text-shadow: 0 1px 3px rgba(0,0,0,0.35);">
-          <Users class="w-3.5 h-3.5" />
-          <span class="text-xs font-semibold tracking-wide uppercase truncate">{{ currentAccount?.name || 'Account' }}</span>
+      <div :class="['py-2 text-white shrink-0 sidebar-banner-shimmer', collapsed ? 'px-2' : 'px-[30px]']">
+        <div :class="['flex items-center gap-1.5', collapsed && 'justify-center']" style="text-shadow: 0 1px 3px rgba(0,0,0,0.35);">
+          <Users class="w-3.5 h-3.5 shrink-0" />
+          <span v-if="!collapsed" class="text-xs font-semibold tracking-wide uppercase truncate">{{ currentAccount?.name || 'Account' }}</span>
+          <button
+            v-if="!collapsed"
+            @click="toggleCollapse"
+            class="hidden lg:flex ml-auto p-1 rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+            style="text-shadow: none;"
+          >
+            <PanelLeftClose class="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      <nav class="mt-4 px-3 space-y-1 overflow-y-auto flex-1">
-        <RouterLink
-          v-for="item in navItems.filter(i => (!i.requireAdmin || canAdmin) && (!i.requireOwner || canOwner))"
-          :key="item.path"
-          :to="item.path"
-          :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px]',
-            isActive(item.path)
-              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
-              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
-          ]"
-          @click="sidebarOpen = false"
-        >
-          <component :is="item.icon" class="w-5 h-5 shrink-0" />
-          {{ $t(item.nameKey) }}
-        </RouterLink>
+      <nav :class="['mt-2 pb-4 overflow-y-auto flex-1', collapsed ? 'px-2 scrollbar-hide' : 'px-3']">
+        <template v-for="(group, gi) in navGroups" :key="group.labelKey">
+          <!-- Group header -->
+          <div v-if="!collapsed" :class="['px-3 pt-4 pb-1', gi === 0 && 'pt-2']">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ $t(group.labelKey) }}</span>
+          </div>
+          <div v-else-if="gi > 0" class="my-2 mx-1 border-t border-gray-200 dark:border-gray-700" />
+
+          <div class="space-y-0.5">
+            <SidebarTooltip
+              v-for="item in group.items"
+              :key="item.path"
+              :label="$t(item.nameKey)"
+              :show="collapsed"
+            >
+              <RouterLink
+                :to="item.path"
+                :class="[
+                  'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
+                  collapsed
+                    ? 'justify-center p-2.5'
+                    : 'gap-3 px-3 py-2 border-l-[3px]',
+                  isActive(item.path)
+                    ? collapsed
+                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                      : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+                    : collapsed
+                      ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
+                ]"
+                @click="sidebarOpen = false"
+              >
+                <component :is="item.icon" class="w-5 h-5 shrink-0" />
+                <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
+              </RouterLink>
+            </SidebarTooltip>
+          </div>
+        </template>
       </nav>
 
       <!-- Back to Admin (for super users) -->
-      <div v-if="isSuper" class="p-3 border-t border-gray-200 dark:border-gray-700 shrink-0">
-        <RouterLink
-          to="/admin"
-          class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
+      <div v-if="isSuper" :class="['border-t border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'p-2' : 'p-3']">
+        <SidebarTooltip :label="$t('nav.backToAdmin')" :show="collapsed">
+          <RouterLink
+            to="/admin"
+            :class="[
+              'flex items-center rounded-lg text-sm font-medium text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors',
+              collapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5',
+            ]"
+          >
+            <ShieldCheck class="w-5 h-5 shrink-0" />
+            <span v-if="!collapsed">{{ $t('nav.backToAdmin') }}</span>
+          </RouterLink>
+        </SidebarTooltip>
+      </div>
+
+      <!-- Collapse toggle (desktop only, collapsed state = own row in sidebar) -->
+      <div v-if="collapsed" class="hidden lg:block p-2 border-t border-gray-200 dark:border-gray-700 shrink-0">
+        <button
+          @click="toggleCollapse"
+          class="flex items-center justify-center w-full p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
-          <ShieldCheck class="w-5 h-5 shrink-0" />
-          {{ $t('nav.backToAdmin') }}
-        </RouterLink>
+          <PanelLeftOpen class="w-5 h-5" />
+        </button>
       </div>
     </aside>
 
     <!-- Main content -->
-    <div class="lg:pl-64 min-w-0 overflow-x-hidden">
+    <div :class="['min-w-0 overflow-x-hidden transition-all duration-200 flex flex-col h-screen', collapsed ? 'lg:pl-16' : 'lg:pl-64']">
       <!-- Top header -->
-      <header class="sticky top-0 z-30 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
+      <header class="shrink-0 z-30 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
         <!-- Mobile hamburger -->
         <button
           class="lg:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -265,6 +390,7 @@ function changeLocale(newLocale: string) {
             <option value="nb">NO</option>
             <option value="de">DE</option>
             <option value="zh">中文</option>
+            <option v-for="cl in customLocales" :key="cl.code" :value="cl.code">{{ cl.name }}</option>
           </select>
 
           <!-- Theme toggle -->
@@ -274,11 +400,7 @@ function changeLocale(newLocale: string) {
             :title="`Theme: ${theme}`"
           >
             <Sun v-if="theme === 'light'" class="w-5 h-5" />
-            <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
-            <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" />
-            </svg>
+            <Moon v-else class="w-5 h-5" />
           </button>
 
           <!-- Search trigger -->
@@ -300,8 +422,9 @@ function changeLocale(newLocale: string) {
               @click="userMenuOpen = !userMenuOpen"
               class="flex items-center gap-2 p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
-              <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold">
-                {{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}
+              <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold overflow-hidden">
+                <img v-if="user?.avatarUrl" :src="user.avatarUrl" :alt="user.name || 'Avatar'" class="w-full h-full object-cover" />
+                <span v-else>{{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}</span>
               </div>
               <ChevronDown class="w-4 h-4" />
             </button>
@@ -339,7 +462,7 @@ function changeLocale(newLocale: string) {
       </header>
 
       <!-- Impersonation banner -->
-      <div v-if="isImpersonating" class="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-sm">
+      <div v-if="isImpersonating" class="shrink-0 bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-sm">
         <div class="flex items-center gap-2">
           <ShieldAlert class="w-4 h-4" />
           <span>{{ $t('impersonation.youAreImpersonating') }} <strong>{{ currentAccount?.name ?? $t('impersonation.anAccount') }}</strong></span>
@@ -368,10 +491,10 @@ function changeLocale(newLocale: string) {
       <AdminOverridesPanel v-if="isImpersonating && overridesPanelOpen && currentAccount?.id" :account-id="currentAccount.id" />
 
       <!-- Page content -->
-      <main class="p-6">
+      <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">
-            <div v-if="Component" :key="$route.path">
+            <div v-if="Component" :key="$route.path" class="flex-1 min-h-0 overflow-y-auto p-6">
               <component :is="Component" />
             </div>
           </Transition>

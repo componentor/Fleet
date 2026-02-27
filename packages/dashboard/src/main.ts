@@ -4,7 +4,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { router } from './router'
-import { i18n } from './i18n'
+import { i18n, loadI18nOverrides } from './i18n'
 import { useAuthStore } from './stores/auth'
 
 const app = createApp(App)
@@ -18,8 +18,9 @@ app.config.errorHandler = (err, _instance, info) => {
   console.error(`[Fleet] Unhandled error (${info}):`, err)
 }
 
-// Initialize auth (silent refresh from httpOnly cookie) before mounting
+// Initialize auth (silent refresh from httpOnly cookie) then load i18n overrides before mounting
 const authStore = useAuthStore()
-authStore.init().finally(() => {
+authStore.init().finally(async () => {
+  await loadI18nOverrides()
   app.mount('#app')
 })

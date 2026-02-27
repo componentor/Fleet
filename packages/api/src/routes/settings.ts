@@ -8,7 +8,7 @@ import { requireAdmin } from '../middleware/rbac.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
 import { encrypt, decrypt } from '../services/crypto.service.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
@@ -177,6 +177,12 @@ const githubSettingsSchema = z.object({
 const googleSettingsSchema = z.object({
   clientId: z.string().min(1).optional(),
   clientSecret: z.string().min(1).optional(),
+});
+
+const translationSettingsSchema = z.object({
+  provider: z.enum(['deepl', 'claude']).optional(),
+  deeplApiKey: z.string().min(1).optional(),
+  claudeApiKey: z.string().min(1).optional(),
 });
 
 const brandingTypeParamSchema = z.object({
@@ -455,6 +461,48 @@ const deleteBrandingRoute = createRoute({
   },
 });
 
+const getTranslationRoute = createRoute({
+  method: 'get',
+  path: '/translation',
+  tags: ['Settings'],
+  summary: 'Get translation service configuration (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Translation configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateTranslationRoute = createRoute({
+  method: 'patch',
+  path: '/translation',
+  tags: ['Settings'],
+  summary: 'Configure translation service (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(translationSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Translation configuration updated'),
+  },
+});
+
+const testTranslationRoute = createRoute({
+  method: 'post',
+  path: '/translation/test',
+  tags: ['Settings'],
+  summary: 'Test DeepL API connection (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean(), message: z.string(), characterCount: z.number().optional(), characterLimit: z.number().optional() }), 'DeepL test result'),
+    ...standardErrors,
+  },
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ────────────────────────────────────────────────────────────────────────────
@@ -540,7 +588,7 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
   const ALLOWED_PLATFORM_PREFIXES = [
     'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
     'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
-    'updates:',
+    'updates:', 'support:', 'translation:', 'i18n:', 'selfhealing:',
   ];
 
   // Detect if any keys are platform-scoped (super admin settings page sends platform:* keys even with an account selected)
@@ -577,6 +625,7 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
           logger.info({ newDomain, changedBy: user.userId }, 'Fleet service Traefik labels updated for new domain');
         } catch (err) {
           logger.error({ err, newDomain }, 'Failed to update fleet service Traefik labels — manual service update may be needed');
+          logToErrorTable({ level: 'warn', message: `Traefik label update failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'traefik-label-update' } });
         }
       }
     }
@@ -675,6 +724,7 @@ settings.openapi(testStripeRoute, (async (c: any) => {
     });
   } catch (err) {
     logger.warn({ err }, 'Stripe connection test failed');
+    logToErrorTable({ level: 'warn', message: `Stripe connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'stripe-test' } });
     return c.json({ success: false, message: `Stripe connection failed: ${(err as Error).message}` }, 200);
   }
 }) as any);
@@ -757,6 +807,7 @@ settings.openapi(testEmailRoute, (async (c: any) => {
     return c.json({ success: true, message: `Test email sent (ID: ${result.messageId})` });
   } catch (err) {
     logger.warn({ err, to }, 'Test email failed');
+    logToErrorTable({ level: 'warn', message: `Test email failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'email-test' } });
     return c.json({ success: false, message: `Failed to send test email: ${(err as Error).message}` }, 200);
   }
 }) as any);
@@ -849,6 +900,8 @@ settings.openapi(testRegistrarRoute, (async (c: any) => {
     const results = await provider.searchDomains('test', ['com']);
     return c.json({ success: true, provider: provider.name, results: results.length });
   } catch (err) {
+    logger.error({ err }, 'Registrar connection test failed');
+    logToErrorTable({ level: 'error', message: `Registrar connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'registrar-test' } });
     return c.json({ success: false, error: 'Registrar connection test failed' }, 500);
   }
 }) as any);
@@ -1080,6 +1133,299 @@ settings.openapi(deleteBrandingRoute, (async (c: any) => {
   await invalidateCache('GET:/settings/*');
   logger.info({ type, changedBy: user.userId }, 'Branding asset removed');
   return c.json({ message: `Branding ${type} removed` });
+}) as any);
+
+// GET /translation
+settings.openapi(getTranslationRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can view translation config' }, 403);
+  }
+
+  const provider = await getSetting('translation:provider') as string | null;
+  const deeplApiKey = await getSetting('translation:deepl_api_key');
+  const claudeApiKey = await getSetting('translation:claude_api_key');
+
+  return c.json({
+    provider: provider ?? 'deepl',
+    deeplConfigured: !!deeplApiKey,
+    deeplApiKeyHint: maskSecret(deeplApiKey),
+    claudeConfigured: !!claudeApiKey,
+    claudeApiKeyHint: maskSecret(claudeApiKey),
+  });
+}) as any);
+
+// PATCH /translation
+settings.openapi(updateTranslationRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can configure translation' }, 403);
+  }
+
+  const data = c.req.valid('json');
+
+  if (data.provider) {
+    await upsertSetting('translation:provider', data.provider);
+  }
+  if (data.deeplApiKey) {
+    await upsertSetting('translation:deepl_api_key', encrypt(data.deeplApiKey));
+  }
+  if (data.claudeApiKey) {
+    await upsertSetting('translation:claude_api_key', encrypt(data.claudeApiKey));
+  }
+
+  await invalidateCache('GET:/settings/*');
+  logger.info({ changedBy: user.userId }, 'Translation configuration updated');
+  return c.json({ message: 'Translation configuration updated' });
+}) as any);
+
+// POST /translation/test — test the active translation provider
+settings.openapi(testTranslationRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can test translation' }, 403);
+  }
+
+  const provider = (await getSetting('translation:provider') as string | null) ?? 'deepl';
+
+  if (provider === 'claude') {
+    const encryptedKey = await getSetting('translation:claude_api_key');
+    if (!encryptedKey || typeof encryptedKey !== 'string') {
+      return c.json({ success: false, message: 'Claude API key is not configured' }, 200);
+    }
+
+    try {
+      const apiKey = decrypt(encryptedKey);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Reply with just the word "ok".' }],
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        return c.json({ success: false, message: `Claude API error: ${res.status} ${text}` }, 200);
+      }
+
+      return c.json({ success: true, message: 'Connected to Claude API successfully' });
+    } catch (err) {
+      logger.warn({ err }, 'Claude connection test failed');
+      logToErrorTable({ level: 'warn', message: `Claude connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'translation-test' } });
+      return c.json({ success: false, message: `Claude connection failed: ${(err as Error).message}` }, 200);
+    }
+  }
+
+  // DeepL test
+  const encryptedKey = await getSetting('translation:deepl_api_key');
+  if (!encryptedKey || typeof encryptedKey !== 'string') {
+    return c.json({ success: false, message: 'DeepL API key is not configured' }, 200);
+  }
+
+  try {
+    const apiKey = decrypt(encryptedKey);
+    const baseUrl = apiKey.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+    const res = await fetch(`${baseUrl}/v2/usage`, {
+      headers: { Authorization: `DeepL-Auth-Key ${apiKey}` },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ success: false, message: `DeepL API error: ${res.status} ${text}` }, 200);
+    }
+
+    const usage = await res.json() as { character_count: number; character_limit: number };
+    return c.json({
+      success: true,
+      message: 'Connected to DeepL successfully',
+      characterCount: usage.character_count,
+      characterLimit: usage.character_limit,
+    });
+  } catch (err) {
+    logger.warn({ err }, 'DeepL connection test failed');
+    logToErrorTable({ level: 'warn', message: `DeepL connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'translation-test' } });
+    return c.json({ success: false, message: `DeepL connection failed: ${(err as Error).message}` }, 200);
+  }
+}) as any);
+
+// ── Self-Healing settings ──
+
+const selfHealingSettingsSchema = z.object({
+  anthropicApiKey: z.string().min(1).optional(),
+  githubPat: z.string().min(1).optional(),
+  repoOwner: z.string().min(1).optional(),
+  repoName: z.string().min(1).optional(),
+  defaultBranch: z.string().min(1).optional(),
+});
+
+const getSelfHealingRoute = createRoute({
+  method: 'get',
+  path: '/self-healing',
+  tags: ['Settings'],
+  summary: 'Get self-healing configuration (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Self-healing configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateSelfHealingRoute = createRoute({
+  method: 'patch',
+  path: '/self-healing',
+  tags: ['Settings'],
+  summary: 'Configure self-healing (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(selfHealingSettingsSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Self-healing configuration updated'),
+    ...standardErrors,
+  },
+});
+
+const testSelfHealingRoute = createRoute({
+  method: 'post',
+  path: '/self-healing/test',
+  tags: ['Settings'],
+  summary: 'Test self-healing API keys (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Test result'),
+    ...standardErrors,
+  },
+});
+
+// GET /self-healing
+settings.openapi(getSelfHealingRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Only super admins can view self-healing config' }, 403);
+
+  const anthropicApiKey = await getSetting('selfhealing:anthropic_api_key');
+  const githubPat = await getSetting('selfhealing:github_pat');
+  const repoOwner = await getSetting('selfhealing:repo_owner');
+  const repoName = await getSetting('selfhealing:repo_name');
+  const defaultBranch = await getSetting('selfhealing:default_branch');
+  const defaultOptions = await getSetting('selfhealing:default_options');
+
+  return c.json({
+    anthropicConfigured: !!anthropicApiKey,
+    anthropicApiKeyHint: anthropicApiKey ? maskSecret(anthropicApiKey) : null,
+    githubPatConfigured: !!githubPat,
+    githubPatHint: githubPat ? maskSecret(githubPat) : null,
+    repoOwner: repoOwner ?? '',
+    repoName: repoName ?? '',
+    defaultBranch: defaultBranch ?? 'main',
+    defaultOptions: defaultOptions ?? { autoMerge: false, autoRelease: false, autoUpdate: false, releaseType: 'release' },
+  });
+}) as any);
+
+// PATCH /self-healing
+settings.openapi(updateSelfHealingRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Only super admins can configure self-healing' }, 403);
+
+  const data = c.req.valid('json');
+
+  if (data.anthropicApiKey) {
+    await upsertSetting('selfhealing:anthropic_api_key', encrypt(data.anthropicApiKey));
+  }
+  if (data.githubPat) {
+    await upsertSetting('selfhealing:github_pat', encrypt(data.githubPat));
+  }
+  if (data.repoOwner !== undefined) {
+    await upsertSetting('selfhealing:repo_owner', data.repoOwner);
+  }
+  if (data.repoName !== undefined) {
+    await upsertSetting('selfhealing:repo_name', data.repoName);
+  }
+  if (data.defaultBranch !== undefined) {
+    await upsertSetting('selfhealing:default_branch', data.defaultBranch);
+  }
+
+  // Invalidate service config cache
+  const { invalidateConfigCache } = await import('../services/self-healing.service.js');
+  invalidateConfigCache();
+
+  return c.json({ message: 'Self-healing configuration updated' });
+}) as any);
+
+// POST /self-healing/test
+settings.openapi(testSelfHealingRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Only super admins can test self-healing' }, 403);
+
+  const results: { anthropic: { success: boolean; message: string } | null; github: { success: boolean; message: string } | null } = {
+    anthropic: null,
+    github: null,
+  };
+
+  // Test Anthropic API key
+  const encryptedAnthropicKey = await getSetting('selfhealing:anthropic_api_key');
+  if (encryptedAnthropicKey) {
+    try {
+      const apiKey = decrypt(encryptedAnthropicKey as string);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'Hi' }],
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        results.anthropic = { success: true, message: 'Anthropic API key is valid' };
+      } else {
+        const body = await res.text();
+        results.anthropic = { success: false, message: `Anthropic API error: ${res.status} ${body.slice(0, 200)}` };
+      }
+    } catch (err: any) {
+      results.anthropic = { success: false, message: `Anthropic test failed: ${err.message}` };
+    }
+  }
+
+  // Test GitHub PAT
+  const encryptedGithubPat = await getSetting('selfhealing:github_pat');
+  if (encryptedGithubPat) {
+    try {
+      const pat = decrypt(encryptedGithubPat as string);
+      const res = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `token ${pat}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'Fleet-SelfHealing',
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        const data = await res.json() as { login: string };
+        results.github = { success: true, message: `GitHub PAT valid (user: ${data.login})` };
+      } else {
+        results.github = { success: false, message: `GitHub API error: ${res.status}` };
+      }
+    } catch (err: any) {
+      results.github = { success: false, message: `GitHub test failed: ${err.message}` };
+    }
+  }
+
+  return c.json(results);
 }) as any);
 
 export default settings;

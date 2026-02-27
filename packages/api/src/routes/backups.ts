@@ -6,7 +6,7 @@ import { backupService } from '../services/backup.service.js';
 import { db, storageClusters, eq } from '@fleet/db';
 import { schedulerService } from '../services/scheduler.service.js';
 import { requireMember } from '../middleware/rbac.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
@@ -185,6 +185,7 @@ backupRoutes.openapi(createBackupRoute, (async (c: any) => {
       return c.json({ error: message }, 409);
     }
     logger.error({ err }, 'Backup creation failed');
+    logToErrorTable({ level: 'error', message: `Backup creation failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'backups', operation: 'create' } });
     return c.json({ error: 'Failed to create backup' }, 500);
   }
 }) as any);
@@ -265,6 +266,7 @@ backupRoutes.openapi(createScheduleRoute, (async (c: any) => {
     return c.json(schedule, 201);
   } catch (err) {
     logger.error({ err }, 'Schedule creation failed');
+    logToErrorTable({ level: 'error', message: `Backup schedule creation failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'backups', operation: 'create-schedule' } });
     return c.json({ error: 'Failed to create schedule' }, 500);
   }
 }) as any);
@@ -403,6 +405,7 @@ backupRoutes.openapi(runScheduleRoute, (async (c: any) => {
     }
 
     logger.error({ err }, 'Scheduled backup trigger failed');
+    logToErrorTable({ level: 'error', message: `Scheduled backup trigger failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'backups', operation: 'trigger-schedule' } });
     return c.json({ error: 'Failed to trigger backup' }, 500);
   }
 }) as any);
@@ -545,6 +548,7 @@ backupRoutes.openapi(restoreBackupRoute, (async (c: any) => {
     }
 
     logger.error({ err }, 'Backup restore failed');
+    logToErrorTable({ level: 'error', message: `Backup restore failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'backups', operation: 'restore' } });
     return c.json({ error: 'Failed to restore backup' }, 500);
   }
 }) as any);

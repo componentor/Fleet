@@ -6,7 +6,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
 import { requireMember, requireAdmin } from '../middleware/rbac.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 
 const emails = new OpenAPIHono<{
   Variables: {
@@ -301,6 +301,7 @@ emails.openapi(testEmailRoute, (async (c: any) => {
     });
   } catch (err) {
     logger.error({ err }, 'Test email failed');
+    logToErrorTable({ level: 'error', message: `Test email send failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'emails', operation: 'send-test-email' } });
     return c.json(
       {
         error: 'Failed to send test email',

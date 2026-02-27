@@ -2,9 +2,12 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Bell } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+const router = useRouter()
+const route = useRoute()
 
 const api = useApi()
 const unreadCount = ref(0)
@@ -39,6 +42,24 @@ async function markAsRead(id: string) {
   const n = notifications.value.find(n => n.id === id)
   if (n) n.read = true
   unreadCount.value = Math.max(0, unreadCount.value - 1)
+}
+
+function getNotificationRoute(n: any): string | null {
+  if (!n.resourceType || !n.resourceId) return null
+  const isAdmin = route.path.startsWith('/admin')
+  const routes: Record<string, string> = {
+    support_ticket: isAdmin ? `/admin/support/${n.resourceId}` : `/panel/support/${n.resourceId}`,
+  }
+  return routes[n.resourceType] ?? null
+}
+
+async function handleNotificationClick(n: any) {
+  if (!n.read) markAsRead(n.id)
+  const target = getNotificationRoute(n)
+  if (target) {
+    showDropdown.value = false
+    router.push(target)
+  }
 }
 
 async function markAllRead() {
@@ -80,7 +101,7 @@ onUnmounted(() => {
         <div
           v-for="n in notifications"
           :key="n.id"
-          @click="!n.read && markAsRead(n.id)"
+          @click="handleNotificationClick(n)"
           class="px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
           :class="{ 'bg-blue-50/50 dark:bg-blue-900/10': !n.read }"
         >

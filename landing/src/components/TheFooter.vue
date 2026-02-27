@@ -43,12 +43,12 @@
           >
             {{ $t('footer.terms') }}
           </router-link>
-          <a
-            href="#"
+          <router-link
+            to="/status"
             class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
           >
-            {{ $t('footer.discord') }}
-          </a>
+            {{ $t('footer.status') }}
+          </router-link>
         </div>
 
         <!-- Copyright -->

@@ -28,7 +28,7 @@ import { notificationService } from '../services/notification.service.js';
 import { eventService, EventTypes } from '../services/event.service.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 type AdminEnv = {
@@ -519,6 +519,7 @@ billingAdmin.openapi(syncPlanRoute, (async (c: any) => {
     return c.json({ message: 'Plan synced to Stripe' });
   } catch (err) {
     logger.error({ err, planId: id }, 'Failed to sync plan to Stripe');
+    logToErrorTable({ level: 'error', message: `Sync plan to Stripe failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing-admin', operation: 'sync-plan-to-stripe' } });
     return c.json({ error: 'Failed to sync plan to Stripe' }, 500);
   }
 }) as any);
@@ -530,6 +531,7 @@ billingAdmin.openapi(syncAllPlansRoute, (async (c: any) => {
     return c.json({ message: `${result.synced} plan(s) synced to Stripe` });
   } catch (err) {
     logger.error({ err }, 'Failed to sync all plans to Stripe');
+    logToErrorTable({ level: 'error', message: `Sync all plans to Stripe failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing-admin', operation: 'sync-all-plans-to-stripe' } });
     return c.json({ error: 'Sync failed' }, 500);
   }
 }) as any);
@@ -786,6 +788,7 @@ billingAdmin.openapi(createMeteredPricesRoute, (async (c: any) => {
     return c.json({ message: 'Metered prices created in Stripe' });
   } catch (err) {
     logger.error({ err }, 'Failed to create metered prices');
+    logToErrorTable({ level: 'error', message: `Failed to create metered prices: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing-admin', operation: 'create-metered-prices' } });
     return c.json({ error: 'Failed to create metered prices' }, 500);
   }
 }) as any);
@@ -895,6 +898,7 @@ billingAdmin.openapi(suspendAccountRoute, (async (c: any) => {
       }
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to suspend service during admin suspension');
+      logToErrorTable({ level: 'error', message: `Admin suspend service scale to 0 failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing-admin', operation: 'suspend-service-scale-to-zero' } });
     }
   }
 

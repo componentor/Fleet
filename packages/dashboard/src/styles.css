@@ -9,6 +9,13 @@ summary {
   cursor: pointer;
 }
 
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Normalize form elements to consistent sizing */
 input[type="number"] {
   -moz-appearance: textfield;

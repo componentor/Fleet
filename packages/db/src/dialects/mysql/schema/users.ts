@@ -9,6 +9,7 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { adminRoles } from './admin-roles';
 
 export const users = mysqlTable('users', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -17,6 +18,7 @@ export const users = mysqlTable('users', {
   name: varchar('name', { length: 255 }),
   avatarUrl: varchar('avatar_url', { length: 255 }),
   isSuper: boolean('is_super').default(false),
+  adminRoleId: varchar('admin_role_id', { length: 36 }).references(() => adminRoles.id, { onDelete: 'set null' }),
   emailVerified: boolean('email_verified').default(false),
   emailVerifyToken: varchar('email_verify_token', { length: 255 }),
   emailVerifyExpires: timestamp('email_verify_expires'),
@@ -72,7 +74,11 @@ export const oauthProviders = mysqlTable(
   ],
 );
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
+  adminRole: one(adminRoles, {
+    fields: [users.adminRoleId],
+    references: [adminRoles.id],
+  }),
   userAccounts: many(userAccounts),
   oauthProviders: many(oauthProviders),
 }));

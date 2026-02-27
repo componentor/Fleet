@@ -6,9 +6,9 @@ import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, deployments, eq, and, isNull, errorLog, userAccounts } from '@fleet/db';
+import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, selfHealingJobs, users as usersTable } from '@fleet/db';
 import { dockerService } from './services/docker.service.js';
-import { logger } from './services/logger.js';
+import { logger, logToErrorTable } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { securityHeaders } from './middleware/security.js';
@@ -48,6 +48,12 @@ import jobRoutes from './routes/jobs.js';
 import volumeFileRoutes from './routes/volume-files.js';
 import logArchiveRoutes from './routes/log-archives.js';
 import registryCredentialRoutes from './routes/registry-credentials.js';
+import statusPageRoutes from './routes/status-page.js';
+import adminRoleRoutes from './routes/admin-roles.js';
+import supportRoutes from './routes/support.js';
+import adminSupportRoutes from './routes/admin-support.js';
+import adminI18nRoutes from './routes/admin-i18n.js';
+import selfHealingRoutes from './routes/self-healing.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -270,13 +276,68 @@ const api = new OpenAPIHono({
   },
 });
 
+// Error response logging — catches ALL error responses from sub-routers and logs
+// them to the error_log table. Also normalizes raw Zod validation errors from
+// sub-routers (which lack a defaultHook) into a consistent response format.
+api.use('*', async (c, next) => {
+  await next();
+
+  const status = c.res.status;
+  if (status < 400) return;
+
+  try {
+    const cloned = c.res.clone();
+    const text = await cloned.text();
+    let body: unknown;
+    try { body = JSON.parse(text); } catch { body = text; }
+
+    let errorMessage = `HTTP ${status}`;
+    let metadata: Record<string, unknown> = {};
+
+    if (body && typeof body === 'object' && 'success' in body && (body as any).success === false && (body as any).error?.issues) {
+      // Raw Zod validation error from sub-router — reformat and log
+      const issues = (body as any).error.issues as Array<{ path: PropertyKey[]; message: string }>;
+      const details = issues.map((i: { path: PropertyKey[]; message: string }) => `${i.path.map(String).join('.')}: ${i.message}`);
+      errorMessage = `Validation failed: ${details.join('; ')}`;
+      metadata = { validationErrors: details };
+
+      // Replace response with standard error format
+      c.res = new Response(JSON.stringify({ error: 'Validation failed', details }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } else if (body && typeof body === 'object' && 'error' in body) {
+      const errorField = (body as any).error;
+      errorMessage = typeof errorField === 'string' ? errorField : JSON.stringify(errorField);
+      metadata = body as Record<string, unknown>;
+    }
+
+    let userId: string | null = null;
+    try {
+      const user = c.get('user' as never) as { userId?: string } | undefined;
+      userId = user?.userId ?? null;
+    } catch { /* auth may not have run yet */ }
+
+    logToErrorTable({
+      level: status >= 500 ? 'error' : 'warn',
+      message: errorMessage,
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      statusCode: status,
+      userId,
+      userAgent: c.req.header('user-agent') ?? null,
+      metadata,
+    });
+  } catch { /* Response not readable — skip logging */ }
+});
+
 // Audit logging for mutating requests (POST/PUT/PATCH/DELETE)
 api.use('*', auditMiddleware);
 
 api.route('/auth', authRoutes);
 api.route('/accounts', accountRoutes);
-api.route('/users', userRoutes);
 api.route('/users', userPublicRoutes);
+api.route('/users', userRoutes);
 api.route('/services', serviceRoutes);
 api.route('/deployments', deploymentRoutes);
 api.route('/dns', dnsRoutes);
@@ -309,6 +370,12 @@ api.route('/shared-domains', sharedDomainRoutes);
 api.route('/reseller', resellerRoutes);
 api.route('/log-archives', logArchiveRoutes);
 api.route('/registry-credentials', registryCredentialRoutes);
+api.route('/status-page', statusPageRoutes);
+api.route('/admin', adminRoleRoutes);
+api.route('/support', supportRoutes);
+api.route('/admin/support', adminSupportRoutes);
+api.route('/admin/i18n', adminI18nRoutes);
+api.route('/admin/self-healing', selfHealingRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(
@@ -387,6 +454,7 @@ api.get(
           }
         } catch (err) {
           logger.error({ err }, 'WS log auth failed');
+          logToErrorTable({ level: 'warn', message: `WS log auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'log-stream-auth' } });
           ws.close(4003, 'Auth failed');
         }
       },
@@ -660,6 +728,7 @@ api.get(
                 }
               } catch (err) {
                 logger.error({ err }, 'Deploy WS poll error');
+                logToErrorTable({ level: 'error', message: `Deploy WS poll error: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'deploy-poll' } });
               }
             }, 2000);
 
@@ -681,6 +750,7 @@ api.get(
           }
         } catch (err) {
           logger.error({ err }, 'WS deploy auth failed');
+          logToErrorTable({ level: 'warn', message: `WS deploy auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'deploy-auth' } });
           ws.close(4003, 'Auth failed');
         }
       },
@@ -707,6 +777,179 @@ api.get(
         if (trackedAccountId) {
           releaseWsSlot('deploy', trackedAccountId, activeDeployStreams);
           trackedAccountId = null;
+        }
+      },
+    };
+  }),
+);
+
+// ── WebSocket: Support ticket real-time chat ──
+// Shared Valkey subscriber for support ticket fan-out (one Redis connection for all support WS clients)
+type SupportListener = (message: string) => void;
+const supportChannelListeners = new Map<string, Set<SupportListener>>();
+let sharedSupportSubscriber: Awaited<ReturnType<typeof getValkey>> = null;
+let supportSubscriberInitPromise: Promise<boolean> | null = null;
+
+async function initSharedSupportSubscriber(): Promise<boolean> {
+  const valkey = await getValkey();
+  if (!valkey) return false;
+
+  sharedSupportSubscriber = valkey.duplicate();
+  sharedSupportSubscriber.on('message', (channel: string, message: string) => {
+    const listeners = supportChannelListeners.get(channel);
+    if (!listeners) return;
+    for (const listener of listeners) {
+      try { listener(message); } catch { /* individual listener error */ }
+    }
+  });
+
+  sharedSupportSubscriber.on('ready', () => {
+    const channels = [...supportChannelListeners.keys()];
+    if (channels.length > 0) {
+      sharedSupportSubscriber!.subscribe(...channels).catch((err) => {
+        logger.error({ err }, 'Failed to re-subscribe support channels');
+      });
+    }
+  });
+
+  return true;
+}
+
+function ensureSharedSupportSubscriber(): Promise<boolean> {
+  if (!supportSubscriberInitPromise) {
+    supportSubscriberInitPromise = initSharedSupportSubscriber();
+  }
+  return supportSubscriberInitPromise;
+}
+
+function addSupportListener(ticketId: string, listener: SupportListener) {
+  const channel = `support:ticket:${ticketId}`;
+  let listeners = supportChannelListeners.get(channel);
+  const isNewChannel = !listeners || listeners.size === 0;
+  if (!listeners) {
+    listeners = new Set();
+    supportChannelListeners.set(channel, listeners);
+  }
+  listeners.add(listener);
+
+  if (isNewChannel && sharedSupportSubscriber) {
+    sharedSupportSubscriber.subscribe(channel).catch((err) => {
+      logger.error({ err, ticketId }, 'Failed to subscribe to support channel');
+    });
+  }
+}
+
+function removeSupportListener(ticketId: string, listener: SupportListener) {
+  const channel = `support:ticket:${ticketId}`;
+  const listeners = supportChannelListeners.get(channel);
+  if (!listeners) return;
+  listeners.delete(listener);
+
+  if (listeners.size === 0) {
+    supportChannelListeners.delete(channel);
+    if (sharedSupportSubscriber) {
+      sharedSupportSubscriber.unsubscribe(channel).catch(() => {});
+    }
+  }
+}
+
+api.get(
+  '/support/tickets/:ticketId/ws',
+  upgradeWebSocket((c) => {
+    const ticketId = c.req.param('ticketId');
+    const token = extractWsToken(c);
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+    let activeListener: SupportListener | null = null;
+    let isAdminUser = false;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+          if (!ticketId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId)) {
+            ws.close(4001, 'Invalid ticketId');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+          isAdminUser = wsUser.isSuper;
+
+          // Verify the user has access to this ticket
+          const ticket = await db.query.supportTickets.findFirst({
+            where: eq(supportTickets.id, ticketId),
+          });
+
+          if (!ticket) {
+            ws.close(4004, 'Ticket not found');
+            return;
+          }
+
+          // Check if user is an admin (super or has admin role)
+          if (!isAdminUser) {
+            const wsUserRecord = await db.query.users.findFirst({
+              where: eq(usersTable.id, wsUser.userId),
+              columns: { adminRoleId: true },
+            });
+            if (wsUserRecord?.adminRoleId) {
+              isAdminUser = true;
+            }
+          }
+
+          // Non-admin users: verify they belong to the ticket's account
+          if (!isAdminUser) {
+            const membership = await db.query.userAccounts.findFirst({
+              where: and(
+                eq(userAccounts.userId, wsUser.userId),
+                eq(userAccounts.accountId, ticket.accountId),
+              ),
+            });
+            if (!membership) {
+              ws.close(4003, 'Access denied');
+              return;
+            }
+          }
+
+          // Subscribe to Valkey channel for this ticket
+          const hasValkey = await ensureSharedSupportSubscriber();
+          if (hasValkey) {
+            activeListener = (message: string) => {
+              try {
+                const data = JSON.parse(message);
+                // Filter out internal notes for non-admin clients
+                if (!isAdminUser && data.type === 'message' && data.message?.isInternal) {
+                  return;
+                }
+                ws.send(message);
+              } catch { /* ignore malformed */ }
+            };
+            addSupportListener(ticketId, activeListener);
+          }
+
+          // Keepalive pings
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 25_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS support auth failed');
+          logToErrorTable({ level: 'warn', message: `WS support auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'support-auth' } });
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      onClose() {
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
+        if (activeListener) {
+          removeSupportListener(ticketId, activeListener);
+          activeListener = null;
         }
       },
     };
@@ -899,6 +1142,7 @@ api.get(
           }
         } catch (err) {
           logger.error({ err }, 'WS terminal auth failed');
+          logToErrorTable({ level: 'warn', message: `WS terminal auth failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'websocket', operation: 'terminal-auth' } });
           ws.close(4003, 'Auth failed');
         }
       },
@@ -940,6 +1184,143 @@ api.get(
           releaseWsSlot('terminal', sessionAccountId, activeTerminalSessions);
           sessionAccountId = null;
         }
+      },
+    };
+  }),
+);
+
+// ── WebSocket: Self-healing container terminal ──
+api.get(
+  '/terminal/self-healing/:jobId',
+  upgradeWebSocket((c) => {
+    const jobId = c.req.param('jobId');
+    const token = extractWsToken(c);
+    let dockerStream: import('node:stream').Duplex | null = null;
+    let execId: string | null = null;
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+
+          // Only super admins can access self-healing terminals
+          if (!wsUser.isSuper) {
+            ws.close(4003, 'Super admin access required');
+            return;
+          }
+
+          // Look up the job to find the Docker service
+          const job = await db.query.selfHealingJobs.findFirst({
+            where: eq(selfHealingJobs.id, jobId),
+          });
+
+          if (!job?.dockerServiceId) {
+            ws.close(4004, 'Job not found or no container');
+            return;
+          }
+
+          // Find the running container
+          const tasks = await dockerService.getServiceTasks(job.dockerServiceId);
+          const runningTask = tasks.find(
+            (t) => t.status === 'running' && t.containerStatus?.containerId,
+          );
+
+          if (!runningTask?.containerStatus?.containerId) {
+            ws.close(4004, 'No running containers for this job');
+            return;
+          }
+
+          const targetContainer = runningTask.containerStatus.containerId;
+          const targetNodeId = runningTask.nodeId;
+          const localNodeId = await dockerService.getLocalNodeId();
+          const isLocal = targetNodeId === localNodeId;
+
+          if (!isLocal) {
+            const agentUrl = await dockerService.getAgentAddress(targetNodeId);
+            if (!agentUrl) {
+              ws.close(4004, 'No agent on target node');
+              return;
+            }
+
+            const nodeToken = process.env['NODE_AUTH_TOKEN'] || '';
+            const agentWsUrl = agentUrl.replace('http://', 'ws://');
+            const proxyUrl = `${agentWsUrl}/ws/exec?token=${encodeURIComponent(nodeToken)}&containerId=${encodeURIComponent(targetContainer)}`;
+
+            const { default: WebSocket } = await import('ws');
+            const agentWs = new WebSocket(proxyUrl);
+
+            agentWs.on('message', (data: Buffer | string) => {
+              ws.send(typeof data === 'string' ? data : data.toString('utf-8'));
+            });
+            agentWs.on('close', () => ws.close(1000, 'Agent disconnected'));
+            agentWs.on('error', () => ws.close(1011, 'Agent connection failed'));
+
+            dockerStream = {
+              write: (data: any) => { if (agentWs.readyState === WebSocket.OPEN) agentWs.send(data); },
+              destroy: () => { agentWs.close(); },
+            } as any;
+            execId = '__proxy__';
+          } else {
+            let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
+            for (const shell of ['/bin/bash', '/bin/sh', '/bin/ash']) {
+              try {
+                result = await dockerService.execInContainer(targetContainer, [shell]);
+                break;
+              } catch { /* try next */ }
+            }
+            if (!result) {
+              ws.close(4004, 'No shell available in container');
+              return;
+            }
+            dockerStream = result.stream as import('node:stream').Duplex;
+            execId = result.execId;
+
+            dockerStream.on('data', (chunk: Buffer) => ws.send(chunk.toString('utf-8')));
+            dockerStream.on('end', () => ws.close(1000, 'Container stream ended'));
+            dockerStream.on('error', () => ws.close(1011, 'Container error'));
+          }
+
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 25_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS self-healing terminal auth failed');
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      async onMessage(evt: { data: unknown }, _ws: unknown) {
+        if (!dockerStream) return;
+        try {
+          const msg = JSON.parse(
+            typeof evt.data === 'string' ? evt.data : evt.data?.toString?.() ?? '',
+          ) as { type: string; data?: string; cols?: number; rows?: number };
+
+          if (msg.type === 'input' && msg.data) {
+            dockerStream.write(msg.data);
+          } else if (msg.type === 'resize' && msg.cols && msg.rows && execId) {
+            if (execId === '__proxy__') {
+              dockerStream.write(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
+            } else {
+              await dockerService.resizeExec(execId, msg.rows, msg.cols);
+            }
+          }
+        } catch { /* ignore */ }
+      },
+
+      onClose() {
+        if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+        if (dockerStream) { dockerStream.destroy(); dockerStream = null; }
+        execId = null;
       },
     };
   }),
@@ -1022,6 +1403,32 @@ app.get('/api/v1/branding/:type', brandingRateLimit, async (c) => {
       'Cache-Control': 'public, max-age=3600',
     },
   });
+});
+
+// ── Public i18n overrides endpoint (no auth, needed before login) ──
+const i18nRateLimit = rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'i18n-public' });
+
+app.get('/api/v1/i18n/overrides', i18nRateLimit, async (c) => {
+  const { db: dbImport, platformSettings, eq: eqOp } = await import('@fleet/db');
+
+  // Fetch custom locales
+  const customLocalesRow = await dbImport.query.platformSettings.findFirst({
+    where: eqOp(platformSettings.key, 'i18n:custom_locales'),
+  });
+  const customLocales = (customLocalesRow?.value as { code: string; name: string }[] | null) ?? [];
+
+  // Fetch all override entries
+  const allRows = await dbImport.query.platformSettings.findMany();
+  const overrides: Record<string, Record<string, string>> = {};
+  for (const row of allRows) {
+    if (row.key.startsWith('i18n:overrides:')) {
+      const locale = row.key.replace('i18n:overrides:', '');
+      overrides[locale] = (row.value as Record<string, string>) ?? {};
+    }
+  }
+
+  c.header('Cache-Control', 'public, max-age=300');
+  return c.json({ customLocales, overrides });
 });
 
 app.route('/api/v1', api);

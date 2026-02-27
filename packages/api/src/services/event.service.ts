@@ -67,6 +67,20 @@ export const EventTypes = {
   // Stacks
   STACK_DELETED: 'stack.deleted',
   STACK_RESTARTED: 'stack.restarted',
+
+  // Admin Roles
+  ADMIN_ROLE_CREATED: 'admin_role.created',
+  ADMIN_ROLE_UPDATED: 'admin_role.updated',
+  ADMIN_ROLE_DELETED: 'admin_role.deleted',
+  ADMIN_ROLE_ASSIGNED: 'admin_role.assigned',
+  ADMIN_ROLE_REMOVED: 'admin_role.removed',
+
+  // Support Tickets
+  SUPPORT_TICKET_CREATED: 'support.ticket_created',
+  SUPPORT_TICKET_UPDATED: 'support.ticket_updated',
+  SUPPORT_TICKET_CLOSED: 'support.ticket_closed',
+  SUPPORT_TICKET_REOPENED: 'support.ticket_reopened',
+  SUPPORT_MESSAGE_SENT: 'support.message_sent',
 } as const;
 
 export type EventType = (typeof EventTypes)[keyof typeof EventTypes];
@@ -123,7 +137,7 @@ interface EventOptions {
   resourceName?: string;
   actorEmail?: string | null;
   ipAddress?: string;
-  source?: 'user' | 'system' | 'webhook' | 'api-key';
+  source?: 'user' | 'system' | 'webhook' | 'api-key' | 'support';
   details?: Record<string, unknown>;
 }
 

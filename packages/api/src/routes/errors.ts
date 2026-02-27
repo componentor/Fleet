@@ -1,13 +1,16 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, errorLog, countSql, eq, and, desc, gte, lte } from '@fleet/db';
+import { db, errorLog, selfHealingJobs, countSql, eq, and, desc, gte, lte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import {
   jsonContent,
+  jsonBody,
   errorResponseSchema,
   standardErrors,
   bearerSecurity,
 } from './_schemas.js';
+import { getSelfHealingConfig } from '../services/self-healing.service.js';
+import { getSelfHealingQueue, isQueueAvailable } from '../services/queue.service.js';
 
 type Env = {
   Variables: { user: AuthUser };
@@ -178,7 +181,7 @@ errorRoutes.openapi(resolveRoute, async (c) => {
     return c.json({ error: 'Error log entry not found' }, 404) as any;
   }
 
-  await db.update(errorLog).set({ resolved: true }).where(eq(errorLog.id, id));
+  await db.update(errorLog).set({ resolved: true, status: 'resolved' }).where(eq(errorLog.id, id));
 
   return c.json({ success: true }, 200);
 });
@@ -196,7 +199,7 @@ const resolveAllRoute = createRoute({
 });
 
 errorRoutes.openapi(resolveAllRoute, async (c) => {
-  await db.update(errorLog).set({ resolved: true }).where(eq(errorLog.resolved, false));
+  await db.update(errorLog).set({ resolved: true, status: 'resolved' }).where(eq(errorLog.resolved, false));
   return c.json({ success: true }, 200);
 });
 
@@ -218,6 +221,130 @@ const deleteRoute = createRoute({
 errorRoutes.openapi(deleteRoute, async (c) => {
   const { id } = c.req.valid('param');
   await db.delete(errorLog).where(eq(errorLog.id, id));
+  return c.json({ success: true }, 200);
+});
+
+// ── Self-heal an error ──
+
+const selfHealSchema = z.object({
+  context: z.string().max(5000).optional(),
+  options: z.object({
+    autoMerge: z.boolean().default(false),
+    autoRelease: z.boolean().default(false),
+    autoUpdate: z.boolean().default(false),
+    releaseType: z.enum(['alpha', 'release']).default('release'),
+  }).optional().default({ autoMerge: false, autoRelease: false, autoUpdate: false, releaseType: 'release' }),
+});
+
+const selfHealRoute = createRoute({
+  method: 'post',
+  path: '/{id}/self-heal',
+  tags: ['Errors'],
+  summary: 'Trigger self-healing for an error',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(selfHealSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Self-healing job created'),
+    ...standardErrors,
+  },
+});
+
+errorRoutes.openapi(selfHealRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  const body = c.req.valid('json');
+  const user = c.get('user');
+
+  const entry = await db.query.errorLog.findFirst({
+    where: eq(errorLog.id, id),
+  });
+
+  if (!entry) {
+    return c.json({ error: 'Error log entry not found' }, 404);
+  }
+
+  // Validate self-healing is configured
+  const config = await getSelfHealingConfig();
+  if (!config) {
+    return c.json({ error: 'Self-healing not configured. Add API keys in Settings.' }, 400);
+  }
+
+  // Build prompt from error + optional user context
+  const parts = [
+    `Fix the following error in the codebase:`,
+    ``,
+    `Level: ${entry.level}`,
+    `Message: ${entry.message}`,
+  ];
+  if (entry.path) parts.push(`Path: ${entry.method ?? ''} ${entry.path}`);
+  if (entry.statusCode) parts.push(`Status Code: ${entry.statusCode}`);
+  if (entry.stack) parts.push(`\nStack trace:\n${entry.stack}`);
+  if (body.context) parts.push(`\nAdditional context from the admin:\n${body.context}`);
+
+  const prompt = parts.join('\n');
+
+  // Create self-healing job
+  const { insertReturning } = await import('@fleet/db');
+  const [job] = await insertReturning(selfHealingJobs, {
+    prompt,
+    baseBranch: config.defaultBranch,
+    options: body.options,
+    createdBy: user.userId,
+  });
+
+  // Update error status
+  await db.update(errorLog).set({
+    status: 'self_healing',
+    selfHealingJobId: job.id,
+  }).where(eq(errorLog.id, id));
+
+  // Enqueue
+  if (isQueueAvailable()) {
+    const queue = getSelfHealingQueue();
+    await queue.add('self-healing', { jobId: job.id }, {
+      jobId: `sh-${job.id}`,
+    });
+  } else {
+    const { launchWorkerContainer, waitForContainerRunning } = await import('../services/self-healing.service.js');
+    launchWorkerContainer(job.id)
+      .then((serviceId) => waitForContainerRunning(job.id, serviceId))
+      .catch(() => {});
+  }
+
+  return c.json(job, 201);
+}) as any);
+
+// ── Set error status to pending ──
+
+const setPendingRoute = createRoute({
+  method: 'patch',
+  path: '/{id}/pending',
+  tags: ['Errors'],
+  summary: 'Mark an error as pending (assigned to power user)',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(successSchema, 'Error marked as pending'),
+    ...standardErrors,
+  },
+});
+
+errorRoutes.openapi(setPendingRoute, async (c) => {
+  const { id } = c.req.valid('param');
+  const entry = await db.query.errorLog.findFirst({
+    where: eq(errorLog.id, id),
+  });
+
+  if (!entry) {
+    return c.json({ error: 'Error log entry not found' }, 404) as any;
+  }
+
+  await db.update(errorLog).set({ status: 'pending' }).where(eq(errorLog.id, id));
+
   return c.json({ success: true }, 200);
 });
 

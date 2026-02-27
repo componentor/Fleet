@@ -118,7 +118,56 @@
     "privacy": "隐私政策",
     "terms": "服务条款",
     "discord": "Discord",
+    "status": "状态",
     "rights": "Fleet。保留所有权利。"
+  },
+  "statusPage": {
+    "title": "系统状态",
+    "description": "所有服务的当前状态和事件历史",
+    "allOperational": "所有系统正常运行",
+    "partialDegradation": "部分降级",
+    "majorOutage": "重大故障",
+    "unknown": "未知",
+    "notConfigured": "未配置",
+    "services": {
+      "api": "API",
+      "docker": "Docker Swarm",
+      "storage": "存储",
+      "queue": "队列"
+    },
+    "healthy": "健康",
+    "degraded": "降级",
+    "down": "宕机",
+    "responseTime": "{ms}ms",
+    "uptime": {
+      "title": "运行时间历史",
+      "days": "{count} 天",
+      "noData": "无数据",
+      "percent": "{value}%",
+      "today": "今天"
+    },
+    "timeline": {
+      "title": "事件历史",
+      "search": "搜索事件...",
+      "empty": "暂无事件报告",
+      "noResults": "没有匹配的事件",
+      "prev": "上一页",
+      "next": "下一页",
+      "page": "第 {page} 页，共 {total} 页"
+    },
+    "icons": {
+      "incident": "事件",
+      "maintenance": "维护",
+      "resolved": "已解决",
+      "info": "信息",
+      "outage": "中断",
+      "degraded": "降级"
+    },
+    "severity": {
+      "info": "信息",
+      "warning": "警告",
+      "critical": "严重"
+    }
   },
   "privacy": {
     "title": "隐私政策",

@@ -31,7 +31,7 @@ const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 const IMPERSONATION_REFRESH_EXPIRY = '1h'; // Shorter session for impersonation
 
-export async function generateTokens(payload: { userId: string; email: string; isSuper: boolean; impersonatingAccountId?: string }) {
+export async function generateTokens(payload: { userId: string; email: string; isSuper: boolean; adminRoleId?: string; impersonatingAccountId?: string }) {
   const secret = JWT_SECRET_KEY();
   const isImpersonating = !!payload.impersonatingAccountId;
 
@@ -118,6 +118,7 @@ function userResponse(user: any) {
     name: user.name,
     avatarUrl: user.avatarUrl,
     isSuper: user.isSuper,
+    adminRoleId: user.adminRoleId ?? null,
     emailVerified: user.emailVerified ?? false,
     twoFactorEnabled: user.twoFactorEnabled ?? false,
     createdAt: user.createdAt,
@@ -337,6 +338,7 @@ auth.openapi(loginRoute, (async (c: any) => {
     userId: user.id,
     email: user.email!,
     isSuper: user.isSuper ?? false,
+    adminRoleId: (user as any).adminRoleId ?? undefined,
   });
 
   setRefreshTokenCookie(c, tokens.refreshToken);
@@ -431,6 +433,7 @@ auth.openapi(refreshRoute, (async (c: any) => {
       userId: user.id,
       email: user.email!,
       isSuper: user.isSuper ?? false,
+      adminRoleId: (user as any).adminRoleId ?? undefined,
       impersonatingAccountId,
     });
 
@@ -1098,6 +1101,7 @@ auth.openapi(twoFactorVerifyRoute, (async (c: any) => {
     userId: user.id,
     email: user.email!,
     isSuper: user.isSuper ?? false,
+    adminRoleId: (user as any).adminRoleId ?? undefined,
   });
 
   setRefreshTokenCookie(c, tokens.refreshToken);
@@ -1395,6 +1399,7 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
       userId: user.id,
       email: user.email!,
       isSuper: user.isSuper ?? false,
+      adminRoleId: (user as any).adminRoleId ?? undefined,
     });
 
     setRefreshTokenCookie(c, tokens.refreshToken);
@@ -1682,6 +1687,7 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
       userId: user.id,
       email: user.email!,
       isSuper: user.isSuper ?? false,
+      adminRoleId: (user as any).adminRoleId ?? undefined,
     });
 
     setRefreshTokenCookie(c, tokens.refreshToken);

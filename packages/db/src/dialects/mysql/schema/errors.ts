@@ -23,9 +23,12 @@ export const errorLog = mysqlTable('error_log', {
   userAgent: text('user_agent'),
   metadata: json('metadata').$type<Record<string, unknown> | null>(),
   resolved: boolean('resolved').default(false),
+  status: varchar('status', { length: 50 }).default('open'),
+  selfHealingJobId: varchar('self_healing_job_id', { length: 36 }),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
   index('idx_error_log_created_at').on(table.createdAt),
   index('idx_error_log_level').on(table.level),
   index('idx_error_log_resolved').on(table.resolved),
+  index('idx_error_log_status').on(table.status),
 ]);

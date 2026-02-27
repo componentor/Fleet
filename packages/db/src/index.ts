@@ -111,6 +111,13 @@ export const appTemplates = _schema.appTemplates as typeof PgSchema.appTemplates
 // settings.ts
 export const platformSettings = _schema.platformSettings as typeof PgSchema.platformSettings;
 
+// status-page.ts
+export const statusPosts = _schema.statusPosts as typeof PgSchema.statusPosts;
+export const statusPostTranslations = _schema.statusPostTranslations as typeof PgSchema.statusPostTranslations;
+export const uptimeSnapshots = _schema.uptimeSnapshots as typeof PgSchema.uptimeSnapshots;
+export const statusPostsRelations = _schema.statusPostsRelations;
+export const statusPostTranslationsRelations = _schema.statusPostTranslationsRelations;
+
 // metrics.ts
 export const nodeMetrics = _schema.nodeMetrics as typeof PgSchema.nodeMetrics;
 export const nodeMetricsRelations = _schema.nodeMetricsRelations;
@@ -152,6 +159,19 @@ export const storageMigrationsRelations = _schema.storageMigrationsRelations;
 // registry-credentials.ts
 export const registryCredentials = _schema.registryCredentials as typeof PgSchema.registryCredentials;
 export const registryCredentialsRelations = _schema.registryCredentialsRelations;
+
+// admin-roles.ts
+export const adminRoles = _schema.adminRoles as typeof PgSchema.adminRoles;
+
+// support.ts
+export const supportTickets = _schema.supportTickets as typeof PgSchema.supportTickets;
+export const supportTicketMessages = _schema.supportTicketMessages as typeof PgSchema.supportTicketMessages;
+export const supportTicketsRelations = _schema.supportTicketsRelations;
+export const supportTicketMessagesRelations = _schema.supportTicketMessagesRelations;
+
+// self-healing.ts
+export const selfHealingJobs = _schema.selfHealingJobs as typeof PgSchema.selfHealingJobs;
+export const selfHealingJobsRelations = _schema.selfHealingJobsRelations;
 
 // --- Helper exports ---
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql, safeTransaction } from './helpers';

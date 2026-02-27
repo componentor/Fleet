@@ -10,7 +10,7 @@ import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { DeploymentJobData } from '../workers/deployment.worker.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
@@ -54,6 +54,7 @@ async function enqueueOrRunDeployment(data: DeploymentJobData) {
     import('../workers/deployment.worker.js').then(({ processDeploymentInline }) =>
       processDeploymentInline(data).catch(async (err) => {
         logger.error({ err, deploymentId: data.deploymentId }, `Build failed for deployment ${data.deploymentId}`);
+        logToErrorTable({ level: 'error', message: `processDeploymentInline failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'processDeploymentInline' } });
         // Safety net: only mark as failed if the worker didn't already handle it
         // (the worker's own catch handlers write the detailed build log — don't overwrite)
         try {
@@ -376,6 +377,7 @@ webhookRoutes.openapi(registryWebhookRoute, (async (c: any) => {
         .where(eq(services.id, svc.id));
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Registry webhook deploy failed');
+      logToErrorTable({ level: 'error', message: `Registry webhook deploy failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'registry-webhook-deploy' } });
       await db.update(deployments)
         .set({ status: 'failed', completedAt: new Date(), log: deployment.log + `Deploy failed: ${String(err)}\n` })
         .where(eq(deployments.id, deployment.id));
@@ -682,6 +684,8 @@ authenticatedRoutes.openapi(rollbackRoute, (async (c: any) => {
         .set({ image: deployment.imageTag, status: 'running', updatedAt: new Date() })
         .where(eq(services.id, svc.id));
     } catch (err) {
+      logger.error({ err, serviceId: svc.id }, 'Deployment rollback failed');
+      logToErrorTable({ level: 'error', message: `Deployment rollback failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'deployment-rollback' } });
       await db
         .update(deployments)
         .set({ status: 'failed', log: rollbackDeploy.log + `Rollback failed: ${String(err)}\n` })
@@ -898,6 +902,7 @@ authenticatedRoutes.openapi(getManifestRoute, (async (c: any) => {
     return c.json({ manifest: result.data, branch: targetBranch, repo });
   } catch (err) {
     logger.error({ err, repo }, 'Failed to fetch fleet.json');
+    logToErrorTable({ level: 'warn', message: `fleet.json fetch failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'fleet-json-fetch' } });
     return c.json({ manifest: null, branch: targetBranch, repo });
   }
 }) as any);
@@ -964,6 +969,7 @@ authenticatedRoutes.openapi(listGithubReposRoute, (async (c: any) => {
     return c.json(repos);
   } catch (err) {
     logger.error({ err }, 'Failed to fetch GitHub repos');
+    logToErrorTable({ level: 'error', message: `GitHub repo list failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'github-repo-list' } });
     return c.json({ error: 'Failed to fetch repositories from GitHub' }, 500);
   }
 }) as any);
@@ -1006,6 +1012,7 @@ authenticatedRoutes.openapi(listBranchesRoute, (async (c: any) => {
     return c.json(branches);
   } catch (err) {
     logger.error({ err }, 'Failed to fetch branches');
+    logToErrorTable({ level: 'error', message: `GitHub branch list failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'github-branch-list' } });
     return c.json({ error: 'Failed to fetch branches from GitHub' }, 500);
   }
 }) as any);

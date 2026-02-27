@@ -187,6 +187,17 @@ class SchedulerService {
       },
     );
 
+    // Uptime snapshot — every 5 minutes
+    // Records health status of core services for the public status page
+    await getMaintenanceQueue().add(
+      'uptime-snapshot',
+      { type: 'uptime-snapshot' },
+      {
+        repeat: { every: 5 * 60 * 1000 },
+        jobId: 'system:uptime-snapshot',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -197,7 +208,7 @@ class SchedulerService {
     }
 
     logger.info(
-      `Scheduler initialized: ${schedules.length} backup schedule(s), 17 system jobs (BullMQ)`,
+      `Scheduler initialized: ${schedules.length} backup schedule(s), 18 system jobs (BullMQ)`,
     );
   }
 

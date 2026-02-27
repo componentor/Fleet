@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -28,6 +28,9 @@ const sections = [
   { id: 'log-archiving', label: () => t('super.settings.logArchiving') },
   { id: 'backup-defaults', label: () => 'Backup Defaults' },
   { id: 'registry', label: () => 'Registry Credentials' },
+  { id: 'support', label: () => 'Support' },
+  { id: 'translation', label: () => t('super.settings.translationConfig') },
+  { id: 'self-healing', label: () => t('super.settings.selfHealing.title') },
 ]
 
 // General settings
@@ -133,6 +136,35 @@ const newCredUsername = ref('')
 const newCredPassword = ref('')
 const credError = ref('')
 const connectingGithub = ref(false)
+
+// Support
+const supportEnabledSetting = ref(false)
+const savingSupport = ref(false)
+
+// Translation
+const translationProvider = ref<'deepl' | 'claude'>('deepl')
+const deeplConfigured = ref(false)
+const deeplApiKey = ref('')
+const deeplApiKeyHint = ref('')
+const claudeConfigured = ref(false)
+const claudeApiKey = ref('')
+const claudeApiKeyHint = ref('')
+const testingTranslation = ref(false)
+const translationTestResult = ref<{ success: boolean; message: string; characterCount?: number; characterLimit?: number } | null>(null)
+
+// Self-Healing
+const shAnthropicApiKey = ref('')
+const shAnthropicApiKeyHint = ref('')
+const shAnthropicConfigured = ref(false)
+const shGithubPat = ref('')
+const shGithubPatHint = ref('')
+const shGithubConfigured = ref(false)
+const shRepoOwner = ref('')
+const shRepoName = ref('')
+const shDefaultBranch = ref('main')
+const savingSelfHealing = ref(false)
+const testingSelfHealing = ref(false)
+const shTestResult = ref<{ success: boolean; message: string } | null>(null)
 
 async function fetchSettings() {
   loading.value = true
@@ -399,6 +431,74 @@ async function triggerArchiveNow() {
   }
 }
 
+async function fetchSupportSettings() {
+  try {
+    const data = await api.get<Record<string, any>>('/settings')
+    supportEnabledSetting.value = data['support:enabled'] === true
+  } catch {
+    // Not configured
+  }
+}
+
+async function saveSupportSettings() {
+  savingSupport.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings', {
+      'support:enabled': supportEnabledSetting.value,
+    })
+    success.value = t('common.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save'
+  } finally {
+    savingSupport.value = false
+  }
+}
+
+async function fetchTranslation() {
+  try {
+    const data = await api.get<any>('/settings/translation')
+    translationProvider.value = data.provider ?? 'deepl'
+    deeplConfigured.value = data.deeplConfigured ?? false
+    deeplApiKeyHint.value = data.deeplApiKeyHint ?? ''
+    claudeConfigured.value = data.claudeConfigured ?? false
+    claudeApiKeyHint.value = data.claudeApiKeyHint ?? ''
+  } catch {
+    // Not configured
+  }
+}
+
+function saveTranslationProvider(provider: 'deepl' | 'claude') {
+  translationProvider.value = provider
+  translationTestResult.value = null
+  saveOneField('translation:provider', () => api.patch('/settings/translation', { provider }))
+}
+
+function saveTranslationKey(provider: 'deepl' | 'claude', value: string) {
+  if (!value) return
+  const key = provider === 'deepl' ? 'deeplApiKey' : 'claudeApiKey'
+  saveOneField(`translation:${key}`, () => api.patch('/settings/translation', { [key]: value }), async () => {
+    if (provider === 'deepl') deeplApiKey.value = ''
+    else claudeApiKey.value = ''
+    await fetchTranslation()
+  })
+}
+
+async function testTranslation() {
+  testingTranslation.value = true
+  translationTestResult.value = null
+  try {
+    const res = await api.post<{ success: boolean; message: string; characterCount?: number; characterLimit?: number }>('/settings/translation/test', {})
+    translationTestResult.value = res
+  } catch (err: any) {
+    translationTestResult.value = { success: false, message: err?.body?.error || 'Connection test failed' }
+  } finally {
+    testingTranslation.value = false
+  }
+}
+
 function formatCents(cents: number): string {
   return (cents / 100).toFixed(2)
 }
@@ -603,6 +703,60 @@ async function removeCredential(id: string) {
   }
 }
 
+// Self-Healing settings
+async function fetchSelfHealing() {
+  try {
+    const data = await api.get<any>('/settings/self-healing')
+    shAnthropicConfigured.value = data.anthropicConfigured ?? false
+    shAnthropicApiKeyHint.value = data.anthropicApiKeyHint ?? ''
+    shGithubConfigured.value = data.githubConfigured ?? false
+    shGithubPatHint.value = data.githubPatHint ?? ''
+    shRepoOwner.value = data.repoOwner ?? ''
+    shRepoName.value = data.repoName ?? ''
+    shDefaultBranch.value = data.defaultBranch ?? 'main'
+  } catch {
+    // Not configured
+  }
+}
+
+async function saveSelfHealingConfig() {
+  savingSelfHealing.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const payload: Record<string, any> = {
+      repoOwner: shRepoOwner.value,
+      repoName: shRepoName.value,
+      defaultBranch: shDefaultBranch.value,
+    }
+    if (shAnthropicApiKey.value) payload.anthropicApiKey = shAnthropicApiKey.value
+    if (shGithubPat.value) payload.githubPat = shGithubPat.value
+    await api.patch('/settings/self-healing', payload)
+    success.value = t('common.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+    shAnthropicApiKey.value = ''
+    shGithubPat.value = ''
+    await fetchSelfHealing()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save self-healing config'
+  } finally {
+    savingSelfHealing.value = false
+  }
+}
+
+async function testSelfHealing() {
+  testingSelfHealing.value = true
+  shTestResult.value = null
+  try {
+    const res = await api.post<{ success: boolean; message: string }>('/settings/self-healing/test', {})
+    shTestResult.value = res
+  } catch (err: any) {
+    shTestResult.value = { success: false, message: err?.body?.error || 'Connection test failed' }
+  } finally {
+    testingSelfHealing.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -614,6 +768,9 @@ onMounted(() => {
   fetchLogArchiveSettings()
   fetchBackupDefaults()
   fetchRegistryCreds()
+  fetchSupportSettings()
+  fetchTranslation()
+  fetchSelfHealing()
 })
 </script>
 
@@ -1507,6 +1664,265 @@ onMounted(() => {
               <KeyRound class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
               <p class="text-sm text-gray-500 dark:text-gray-400">No registry credentials configured.</p>
               <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Add credentials to pull images from private registries.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══════════ Support section ═══════════ -->
+        <div v-if="activeSection === 'support'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Support Tickets</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Enable or disable the support ticket system for end-users.</p>
+          </div>
+          <div class="p-6 space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Enable Support</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">When enabled, users will see a Support link in their panel navigation and can create tickets.</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input v-model="supportEnabledSetting" type="checkbox" class="sr-only peer" />
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-gray-500 peer-checked:bg-primary-600"></div>
+              </label>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                @click="saveSupportSettings"
+                :disabled="savingSupport"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="savingSupport" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Translation -->
+        <div v-if="activeSection === 'translation'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.translationConfig') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.translationConfigDesc') }}</p>
+          </div>
+          <div class="p-6 space-y-6">
+            <!-- Provider selector -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.translationProvider') }}</label>
+              <div class="flex gap-3">
+                <button
+                  v-for="p in (['deepl', 'claude'] as const)"
+                  :key="p"
+                  @click="saveTranslationProvider(p)"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+                  :class="translationProvider === p
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 ring-1 ring-primary-500'
+                    : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
+                >
+                  {{ p === 'deepl' ? 'DeepL' : 'Claude' }}
+                  <Check v-if="(p === 'deepl' && deeplConfigured) || (p === 'claude' && claudeConfigured)" class="w-3.5 h-3.5 text-green-500" />
+                </button>
+              </div>
+            </div>
+
+            <!-- DeepL API Key -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.deeplApiKey') }}</label>
+              <div v-if="deeplConfigured" class="mb-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                <Check class="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                <span class="text-xs text-green-700 dark:text-green-300">
+                  {{ t('super.settings.configured') }}
+                  <span v-if="deeplApiKeyHint" class="font-mono ml-1">({{ deeplApiKeyHint }})</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2 max-w-lg">
+                <input
+                  v-model="deeplApiKey"
+                  type="password"
+                  :placeholder="deeplApiKeyHint || 'Enter DeepL API key'"
+                  class="flex-1 px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  @keydown.enter="saveTranslationKey('deepl', deeplApiKey)"
+                />
+                <button
+                  @click="saveTranslationKey('deepl', deeplApiKey)"
+                  :disabled="!deeplApiKey || savingField === 'translation:deeplApiKey'"
+                  class="p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
+                >
+                  <Loader2 v-if="savingField === 'translation:deeplApiKey'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                {{ t('super.settings.deeplApiKeyDesc') }}
+                <a href="https://www.deepl.com/pro-api" target="_blank" class="text-primary-600 hover:underline">deepl.com/pro-api</a>
+              </p>
+            </div>
+
+            <!-- Claude API Key -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.claudeApiKey') }}</label>
+              <div v-if="claudeConfigured" class="mb-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                <Check class="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                <span class="text-xs text-green-700 dark:text-green-300">
+                  {{ t('super.settings.configured') }}
+                  <span v-if="claudeApiKeyHint" class="font-mono ml-1">({{ claudeApiKeyHint }})</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2 max-w-lg">
+                <input
+                  v-model="claudeApiKey"
+                  type="password"
+                  :placeholder="claudeApiKeyHint || 'Enter Claude API key'"
+                  class="flex-1 px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  @keydown.enter="saveTranslationKey('claude', claudeApiKey)"
+                />
+                <button
+                  @click="saveTranslationKey('claude', claudeApiKey)"
+                  :disabled="!claudeApiKey || savingField === 'translation:claudeApiKey'"
+                  class="p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
+                >
+                  <Loader2 v-if="savingField === 'translation:claudeApiKey'" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                {{ t('super.settings.claudeApiKeyDesc') }}
+                <a href="https://console.anthropic.com/" target="_blank" class="text-primary-600 hover:underline">console.anthropic.com</a>
+              </p>
+            </div>
+
+            <!-- Test connection -->
+            <div>
+              <button
+                @click="testTranslation"
+                :disabled="(translationProvider === 'deepl' && !deeplConfigured) || (translationProvider === 'claude' && !claudeConfigured) || testingTranslation"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                <Loader2 v-if="testingTranslation" class="w-4 h-4 animate-spin" />
+                <RefreshCw v-else class="w-4 h-4" />
+                {{ t('super.settings.testConnection') }} ({{ translationProvider === 'deepl' ? 'DeepL' : 'Claude' }})
+              </button>
+              <div v-if="translationTestResult" class="mt-3 p-3 rounded-lg border" :class="translationTestResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+                <p class="text-sm" :class="translationTestResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                  {{ translationTestResult.message }}
+                </p>
+                <p v-if="translationTestResult.success && translationTestResult.characterLimit" class="text-xs mt-1" :class="translationTestResult.success ? 'text-green-600 dark:text-green-400' : ''">
+                  {{ t('super.settings.deeplUsage') }}: {{ (translationTestResult.characterCount ?? 0).toLocaleString() }} / {{ translationTestResult.characterLimit.toLocaleString() }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- ═══════════ Self-Healing section ═══════════ -->
+        <div v-if="activeSection === 'self-healing'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Bot class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.selfHealing.title') }}</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.selfHealing.titleDesc') }}</p>
+          </div>
+          <div class="p-6 space-y-6">
+            <!-- Anthropic API Key -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.anthropicApiKey') }}</label>
+              <div v-if="shAnthropicConfigured" class="mb-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                <Check class="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                <span class="text-xs text-green-700 dark:text-green-300">
+                  {{ t('super.settings.configured') }}
+                  <span v-if="shAnthropicApiKeyHint" class="font-mono ml-1">({{ shAnthropicApiKeyHint }})</span>
+                </span>
+              </div>
+              <input
+                v-model="shAnthropicApiKey"
+                type="password"
+                :placeholder="shAnthropicApiKeyHint || 'sk-ant-...'"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                {{ t('super.settings.selfHealing.anthropicApiKeyDesc') }}
+                <a href="https://console.anthropic.com/" target="_blank" class="text-primary-600 hover:underline">console.anthropic.com</a>
+              </p>
+            </div>
+
+            <!-- GitHub PAT -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.githubPat') }}</label>
+              <div v-if="shGithubConfigured" class="mb-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                <Check class="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                <span class="text-xs text-green-700 dark:text-green-300">
+                  {{ t('super.settings.configured') }}
+                  <span v-if="shGithubPatHint" class="font-mono ml-1">({{ shGithubPatHint }})</span>
+                </span>
+              </div>
+              <input
+                v-model="shGithubPat"
+                type="password"
+                :placeholder="shGithubPatHint || 'ghp_...'"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ t('super.settings.selfHealing.githubPatDesc') }}</p>
+            </div>
+
+            <!-- Repo Owner -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.repoOwner') }}</label>
+              <input
+                v-model="shRepoOwner"
+                type="text"
+                placeholder="e.g. my-org"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <!-- Repo Name -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.repoName') }}</label>
+              <input
+                v-model="shRepoName"
+                type="text"
+                placeholder="e.g. fleet"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <!-- Default Branch -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.defaultBranch') }}</label>
+              <input
+                v-model="shDefaultBranch"
+                type="text"
+                placeholder="main"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <!-- Save + Test -->
+            <div class="flex items-center gap-3 pt-2">
+              <button
+                @click="saveSelfHealingConfig"
+                :disabled="savingSelfHealing"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="savingSelfHealing" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ t('common.save') }}
+              </button>
+              <button
+                @click="testSelfHealing"
+                :disabled="(!shAnthropicConfigured && !shAnthropicApiKey) || testingSelfHealing"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                <Loader2 v-if="testingSelfHealing" class="w-4 h-4 animate-spin" />
+                <RefreshCw v-else class="w-4 h-4" />
+                {{ t('super.settings.testConnection') }}
+              </button>
+            </div>
+
+            <div v-if="shTestResult" class="p-3 rounded-lg border" :class="shTestResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+              <p class="text-sm" :class="shTestResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                {{ shTestResult.message }}
+              </p>
             </div>
           </div>
         </div>

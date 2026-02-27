@@ -1,14 +1,18 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
+import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { loadAdminPermissions, requireAdminPermission, requireSuperAdmin } from '../middleware/admin-permission.js';
+import type { AdminPermissions } from '../middleware/admin-permission.js';
 import { dockerService } from '../services/docker.service.js';
 import { updateService } from '../services/update.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
+import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import {
+  jsonBody,
   jsonContent,
   errorResponseSchema,
   messageResponseSchema,
@@ -17,21 +21,24 @@ import {
 } from './_schemas.js';
 
 type Env = {
-  Variables: { user: AuthUser };
+  Variables: { user: AuthUser; adminPermissions: AdminPermissions | null };
 };
 
 const adminRoutes = new OpenAPIHono<Env>();
 
 adminRoutes.use('*', authMiddleware);
 
-// Super user guard
+// Admin guard: allow super users AND users with an admin role
 adminRoutes.use('*', async (c, next) => {
   const user = c.get('user');
-  if (!user.isSuper) {
-    return c.json({ error: 'Super user access required' }, 403);
+  if (!user.isSuper && !user.adminRoleId) {
+    return c.json({ error: 'Admin access required' }, 403);
   }
   await next();
 });
+
+// Load admin permissions for role-based admins
+adminRoutes.use('*', loadAdminPermissions);
 
 // ── Schemas ──
 
@@ -246,6 +253,7 @@ adminRoutes.openapi(listUsersRoute, (async (c: any) => {
     email: u.email,
     name: u.name,
     isSuper: u.isSuper,
+    adminRoleId: u.adminRoleId ?? null,
     emailVerified: u.emailVerified,
     twoFactorEnabled: u.twoFactorEnabled,
     createdAt: u.createdAt,
@@ -618,6 +626,510 @@ adminRoutes.openapi(statusRoute, (async (c: any) => {
     },
     recentDeployments,
   });
+}) as any);
+
+// ── Status Post Schemas ──
+
+const statusPostQuerySchema = z.object({
+  page: z.string().optional().openapi({ description: 'Page number (default 1)' }),
+  limit: z.string().optional().openapi({ description: 'Items per page (default 20, max 50)' }),
+  status: z.enum(['all', 'draft', 'published', 'archived']).optional().openapi({ description: 'Filter by status' }),
+});
+
+const createStatusPostSchema = z.object({
+  icon: z.enum(['incident', 'maintenance', 'resolved', 'info', 'degraded', 'outage']),
+  severity: z.enum(['info', 'warning', 'critical']),
+  affectedServices: z.array(z.string()),
+  status: z.enum(['draft', 'published', 'archived']).default('draft'),
+  locale: z.string().min(2).max(5),
+  title: z.string().min(1).max(300),
+  body: z.string(),
+});
+
+const updateStatusPostSchema = z.object({
+  icon: z.enum(['incident', 'maintenance', 'resolved', 'info', 'degraded', 'outage']).optional(),
+  severity: z.enum(['info', 'warning', 'critical']).optional(),
+  affectedServices: z.array(z.string()).optional(),
+  status: z.enum(['draft', 'published', 'archived']).optional(),
+});
+
+const upsertTranslationSchema = z.object({
+  title: z.string().min(1).max(300),
+  body: z.string(),
+});
+
+const autoTranslateSchema = z.object({
+  sourceLocale: z.string(),
+  targetLocales: z.array(z.string()).optional(),
+});
+
+const statusPostIdParamSchema = z.object({
+  id: z.string().uuid().openapi({ description: 'Status post ID' }),
+});
+
+const translationParamSchema = z.object({
+  id: z.string().uuid().openapi({ description: 'Status post ID' }),
+  locale: z.string().min(2).max(5).openapi({ description: 'Locale code' }),
+});
+
+// ── Status Post Routes ──
+
+// GET /status-posts — list all status posts with translations (paginated)
+const listStatusPostsRoute = createRoute({
+  method: 'get',
+  path: '/status-posts',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'List all status posts with translations (paginated)',
+  security: bearerSecurity,
+  request: {
+    query: statusPostQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Paginated status posts list'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(listStatusPostsRoute, (async (c: any) => {
+  const query = c.req.valid('query');
+  const page = Math.max(1, parseInt(query.page ?? '1', 10));
+  const limit = Math.min(50, Math.max(1, parseInt(query.limit ?? '20', 10)));
+  const offset = (page - 1) * limit;
+
+  const conditions: any[] = [];
+  if (query.status && query.status !== 'all') {
+    conditions.push(eq(statusPosts.status, query.status));
+  }
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const posts = await db
+    .select()
+    .from(statusPosts)
+    .where(whereClause)
+    .orderBy(desc(statusPosts.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  const [total] = await db
+    .select({ count: countSql() })
+    .from(statusPosts)
+    .where(whereClause);
+
+  // Fetch translations for each post
+  const postsWithTranslations = await Promise.all(
+    posts.map(async (post) => {
+      const translations = await db
+        .select()
+        .from(statusPostTranslations)
+        .where(eq(statusPostTranslations.postId, post.id));
+      return { ...post, translations };
+    }),
+  );
+
+  return c.json({
+    data: postsWithTranslations,
+    pagination: {
+      page,
+      limit,
+      total: total?.count ?? 0,
+      totalPages: Math.ceil((total?.count ?? 0) / limit),
+    },
+  });
+}) as any);
+
+// POST /status-posts — create a new status post with initial translation
+const createStatusPostRoute = createRoute({
+  method: 'post',
+  path: '/status-posts',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'Create a new status post with initial translation',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(createStatusPostSchema),
+  },
+  responses: {
+    201: jsonContent(z.any(), 'Created status post with translation'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(createStatusPostRoute, (async (c: any) => {
+  const body = c.req.valid('json');
+  const user = c.get('user');
+
+  const [post] = await insertReturning(statusPosts, {
+    icon: body.icon,
+    severity: body.severity,
+    affectedServices: body.affectedServices,
+    status: body.status,
+    publishedAt: body.status === 'published' ? new Date() : null,
+    createdBy: user.userId,
+  });
+
+  const [translation] = await insertReturning(statusPostTranslations, {
+    postId: post!.id,
+    locale: body.locale,
+    title: body.title,
+    body: body.body,
+  });
+
+  return c.json({ ...post, translations: [translation] }, 201);
+}) as any);
+
+// PATCH /status-posts/:id — update status post metadata
+const updateStatusPostRoute = createRoute({
+  method: 'patch',
+  path: '/status-posts/{id}',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'Update status post metadata',
+  security: bearerSecurity,
+  request: {
+    params: statusPostIdParamSchema,
+    body: jsonBody(updateStatusPostSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated status post'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(updateStatusPostRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  const body = c.req.valid('json');
+
+  const existing = await db.query.statusPosts.findFirst({
+    where: eq(statusPosts.id, id),
+  });
+
+  if (!existing) {
+    return c.json({ error: 'Status post not found' }, 404);
+  }
+
+  const updates: Record<string, any> = { updatedAt: new Date() };
+  if (body.icon !== undefined) updates.icon = body.icon;
+  if (body.severity !== undefined) updates.severity = body.severity;
+  if (body.affectedServices !== undefined) updates.affectedServices = body.affectedServices;
+  if (body.status !== undefined) {
+    updates.status = body.status;
+    if (body.status === 'published' && !existing.publishedAt) {
+      updates.publishedAt = new Date();
+    }
+  }
+
+  const [updated] = await updateReturning(statusPosts, updates, eq(statusPosts.id, id));
+
+  return c.json(updated);
+}) as any);
+
+// DELETE /status-posts/:id — hard delete a status post (cascades translations)
+const deleteStatusPostRoute = createRoute({
+  method: 'delete',
+  path: '/status-posts/{id}',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'Delete a status post',
+  security: bearerSecurity,
+  request: {
+    params: statusPostIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Status post deleted'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(deleteStatusPostRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+
+  const existing = await db.query.statusPosts.findFirst({
+    where: eq(statusPosts.id, id),
+  });
+
+  if (!existing) {
+    return c.json({ error: 'Status post not found' }, 404);
+  }
+
+  await db.delete(statusPosts).where(eq(statusPosts.id, id));
+
+  return c.json({ message: 'Status post deleted' });
+}) as any);
+
+// PUT /status-posts/:id/translations/:locale — upsert a translation
+const upsertTranslationRoute = createRoute({
+  method: 'put',
+  path: '/status-posts/{id}/translations/{locale}',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'Upsert a translation for a status post',
+  security: bearerSecurity,
+  request: {
+    params: translationParamSchema,
+    body: jsonBody(upsertTranslationSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Upserted translation'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(upsertTranslationRoute, (async (c: any) => {
+  const { id, locale } = c.req.valid('param');
+  const body = c.req.valid('json');
+
+  const post = await db.query.statusPosts.findFirst({
+    where: eq(statusPosts.id, id),
+  });
+
+  if (!post) {
+    return c.json({ error: 'Status post not found' }, 404);
+  }
+
+  const existing = await db.query.statusPostTranslations.findFirst({
+    where: and(
+      eq(statusPostTranslations.postId, id),
+      eq(statusPostTranslations.locale, locale),
+    ),
+  });
+
+  if (existing) {
+    const [updated] = await updateReturning(
+      statusPostTranslations,
+      { title: body.title, body: body.body, updatedAt: new Date() },
+      eq(statusPostTranslations.id, existing.id),
+    );
+    return c.json(updated);
+  } else {
+    const [created] = await insertReturning(statusPostTranslations, {
+      postId: id,
+      locale,
+      title: body.title,
+      body: body.body,
+    });
+    return c.json(created);
+  }
+}) as any);
+
+// DELETE /status-posts/:id/translations/:locale — delete a specific translation
+const deleteTranslationRoute = createRoute({
+  method: 'delete',
+  path: '/status-posts/{id}/translations/{locale}',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'Delete a specific translation for a status post',
+  security: bearerSecurity,
+  request: {
+    params: translationParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Translation deleted'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(deleteTranslationRoute, (async (c: any) => {
+  const { id, locale } = c.req.valid('param');
+
+  const existing = await db.query.statusPostTranslations.findFirst({
+    where: and(
+      eq(statusPostTranslations.postId, id),
+      eq(statusPostTranslations.locale, locale),
+    ),
+  });
+
+  if (!existing) {
+    return c.json({ error: 'Translation not found' }, 404);
+  }
+
+  await db.delete(statusPostTranslations).where(eq(statusPostTranslations.id, existing.id));
+
+  return c.json({ message: 'Translation deleted' });
+}) as any);
+
+// POST /status-posts/:id/auto-translate — auto-translate using DeepL API
+const autoTranslateRoute = createRoute({
+  method: 'post',
+  path: '/status-posts/{id}/auto-translate',
+  tags: ['Admin', 'Status Posts'],
+  summary: 'Auto-translate a status post using DeepL',
+  security: bearerSecurity,
+  request: {
+    params: statusPostIdParamSchema,
+    body: jsonBody(autoTranslateSchema),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Translation results'),
+    ...standardErrors,
+  },
+});
+
+// ── Translation helpers ──
+
+const localeNames: Record<string, string> = { en: 'English', nb: 'Norwegian Bokmål', de: 'German', zh: 'Chinese' };
+const localeToDeepL: Record<string, string> = { en: 'EN', nb: 'NB', de: 'DE', zh: 'ZH' };
+
+async function resolveTranslationProvider(): Promise<{ provider: string; apiKey: string } | null> {
+  // Check provider setting
+  const providerSetting = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'translation:provider'),
+  });
+  const provider = (typeof providerSetting?.value === 'string' ? providerSetting.value : null) ?? 'deepl';
+
+  if (provider === 'claude') {
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
+    if (claudeKey) return { provider: 'claude', apiKey: claudeKey };
+    const setting = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'translation:claude_api_key'),
+    });
+    if (setting) {
+      const raw = typeof setting.value === 'string' ? setting.value : null;
+      if (raw) {
+        try { return { provider: 'claude', apiKey: decrypt(raw) }; } catch { return { provider: 'claude', apiKey: raw }; }
+      }
+    }
+    return null;
+  }
+
+  // DeepL (default)
+  const deeplKey = process.env.DEEPL_API_KEY;
+  if (deeplKey) return { provider: 'deepl', apiKey: deeplKey };
+  const setting = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'translation:deepl_api_key'),
+  });
+  if (setting) {
+    const raw = typeof setting.value === 'string' ? setting.value : null;
+    if (raw) {
+      try { return { provider: 'deepl', apiKey: decrypt(raw) }; } catch { return { provider: 'deepl', apiKey: raw }; }
+    }
+  }
+  return null;
+}
+
+async function translateWithDeepL(apiKey: string, title: string, body: string, sourceLang: string, targetLang: string): Promise<{ title: string; body: string }> {
+  const baseUrl = apiKey.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  const srcLang = localeToDeepL[sourceLang] ?? sourceLang.toUpperCase();
+  const tgtLang = localeToDeepL[targetLang] ?? targetLang.toUpperCase();
+
+  const titleRes = await fetch(`${baseUrl}/v2/translate`, {
+    method: 'POST',
+    headers: { 'Authorization': `DeepL-Auth-Key ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: [title], target_lang: tgtLang, source_lang: srcLang }),
+  });
+  if (!titleRes.ok) throw new Error(`DeepL title translation failed: ${titleRes.status}`);
+  const titleData = await titleRes.json() as { translations: { text: string }[] };
+
+  const bodyRes = await fetch(`${baseUrl}/v2/translate`, {
+    method: 'POST',
+    headers: { 'Authorization': `DeepL-Auth-Key ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: [body], target_lang: tgtLang, source_lang: srcLang }),
+  });
+  if (!bodyRes.ok) throw new Error(`DeepL body translation failed: ${bodyRes.status}`);
+  const bodyData = await bodyRes.json() as { translations: { text: string }[] };
+
+  return {
+    title: titleData.translations[0]?.text ?? title,
+    body: bodyData.translations[0]?.text ?? body,
+  };
+}
+
+async function translateWithClaude(apiKey: string, title: string, body: string, sourceLang: string, targetLang: string): Promise<{ title: string; body: string }> {
+  const srcName = localeNames[sourceLang] ?? sourceLang;
+  const tgtName = localeNames[targetLang] ?? targetLang;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system: `You are a professional translator. Translate from ${srcName} to ${tgtName}. Preserve all markdown formatting. Return ONLY valid JSON: {"title": "translated title", "body": "translated body"}`,
+      messages: [{
+        role: 'user',
+        content: `Translate the following:\n\nTitle: ${title}\n\nBody:\n${body}`,
+      }],
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Claude API error: ${res.status}`);
+  const data = await res.json() as { content: { type: string; text: string }[] };
+  const text = data.content.find((c: any) => c.type === 'text')?.text ?? '';
+
+  // Extract JSON from response (Claude may wrap in markdown code blocks)
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Claude response did not contain valid JSON');
+  const parsed = JSON.parse(jsonMatch[0]) as { title: string; body: string };
+  return { title: parsed.title, body: parsed.body };
+}
+
+adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  const body = c.req.valid('json');
+
+  const translationConfig = await resolveTranslationProvider();
+  if (!translationConfig) {
+    return c.json({ error: 'Translation service not configured. Add an API key in Settings > Translation.' }, 501);
+  }
+
+  // Fetch source translation
+  const sourceTranslation = await db.query.statusPostTranslations.findFirst({
+    where: and(
+      eq(statusPostTranslations.postId, id),
+      eq(statusPostTranslations.locale, body.sourceLocale),
+    ),
+  });
+
+  if (!sourceTranslation) {
+    return c.json({ error: 'Source translation not found' }, 404);
+  }
+
+  const supportedLocales = ['en', 'nb', 'de', 'zh'];
+  const targetLocales = body.targetLocales ?? supportedLocales.filter((l) => l !== body.sourceLocale);
+
+  const translated: string[] = [];
+  const failed: string[] = [];
+
+  const translateFn = translationConfig.provider === 'claude' ? translateWithClaude : translateWithDeepL;
+
+  for (const targetLocale of targetLocales) {
+    try {
+      const result = await translateFn(
+        translationConfig.apiKey,
+        sourceTranslation.title,
+        sourceTranslation.body,
+        body.sourceLocale,
+        targetLocale,
+      );
+
+      // Upsert translation
+      const existing = await db.query.statusPostTranslations.findFirst({
+        where: and(
+          eq(statusPostTranslations.postId, id),
+          eq(statusPostTranslations.locale, targetLocale),
+        ),
+      });
+
+      if (existing) {
+        await updateReturning(
+          statusPostTranslations,
+          { title: result.title, body: result.body, updatedAt: new Date() },
+          eq(statusPostTranslations.id, existing.id),
+        );
+      } else {
+        await insertReturning(statusPostTranslations, {
+          postId: id,
+          locale: targetLocale,
+          title: result.title,
+          body: result.body,
+        });
+      }
+
+      translated.push(targetLocale);
+    } catch {
+      failed.push(targetLocale);
+    }
+  }
+
+  return c.json({ translated, failed });
 }) as any);
 
 export default adminRoutes;

@@ -118,7 +118,56 @@
     "privacy": "Datenschutz",
     "terms": "AGB",
     "discord": "Discord",
+    "status": "Status",
     "rights": "Fleet. Alle Rechte vorbehalten."
+  },
+  "statusPage": {
+    "title": "Systemstatus",
+    "description": "Aktueller Status und Vorfallhistorie aller Dienste",
+    "allOperational": "Alle Systeme funktionsfähig",
+    "partialDegradation": "Teilweise Beeinträchtigung",
+    "majorOutage": "Schwerer Ausfall",
+    "unknown": "Unbekannt",
+    "notConfigured": "Nicht konfiguriert",
+    "services": {
+      "api": "API",
+      "docker": "Docker Swarm",
+      "storage": "Speicher",
+      "queue": "Warteschlange"
+    },
+    "healthy": "Gesund",
+    "degraded": "Beeinträchtigt",
+    "down": "Ausgefallen",
+    "responseTime": "{ms}ms",
+    "uptime": {
+      "title": "Verfügbarkeitshistorie",
+      "days": "{count} Tage",
+      "noData": "Keine Daten",
+      "percent": "{value}%",
+      "today": "Heute"
+    },
+    "timeline": {
+      "title": "Vorfallhistorie",
+      "search": "Vorfälle suchen...",
+      "empty": "Keine Vorfälle gemeldet",
+      "noResults": "Keine Vorfälle entsprechen Ihrer Suche",
+      "prev": "Zurück",
+      "next": "Weiter",
+      "page": "Seite {page} von {total}"
+    },
+    "icons": {
+      "incident": "Vorfall",
+      "maintenance": "Wartung",
+      "resolved": "Gelöst",
+      "info": "Info",
+      "outage": "Ausfall",
+      "degraded": "Beeinträchtigt"
+    },
+    "severity": {
+      "info": "Info",
+      "warning": "Warnung",
+      "critical": "Kritisch"
+    }
   },
   "privacy": {
     "title": "Datenschutzerklärung",

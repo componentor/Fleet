@@ -17,3 +17,7 @@ export * from './errors';
 export * from './storage';
 export * from './log-archives';
 export * from './registry-credentials';
+export * from './status-page';
+export * from './admin-roles';
+export * from './support';
+export * from './self-healing';

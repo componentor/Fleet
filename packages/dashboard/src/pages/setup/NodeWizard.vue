@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
-import { Sun, Moon, Monitor, Server, Key, HardDrive, CheckCircle2, ArrowRight, ArrowLeft, Loader2 } from 'lucide-vue-next'
+import { Sun, Moon, Server, Key, HardDrive, CheckCircle2, ArrowRight, ArrowLeft, Loader2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -71,8 +71,7 @@ async function completeSetup() {
       :title="`Theme: ${theme}`"
     >
       <Sun v-if="theme === 'light'" class="w-5 h-5" />
-      <Moon v-else-if="theme === 'dark'" class="w-5 h-5" />
-      <Monitor v-else class="w-5 h-5" />
+      <Moon v-else class="w-5 h-5" />
     </button>
 
     <!-- Header -->

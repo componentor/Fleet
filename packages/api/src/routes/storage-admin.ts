@@ -20,7 +20,7 @@ import { storageManager } from '../services/storage/storage-manager.js';
 import { migrationService } from '../services/storage/migration.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { getMaintenanceQueue, isQueueAvailable } from '../services/queue.service.js';
-import { logger } from '../services/logger.js';
+import { logger, logToErrorTable } from '../services/logger.js';
 import {
   jsonBody,
   jsonContent,
@@ -518,6 +518,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
 
     const detail = err instanceof Error ? err.message : String(err);
     logger.error({ err, clusterId }, 'Failed to initialize storage cluster');
+    logToErrorTable({ level: 'error', message: `Storage cluster init failure: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'storage-admin', operation: 'initialize-storage-cluster' } });
     return c.json({ error: `Failed to initialize storage cluster: ${detail}`, status: 'error', clusterId }, 500);
   }
 }) as any);
@@ -983,6 +984,7 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
     } catch (err) {
       failed.push({ name: spec.Name ?? svc.ID, error: (err as Error).message });
       logger.error({ err, service: spec.Name }, 'Failed to repair service');
+      logToErrorTable({ level: 'error', message: `Failed to repair service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'storage-admin', operation: 'repair-service' } });
     }
   }
 
@@ -1023,6 +1025,7 @@ storageAdmin.openapi(applyPlatformVolumesRoute, (async (c: any) => {
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     logger.error({ err }, 'Failed to apply platform volume configuration');
+    logToErrorTable({ level: 'error', message: `Failed to apply platform volume configuration: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'storage-admin', operation: 'apply-platform-volumes' } });
     return c.json({ error: `Failed to apply platform volumes: ${detail}` }, 500);
   }
 }) as any);
@@ -1100,6 +1103,7 @@ storageAdmin.openapi(installPrerequisitesRoute, (async (c: any) => {
     });
   } catch (err) {
     logger.error({ err }, 'Failed to install storage prerequisites');
+    logToErrorTable({ level: 'error', message: `Failed to install storage prerequisites: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'storage-admin', operation: 'install-prerequisites' } });
     return c.json({ error: `Failed to install prerequisites: ${(err as Error).message}` }, 500);
   }
 }) as any);
