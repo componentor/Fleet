@@ -20,9 +20,12 @@ export const errorLog = sqliteTable('error_log', {
   userAgent: text('user_agent'),
   metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   resolved: integer('resolved', { mode: 'boolean' }).default(false),
+  status: text('status').default('open'),
+  selfHealingJobId: text('self_healing_job_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_error_log_created_at').on(table.createdAt),
   index('idx_error_log_level').on(table.level),
   index('idx_error_log_resolved').on(table.resolved),
+  index('idx_error_log_status').on(table.status),
 ]);

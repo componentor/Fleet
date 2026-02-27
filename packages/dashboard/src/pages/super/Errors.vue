@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Bug, CheckCircle, XCircle, RefreshCw, Filter, Loader2, Archive, Copy, Check } from 'lucide-vue-next'
+import { Bug, CheckCircle, RefreshCw, Filter, Loader2, Archive, Copy, Check, Bot, Clock, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import LogArchiveList from '@/components/LogArchiveList.vue'
 
 const { t } = useI18n()
+const router = useRouter()
 const api = useApi()
 const loading = ref(true)
 const errors = ref<any[]>([])
@@ -19,6 +21,17 @@ const autoRefresh = ref(false)
 const resolvingId = ref<string | null>(null)
 const resolvingAll = ref(false)
 const viewMode = ref<'errors' | 'archives'>('errors')
+
+// Self-heal modal
+const showSelfHealModal = ref(false)
+const selfHealErrorId = ref<string | null>(null)
+const selfHealError = ref<any>(null)
+const selfHealContext = ref('')
+const selfHealAutoMerge = ref(false)
+const selfHealAutoRelease = ref(false)
+const selfHealAutoUpdate = ref(false)
+const selfHealReleaseType = ref<'alpha' | 'release'>('release')
+const selfHealing = ref(false)
 
 let autoRefreshInterval: ReturnType<typeof setInterval> | null = null
 
@@ -153,6 +166,65 @@ function copyErrorData(err: any) {
   setTimeout(() => { copiedId.value = null }, 2000)
 }
 
+function openSelfHealModal(err: any) {
+  selfHealErrorId.value = err.id
+  selfHealError.value = err
+  selfHealContext.value = ''
+  showSelfHealModal.value = true
+}
+
+function closeSelfHealModal() {
+  showSelfHealModal.value = false
+  selfHealErrorId.value = null
+  selfHealError.value = null
+  selfHealContext.value = ''
+}
+
+async function confirmSelfHeal() {
+  if (!selfHealErrorId.value) return
+  selfHealing.value = true
+  try {
+    await api.post(`/errors/${selfHealErrorId.value}/self-heal`, {
+      context: selfHealContext.value || undefined,
+      options: {
+        autoMerge: selfHealAutoMerge.value,
+        autoRelease: selfHealAutoRelease.value,
+        autoUpdate: selfHealAutoUpdate.value,
+        releaseType: selfHealReleaseType.value,
+      },
+    })
+    const item = errors.value.find((e) => e.id === selfHealErrorId.value)
+    if (item) item.status = 'self_healing'
+    closeSelfHealModal()
+  } finally {
+    selfHealing.value = false
+  }
+}
+
+async function setErrorPending(id: string) {
+  try {
+    await api.patch(`/errors/${id}/pending`, {})
+    const item = errors.value.find((e) => e.id === id)
+    if (item) item.status = 'pending'
+  } catch {
+    // handled by useApi toast
+  }
+}
+
+function errorStatusBadge(err: any) {
+  const status = err.status || (err.resolved ? 'resolved' : 'open')
+  switch (status) {
+    case 'self_healing':
+      return { class: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', label: t('super.settings.selfHealing.selfHeal') }
+    case 'pending':
+      return { class: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300', label: t('super.errors.pending') }
+    case 'resolved':
+      return { class: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300', label: t('super.errors.resolved') }
+    default:
+      return { class: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', label: t('super.errors.unresolved') }
+  }
+}
+
 onMounted(() => {
   fetchErrors()
 })
@@ -281,7 +353,7 @@ onUnmounted(() => {
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.message') }}</th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.path') }}</th>
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.statusCode') }}</th>
-                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.resolvedCol') }}</th>
+                <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.statusCol') }}</th>
                 <th class="text-right px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.actions') }}</th>
               </tr>
             </thead>
@@ -310,8 +382,9 @@ onUnmounted(() => {
                   </td>
                   <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ err.statusCode ?? '--' }}</td>
                   <td class="px-6 py-4">
-                    <CheckCircle v-if="err.resolved" class="w-5 h-5 text-green-500" />
-                    <XCircle v-else class="w-5 h-5 text-red-500" />
+                    <span :class="['inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', errorStatusBadge(err).class]">
+                      {{ errorStatusBadge(err).label }}
+                    </span>
                   </td>
                   <td class="px-6 py-4 text-right">
                     <div class="flex items-center justify-end gap-2">
@@ -324,6 +397,22 @@ onUnmounted(() => {
                         <Copy v-else class="w-3 h-3" />
                       </button>
                       <button
+                        v-if="!err.resolved && err.status !== 'self_healing'"
+                        @click.stop="openSelfHealModal(err)"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                      >
+                        <Bot class="w-3 h-3" />
+                        {{ $t('super.settings.selfHealing.selfHeal') }}
+                      </button>
+                      <button
+                        v-if="!err.resolved && err.status !== 'pending' && err.status !== 'self_healing'"
+                        @click.stop="setErrorPending(err.id)"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 text-xs font-medium hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors"
+                      >
+                        <Clock class="w-3 h-3" />
+                        {{ $t('super.errors.pending') }}
+                      </button>
+                      <button
                         v-if="!err.resolved"
                         @click.stop="resolveError(err.id)"
                         :disabled="resolvingId === err.id"
@@ -333,7 +422,7 @@ onUnmounted(() => {
                         <CheckCircle v-else class="w-3 h-3" />
                         {{ $t('super.errors.resolve') }}
                       </button>
-                      <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ $t('super.errors.resolved') }}</span>
+                      <span v-if="err.resolved" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('super.errors.resolved') }}</span>
                     </div>
                   </td>
                 </tr>
@@ -429,5 +518,96 @@ onUnmounted(() => {
         </div>
       </template>
     </template>
+    <!-- Self-Heal Confirmation Modal -->
+    <Teleport to="body">
+      <div v-if="showSelfHealModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50" @click="closeSelfHealModal" />
+        <div class="relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl max-w-lg w-full">
+          <!-- Modal header -->
+          <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Bot class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('super.settings.selfHealing.confirmSelfHeal') }}</h3>
+            </div>
+            <button @click="closeSelfHealModal" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors">
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <!-- Modal body -->
+          <div class="px-6 py-4 space-y-4">
+            <p class="text-sm text-gray-600 dark:text-gray-400">{{ $t('super.settings.selfHealing.confirmSelfHealDesc') }}</p>
+
+            <!-- Error preview -->
+            <div v-if="selfHealError" class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <div class="flex items-center gap-2 mb-1">
+                <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium', levelBadgeClass(selfHealError.level)]">{{ selfHealError.level }}</span>
+                <span v-if="selfHealError.path" class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ selfHealError.path }}</span>
+              </div>
+              <p class="text-sm text-red-700 dark:text-red-300">{{ truncate(selfHealError.message, 200) }}</p>
+            </div>
+
+            <!-- Additional context -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Additional context (optional)</label>
+              <textarea
+                v-model="selfHealContext"
+                rows="3"
+                placeholder="Add any extra context to help the AI fix this issue..."
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+              />
+            </div>
+
+            <!-- Options -->
+            <div class="space-y-3">
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input v-model="selfHealAutoMerge" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+                {{ $t('super.settings.selfHealing.autoMerge') }}
+                <span class="text-xs text-gray-500">— {{ $t('super.settings.selfHealing.autoMergeDesc') }}</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input v-model="selfHealAutoRelease" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+                {{ $t('super.settings.selfHealing.autoRelease') }}
+                <span class="text-xs text-gray-500">— {{ $t('super.settings.selfHealing.autoReleaseDesc') }}</span>
+              </label>
+              <div v-if="selfHealAutoRelease" class="flex items-center gap-3 pl-6">
+                <label class="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
+                  <input v-model="selfHealReleaseType" type="radio" value="alpha" class="text-primary-600 focus:ring-primary-500" />
+                  {{ $t('super.settings.selfHealing.alpha') }}
+                </label>
+                <label class="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
+                  <input v-model="selfHealReleaseType" type="radio" value="release" class="text-primary-600 focus:ring-primary-500" />
+                  {{ $t('super.settings.selfHealing.release') }}
+                </label>
+              </div>
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input v-model="selfHealAutoUpdate" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+                {{ $t('super.settings.selfHealing.autoUpdate') }}
+                <span class="text-xs text-gray-500">— {{ $t('super.settings.selfHealing.autoUpdateDesc') }}</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Modal footer -->
+          <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+            <button
+              @click="closeSelfHealModal"
+              class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              {{ $t('common.cancel') }}
+            </button>
+            <button
+              @click="confirmSelfHeal"
+              :disabled="selfHealing"
+              class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              <Loader2 v-if="selfHealing" class="w-4 h-4 animate-spin" />
+              <Bot v-else class="w-4 h-4" />
+              {{ $t('super.settings.selfHealing.selfHeal') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

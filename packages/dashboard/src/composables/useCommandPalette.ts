@@ -1,5 +1,6 @@
 import { ref, computed, onMounted, onUnmounted, type Component } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useServicesStore } from '@/stores/services'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -27,6 +28,7 @@ const selectedIndex = ref(0)
 
 export function useCommandPalette() {
   const router = useRouter()
+  const { t } = useI18n()
   const servicesStore = useServicesStore()
   const { isSuper, logout } = useAuth()
   const { toggle: toggleTheme } = useTheme()
@@ -35,38 +37,38 @@ export function useCommandPalette() {
   const domains = ref<Array<{ domain: string; id: string }>>([])
   let domainsLoaded = false
 
-  const navigationItems: CommandItem[] = [
-    { id: 'nav-dashboard', type: 'navigation', label: 'Dashboard', icon: LayoutDashboard, path: '/panel', keywords: ['home', 'overview'] },
-    { id: 'nav-services', type: 'navigation', label: 'Services', icon: Box, path: '/panel/services', keywords: ['containers', 'apps'] },
-    { id: 'nav-deploy', type: 'navigation', label: 'Deploy', icon: Rocket, path: '/panel/deploy', keywords: ['new', 'create'] },
-    { id: 'nav-marketplace', type: 'navigation', label: 'Marketplace', icon: Store, path: '/panel/marketplace', keywords: ['templates', 'apps'] },
-    { id: 'nav-domains', type: 'navigation', label: 'Domains', icon: Globe, path: '/panel/domains', keywords: ['dns', 'ssl', 'certificate'] },
-    { id: 'nav-terminal', type: 'navigation', label: 'Terminal', icon: Terminal, path: '/panel/terminal', keywords: ['shell', 'ssh', 'console'] },
-    { id: 'nav-storage', type: 'navigation', label: 'Storage', icon: HardDrive, path: '/panel/storage', keywords: ['volumes', 'disk'] },
-    { id: 'nav-backups', type: 'navigation', label: 'Backups', icon: Archive, path: '/panel/backups', keywords: ['restore', 'snapshot'] },
-    { id: 'nav-ssh', type: 'navigation', label: 'SSH Keys', icon: Key, path: '/panel/ssh', keywords: ['keys', 'access'] },
-    { id: 'nav-apikeys', type: 'navigation', label: 'API Keys', icon: KeyRound, path: '/panel/api-keys', keywords: ['tokens'] },
-    { id: 'nav-users', type: 'navigation', label: 'Team Members', icon: Users, path: '/panel/users', keywords: ['team', 'members', 'invite'] },
-    { id: 'nav-activity', type: 'navigation', label: 'Activity Log', icon: ScrollText, path: '/panel/activity', keywords: ['events', 'audit'] },
-    { id: 'nav-billing', type: 'navigation', label: 'Billing', icon: CreditCard, path: '/panel/billing', keywords: ['subscription', 'payment', 'invoice'] },
-    { id: 'nav-settings', type: 'navigation', label: 'Settings', icon: Settings, path: '/panel/settings', keywords: ['preferences', 'config'] },
-  ]
+  const navigationItems = computed<CommandItem[]>(() => [
+    { id: 'nav-dashboard', type: 'navigation', label: t('nav.dashboard'), icon: LayoutDashboard, path: '/panel', keywords: ['home', 'overview', 'dashboard'] },
+    { id: 'nav-services', type: 'navigation', label: t('nav.services'), icon: Box, path: '/panel/services', keywords: ['containers', 'apps', 'services'] },
+    { id: 'nav-deploy', type: 'navigation', label: t('nav.deploy'), icon: Rocket, path: '/panel/deploy', keywords: ['new', 'create', 'deploy'] },
+    { id: 'nav-marketplace', type: 'navigation', label: t('nav.marketplace'), icon: Store, path: '/panel/marketplace', keywords: ['templates', 'apps', 'marketplace'] },
+    { id: 'nav-domains', type: 'navigation', label: t('nav.domains'), icon: Globe, path: '/panel/domains', keywords: ['dns', 'ssl', 'certificate', 'domains'] },
+    { id: 'nav-terminal', type: 'navigation', label: t('nav.terminal'), icon: Terminal, path: '/panel/terminal', keywords: ['shell', 'ssh', 'console', 'terminal'] },
+    { id: 'nav-storage', type: 'navigation', label: t('nav.storage'), icon: HardDrive, path: '/panel/storage', keywords: ['volumes', 'disk', 'storage'] },
+    { id: 'nav-backups', type: 'navigation', label: t('nav.backups'), icon: Archive, path: '/panel/backups', keywords: ['restore', 'snapshot', 'backups'] },
+    { id: 'nav-ssh', type: 'navigation', label: t('nav.ssh'), icon: Key, path: '/panel/ssh', keywords: ['keys', 'access', 'ssh'] },
+    { id: 'nav-apikeys', type: 'navigation', label: t('nav.apiKeys'), icon: KeyRound, path: '/panel/api-keys', keywords: ['tokens', 'api keys'] },
+    { id: 'nav-users', type: 'navigation', label: t('commandPalette.teamMembers'), icon: Users, path: '/panel/users', keywords: ['team', 'members', 'invite', 'users'] },
+    { id: 'nav-activity', type: 'navigation', label: t('nav.activity'), icon: ScrollText, path: '/panel/activity', keywords: ['events', 'audit', 'activity'] },
+    { id: 'nav-billing', type: 'navigation', label: t('nav.billing'), icon: CreditCard, path: '/panel/billing', keywords: ['subscription', 'payment', 'invoice', 'billing'] },
+    { id: 'nav-settings', type: 'navigation', label: t('nav.settings'), icon: Settings, path: '/panel/settings', keywords: ['preferences', 'config', 'settings'] },
+  ])
 
-  const adminItems: CommandItem[] = [
-    { id: 'admin-dashboard', type: 'navigation', label: 'Admin Dashboard', icon: LayoutDashboard, path: '/admin', keywords: ['admin', 'super'] },
-    { id: 'admin-nodes', type: 'navigation', label: 'Admin Nodes', icon: HardDrive, path: '/admin/nodes', keywords: ['admin', 'servers'] },
-    { id: 'admin-accounts', type: 'navigation', label: 'Admin Accounts', icon: Users, path: '/admin/accounts', keywords: ['admin', 'customers'] },
-    { id: 'admin-events', type: 'navigation', label: 'Admin Events', icon: ScrollText, path: '/admin/events', keywords: ['admin', 'audit'] },
-    { id: 'admin-settings', type: 'navigation', label: 'Admin Settings', icon: Settings, path: '/admin/settings', keywords: ['admin', 'platform'] },
-  ]
+  const adminItems = computed<CommandItem[]>(() => [
+    { id: 'admin-dashboard', type: 'navigation', label: t('commandPalette.adminDashboard'), icon: LayoutDashboard, path: '/admin', keywords: ['admin', 'super', 'dashboard'] },
+    { id: 'admin-nodes', type: 'navigation', label: t('commandPalette.adminNodes'), icon: HardDrive, path: '/admin/nodes', keywords: ['admin', 'servers', 'nodes'] },
+    { id: 'admin-accounts', type: 'navigation', label: t('commandPalette.adminAccounts'), icon: Users, path: '/admin/accounts', keywords: ['admin', 'customers', 'accounts'] },
+    { id: 'admin-events', type: 'navigation', label: t('commandPalette.adminEvents'), icon: ScrollText, path: '/admin/events', keywords: ['admin', 'audit', 'events'] },
+    { id: 'admin-settings', type: 'navigation', label: t('commandPalette.adminSettings'), icon: Settings, path: '/admin/settings', keywords: ['admin', 'platform', 'settings'] },
+  ])
 
-  const actionItems: CommandItem[] = [
-    { id: 'action-deploy', type: 'action', label: 'Deploy New Service', icon: Plus, action: () => router.push('/panel/deploy'), keywords: ['create', 'new'] },
-    { id: 'action-domain', type: 'action', label: 'Add Domain', icon: Globe, action: () => router.push('/panel/domains'), keywords: ['dns', 'add'] },
-    { id: 'action-invite', type: 'action', label: 'Invite Team Member', icon: UserPlus, action: () => router.push('/panel/users'), keywords: ['add', 'member'] },
-    { id: 'action-theme', type: 'action', label: 'Toggle Theme', icon: Sun, action: toggleTheme, keywords: ['dark', 'light', 'mode'] },
-    { id: 'action-logout', type: 'action', label: 'Sign Out', icon: LogOut, action: logout, keywords: ['logout', 'exit'] },
-  ]
+  const actionItems = computed<CommandItem[]>(() => [
+    { id: 'action-deploy', type: 'action', label: t('commandPalette.deployNew'), icon: Plus, action: () => router.push('/panel/deploy'), keywords: ['create', 'new', 'deploy'] },
+    { id: 'action-domain', type: 'action', label: t('commandPalette.addDomain'), icon: Globe, action: () => router.push('/panel/domains'), keywords: ['dns', 'add', 'domain'] },
+    { id: 'action-invite', type: 'action', label: t('commandPalette.inviteTeam'), icon: UserPlus, action: () => router.push('/panel/users'), keywords: ['add', 'member', 'invite'] },
+    { id: 'action-theme', type: 'action', label: t('commandPalette.toggleTheme'), icon: Sun, action: toggleTheme, keywords: ['dark', 'light', 'mode', 'theme'] },
+    { id: 'action-logout', type: 'action', label: t('commandPalette.signOut'), icon: LogOut, action: logout, keywords: ['logout', 'exit', 'sign out'] },
+  ])
 
   const serviceItems = computed<CommandItem[]>(() => {
     return servicesStore.services.map((svc) => ({
@@ -85,7 +87,7 @@ export function useCommandPalette() {
       id: `domain-${d.id}`,
       type: 'domain' as const,
       label: d.domain,
-      description: 'DNS Zone',
+      description: t('commandPalette.dnsZone'),
       icon: Globe,
       path: `/panel/domains/${d.id}`,
       keywords: ['dns'],
@@ -94,11 +96,11 @@ export function useCommandPalette() {
 
   const allItems = computed(() => {
     const items = [
-      ...navigationItems,
-      ...(isSuper.value ? adminItems : []),
+      ...navigationItems.value,
+      ...(isSuper.value ? adminItems.value : []),
       ...serviceItems.value,
       ...domainItems.value,
-      ...actionItems,
+      ...actionItems.value,
     ]
     return items
   })

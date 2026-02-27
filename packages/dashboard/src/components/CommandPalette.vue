@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, nextTick, ref } from 'vue'
+import { watch, nextTick, ref, computed } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useI18n } from 'vue-i18n'
@@ -22,12 +22,12 @@ watch(query, () => onQueryChange())
 
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
 
-const typeLabels: Record<string, string> = {
-  navigation: 'Navigation',
-  service: 'Services',
-  domain: 'Domains',
-  action: 'Quick Actions',
-}
+const typeLabels = computed<Record<string, string>>(() => ({
+  navigation: t('commandPalette.navigation'),
+  service: t('commandPalette.services'),
+  domain: t('commandPalette.domains'),
+  action: t('commandPalette.quickActions'),
+}))
 
 function statusColor(status?: string) {
   switch (status) {
@@ -115,13 +115,13 @@ function getFlatIndex(type: string, indexInGroup: number): number {
           <!-- Footer -->
           <div class="px-4 py-2.5 border-t border-gray-200 dark:border-gray-700 flex items-center gap-4 text-[10px] text-gray-400">
             <span class="flex items-center gap-1">
-              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-mono">↑↓</kbd> navigate
+              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-mono">↑↓</kbd> {{ $t('commandPalette.navigate') }}
             </span>
             <span class="flex items-center gap-1">
-              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-mono">↵</kbd> select
+              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-mono">↵</kbd> {{ $t('commandPalette.select') }}
             </span>
             <span class="flex items-center gap-1">
-              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-mono">esc</kbd> close
+              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-mono">esc</kbd> {{ $t('commandPalette.close') }}
             </span>
           </div>
         </div>

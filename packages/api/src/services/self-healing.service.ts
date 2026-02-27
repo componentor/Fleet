@@ -446,13 +446,21 @@ export async function handleCallback(
     }
   } catch { /* ignore */ }
 
-  // If auto-update triggered, kick off Fleet update
+  // If auto-update triggered, kick off Fleet update via the update API
   if (payload.status === 'updating' && payload.releaseTag) {
     try {
-      const { updateService } = await import('./update.service.js');
-      // Schedule update in background (don't block callback)
-      updateService.performUpdate?.().catch((err: Error) => {
-        logger.error({ err }, 'Self-healing auto-update failed');
+      // Trigger update through the internal HTTP endpoint so it goes through
+      // the proper update flow (backup, migrations, seeders, restart).
+      const platformUrl = (await db.query.platformSettings.findFirst({
+        where: (s: any, { eq: e }: any) => e(s.key, 'platform:url'),
+      }))?.value as string | undefined;
+      const baseUrl = platformUrl || 'http://localhost:3000';
+      await fetch(`${baseUrl}/api/v1/admin/update/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: payload.releaseTag }),
+      }).catch((err: Error) => {
+        logger.error({ err }, 'Self-healing auto-update request failed');
       });
     } catch (err) {
       logger.error({ err }, 'Failed to trigger auto-update from self-healing');

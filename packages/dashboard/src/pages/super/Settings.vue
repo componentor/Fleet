@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -30,6 +30,7 @@ const sections = [
   { id: 'registry', label: () => 'Registry Credentials' },
   { id: 'support', label: () => 'Support' },
   { id: 'translation', label: () => t('super.settings.translationConfig') },
+  { id: 'self-healing', label: () => t('super.settings.selfHealing.title') },
 ]
 
 // General settings
@@ -150,6 +151,20 @@ const claudeApiKey = ref('')
 const claudeApiKeyHint = ref('')
 const testingTranslation = ref(false)
 const translationTestResult = ref<{ success: boolean; message: string; characterCount?: number; characterLimit?: number } | null>(null)
+
+// Self-Healing
+const shAnthropicApiKey = ref('')
+const shAnthropicApiKeyHint = ref('')
+const shAnthropicConfigured = ref(false)
+const shGithubPat = ref('')
+const shGithubPatHint = ref('')
+const shGithubConfigured = ref(false)
+const shRepoOwner = ref('')
+const shRepoName = ref('')
+const shDefaultBranch = ref('main')
+const savingSelfHealing = ref(false)
+const testingSelfHealing = ref(false)
+const shTestResult = ref<{ success: boolean; message: string } | null>(null)
 
 async function fetchSettings() {
   loading.value = true
@@ -688,6 +703,60 @@ async function removeCredential(id: string) {
   }
 }
 
+// Self-Healing settings
+async function fetchSelfHealing() {
+  try {
+    const data = await api.get<any>('/settings/self-healing')
+    shAnthropicConfigured.value = data.anthropicConfigured ?? false
+    shAnthropicApiKeyHint.value = data.anthropicApiKeyHint ?? ''
+    shGithubConfigured.value = data.githubConfigured ?? false
+    shGithubPatHint.value = data.githubPatHint ?? ''
+    shRepoOwner.value = data.repoOwner ?? ''
+    shRepoName.value = data.repoName ?? ''
+    shDefaultBranch.value = data.defaultBranch ?? 'main'
+  } catch {
+    // Not configured
+  }
+}
+
+async function saveSelfHealingConfig() {
+  savingSelfHealing.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const payload: Record<string, any> = {
+      repoOwner: shRepoOwner.value,
+      repoName: shRepoName.value,
+      defaultBranch: shDefaultBranch.value,
+    }
+    if (shAnthropicApiKey.value) payload.anthropicApiKey = shAnthropicApiKey.value
+    if (shGithubPat.value) payload.githubPat = shGithubPat.value
+    await api.patch('/settings/self-healing', payload)
+    success.value = t('common.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+    shAnthropicApiKey.value = ''
+    shGithubPat.value = ''
+    await fetchSelfHealing()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save self-healing config'
+  } finally {
+    savingSelfHealing.value = false
+  }
+}
+
+async function testSelfHealing() {
+  testingSelfHealing.value = true
+  shTestResult.value = null
+  try {
+    const res = await api.post<{ success: boolean; message: string }>('/settings/self-healing/test', {})
+    shTestResult.value = res
+  } catch (err: any) {
+    shTestResult.value = { success: false, message: err?.body?.error || 'Connection test failed' }
+  } finally {
+    testingSelfHealing.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -701,6 +770,7 @@ onMounted(() => {
   fetchRegistryCreds()
   fetchSupportSettings()
   fetchTranslation()
+  fetchSelfHealing()
 })
 </script>
 
@@ -1740,6 +1810,119 @@ onMounted(() => {
                   {{ t('super.settings.deeplUsage') }}: {{ (translationTestResult.characterCount ?? 0).toLocaleString() }} / {{ translationTestResult.characterLimit.toLocaleString() }}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+        <!-- ═══════════ Self-Healing section ═══════════ -->
+        <div v-if="activeSection === 'self-healing'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Bot class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.selfHealing.title') }}</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.selfHealing.titleDesc') }}</p>
+          </div>
+          <div class="p-6 space-y-6">
+            <!-- Anthropic API Key -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.anthropicApiKey') }}</label>
+              <div v-if="shAnthropicConfigured" class="mb-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                <Check class="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                <span class="text-xs text-green-700 dark:text-green-300">
+                  {{ t('super.settings.configured') }}
+                  <span v-if="shAnthropicApiKeyHint" class="font-mono ml-1">({{ shAnthropicApiKeyHint }})</span>
+                </span>
+              </div>
+              <input
+                v-model="shAnthropicApiKey"
+                type="password"
+                :placeholder="shAnthropicApiKeyHint || 'sk-ant-...'"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                {{ t('super.settings.selfHealing.anthropicApiKeyDesc') }}
+                <a href="https://console.anthropic.com/" target="_blank" class="text-primary-600 hover:underline">console.anthropic.com</a>
+              </p>
+            </div>
+
+            <!-- GitHub PAT -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.githubPat') }}</label>
+              <div v-if="shGithubConfigured" class="mb-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2">
+                <Check class="w-3.5 h-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                <span class="text-xs text-green-700 dark:text-green-300">
+                  {{ t('super.settings.configured') }}
+                  <span v-if="shGithubPatHint" class="font-mono ml-1">({{ shGithubPatHint }})</span>
+                </span>
+              </div>
+              <input
+                v-model="shGithubPat"
+                type="password"
+                :placeholder="shGithubPatHint || 'ghp_...'"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ t('super.settings.selfHealing.githubPatDesc') }}</p>
+            </div>
+
+            <!-- Repo Owner -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.repoOwner') }}</label>
+              <input
+                v-model="shRepoOwner"
+                type="text"
+                placeholder="e.g. my-org"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <!-- Repo Name -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.repoName') }}</label>
+              <input
+                v-model="shRepoName"
+                type="text"
+                placeholder="e.g. fleet"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <!-- Default Branch -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.selfHealing.defaultBranch') }}</label>
+              <input
+                v-model="shDefaultBranch"
+                type="text"
+                placeholder="main"
+                class="w-full max-w-lg px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <!-- Save + Test -->
+            <div class="flex items-center gap-3 pt-2">
+              <button
+                @click="saveSelfHealingConfig"
+                :disabled="savingSelfHealing"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="savingSelfHealing" class="w-4 h-4 animate-spin" />
+                <Save v-else class="w-4 h-4" />
+                {{ t('common.save') }}
+              </button>
+              <button
+                @click="testSelfHealing"
+                :disabled="(!shAnthropicConfigured && !shAnthropicApiKey) || testingSelfHealing"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                <Loader2 v-if="testingSelfHealing" class="w-4 h-4 animate-spin" />
+                <RefreshCw v-else class="w-4 h-4" />
+                {{ t('super.settings.testConnection') }}
+              </button>
+            </div>
+
+            <div v-if="shTestResult" class="p-3 rounded-lg border" :class="shTestResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+              <p class="text-sm" :class="shTestResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                {{ shTestResult.message }}
+              </p>
             </div>
           </div>
         </div>

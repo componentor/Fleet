@@ -34,6 +34,8 @@ const notificationItemSchema = z.object({
   type: z.string(),
   title: z.string(),
   body: z.string().nullable(),
+  resourceType: z.string().nullable().optional(),
+  resourceId: z.string().nullable().optional(),
   readAt: z.string().nullable(),
   createdAt: z.string(),
 }).openapi('NotificationItem');

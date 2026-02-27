@@ -24,9 +24,12 @@ export const errorLog = pgTable('error_log', {
   userAgent: text('user_agent'),
   metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
   resolved: boolean('resolved').default(false),
+  status: varchar('status').default('open'),
+  selfHealingJobId: uuid('self_healing_job_id'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
   index('idx_error_log_created_at').on(table.createdAt),
   index('idx_error_log_level').on(table.level),
   index('idx_error_log_resolved').on(table.resolved),
+  index('idx_error_log_status').on(table.status),
 ]);

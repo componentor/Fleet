@@ -95,6 +95,24 @@ function insertMarkdown(before: string, after: string = '') {
   textarea.focus()
 }
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      const ta = replyTextarea.value
+      if (ta) {
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        replyBody.value = replyBody.value.substring(0, start) + '\n' + replyBody.value.substring(end)
+        nextTick(() => { ta.selectionStart = ta.selectionEnd = start + 1 })
+      }
+    } else if (!e.shiftKey) {
+      e.preventDefault()
+      sendReply()
+    }
+  }
+}
+
 const toolbarButtons = [
   { label: 'Bold', before: '**', after: '**', icon: Bold },
   { label: 'Italic', before: '*', after: '*', icon: Italic },
@@ -203,9 +221,11 @@ function authorDisplayName(msg: Message): string {
 
 function scrollToBottom() {
   nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-    }
+    nextTick(() => {
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      }
+    })
   })
 }
 
@@ -240,11 +260,11 @@ async function fetchTicket() {
   try {
     const data = await api.get<TicketDetail>(`/admin/support/tickets/${props.id}`)
     ticket.value = data
-    scrollToBottom()
   } catch {
     ticket.value = null
   } finally {
     loading.value = false
+    scrollToBottom()
   }
 }
 
@@ -305,7 +325,7 @@ onMounted(() => {
 <template>
   <div class="flex flex-col h-full">
     <!-- Back button -->
-    <div class="flex items-center gap-4 mb-6">
+    <div class="flex items-center gap-4 mb-6 shrink-0">
       <router-link
         to="/admin/support"
         class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -327,7 +347,7 @@ onMounted(() => {
 
     <template v-else>
       <!-- Ticket header -->
-      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-6">
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-6 shrink-0">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-3 mb-2">
@@ -376,7 +396,7 @@ onMounted(() => {
           <!-- Messages list -->
           <div
             ref="messagesContainer"
-            class="flex-1 overflow-y-auto p-6 space-y-4 max-h-[600px]"
+            class="flex-1 overflow-y-auto p-6 space-y-4"
           >
             <div v-if="ticket.messages.length === 0" class="text-center py-12">
               <p class="text-sm text-gray-400 dark:text-gray-500">{{ t('support.admin.noMessages') }}</p>
@@ -482,8 +502,7 @@ onMounted(() => {
               rows="4"
               :placeholder="t('support.admin.replyPlaceholder')"
               class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm resize-y"
-              @keydown.meta.enter="sendReply"
-              @keydown.ctrl.enter="sendReply"
+              @keydown="handleKeydown"
             />
 
             <div class="flex items-center justify-between mt-3">

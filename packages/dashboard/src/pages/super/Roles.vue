@@ -79,8 +79,8 @@ async function fetchRoles() {
   loading.value = true
   error.value = ''
   try {
-    const data = await api.get<{ data: Role[] }>('/admin/roles')
-    roles.value = data.data ?? []
+    const data = await api.get<Role[]>('/admin/roles')
+    roles.value = Array.isArray(data) ? data : (data as any).data ?? []
   } catch {
     roles.value = []
     error.value = t('roles.loadError')

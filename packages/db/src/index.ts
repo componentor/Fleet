@@ -169,6 +169,10 @@ export const supportTicketMessages = _schema.supportTicketMessages as typeof PgS
 export const supportTicketsRelations = _schema.supportTicketsRelations;
 export const supportTicketMessagesRelations = _schema.supportTicketMessagesRelations;
 
+// self-healing.ts
+export const selfHealingJobs = _schema.selfHealingJobs as typeof PgSchema.selfHealingJobs;
+export const selfHealingJobsRelations = _schema.selfHealingJobsRelations;
+
 // --- Helper exports ---
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql, safeTransaction } from './helpers';
 export { getDialect } from './config';

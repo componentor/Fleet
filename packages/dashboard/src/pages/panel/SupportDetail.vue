@@ -44,6 +44,7 @@ const sending = ref(false)
 const toggling = ref(false)
 
 const messagesEnd = ref<HTMLDivElement | null>(null)
+const messagesContainer = ref<HTMLElement | null>(null)
 
 const statusLabel = computed(() => {
   if (!ticket.value) return ''
@@ -111,12 +112,15 @@ function getInitial(name: string | null): string {
 }
 
 function isOwnMessage(msg: Message): boolean {
-  return msg.authorId === authStore.user?.id
+  return msg.senderRole === 'customer'
 }
 
 async function scrollToBottom() {
   await nextTick()
-  messagesEnd.value?.scrollIntoView({ behavior: 'smooth' })
+  await nextTick()
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
 }
 
 async function fetchTicket() {
@@ -125,11 +129,11 @@ async function fetchTicket() {
   try {
     const data = await api.get<TicketDetail>(`/support/tickets/${props.id}`)
     ticket.value = data
-    await scrollToBottom()
   } catch (err: any) {
     error.value = err?.body?.error || t('support.panel.loadError')
   } finally {
     loading.value = false
+    await scrollToBottom()
   }
 }
 
@@ -207,8 +211,20 @@ const toolbarButtons = [
 ]
 
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-    sendReply()
+  if (e.key === 'Enter') {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      const ta = replyTextarea.value
+      if (ta) {
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        replyBody.value = replyBody.value.substring(0, start) + '\n' + replyBody.value.substring(end)
+        nextTick(() => { ta.selectionStart = ta.selectionEnd = start + 1 })
+      }
+    } else if (!e.shiftKey) {
+      e.preventDefault()
+      sendReply()
+    }
   }
 }
 
@@ -220,7 +236,7 @@ onMounted(() => {
 <template>
   <div class="flex flex-col h-full">
     <!-- Back link -->
-    <div class="mb-6">
+    <div class="mb-6 shrink-0">
       <router-link
         to="/panel/support"
         class="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
@@ -243,7 +259,7 @@ onMounted(() => {
     <!-- Ticket content -->
     <template v-else-if="ticket">
       <!-- Header -->
-      <div class="mb-6">
+      <div class="mb-6 shrink-0">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white truncate">
@@ -296,9 +312,9 @@ onMounted(() => {
       </div>
 
       <!-- Messages thread -->
-      <div class="flex-1 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col overflow-hidden">
+      <div class="flex-1 min-h-0 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col overflow-hidden">
         <!-- Message list -->
-        <div class="flex-1 overflow-y-auto p-6 space-y-4">
+        <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4">
           <div v-if="ticket.messages.length === 0" class="text-center py-12 text-gray-500 dark:text-gray-400 text-sm">
             {{ t('support.panel.noMessages') }}
           </div>
@@ -354,8 +370,6 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- Scroll anchor -->
-          <div ref="messagesEnd" />
         </div>
 
         <!-- Reply form -->

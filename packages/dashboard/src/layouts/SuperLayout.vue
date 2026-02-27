@@ -325,9 +325,9 @@ function changeLocale(newLocale: string) {
     </aside>
 
     <!-- Main content -->
-    <div :class="['min-w-0 overflow-x-hidden transition-all duration-200', collapsed ? 'lg:pl-16' : 'lg:pl-64']">
+    <div :class="['min-w-0 overflow-x-hidden transition-all duration-200 flex flex-col h-screen', collapsed ? 'lg:pl-16' : 'lg:pl-64']">
       <!-- Top header -->
-      <header class="sticky top-0 z-30 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
+      <header class="shrink-0 z-30 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
         <!-- Mobile hamburger -->
         <button
           class="lg:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -422,10 +422,12 @@ function changeLocale(newLocale: string) {
       </header>
 
       <!-- Page content -->
-      <main class="p-6">
+      <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">
-            <component :is="Component" />
+            <div v-if="Component" :key="$route.path" class="flex-1 min-h-0 overflow-y-auto p-6">
+              <component :is="Component" />
+            </div>
           </Transition>
         </RouterView>
       </main>

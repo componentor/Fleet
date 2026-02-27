@@ -46,7 +46,7 @@ const createJobSchema = z.object({
     autoRelease: z.boolean().default(false),
     autoUpdate: z.boolean().default(false),
     releaseType: z.enum(['alpha', 'release']).default('release'),
-  }).default({}),
+  }).optional().default({ autoMerge: false, autoRelease: false, autoUpdate: false, releaseType: 'release' }),
 });
 
 const listQuerySchema = z.object({
