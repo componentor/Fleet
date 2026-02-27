@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { LifeBuoy, Loader2, Search } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 
 interface Ticket {
@@ -40,6 +41,7 @@ interface StatsResponse {
 
 const router = useRouter()
 const api = useApi()
+const { t } = useI18n()
 
 const tickets = ref<Ticket[]>([])
 const loading = ref(true)
@@ -60,21 +62,21 @@ const filters = reactive({
 
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
-const statusOptions = [
-  { value: '', label: 'All statuses' },
-  { value: 'open', label: 'Open' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'resolved', label: 'Resolved' },
-  { value: 'closed', label: 'Closed' },
-]
+const statusOptions = computed(() => [
+  { value: '', label: t('support.admin.allStatuses') },
+  { value: 'open', label: t('support.status.open') },
+  { value: 'in_progress', label: t('support.status.inProgress') },
+  { value: 'resolved', label: t('support.status.resolved') },
+  { value: 'closed', label: t('support.status.closed') },
+])
 
-const priorityOptions = [
-  { value: '', label: 'All priorities' },
-  { value: 'low', label: 'Low' },
-  { value: 'normal', label: 'Normal' },
-  { value: 'high', label: 'High' },
-  { value: 'urgent', label: 'Urgent' },
-]
+const priorityOptions = computed(() => [
+  { value: '', label: t('support.admin.allPriorities') },
+  { value: 'low', label: t('support.priority.low') },
+  { value: 'normal', label: t('support.priority.normal') },
+  { value: 'high', label: t('support.priority.high') },
+  { value: 'urgent', label: t('support.priority.urgent') },
+])
 
 function statusBadgeClasses(status: string): string {
   switch (status) {
@@ -108,16 +110,16 @@ function priorityBadgeClasses(priority: string): string {
 
 function formatStatus(status: string): string {
   switch (status) {
-    case 'in_progress': return 'In Progress'
-    case 'open': return 'Open'
-    case 'resolved': return 'Resolved'
-    case 'closed': return 'Closed'
+    case 'in_progress': return t('support.status.inProgress')
+    case 'open': return t('support.status.open')
+    case 'resolved': return t('support.status.resolved')
+    case 'closed': return t('support.status.closed')
     default: return status
   }
 }
 
 function formatPriority(priority: string): string {
-  return priority.charAt(0).toUpperCase() + priority.slice(1)
+  return t('support.priority.' + priority)
 }
 
 function timeAgo(ts: string | null): string {
@@ -171,7 +173,7 @@ async function fetchTickets() {
     totalPages.value = data.pagination?.totalPages ?? 1
     total.value = data.pagination?.total ?? 0
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to load support tickets'
+    error.value = err?.body?.error || t('support.admin.loadError')
     tickets.value = []
   } finally {
     loading.value = false
@@ -208,16 +210,16 @@ onMounted(() => {
       <div class="flex items-center gap-3">
         <LifeBuoy class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Support Tickets</h1>
-          <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} tickets</p>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('support.admin.title') }}</h1>
+          <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ t('support.admin.ticketCount', { count: total.toLocaleString() }) }}</p>
         </div>
       </div>
       <div v-if="!statsLoading" class="flex items-center gap-2">
         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
-          {{ stats.open }} open
+          {{ t('support.admin.openCount', { count: stats.open }) }}
         </span>
         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-          {{ stats.inProgress }} in progress
+          {{ t('support.admin.inProgressCount', { count: stats.inProgress }) }}
         </span>
       </div>
     </div>
@@ -230,7 +232,7 @@ onMounted(() => {
     <!-- Filters -->
     <div class="mb-6 flex flex-wrap items-end gap-4">
       <div>
-        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Status</label>
+        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ t('support.admin.filterStatus') }}</label>
         <select
           v-model="filters.status"
           @change="onFilterChange"
@@ -240,7 +242,7 @@ onMounted(() => {
         </select>
       </div>
       <div>
-        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Priority</label>
+        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ t('support.admin.filterPriority') }}</label>
         <select
           v-model="filters.priority"
           @change="onFilterChange"
@@ -250,13 +252,13 @@ onMounted(() => {
         </select>
       </div>
       <div class="flex-1 min-w-[200px]">
-        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Search</label>
+        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">{{ t('support.admin.filterSearch') }}</label>
         <div class="relative">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             v-model="filters.search"
             type="text"
-            placeholder="Search tickets..."
+            :placeholder="t('support.admin.searchPlaceholder')"
             class="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             @input="onSearchInput"
           />
@@ -275,19 +277,19 @@ onMounted(() => {
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Subject</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Created by</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Priority</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Assigned to</th>
-              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Updated</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tableSubject') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tableAccount') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tableCreatedBy') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tableStatus') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tablePriority') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tableAssignedTo') }}</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('support.admin.tableUpdated') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="tickets.length === 0">
               <td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                No tickets found.
+                {{ t('support.admin.noTickets') }}
               </td>
             </tr>
             <tr
@@ -318,7 +320,7 @@ onMounted(() => {
                 </span>
               </td>
               <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-400">
-                {{ ticket.assigneeName || 'Unassigned' }}
+                {{ ticket.assigneeName || t('support.admin.unassigned') }}
               </td>
               <td class="px-5 py-3.5 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
                 {{ timeAgo(ticket.updatedAt) }}
@@ -330,21 +332,21 @@ onMounted(() => {
 
       <!-- Pagination -->
       <div v-if="totalPages > 1" class="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-        <p class="text-xs text-gray-500 dark:text-gray-400">Page {{ page }} of {{ totalPages }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('support.admin.pageOf', { page, total: totalPages }) }}</p>
         <div class="flex gap-2">
           <button
             @click="page--; fetchTickets()"
             :disabled="page <= 1"
             class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
-            Previous
+            {{ t('common.previous') }}
           </button>
           <button
             @click="page++; fetchTickets()"
             :disabled="page >= totalPages"
             class="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
-            Next
+            {{ t('common.next') }}
           </button>
         </div>
       </div>

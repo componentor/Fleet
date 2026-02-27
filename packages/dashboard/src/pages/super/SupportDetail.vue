@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import { renderMarkdown } from '@/utils/markdown'
 import {
   ArrowLeft,
@@ -10,6 +12,14 @@ import {
   Send,
   MessageSquare,
   Lock,
+  Bold,
+  Italic,
+  Heading,
+  Link,
+  List,
+  Code,
+  Quote,
+  Eye,
 } from 'lucide-vue-next'
 
 interface Message {
@@ -20,6 +30,7 @@ interface Message {
   isInternal: boolean
   authorName: string | null
   authorEmail: string | null
+  authorAvatarUrl: string | null
   createdAt: string
   updatedAt: string
 }
@@ -48,6 +59,8 @@ const props = defineProps<{ id: string }>()
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
+const authStore = useAuthStore()
+const { t } = useI18n()
 
 const ticket = ref<TicketDetail | null>(null)
 const loading = ref(true)
@@ -59,20 +72,51 @@ const updatingPriority = ref(false)
 const updatingAssignee = ref(false)
 const assignees = ref<{ id: string; name: string | null; email: string | null; avatarUrl: string | null }[]>([])
 const messagesContainer = ref<HTMLElement | null>(null)
+const replyTextarea = ref<HTMLTextAreaElement | null>(null)
+const previewReply = ref(false)
 
-const statusOptions = [
-  { value: 'open', label: 'Open' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'resolved', label: 'Resolved' },
-  { value: 'closed', label: 'Closed' },
+function isOwnMessage(msg: Message): boolean {
+  return msg.authorId === authStore.user?.id
+}
+
+function insertMarkdown(before: string, after: string = '') {
+  const textarea = replyTextarea.value
+  if (!textarea) return
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const text = textarea.value
+  const selected = text.substring(start, end)
+  const replacement = before + (selected || 'text') + after
+  textarea.value = text.substring(0, start) + replacement + text.substring(end)
+  textarea.selectionStart = start + before.length
+  textarea.selectionEnd = start + before.length + (selected || 'text').length
+  textarea.dispatchEvent(new Event('input'))
+  textarea.focus()
+}
+
+const toolbarButtons = [
+  { label: 'Bold', before: '**', after: '**', icon: Bold },
+  { label: 'Italic', before: '*', after: '*', icon: Italic },
+  { label: 'Heading', before: '## ', after: '', icon: Heading },
+  { label: 'Link', before: '[', after: '](url)', icon: Link },
+  { label: 'List', before: '- ', after: '', icon: List },
+  { label: 'Code', before: '`', after: '`', icon: Code },
+  { label: 'Quote', before: '> ', after: '', icon: Quote },
 ]
 
-const priorityOptions = [
-  { value: 'low', label: 'Low' },
-  { value: 'normal', label: 'Normal' },
-  { value: 'high', label: 'High' },
-  { value: 'urgent', label: 'Urgent' },
-]
+const statusOptions = computed(() => [
+  { value: 'open', label: t('support.status.open') },
+  { value: 'in_progress', label: t('support.status.inProgress') },
+  { value: 'resolved', label: t('support.status.resolved') },
+  { value: 'closed', label: t('support.status.closed') },
+])
+
+const priorityOptions = computed(() => [
+  { value: 'low', label: t('support.priority.low') },
+  { value: 'normal', label: t('support.priority.normal') },
+  { value: 'high', label: t('support.priority.high') },
+  { value: 'urgent', label: t('support.priority.urgent') },
+])
 
 function statusBadgeClasses(status: string): string {
   switch (status) {
@@ -105,17 +149,18 @@ function priorityBadgeClasses(priority: string): string {
 }
 
 function formatStatus(status: string): string {
-  switch (status) {
-    case 'in_progress': return 'In Progress'
-    case 'open': return 'Open'
-    case 'resolved': return 'Resolved'
-    case 'closed': return 'Closed'
-    default: return status
+  const keyMap: Record<string, string> = {
+    in_progress: 'inProgress',
+    open: 'open',
+    resolved: 'resolved',
+    closed: 'closed',
   }
+  const key = keyMap[status]
+  return key ? t('support.status.' + key) : status
 }
 
 function formatPriority(priority: string): string {
-  return priority.charAt(0).toUpperCase() + priority.slice(1)
+  return t('support.priority.' + priority)
 }
 
 function formatDate(ts: string | null): string {
@@ -181,7 +226,7 @@ async function updateAssignee(userId: string | null) {
     const matched = assignees.value.find(a => a.id === userId)
     ticket.value.assigneeName = matched?.name ?? null
     ticket.value.assigneeEmail = matched?.email ?? null
-    toast.success('Assignee updated')
+    toast.success(t('support.admin.assigneeUpdated'))
   } catch {
     // Error handled by useApi toast
   } finally {
@@ -208,7 +253,7 @@ async function updateStatus(newStatus: string) {
   try {
     await api.patch(`/admin/support/tickets/${props.id}`, { status: newStatus })
     ticket.value.status = newStatus
-    toast.success(`Status updated to ${formatStatus(newStatus)}`)
+    toast.success(t('support.admin.statusUpdated', { status: formatStatus(newStatus) }))
   } catch {
     // Error handled by useApi toast
   } finally {
@@ -222,7 +267,7 @@ async function updatePriority(newPriority: string) {
   try {
     await api.patch(`/admin/support/tickets/${props.id}`, { priority: newPriority })
     ticket.value.priority = newPriority
-    toast.success(`Priority updated to ${formatPriority(newPriority)}`)
+    toast.success(t('support.admin.priorityUpdated', { priority: formatPriority(newPriority) }))
   } catch {
     // Error handled by useApi toast
   } finally {
@@ -241,6 +286,7 @@ async function sendReply() {
     ticket.value.messages.push(msg)
     replyBody.value = ''
     isInternal.value = false
+    previewReply.value = false
     scrollToBottom()
   } catch {
     // Error handled by useApi toast
@@ -264,7 +310,7 @@ onMounted(() => {
         class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
       >
         <ArrowLeft class="w-4 h-4" />
-        Back to Tickets
+        {{ t('support.admin.backToTickets') }}
       </router-link>
     </div>
 
@@ -275,7 +321,7 @@ onMounted(() => {
 
     <!-- Not found -->
     <div v-else-if="!ticket" class="text-center py-20">
-      <p class="text-gray-500 dark:text-gray-400">Ticket not found</p>
+      <p class="text-gray-500 dark:text-gray-400">{{ t('support.admin.ticketNotFound') }}</p>
     </div>
 
     <template v-else>
@@ -294,19 +340,19 @@ onMounted(() => {
             </div>
             <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600 dark:text-gray-400">
               <span>
-                <span class="font-medium text-gray-700 dark:text-gray-300">Account:</span>
+                <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('support.admin.account') }}:</span>
                 {{ ticket.accountName || '--' }}
               </span>
               <span>
-                <span class="font-medium text-gray-700 dark:text-gray-300">Created by:</span>
+                <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('support.admin.createdBy') }}:</span>
                 {{ ticket.creatorName || ticket.creatorEmail || '--' }}
               </span>
               <span>
-                <span class="font-medium text-gray-700 dark:text-gray-300">Created:</span>
+                <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('support.admin.created') }}:</span>
                 {{ formatDate(ticket.createdAt) }}
               </span>
               <span>
-                <span class="font-medium text-gray-700 dark:text-gray-300">Updated:</span>
+                <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('support.admin.updated') }}:</span>
                 {{ timeAgo(ticket.updatedAt) }}
               </span>
             </div>
@@ -322,71 +368,123 @@ onMounted(() => {
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
             <MessageSquare class="w-4 h-4 text-gray-500 dark:text-gray-400" />
             <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
-              Messages ({{ ticket.messages.length }})
+              {{ t('support.admin.messagesTitle', { count: ticket.messages.length }) }}
             </h2>
           </div>
 
           <!-- Messages list -->
           <div
             ref="messagesContainer"
-            class="flex-1 overflow-y-auto p-6 space-y-6 max-h-[600px]"
+            class="flex-1 overflow-y-auto p-6 space-y-4 max-h-[600px]"
           >
             <div v-if="ticket.messages.length === 0" class="text-center py-12">
-              <p class="text-sm text-gray-400 dark:text-gray-500">No messages yet.</p>
+              <p class="text-sm text-gray-400 dark:text-gray-500">{{ t('support.admin.noMessages') }}</p>
             </div>
 
             <div
               v-for="msg in ticket.messages"
               :key="msg.id"
-              :class="[
-                'flex gap-4',
-                msg.isInternal ? 'pl-3 border-l-4 border-amber-400 dark:border-amber-500' : '',
-              ]"
+              :class="['flex gap-3', isOwnMessage(msg) ? 'justify-end' : 'justify-start']"
             >
-              <!-- Author avatar -->
-              <div
-                :class="[
-                  'w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold shrink-0',
-                  msg.isInternal
-                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                    : 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300',
-                ]"
-              >
-                {{ authorInitial(msg) }}
+              <!-- Avatar (left side for other's messages) -->
+              <div v-if="!isOwnMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-300">
+                <img v-if="msg.authorAvatarUrl" :src="msg.authorAvatarUrl" class="w-full h-full object-cover" />
+                <span v-else>{{ authorInitial(msg) }}</span>
               </div>
 
-              <!-- Message content -->
-              <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap items-center gap-2 mb-1">
-                  <span class="text-sm font-semibold text-gray-900 dark:text-white">
+              <!-- Bubble -->
+              <div
+                :class="[
+                  'max-w-[75%] rounded-2xl px-4 py-3',
+                  msg.isInternal
+                    ? 'bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700'
+                    : isOwnMessage(msg)
+                      ? 'bg-primary-600 dark:bg-primary-700 text-white rounded-tr-sm'
+                      : 'bg-gray-100 dark:bg-gray-700 rounded-tl-sm',
+                ]"
+              >
+                <!-- Author name -->
+                <div class="flex items-center gap-2 mb-1">
+                  <span :class="[
+                    'text-xs font-semibold',
+                    msg.isInternal ? 'text-amber-700 dark:text-amber-300'
+                      : isOwnMessage(msg) ? 'text-primary-200 dark:text-primary-300'
+                      : 'text-gray-500 dark:text-gray-400',
+                  ]">
                     {{ authorDisplayName(msg) }}
                   </span>
-                  <span v-if="msg.isInternal" class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
-                    <Lock class="w-3 h-3" />
-                    Internal Note
-                  </span>
-                  <span class="text-xs text-gray-400 dark:text-gray-500">
-                    {{ formatDate(msg.createdAt) }}
+                  <span v-if="msg.isInternal" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                    <Lock class="w-2.5 h-2.5" />
+                    {{ t('support.admin.internalNote') }}
                   </span>
                 </div>
+
+                <!-- Body -->
                 <div
-                  class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_code]:bg-gray-100 [&_code]:dark:bg-gray-900 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_a]:text-primary-600 [&_a]:dark:text-primary-400"
+                  :class="[
+                    'prose prose-sm max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs',
+                    msg.isInternal
+                      ? 'text-amber-900 dark:text-amber-100 [&_a]:text-primary-600 dark:[&_a]:text-primary-400 [&_code]:bg-amber-100 dark:[&_code]:bg-amber-800'
+                      : isOwnMessage(msg)
+                        ? 'prose-invert text-white [&_a]:text-blue-200 [&_code]:bg-primary-500 dark:[&_code]:bg-primary-600'
+                        : 'dark:prose-invert text-gray-800 dark:text-gray-200 [&_a]:text-primary-600 dark:[&_a]:text-primary-400 [&_code]:bg-gray-200 dark:[&_code]:bg-gray-600',
+                  ]"
                   v-html="renderMarkdown(msg.body)"
                 />
+
+                <!-- Timestamp -->
+                <div :class="['text-[10px] mt-1.5 text-right',
+                  msg.isInternal ? 'text-amber-500 dark:text-amber-400'
+                    : isOwnMessage(msg) ? 'text-primary-200 dark:text-primary-300'
+                    : 'text-gray-400 dark:text-gray-500']">
+                  {{ timeAgo(msg.createdAt) }}
+                </div>
+              </div>
+
+              <!-- Avatar (right side for own messages) -->
+              <div v-if="isOwnMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-xs font-semibold text-primary-700 dark:text-primary-300">
+                <img v-if="msg.authorAvatarUrl" :src="msg.authorAvatarUrl" class="w-full h-full object-cover" />
+                <span v-else>{{ authorInitial(msg) }}</span>
               </div>
             </div>
           </div>
 
           <!-- Reply form -->
           <div class="border-t border-gray-200 dark:border-gray-700 p-6">
+            <!-- Markdown toolbar -->
+            <div class="flex items-center gap-1 mb-2 p-1 bg-gray-50 dark:bg-gray-750 rounded-lg border border-gray-200 dark:border-gray-600">
+              <button
+                v-for="btn in toolbarButtons"
+                :key="btn.label"
+                @click="insertMarkdown(btn.before, btn.after)"
+                :title="btn.label"
+                class="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400 transition-colors"
+              >
+                <component :is="btn.icon" class="w-4 h-4" />
+              </button>
+              <div class="flex-1" />
+              <button
+                @click="previewReply = !previewReply"
+                :title="previewReply ? 'Edit' : 'Preview'"
+                :class="['p-1.5 rounded transition-colors', previewReply ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400' : 'hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400']"
+              >
+                <Eye class="w-4 h-4" />
+              </button>
+            </div>
+
+            <!-- Editor / Preview -->
+            <div v-if="previewReply && replyBody.trim()" class="min-h-[100px] px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(replyBody)" />
             <textarea
+              v-else
+              ref="replyTextarea"
               v-model="replyBody"
               rows="4"
-              placeholder="Write a reply... (Markdown supported)"
+              :placeholder="t('support.admin.replyPlaceholder')"
               class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm resize-y"
               @keydown.meta.enter="sendReply"
               @keydown.ctrl.enter="sendReply"
             />
+
             <div class="flex items-center justify-between mt-3">
               <label class="flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -396,7 +494,7 @@ onMounted(() => {
                 />
                 <span class="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
                   <Lock class="w-3.5 h-3.5" />
-                  Internal note
+                  {{ t('support.admin.internalNoteLabel') }}
                 </span>
               </label>
               <button
@@ -406,7 +504,7 @@ onMounted(() => {
               >
                 <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
                 <Send v-else class="w-4 h-4" />
-                Send Reply
+                {{ t('support.admin.sendReply') }}
               </button>
             </div>
           </div>
@@ -417,7 +515,7 @@ onMounted(() => {
           <!-- Status control -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
             <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Status
+              {{ t('support.admin.statusLabel') }}
             </label>
             <select
               :value="ticket.status"
@@ -434,7 +532,7 @@ onMounted(() => {
           <!-- Priority control -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
             <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Priority
+              {{ t('support.admin.priorityLabel') }}
             </label>
             <select
               :value="ticket.priority"
@@ -451,7 +549,7 @@ onMounted(() => {
           <!-- Assigned to -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
             <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Assigned To
+              {{ t('support.admin.assignedTo') }}
             </label>
             <select
               :value="ticket.assignedTo ?? ''"
@@ -459,7 +557,7 @@ onMounted(() => {
               :disabled="updatingAssignee"
               class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
             >
-              <option value="">Unassigned</option>
+              <option value="">{{ t('support.admin.unassigned') }}</option>
               <option v-for="a in assignees" :key="a.id" :value="a.id">
                 {{ a.name || a.email }}
               </option>
@@ -469,25 +567,25 @@ onMounted(() => {
           <!-- Ticket info -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
             <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-              Details
+              {{ t('support.admin.detailsTitle') }}
             </label>
             <div class="space-y-3 text-sm">
               <div class="flex items-center justify-between">
-                <span class="text-gray-500 dark:text-gray-400">Ticket ID</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('support.admin.ticketId') }}</span>
                 <span class="font-mono text-xs text-gray-700 dark:text-gray-300 truncate max-w-[140px]" :title="ticket.id">
                   {{ ticket.id }}
                 </span>
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-gray-500 dark:text-gray-400">Account</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('support.admin.account') }}</span>
                 <span class="text-gray-700 dark:text-gray-300">{{ ticket.accountName || '--' }}</span>
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-gray-500 dark:text-gray-400">Created</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('support.admin.created') }}</span>
                 <span class="text-gray-700 dark:text-gray-300">{{ timeAgo(ticket.createdAt) }}</span>
               </div>
               <div v-if="ticket.closedAt" class="flex items-center justify-between">
-                <span class="text-gray-500 dark:text-gray-400">Closed</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ t('support.admin.closed') }}</span>
                 <span class="text-gray-700 dark:text-gray-300">{{ formatDate(ticket.closedAt) }}</span>
               </div>
             </div>

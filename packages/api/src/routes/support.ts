@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, supportTickets, supportTicketMessages, platformSettings, insertReturning, updateReturning, countSql, eq, and, desc } from '@fleet/db';
+import { db, supportTickets, supportTicketMessages, platformSettings, users, insertReturning, updateReturning, countSql, eq, and, desc, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware } from '../middleware/tenant.js';
 import { notificationService } from '../services/notification.service.js';
@@ -23,6 +23,29 @@ const supportRoutes = new OpenAPIHono<Env>();
 
 supportRoutes.use('*', authMiddleware);
 supportRoutes.use('*', tenantMiddleware);
+
+// Helper: enrich messages with author name/email from users table
+async function enrichMessages(messages: any[]) {
+  if (messages.length === 0) return messages;
+  const authorIds = [...new Set(messages.map((m) => m.authorId).filter(Boolean))];
+  if (authorIds.length === 0) return messages;
+  const usrs = await db.select({ id: users.id, name: users.name, email: users.email, avatarUrl: users.avatarUrl })
+    .from(users)
+    .where(inArray(users.id, authorIds));
+  const authorMap = new Map(usrs.map((u: any) => [u.id, { name: u.name, email: u.email, avatarUrl: u.avatarUrl }]));
+  return messages.map((m) => ({
+    ...m,
+    authorName: authorMap.get(m.authorId)?.name ?? null,
+    authorEmail: authorMap.get(m.authorId)?.email ?? null,
+    authorAvatarUrl: authorMap.get(m.authorId)?.avatarUrl ?? null,
+  }));
+}
+
+// Helper: enrich a single message
+async function enrichMessage(message: any) {
+  const [enriched] = await enrichMessages([message]);
+  return enriched;
+}
 
 // Helper: check if support is enabled
 async function isSupportEnabled(): Promise<boolean> {
@@ -165,7 +188,7 @@ supportRoutes.openapi(getTicketRoute, (async (c: any) => {
     return c.json({ error: 'Ticket not found' }, 404);
   }
 
-  const messages = await db
+  const rawMessages = await db
     .select()
     .from(supportTicketMessages)
     .where(and(
@@ -173,6 +196,8 @@ supportRoutes.openapi(getTicketRoute, (async (c: any) => {
       eq(supportTicketMessages.isInternal, false),
     ))
     .orderBy(supportTicketMessages.createdAt);
+
+  const messages = await enrichMessages(rawMessages);
 
   return c.json({ ...ticket, messages });
 }) as any);
@@ -226,18 +251,20 @@ supportRoutes.openapi(createTicketRoute, (async (c: any) => {
     resourceName: body.subject,
   });
 
+  const enrichedMessage = await enrichMessage(message);
+
   // Publish to Valkey for real-time
   try {
     const valkey = await getValkey();
     if (valkey) {
       await valkey.publish(`support:ticket:${ticket!.id}`, JSON.stringify({
         type: 'message',
-        message,
+        message: enrichedMessage,
       }));
     }
   } catch { /* ignore */ }
 
-  return c.json({ ...ticket, messages: [message] }, 201);
+  return c.json({ ...ticket, messages: [enrichedMessage] }, 201);
 }) as any);
 
 // POST /tickets/:id/messages — add reply
@@ -298,18 +325,20 @@ supportRoutes.openapi(addMessageRoute, (async (c: any) => {
     resourceName: ticket.subject,
   });
 
+  const enrichedMessage = await enrichMessage(message);
+
   // Publish to Valkey for real-time
   try {
     const valkey = await getValkey();
     if (valkey) {
       await valkey.publish(`support:ticket:${id}`, JSON.stringify({
         type: 'message',
-        message,
+        message: enrichedMessage,
       }));
     }
   } catch { /* ignore */ }
 
-  return c.json(message, 201);
+  return c.json(enrichedMessage, 201);
 }) as any);
 
 // PATCH /tickets/:id/messages/:msgId — edit own message

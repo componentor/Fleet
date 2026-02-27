@@ -290,7 +290,7 @@ const deleteAvatarRoute = createRoute({
 
 const getAvatarRoute = createRoute({
   method: 'get',
-  path: '/avatar/:userId',
+  path: '/avatar/{userId}',
   tags: ['Users'],
   summary: 'Get user avatar image',
   security: noSecurity,

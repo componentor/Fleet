@@ -83,6 +83,12 @@ const { collapsed, toggle: toggleCollapse } = useSidebarCollapse()
 const supportEnabled = ref(false)
 
 onMounted(async () => {
+  // Load custom locales for language selector
+  try {
+    const stored = localStorage.getItem('fleet_custom_locales')
+    if (stored) customLocales.value = JSON.parse(stored)
+  } catch { /* ignore */ }
+
   // Super admins always see platform branding, even when viewing sub-accounts
   if (!isSuper) {
     try {
@@ -100,31 +106,86 @@ onMounted(async () => {
   }
 })
 
-const navItems = [
-  { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
-  { nameKey: 'nav.services', path: '/panel/services', icon: Box },
-  { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
-  { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
-  { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
-  { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
-  { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
-  { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
-  { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
-  { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
-  { nameKey: 'nav.subAccounts', path: '/panel/sub-accounts', icon: UserPlus },
-  { nameKey: 'nav.users', path: '/panel/users', icon: Users },
-  { nameKey: 'nav.activity', path: '/panel/activity', icon: ScrollText },
-  { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
-  { nameKey: 'nav.reseller', path: '/panel/reseller', icon: Handshake, requireOwner: true },
-  { nameKey: 'nav.support', path: '/panel/support', icon: LifeBuoy, requireSupport: true },
-  { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
+interface NavItem {
+  nameKey: string
+  path: string
+  icon: any
+  requireAdmin?: boolean
+  requireOwner?: boolean
+  requireSupport?: boolean
+}
+
+interface NavGroup {
+  labelKey: string
+  items: NavItem[]
+}
+
+const allNavGroups: NavGroup[] = [
+  {
+    labelKey: 'nav.group.overview',
+    items: [
+      { nameKey: 'nav.dashboard', path: '/panel', icon: LayoutDashboard },
+    ],
+  },
+  {
+    labelKey: 'nav.group.services',
+    items: [
+      { nameKey: 'nav.services', path: '/panel/services', icon: Box },
+      { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
+      { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
+    ],
+  },
+  {
+    labelKey: 'nav.group.infrastructure',
+    items: [
+      { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
+      { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
+      { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
+      { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
+      { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
+      { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
+    ],
+  },
+  {
+    labelKey: 'nav.group.team',
+    items: [
+      { nameKey: 'nav.subAccounts', path: '/panel/sub-accounts', icon: UserPlus },
+      { nameKey: 'nav.users', path: '/panel/users', icon: Users },
+      { nameKey: 'nav.activity', path: '/panel/activity', icon: ScrollText },
+    ],
+  },
+  {
+    labelKey: 'nav.group.business',
+    items: [
+      { nameKey: 'nav.billing', path: '/panel/billing', icon: CreditCard, requireOwner: true },
+      { nameKey: 'nav.reseller', path: '/panel/reseller', icon: Handshake, requireOwner: true },
+    ],
+  },
+  {
+    labelKey: 'nav.group.other',
+    items: [
+      { nameKey: 'nav.support', path: '/panel/support', icon: LifeBuoy, requireSupport: true },
+      { nameKey: 'nav.settings', path: '/panel/settings', icon: Settings, requireAdmin: true },
+    ],
+  },
 ]
+
+const navGroups = computed(() => {
+  return allNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (i) => (!i.requireAdmin || canAdmin) && (!i.requireOwner || canOwner) && (!i.requireSupport || supportEnabled.value),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 
 function isActive(path: string) {
   if (path === '/panel') {
     return route.path === '/panel'
   }
-  return route.path.startsWith(path)
+  return route.path === path || route.path.startsWith(path + '/')
 }
 
 async function handleLogout() {
@@ -136,6 +197,8 @@ function handleSwitchAccount(id: string) {
   accountMenuOpen.value = false
   switchAccount(id)
 }
+
+const customLocales = ref<{ code: string; name: string }[]>([])
 
 function changeLocale(newLocale: string) {
   locale.value = newLocale
@@ -196,34 +259,44 @@ function changeLocale(newLocale: string) {
         </div>
       </div>
 
-      <nav :class="['mt-4 space-y-1 overflow-y-auto flex-1', collapsed ? 'px-2 scrollbar-hide' : 'px-3']">
-        <SidebarTooltip
-          v-for="item in navItems.filter(i => (!i.requireAdmin || canAdmin) && (!i.requireOwner || canOwner) && (!i.requireSupport || supportEnabled))"
-          :key="item.path"
-          :label="$t(item.nameKey)"
-          :show="collapsed"
-        >
-          <RouterLink
-            :to="item.path"
-            :class="[
-              'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
-              collapsed
-                ? 'justify-center p-2.5'
-                : 'gap-3 px-3 py-2.5 border-l-[3px]',
-              isActive(item.path)
-                ? collapsed
-                  ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                  : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
-                : collapsed
-                  ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
-            ]"
-            @click="sidebarOpen = false"
-          >
-            <component :is="item.icon" class="w-5 h-5 shrink-0" />
-            <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
-          </RouterLink>
-        </SidebarTooltip>
+      <nav :class="['mt-2 pb-4 overflow-y-auto flex-1', collapsed ? 'px-2 scrollbar-hide' : 'px-3']">
+        <template v-for="(group, gi) in navGroups" :key="group.labelKey">
+          <!-- Group header -->
+          <div v-if="!collapsed" :class="['px-3 pt-4 pb-1', gi === 0 && 'pt-2']">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ $t(group.labelKey) }}</span>
+          </div>
+          <div v-else-if="gi > 0" class="my-2 mx-1 border-t border-gray-200 dark:border-gray-700" />
+
+          <div class="space-y-0.5">
+            <SidebarTooltip
+              v-for="item in group.items"
+              :key="item.path"
+              :label="$t(item.nameKey)"
+              :show="collapsed"
+            >
+              <RouterLink
+                :to="item.path"
+                :class="[
+                  'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
+                  collapsed
+                    ? 'justify-center p-2.5'
+                    : 'gap-3 px-3 py-2 border-l-[3px]',
+                  isActive(item.path)
+                    ? collapsed
+                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                      : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+                    : collapsed
+                      ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
+                ]"
+                @click="sidebarOpen = false"
+              >
+                <component :is="item.icon" class="w-5 h-5 shrink-0" />
+                <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
+              </RouterLink>
+            </SidebarTooltip>
+          </div>
+        </template>
       </nav>
 
       <!-- Back to Admin (for super users) -->
@@ -317,6 +390,7 @@ function changeLocale(newLocale: string) {
             <option value="nb">NO</option>
             <option value="de">DE</option>
             <option value="zh">中文</option>
+            <option v-for="cl in customLocales" :key="cl.code" :value="cl.code">{{ cl.name }}</option>
           </select>
 
           <!-- Theme toggle -->
@@ -348,8 +422,9 @@ function changeLocale(newLocale: string) {
               @click="userMenuOpen = !userMenuOpen"
               class="flex items-center gap-2 p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
-              <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold">
-                {{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}
+              <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold overflow-hidden">
+                <img v-if="user?.avatarUrl" :src="user.avatarUrl" :alt="user.name || 'Avatar'" class="w-full h-full object-cover" />
+                <span v-else>{{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}</span>
               </div>
               <ChevronDown class="w-4 h-4" />
             </button>

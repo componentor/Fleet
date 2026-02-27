@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Bug, CheckCircle, XCircle, RefreshCw, Filter, Loader2, Archive } from 'lucide-vue-next'
+import { Bug, CheckCircle, XCircle, RefreshCw, Filter, Loader2, Archive, Copy, Check } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 import LogArchiveList from '@/components/LogArchiveList.vue'
@@ -123,6 +123,8 @@ function truncate(str: string, len = 80) {
   return str.length > len ? str.slice(0, len) + '...' : str
 }
 
+const copiedId = ref<string | null>(null)
+
 function formatJson(obj: any) {
   if (!obj) return 'null'
   try {
@@ -130,6 +132,25 @@ function formatJson(obj: any) {
   } catch {
     return String(obj)
   }
+}
+
+function copyErrorData(err: any) {
+  const data = {
+    level: err.level,
+    message: err.message,
+    method: err.method ?? null,
+    path: err.path ?? null,
+    statusCode: err.statusCode ?? null,
+    stack: err.stack ?? null,
+    timestamp: err.timestamp ?? err.createdAt,
+    userId: err.userId ?? null,
+    ip: err.ip ?? null,
+    userAgent: err.userAgent ?? null,
+    metadata: err.metadata ?? null,
+  }
+  navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+  copiedId.value = err.id
+  setTimeout(() => { copiedId.value = null }, 2000)
 }
 
 onMounted(() => {
@@ -293,17 +314,27 @@ onUnmounted(() => {
                     <XCircle v-else class="w-5 h-5 text-red-500" />
                   </td>
                   <td class="px-6 py-4 text-right">
-                    <button
-                      v-if="!err.resolved"
-                      @click.stop="resolveError(err.id)"
-                      :disabled="resolvingId === err.id"
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
-                    >
-                      <Loader2 v-if="resolvingId === err.id" class="w-3 h-3 animate-spin" />
-                      <CheckCircle v-else class="w-3 h-3" />
-                      {{ $t('super.errors.resolve') }}
-                    </button>
-                    <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ $t('super.errors.resolved') }}</span>
+                    <div class="flex items-center justify-end gap-2">
+                      <button
+                        @click.stop="copyErrorData(err)"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                        :title="$t('common.copy')"
+                      >
+                        <Check v-if="copiedId === err.id" class="w-3 h-3 text-green-500" />
+                        <Copy v-else class="w-3 h-3" />
+                      </button>
+                      <button
+                        v-if="!err.resolved"
+                        @click.stop="resolveError(err.id)"
+                        :disabled="resolvingId === err.id"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
+                      >
+                        <Loader2 v-if="resolvingId === err.id" class="w-3 h-3 animate-spin" />
+                        <CheckCircle v-else class="w-3 h-3" />
+                        {{ $t('super.errors.resolve') }}
+                      </button>
+                      <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ $t('super.errors.resolved') }}</span>
+                    </div>
                   </td>
                 </tr>
 

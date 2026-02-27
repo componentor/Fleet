@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, computed } from 'vue'
-import { ArrowLeft, Send, Loader2, Lock, Unlock } from 'lucide-vue-next'
+import { ArrowLeft, Send, Loader2, Lock, Unlock, Bold, Italic, Heading, Link, List, Code, Quote, Eye } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
+import { useAuthStore } from '@/stores/auth'
 import { renderMarkdown } from '@/utils/markdown'
 
 interface Message {
@@ -12,6 +14,7 @@ interface Message {
   isInternal: boolean
   authorName: string | null
   authorEmail: string | null
+  authorAvatarUrl: string | null
   createdAt: string
   updatedAt: string
 }
@@ -28,7 +31,9 @@ interface TicketDetail {
 
 const props = defineProps<{ id: string }>()
 
+const { t } = useI18n()
 const api = useApi()
+const authStore = useAuthStore()
 
 const ticket = ref<TicketDetail | null>(null)
 const loading = ref(true)
@@ -42,9 +47,9 @@ const messagesEnd = ref<HTMLDivElement | null>(null)
 const statusLabel = computed(() => {
   if (!ticket.value) return ''
   const s = ticket.value.status
-  if (s === 'open') return 'Open'
-  if (s === 'in_progress') return 'In Progress'
-  if (s === 'closed') return 'Closed'
+  if (s === 'open') return t('support.status.open')
+  if (s === 'in_progress') return t('support.status.inProgress')
+  if (s === 'closed') return t('support.status.closed')
   return s.charAt(0).toUpperCase() + s.slice(1)
 })
 
@@ -60,10 +65,10 @@ const statusClasses = computed(() => {
 const priorityLabel = computed(() => {
   if (!ticket.value) return ''
   const p = ticket.value.priority
-  if (p === 'low') return 'Low'
-  if (p === 'medium') return 'Medium'
-  if (p === 'high') return 'High'
-  if (p === 'urgent') return 'Urgent'
+  if (p === 'low') return t('support.priority.low')
+  if (p === 'medium') return t('support.priority.medium')
+  if (p === 'high') return t('support.priority.high')
+  if (p === 'urgent') return t('support.priority.urgent')
   return p.charAt(0).toUpperCase() + p.slice(1)
 })
 
@@ -104,16 +109,8 @@ function getInitial(name: string | null): string {
   return name.charAt(0).toUpperCase()
 }
 
-/**
- * Determine if a message is from a support agent.
- * Agent messages have authorName set and typically differ from the ticket creator.
- * Since we don't have the current user ID on the ticket response, we use a heuristic:
- * the first message author is the ticket creator (user), anyone else is an agent.
- */
-function isAgentMessage(msg: Message): boolean {
-  if (!ticket.value || ticket.value.messages.length === 0) return false
-  const firstAuthorId = ticket.value.messages[0]!.authorId
-  return msg.authorId !== firstAuthorId
+function isOwnMessage(msg: Message): boolean {
+  return msg.authorId === authStore.user?.id
 }
 
 async function scrollToBottom() {
@@ -129,7 +126,7 @@ async function fetchTicket() {
     ticket.value = data
     await scrollToBottom()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to load ticket'
+    error.value = err?.body?.error || t('support.panel.loadError')
   } finally {
     loading.value = false
   }
@@ -146,7 +143,7 @@ async function sendReply() {
     replyBody.value = ''
     await scrollToBottom()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to send reply'
+    error.value = err?.body?.error || t('support.panel.sendError')
   } finally {
     sending.value = false
   }
@@ -160,7 +157,7 @@ async function closeTicket() {
       ticket.value.status = updated.status ?? 'closed'
     }
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to close ticket'
+    error.value = err?.body?.error || t('support.panel.closeError')
   } finally {
     toggling.value = false
   }
@@ -174,11 +171,39 @@ async function reopenTicket() {
       ticket.value.status = updated.status ?? 'open'
     }
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to reopen ticket'
+    error.value = err?.body?.error || t('support.panel.reopenError')
   } finally {
     toggling.value = false
   }
 }
+
+const replyTextarea = ref<HTMLTextAreaElement | null>(null)
+const previewReply = ref(false)
+
+function insertMarkdown(before: string, after: string = '') {
+  const textarea = replyTextarea.value
+  if (!textarea) return
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const text = textarea.value
+  const selected = text.substring(start, end)
+  const replacement = before + (selected || 'text') + after
+  textarea.value = text.substring(0, start) + replacement + text.substring(end)
+  textarea.selectionStart = start + before.length
+  textarea.selectionEnd = start + before.length + (selected || 'text').length
+  textarea.dispatchEvent(new Event('input'))
+  textarea.focus()
+}
+
+const toolbarButtons = [
+  { label: 'Bold', before: '**', after: '**', icon: Bold },
+  { label: 'Italic', before: '*', after: '*', icon: Italic },
+  { label: 'Heading', before: '## ', after: '', icon: Heading },
+  { label: 'Link', before: '[', after: '](url)', icon: Link },
+  { label: 'List', before: '- ', after: '', icon: List },
+  { label: 'Code', before: '`', after: '`', icon: Code },
+  { label: 'Quote', before: '> ', after: '', icon: Quote },
+]
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -200,7 +225,7 @@ onMounted(() => {
         class="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
       >
         <ArrowLeft class="w-4 h-4" />
-        Back to Support
+        {{ t('support.panel.backToSupport') }}
       </router-link>
     </div>
 
@@ -235,7 +260,7 @@ onMounted(() => {
                 {{ priorityLabel }}
               </span>
               <span class="text-xs text-gray-400 dark:text-gray-500">
-                Opened {{ formatDate(ticket.createdAt) }}
+                {{ t('support.panel.opened', { date: formatDate(ticket.createdAt) }) }}
               </span>
             </div>
           </div>
@@ -249,7 +274,7 @@ onMounted(() => {
           >
             <Loader2 v-if="toggling" class="w-4 h-4 animate-spin" />
             <Unlock v-else class="w-4 h-4" />
-            Reopen Ticket
+            {{ t('support.panel.reopenTicket') }}
           </button>
           <button
             v-else
@@ -259,7 +284,7 @@ onMounted(() => {
           >
             <Loader2 v-if="toggling" class="w-4 h-4 animate-spin" />
             <Lock v-else class="w-4 h-4" />
-            Close Ticket
+            {{ t('support.panel.closeTicket') }}
           </button>
         </div>
       </div>
@@ -272,56 +297,60 @@ onMounted(() => {
       <!-- Messages thread -->
       <div class="flex-1 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col overflow-hidden">
         <!-- Message list -->
-        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+        <div class="flex-1 overflow-y-auto p-6 space-y-4">
           <div v-if="ticket.messages.length === 0" class="text-center py-12 text-gray-500 dark:text-gray-400 text-sm">
-            No messages yet.
+            {{ t('support.panel.noMessages') }}
           </div>
 
           <div
             v-for="msg in ticket.messages"
             :key="msg.id"
-            :class="[
-              'rounded-lg p-4',
-              isAgentMessage(msg)
-                ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40'
-                : 'bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700',
-            ]"
+            :class="['flex gap-3', isOwnMessage(msg) ? 'justify-end' : 'justify-start']"
           >
-            <div class="flex items-center gap-3 mb-3">
-              <!-- Avatar -->
-              <div
-                :class="[
-                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0',
-                  isAgentMessage(msg)
-                    ? 'bg-blue-200 dark:bg-blue-800 text-blue-700 dark:text-blue-200'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
-                ]"
-              >
-                {{ getInitial(msg.authorName) }}
-              </div>
-
-              <!-- Name + time -->
-              <div class="min-w-0 flex-1">
-                <span class="text-sm font-medium text-gray-900 dark:text-white">
-                  {{ msg.authorName || 'Unknown' }}
-                </span>
-                <span
-                  v-if="isAgentMessage(msg)"
-                  class="ml-2 text-xs text-blue-600 dark:text-blue-400 font-medium"
-                >
-                  Support
-                </span>
-              </div>
-              <span class="text-xs text-gray-400 dark:text-gray-500 shrink-0">
-                {{ timeAgo(msg.createdAt) }}
-              </span>
+            <!-- Avatar (left side for other's messages) -->
+            <div v-if="!isOwnMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-300">
+              <img v-if="msg.authorAvatarUrl" :src="msg.authorAvatarUrl" class="w-full h-full object-cover" />
+              <span v-else>{{ getInitial(msg.authorName) }}</span>
             </div>
 
-            <!-- Body -->
+            <!-- Bubble -->
             <div
-              class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 [&_a]:text-primary-600 dark:[&_a]:text-primary-400 [&_code]:bg-gray-200 dark:[&_code]:bg-gray-700 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs"
-              v-html="renderMarkdown(msg.body)"
-            />
+              :class="[
+                'max-w-[75%] rounded-2xl px-4 py-3',
+                isOwnMessage(msg)
+                  ? 'bg-primary-600 dark:bg-primary-700 text-white rounded-tr-sm'
+                  : 'bg-gray-100 dark:bg-gray-700 rounded-tl-sm',
+              ]"
+            >
+              <!-- Author name -->
+              <div class="flex items-center gap-2 mb-1">
+                <span :class="['text-xs font-semibold', isOwnMessage(msg) ? 'text-primary-200 dark:text-primary-300' : 'text-blue-600 dark:text-blue-400']">
+                  {{ msg.authorName || (isOwnMessage(msg) ? t('support.panel.you') : 'Support') }}
+                </span>
+              </div>
+
+              <!-- Body -->
+              <div
+                :class="[
+                  'prose prose-sm max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs',
+                  isOwnMessage(msg)
+                    ? 'prose-invert text-white [&_a]:text-blue-200 [&_code]:bg-primary-500 dark:[&_code]:bg-primary-600'
+                    : 'dark:prose-invert text-gray-800 dark:text-gray-200 [&_a]:text-primary-600 dark:[&_a]:text-primary-400 [&_code]:bg-gray-200 dark:[&_code]:bg-gray-600',
+                ]"
+                v-html="renderMarkdown(msg.body)"
+              />
+
+              <!-- Timestamp -->
+              <div :class="['text-[10px] mt-1.5 text-right', isOwnMessage(msg) ? 'text-primary-200 dark:text-primary-300' : 'text-gray-400 dark:text-gray-500']">
+                {{ timeAgo(msg.createdAt) }}
+              </div>
+            </div>
+
+            <!-- Avatar (right side for own messages) -->
+            <div v-if="isOwnMessage(msg)" class="w-8 h-8 rounded-full shrink-0 mt-1 overflow-hidden bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-xs font-semibold text-primary-700 dark:text-primary-300">
+              <img v-if="msg.authorAvatarUrl" :src="msg.authorAvatarUrl" class="w-full h-full object-cover" />
+              <span v-else>{{ getInitial(msg.authorName) }}</span>
+            </div>
           </div>
 
           <!-- Scroll anchor -->
@@ -331,25 +360,53 @@ onMounted(() => {
         <!-- Reply form -->
         <div class="border-t border-gray-200 dark:border-gray-700 p-4">
           <div v-if="isClosed" class="text-center py-2 text-sm text-gray-500 dark:text-gray-400">
-            This ticket is closed. Reopen it to reply.
+            {{ t('support.panel.closedNotice') }}
           </div>
-          <div v-else class="flex gap-3">
+          <div v-else>
+            <!-- Markdown toolbar -->
+            <div class="flex items-center gap-1 mb-2 p-1 bg-gray-50 dark:bg-gray-750 rounded-lg border border-gray-200 dark:border-gray-600">
+              <button
+                v-for="btn in toolbarButtons"
+                :key="btn.label"
+                @click="insertMarkdown(btn.before, btn.after)"
+                :title="btn.label"
+                class="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400 transition-colors"
+              >
+                <component :is="btn.icon" class="w-4 h-4" />
+              </button>
+              <div class="flex-1" />
+              <button
+                @click="previewReply = !previewReply"
+                :title="previewReply ? 'Edit' : 'Preview'"
+                :class="['p-1.5 rounded transition-colors', previewReply ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400' : 'hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400']"
+              >
+                <Eye class="w-4 h-4" />
+              </button>
+            </div>
+
+            <!-- Editor / Preview -->
+            <div v-if="previewReply && replyBody.trim()" class="min-h-[80px] px-3.5 py-2.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 prose prose-sm dark:prose-invert max-w-none mb-3" v-html="renderMarkdown(replyBody)" />
             <textarea
+              v-else
+              ref="replyTextarea"
               v-model="replyBody"
               @keydown="handleKeydown"
               rows="3"
-              placeholder="Type your reply... (Ctrl+Enter to send)"
-              class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm resize-none"
+              :placeholder="t('support.panel.replyPlaceholder')"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm resize-none mb-3"
             />
-            <button
-              @click="sendReply"
-              :disabled="sending || !replyBody.trim()"
-              class="self-end px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
-            >
-              <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
-              <Send v-else class="w-4 h-4" />
-              Send
-            </button>
+
+            <div class="flex justify-end">
+              <button
+                @click="sendReply"
+                :disabled="sending || !replyBody.trim()"
+                class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
+                <Send v-else class="w-4 h-4" />
+                {{ t('support.panel.send') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>

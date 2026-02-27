@@ -179,6 +179,12 @@ const googleSettingsSchema = z.object({
   clientSecret: z.string().min(1).optional(),
 });
 
+const translationSettingsSchema = z.object({
+  provider: z.enum(['deepl', 'claude']).optional(),
+  deeplApiKey: z.string().min(1).optional(),
+  claudeApiKey: z.string().min(1).optional(),
+});
+
 const brandingTypeParamSchema = z.object({
   type: z.string().openapi({ description: 'Branding asset type (logo or favicon)' }),
 });
@@ -455,6 +461,48 @@ const deleteBrandingRoute = createRoute({
   },
 });
 
+const getTranslationRoute = createRoute({
+  method: 'get',
+  path: '/translation',
+  tags: ['Settings'],
+  summary: 'Get translation service configuration (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Translation configuration'),
+    ...standardErrors,
+  },
+});
+
+const updateTranslationRoute = createRoute({
+  method: 'patch',
+  path: '/translation',
+  tags: ['Settings'],
+  summary: 'Configure translation service (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(translationSettingsSchema),
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(messageResponseSchema, 'Translation configuration updated'),
+  },
+});
+
+const testTranslationRoute = createRoute({
+  method: 'post',
+  path: '/translation/test',
+  tags: ['Settings'],
+  summary: 'Test DeepL API connection (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.object({ success: z.boolean(), message: z.string(), characterCount: z.number().optional(), characterLimit: z.number().optional() }), 'DeepL test result'),
+    ...standardErrors,
+  },
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ────────────────────────────────────────────────────────────────────────────
@@ -540,7 +588,7 @@ settings.openapi(updateSettingsRoute, (async (c: any) => {
   const ALLOWED_PLATFORM_PREFIXES = [
     'platform:', 'billing:', 'email:', 'notifications:', 'branding:',
     'github:', 'google:', 'registrar:', 'storage:', 'domain:', 'limits:', 'reseller:',
-    'updates:', 'support:',
+    'updates:', 'support:', 'translation:', 'i18n:',
   ];
 
   // Detect if any keys are platform-scoped (super admin settings page sends platform:* keys even with an account selected)
@@ -1085,6 +1133,126 @@ settings.openapi(deleteBrandingRoute, (async (c: any) => {
   await invalidateCache('GET:/settings/*');
   logger.info({ type, changedBy: user.userId }, 'Branding asset removed');
   return c.json({ message: `Branding ${type} removed` });
+}) as any);
+
+// GET /translation
+settings.openapi(getTranslationRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can view translation config' }, 403);
+  }
+
+  const provider = await getSetting('translation:provider') as string | null;
+  const deeplApiKey = await getSetting('translation:deepl_api_key');
+  const claudeApiKey = await getSetting('translation:claude_api_key');
+
+  return c.json({
+    provider: provider ?? 'deepl',
+    deeplConfigured: !!deeplApiKey,
+    deeplApiKeyHint: maskSecret(deeplApiKey),
+    claudeConfigured: !!claudeApiKey,
+    claudeApiKeyHint: maskSecret(claudeApiKey),
+  });
+}) as any);
+
+// PATCH /translation
+settings.openapi(updateTranslationRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can configure translation' }, 403);
+  }
+
+  const data = c.req.valid('json');
+
+  if (data.provider) {
+    await upsertSetting('translation:provider', data.provider);
+  }
+  if (data.deeplApiKey) {
+    await upsertSetting('translation:deepl_api_key', encrypt(data.deeplApiKey));
+  }
+  if (data.claudeApiKey) {
+    await upsertSetting('translation:claude_api_key', encrypt(data.claudeApiKey));
+  }
+
+  await invalidateCache('GET:/settings/*');
+  logger.info({ changedBy: user.userId }, 'Translation configuration updated');
+  return c.json({ message: 'Translation configuration updated' });
+}) as any);
+
+// POST /translation/test — test the active translation provider
+settings.openapi(testTranslationRoute, (async (c: any) => {
+  const user = c.get('user');
+  if (!user.isSuper) {
+    return c.json({ error: 'Only super admins can test translation' }, 403);
+  }
+
+  const provider = (await getSetting('translation:provider') as string | null) ?? 'deepl';
+
+  if (provider === 'claude') {
+    const encryptedKey = await getSetting('translation:claude_api_key');
+    if (!encryptedKey || typeof encryptedKey !== 'string') {
+      return c.json({ success: false, message: 'Claude API key is not configured' }, 200);
+    }
+
+    try {
+      const apiKey = decrypt(encryptedKey);
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Reply with just the word "ok".' }],
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        return c.json({ success: false, message: `Claude API error: ${res.status} ${text}` }, 200);
+      }
+
+      return c.json({ success: true, message: 'Connected to Claude API successfully' });
+    } catch (err) {
+      logger.warn({ err }, 'Claude connection test failed');
+      logToErrorTable({ level: 'warn', message: `Claude connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'translation-test' } });
+      return c.json({ success: false, message: `Claude connection failed: ${(err as Error).message}` }, 200);
+    }
+  }
+
+  // DeepL test
+  const encryptedKey = await getSetting('translation:deepl_api_key');
+  if (!encryptedKey || typeof encryptedKey !== 'string') {
+    return c.json({ success: false, message: 'DeepL API key is not configured' }, 200);
+  }
+
+  try {
+    const apiKey = decrypt(encryptedKey);
+    const baseUrl = apiKey.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+    const res = await fetch(`${baseUrl}/v2/usage`, {
+      headers: { Authorization: `DeepL-Auth-Key ${apiKey}` },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json({ success: false, message: `DeepL API error: ${res.status} ${text}` }, 200);
+    }
+
+    const usage = await res.json() as { character_count: number; character_limit: number };
+    return c.json({
+      success: true,
+      message: 'Connected to DeepL successfully',
+      characterCount: usage.character_count,
+      characterLimit: usage.character_limit,
+    });
+  } catch (err) {
+    logger.warn({ err }, 'DeepL connection test failed');
+    logToErrorTable({ level: 'warn', message: `DeepL connection test failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'translation-test' } });
+    return c.json({ success: false, message: `DeepL connection failed: ${(err as Error).message}` }, 200);
+  }
 }) as any);
 
 export default settings;

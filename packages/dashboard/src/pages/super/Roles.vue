@@ -2,8 +2,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ShieldCheck, Plus, Loader2, Trash2, Pencil, X, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
+import { useI18n } from 'vue-i18n'
 
 const api = useApi()
+const { t } = useI18n()
 
 interface Role {
   id: string
@@ -40,29 +42,7 @@ const SECTIONS = [
 ] as const
 
 function sectionLabel(section: string): string {
-  const labels: Record<string, string> = {
-    dashboard: 'Dashboard',
-    nodes: 'Nodes',
-    status: 'Status',
-    statusPosts: 'Status Posts',
-    users: 'Users',
-    accounts: 'Accounts',
-    services: 'Services',
-    storage: 'Storage',
-    marketplace: 'Marketplace',
-    events: 'Events',
-    errors: 'Errors',
-    jobs: 'Jobs',
-    billing: 'Billing',
-    resellers: 'Resellers',
-    emailTemplates: 'Email Templates',
-    sharedDomains: 'Shared Domains',
-    settings: 'Settings',
-    updates: 'Updates',
-    support: 'Support',
-    roles: 'Roles',
-  }
-  return labels[section] || section
+  return t(`roles.sections.${section}`, section)
 }
 
 function sectionPerms(section: string) {
@@ -103,7 +83,7 @@ async function fetchRoles() {
     roles.value = data.data ?? []
   } catch {
     roles.value = []
-    error.value = 'Failed to load roles'
+    error.value = t('roles.loadError')
   } finally {
     loading.value = false
   }
@@ -122,10 +102,10 @@ async function createRole() {
     })
     createForm.value = { name: '', description: '' }
     showCreateForm.value = false
-    success.value = 'Role created successfully'
+    success.value = t('roles.createSuccess')
     await fetchRoles()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to create role'
+    error.value = err?.body?.error || t('roles.createError')
   } finally {
     creating.value = false
   }
@@ -173,11 +153,11 @@ async function saveRole() {
       description: editForm.value.description.trim() || null,
       permissions: buildPermissions(),
     })
-    success.value = 'Role updated successfully'
+    success.value = t('roles.updateSuccess')
     expandedRoleId.value = null
     await fetchRoles()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to update role'
+    error.value = err?.body?.error || t('roles.updateError')
   } finally {
     saving.value = false
   }
@@ -194,14 +174,14 @@ async function deleteRole() {
   success.value = ''
   try {
     await api.del(`/admin/roles/${deletingId.value}`)
-    success.value = 'Role deleted successfully'
+    success.value = t('roles.deleteSuccess')
     deletingId.value = null
     if (expandedRoleId.value === deletingId.value) {
       expandedRoleId.value = null
     }
     await fetchRoles()
   } catch (err: any) {
-    error.value = err?.body?.error || 'Failed to delete role'
+    error.value = err?.body?.error || t('roles.deleteError')
   } finally {
     deleting.value = false
   }
@@ -218,14 +198,14 @@ onMounted(() => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <ShieldCheck class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Roles</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('roles.title') }}</h1>
       </div>
       <button
         @click="showCreateForm = !showCreateForm; error = ''; success = ''"
         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
       >
         <Plus class="w-4 h-4" />
-        Create Role
+        {{ t('roles.createRole') }}
       </button>
     </div>
 
@@ -247,25 +227,25 @@ onMounted(() => {
 
     <!-- Create form -->
     <div v-if="showCreateForm" class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
-      <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Create New Role</h2>
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">{{ t('roles.createTitle') }}</h2>
       <form @submit.prevent="createRole" class="space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('roles.nameLabel') }}</label>
             <input
               v-model="createForm.name"
               type="text"
-              placeholder="e.g. Support Agent"
+              :placeholder="t('roles.namePlaceholder')"
               required
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Description</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('roles.descriptionLabel') }}</label>
             <input
               v-model="createForm.description"
               type="text"
-              placeholder="Optional description"
+              :placeholder="t('roles.descriptionPlaceholder')"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             />
           </div>
@@ -277,14 +257,14 @@ onMounted(() => {
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
             <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
-            Create
+            {{ t('common.create') }}
           </button>
           <button
             type="button"
             @click="showCreateForm = false; createForm = { name: '', description: '' }"
             class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            Cancel
+            {{ t('common.cancel') }}
           </button>
         </div>
       </form>
@@ -298,18 +278,18 @@ onMounted(() => {
     <!-- Roles table -->
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
       <div v-if="roles.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-        No roles found. Create one to get started.
+        {{ t('roles.noRoles') }}
       </div>
 
       <div v-else>
         <table class="w-full">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Description</th>
-              <th class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Users</th>
-              <th class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('roles.tableName') }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('roles.tableDescription') }}</th>
+              <th class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('roles.tableUsers') }}</th>
+              <th class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('roles.tableType') }}</th>
+              <th class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('roles.tableActions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -339,13 +319,13 @@ onMounted(() => {
                     v-if="role.isBuiltin"
                     class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
                   >
-                    Built-in
+                    {{ t('roles.builtIn') }}
                   </span>
                   <span
                     v-else
                     class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                   >
-                    Custom
+                    {{ t('roles.custom') }}
                   </span>
                 </td>
                 <td class="px-6 py-4 text-right" @click.stop>
@@ -353,7 +333,7 @@ onMounted(() => {
                     <button
                       @click="expandRole(role)"
                       class="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                      title="Edit"
+                      :title="t('roles.editTooltip')"
                     >
                       <Pencil class="w-4 h-4" />
                     </button>
@@ -366,7 +346,7 @@ onMounted(() => {
                           ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                           : 'text-gray-400 hover:text-red-600 dark:hover:text-red-400'
                       ]"
-                      :title="role.isBuiltin ? 'Cannot delete built-in roles' : 'Delete'"
+                      :title="role.isBuiltin ? t('roles.cannotDeleteBuiltin') : t('roles.deleteTooltip')"
                     >
                       <Trash2 class="w-4 h-4" />
                     </button>
@@ -381,7 +361,7 @@ onMounted(() => {
                     <!-- Name & Description -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('roles.nameLabel') }}</label>
                         <input
                           v-model="editForm.name"
                           type="text"
@@ -390,11 +370,11 @@ onMounted(() => {
                         />
                       </div>
                       <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Description</label>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('roles.descriptionLabel') }}</label>
                         <input
                           v-model="editForm.description"
                           type="text"
-                          placeholder="Optional description"
+                          :placeholder="t('roles.descriptionPlaceholder')"
                           class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
                         />
                       </div>
@@ -402,15 +382,15 @@ onMounted(() => {
 
                     <!-- Permissions grid -->
                     <div>
-                      <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Permissions</h3>
+                      <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">{{ t('roles.permissions') }}</h3>
                       <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
                         <table class="w-full">
                           <thead>
                             <tr class="bg-gray-100 dark:bg-gray-700/50">
-                              <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Section</th>
-                              <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">Read</th>
-                              <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">Write</th>
-                              <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">Impersonate</th>
+                              <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('roles.permSection') }}</th>
+                              <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">{{ t('roles.permRead') }}</th>
+                              <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">{{ t('roles.permWrite') }}</th>
+                              <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">{{ t('roles.permImpersonate') }}</th>
                             </tr>
                           </thead>
                           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -459,13 +439,13 @@ onMounted(() => {
                         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                       >
                         <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
-                        Save Changes
+                        {{ t('roles.saveChanges') }}
                       </button>
                       <button
                         @click="expandedRoleId = null"
                         class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                       >
-                        Cancel
+                        {{ t('common.cancel') }}
                       </button>
                     </div>
                   </div>
@@ -483,16 +463,16 @@ onMounted(() => {
         <div class="fixed inset-0 bg-black/50" @click="deletingId = null" />
         <div class="relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-md">
           <div class="p-6">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete Role</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">{{ t('roles.deleteTitle') }}</h2>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
-              Are you sure you want to delete this role? Users assigned to this role will lose their permissions. This action cannot be undone.
+              {{ t('roles.deleteConfirm') }}
             </p>
             <div class="flex justify-end gap-3">
               <button
                 @click="deletingId = null"
                 class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                Cancel
+                {{ t('common.cancel') }}
               </button>
               <button
                 @click="deleteRole"
@@ -500,7 +480,7 @@ onMounted(() => {
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
                 <Loader2 v-if="deleting" class="w-4 h-4 animate-spin" />
-                Delete
+                {{ t('common.delete') }}
               </button>
             </div>
           </div>

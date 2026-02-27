@@ -406,16 +406,17 @@ function visibleDays(days: UptimeDay[]): UptimeDay[] {
   return days.slice(-daysToShow.value)
 }
 
-function iconEmoji(icon: string): string {
-  const map: Record<string, string> = {
-    incident: '\u26A0\uFE0F',
-    maintenance: '\uD83D\uDD27',
-    resolved: '\u2705',
-    info: '\u2139\uFE0F',
-    outage: '\uD83D\uDED1',
-    degraded: '\uD83D\uDCC9',
-  }
-  return map[icon] || '\u2139\uFE0F'
+const ICON_SVG: Record<string, { path: string; color: string; fill?: boolean }> = {
+  incident: { path: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01', color: 'text-amber-500' },
+  maintenance: { path: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z', color: 'text-blue-500' },
+  resolved: { path: 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3', color: 'text-green-500' },
+  info: { path: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 16v-4M12 8h.01', color: 'text-sky-500' },
+  outage: { path: 'M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86L7.86 2zM12 8v4M12 16h.01', color: 'text-red-500' },
+  degraded: { path: 'M23 18l-9.5-9.5-5 5L1 6', color: 'text-orange-500' },
+}
+
+function getIconSvg(icon: string) {
+  return ICON_SVG[icon] ?? ICON_SVG.info
 }
 
 function severityBadgeClass(severity: string): string {
@@ -688,8 +689,8 @@ function nextPage() {
                 <div v-for="post in posts" :key="post.id" class="relative pb-8 last:pb-0">
                   <div class="flex gap-4">
                     <!-- Icon circle on the line -->
-                    <div class="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 text-lg">
-                      {{ iconEmoji(post.icon) }}
+                    <div class="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900">
+                      <svg :class="['w-5 h-5', getIconSvg(post.icon).color]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path :d="getIconSvg(post.icon).path" /></svg>
                     </div>
 
                     <!-- Card content -->

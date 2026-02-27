@@ -168,6 +168,11 @@ const superRoutes: RouteRecordRaw[] = [
         props: true,
       },
       {
+        path: 'translations',
+        name: 'super-translations',
+        component: () => import('@/pages/super/Translations.vue'),
+      },
+      {
         path: 'roles',
         name: 'super-roles',
         component: () => import('@/pages/super/Roles.vue'),

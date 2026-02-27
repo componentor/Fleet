@@ -6,6 +6,16 @@ import type { NavLink } from '@/components/landing/LandingNavbar.vue'
 import LandingFooter from '@/components/landing/LandingFooter.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useBranding } from '@/composables/useBranding'
+import { AlertTriangle, Wrench, CheckCircle, Info, AlertOctagon, TrendingDown } from 'lucide-vue-next'
+
+const ICON_MAP: Record<string, { icon: any; color: string }> = {
+  incident: { icon: AlertTriangle, color: 'text-amber-500' },
+  maintenance: { icon: Wrench, color: 'text-blue-500' },
+  resolved: { icon: CheckCircle, color: 'text-green-500' },
+  info: { icon: Info, color: 'text-sky-500' },
+  outage: { icon: AlertOctagon, color: 'text-red-500' },
+  degraded: { icon: TrendingDown, color: 'text-orange-500' },
+}
 
 const { t, locale } = useI18n()
 const { brandGithubUrl } = useBranding()
@@ -306,16 +316,8 @@ function visibleDays(days: UptimeDay[]): UptimeDay[] {
   return days.slice(-daysToShow.value)
 }
 
-function iconEmoji(icon: string): string {
-  const map: Record<string, string> = {
-    incident: '\u26A0\uFE0F',
-    maintenance: '\uD83D\uDD27',
-    resolved: '\u2705',
-    info: '\u2139\uFE0F',
-    outage: '\uD83D\uDED1',
-    degraded: '\uD83D\uDCC9',
-  }
-  return map[icon] || '\u2139\uFE0F'
+function getIconOption(icon: string) {
+  return ICON_MAP[icon] ?? ICON_MAP.info!
 }
 
 function severityBadgeClass(severity: string): string {
@@ -591,8 +593,8 @@ function nextPage() {
                 <div v-for="(post, index) in posts" :key="post.id" class="relative pb-8 last:pb-0">
                   <div class="flex gap-4">
                     <!-- Icon circle on the line -->
-                    <div class="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 text-lg">
-                      {{ iconEmoji(post.icon) }}
+                    <div class="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900">
+                      <component :is="getIconOption(post.icon).icon" :class="['w-5 h-5', getIconOption(post.icon).color]" />
                     </div>
 
                     <!-- Card content -->

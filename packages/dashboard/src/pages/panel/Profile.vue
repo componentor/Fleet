@@ -142,6 +142,7 @@ async function uploadAvatar(event: Event) {
     }
     const updated = await res.json()
     profile.value = updated
+    if (authStore.user) authStore.user.avatarUrl = updated.avatarUrl ? `${updated.avatarUrl}?t=${Date.now()}` : null
     toast.success(t('profile.avatarUpdated'))
   } catch (err: any) {
     toast.error(err?.message || t('profile.avatarUploadFailed'))
@@ -154,8 +155,11 @@ async function uploadAvatar(event: Event) {
 async function removeAvatar() {
   uploadingAvatar.value = true
   try {
+    const { useAuthStore } = await import('@/stores/auth')
+    const authStore = useAuthStore()
     const updated = await api.del<any>('/users/me/avatar')
     profile.value = updated
+    if (authStore.user) authStore.user.avatarUrl = null
     toast.success(t('profile.avatarRemoved'))
   } catch {
     toast.error(t('profile.avatarRemoveFailed'))

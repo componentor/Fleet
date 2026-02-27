@@ -196,18 +196,19 @@ adminSupportRoutes.openapi(getTicketRoute, (async (c: any) => {
 
   // Enrich messages with author info
   const authorIds = [...new Set(messages.map((m: any) => m.authorId))];
-  let authorMap = new Map<string, { name: string | null; email: string | null }>();
+  let authorMap = new Map<string, { name: string | null; email: string | null; avatarUrl: string | null }>();
   if (authorIds.length > 0) {
-    const usrs = await db.select({ id: users.id, name: users.name, email: users.email })
+    const usrs = await db.select({ id: users.id, name: users.name, email: users.email, avatarUrl: users.avatarUrl })
       .from(users)
       .where(inArray(users.id, authorIds));
-    authorMap = new Map(usrs.map((u: any) => [u.id, { name: u.name, email: u.email }]));
+    authorMap = new Map(usrs.map((u: any) => [u.id, { name: u.name, email: u.email, avatarUrl: u.avatarUrl }]));
   }
 
   const enrichedMessages = messages.map((m: any) => ({
     ...m,
     authorName: authorMap.get(m.authorId)?.name ?? null,
     authorEmail: authorMap.get(m.authorId)?.email ?? null,
+    authorAvatarUrl: authorMap.get(m.authorId)?.avatarUrl ?? null,
   }));
 
   // Get account name
@@ -380,18 +381,31 @@ adminSupportRoutes.openapi(addMessageRoute, (async (c: any) => {
     }).catch(() => { /* fire and forget */ });
   }
 
+  // Enrich message with author info
+  const author = await db.query.users.findFirst({
+    where: eq(users.id, user.userId),
+    columns: { name: true, email: true, avatarUrl: true },
+  });
+  const enrichedMessage = {
+    ...message,
+    isInternal,
+    authorName: author?.name ?? null,
+    authorEmail: author?.email ?? null,
+    authorAvatarUrl: author?.avatarUrl ?? null,
+  };
+
   // Publish to Valkey for real-time (filter internal for non-admin clients in WS handler)
   try {
     const valkey = await getValkey();
     if (valkey) {
       await valkey.publish(`support:ticket:${id}`, JSON.stringify({
         type: 'message',
-        message: { ...message, isInternal },
+        message: enrichedMessage,
       }));
     }
   } catch { /* ignore */ }
 
-  return c.json(message, 201);
+  return c.json(enrichedMessage, 201);
 }) as any);
 
 // PATCH /tickets/:id/messages/:msgId — edit own message (admin)

@@ -9,6 +9,7 @@ import { updateService } from '../services/update.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
 import { logger } from '../services/logger.js';
+import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import {
   jsonBody,
@@ -632,17 +633,17 @@ adminRoutes.openapi(statusRoute, (async (c: any) => {
 const statusPostQuerySchema = z.object({
   page: z.string().optional().openapi({ description: 'Page number (default 1)' }),
   limit: z.string().optional().openapi({ description: 'Items per page (default 20, max 50)' }),
-  status: z.enum(['draft', 'published', 'archived']).optional().openapi({ description: 'Filter by status' }),
+  status: z.enum(['all', 'draft', 'published', 'archived']).optional().openapi({ description: 'Filter by status' }),
 });
 
 const createStatusPostSchema = z.object({
   icon: z.enum(['incident', 'maintenance', 'resolved', 'info', 'degraded', 'outage']),
   severity: z.enum(['info', 'warning', 'critical']),
   affectedServices: z.array(z.string()),
-  status: z.enum(['draft', 'published']),
+  status: z.enum(['draft', 'published', 'archived']).default('draft'),
   locale: z.string().min(2).max(5),
   title: z.string().min(1).max(300),
-  body: z.string().min(1),
+  body: z.string(),
 });
 
 const updateStatusPostSchema = z.object({
@@ -654,7 +655,7 @@ const updateStatusPostSchema = z.object({
 
 const upsertTranslationSchema = z.object({
   title: z.string().min(1).max(300),
-  body: z.string().min(1),
+  body: z.string(),
 });
 
 const autoTranslateSchema = z.object({
@@ -696,7 +697,7 @@ adminRoutes.openapi(listStatusPostsRoute, (async (c: any) => {
   const offset = (page - 1) * limit;
 
   const conditions: any[] = [];
-  if (query.status) {
+  if (query.status && query.status !== 'all') {
     conditions.push(eq(statusPosts.status, query.status));
   }
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -958,23 +959,115 @@ const autoTranslateRoute = createRoute({
   },
 });
 
+// ── Translation helpers ──
+
+const localeNames: Record<string, string> = { en: 'English', nb: 'Norwegian Bokmål', de: 'German', zh: 'Chinese' };
+const localeToDeepL: Record<string, string> = { en: 'EN', nb: 'NB', de: 'DE', zh: 'ZH' };
+
+async function resolveTranslationProvider(): Promise<{ provider: string; apiKey: string } | null> {
+  // Check provider setting
+  const providerSetting = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'translation:provider'),
+  });
+  const provider = (typeof providerSetting?.value === 'string' ? providerSetting.value : null) ?? 'deepl';
+
+  if (provider === 'claude') {
+    const claudeKey = process.env.ANTHROPIC_API_KEY;
+    if (claudeKey) return { provider: 'claude', apiKey: claudeKey };
+    const setting = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'translation:claude_api_key'),
+    });
+    if (setting) {
+      const raw = typeof setting.value === 'string' ? setting.value : null;
+      if (raw) {
+        try { return { provider: 'claude', apiKey: decrypt(raw) }; } catch { return { provider: 'claude', apiKey: raw }; }
+      }
+    }
+    return null;
+  }
+
+  // DeepL (default)
+  const deeplKey = process.env.DEEPL_API_KEY;
+  if (deeplKey) return { provider: 'deepl', apiKey: deeplKey };
+  const setting = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'translation:deepl_api_key'),
+  });
+  if (setting) {
+    const raw = typeof setting.value === 'string' ? setting.value : null;
+    if (raw) {
+      try { return { provider: 'deepl', apiKey: decrypt(raw) }; } catch { return { provider: 'deepl', apiKey: raw }; }
+    }
+  }
+  return null;
+}
+
+async function translateWithDeepL(apiKey: string, title: string, body: string, sourceLang: string, targetLang: string): Promise<{ title: string; body: string }> {
+  const baseUrl = apiKey.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  const srcLang = localeToDeepL[sourceLang] ?? sourceLang.toUpperCase();
+  const tgtLang = localeToDeepL[targetLang] ?? targetLang.toUpperCase();
+
+  const titleRes = await fetch(`${baseUrl}/v2/translate`, {
+    method: 'POST',
+    headers: { 'Authorization': `DeepL-Auth-Key ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: [title], target_lang: tgtLang, source_lang: srcLang }),
+  });
+  if (!titleRes.ok) throw new Error(`DeepL title translation failed: ${titleRes.status}`);
+  const titleData = await titleRes.json() as { translations: { text: string }[] };
+
+  const bodyRes = await fetch(`${baseUrl}/v2/translate`, {
+    method: 'POST',
+    headers: { 'Authorization': `DeepL-Auth-Key ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: [body], target_lang: tgtLang, source_lang: srcLang }),
+  });
+  if (!bodyRes.ok) throw new Error(`DeepL body translation failed: ${bodyRes.status}`);
+  const bodyData = await bodyRes.json() as { translations: { text: string }[] };
+
+  return {
+    title: titleData.translations[0]?.text ?? title,
+    body: bodyData.translations[0]?.text ?? body,
+  };
+}
+
+async function translateWithClaude(apiKey: string, title: string, body: string, sourceLang: string, targetLang: string): Promise<{ title: string; body: string }> {
+  const srcName = localeNames[sourceLang] ?? sourceLang;
+  const tgtName = localeNames[targetLang] ?? targetLang;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system: `You are a professional translator. Translate from ${srcName} to ${tgtName}. Preserve all markdown formatting. Return ONLY valid JSON: {"title": "translated title", "body": "translated body"}`,
+      messages: [{
+        role: 'user',
+        content: `Translate the following:\n\nTitle: ${title}\n\nBody:\n${body}`,
+      }],
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Claude API error: ${res.status}`);
+  const data = await res.json() as { content: { type: string; text: string }[] };
+  const text = data.content.find((c: any) => c.type === 'text')?.text ?? '';
+
+  // Extract JSON from response (Claude may wrap in markdown code blocks)
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Claude response did not contain valid JSON');
+  const parsed = JSON.parse(jsonMatch[0]) as { title: string; body: string };
+  return { title: parsed.title, body: parsed.body };
+}
+
 adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
   const { id } = c.req.valid('param');
   const body = c.req.valid('json');
 
-  // Resolve DeepL API key from env or platform settings
-  let deeplApiKey = process.env.DEEPL_API_KEY;
-  if (!deeplApiKey) {
-    const setting = await db.query.platformSettings.findFirst({
-      where: eq(platformSettings.key, 'translation:deepl_api_key'),
-    });
-    if (setting) {
-      deeplApiKey = typeof setting.value === 'string' ? setting.value : (setting.value as any)?.key;
-    }
-  }
-
-  if (!deeplApiKey) {
-    return c.json({ error: 'Translation service not configured' }, 501);
+  const translationConfig = await resolveTranslationProvider();
+  if (!translationConfig) {
+    return c.json({ error: 'Translation service not configured. Add an API key in Settings > Translation.' }, 501);
   }
 
   // Fetch source translation
@@ -992,60 +1085,20 @@ adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
   const supportedLocales = ['en', 'nb', 'de', 'zh'];
   const targetLocales = body.targetLocales ?? supportedLocales.filter((l) => l !== body.sourceLocale);
 
-  const localeToDeepL: Record<string, string> = { en: 'EN', nb: 'NB', de: 'DE', zh: 'ZH' };
-  const sourceDeepLLang = localeToDeepL[body.sourceLocale] ?? body.sourceLocale.toUpperCase();
-
   const translated: string[] = [];
   const failed: string[] = [];
 
+  const translateFn = translationConfig.provider === 'claude' ? translateWithClaude : translateWithDeepL;
+
   for (const targetLocale of targetLocales) {
     try {
-      const targetDeepLLang = localeToDeepL[targetLocale] ?? targetLocale.toUpperCase();
-
-      // Translate title
-      const titleRes = await fetch('https://api-free.deepl.com/v2/translate', {
-        method: 'POST',
-        headers: {
-          'Authorization': `DeepL-Auth-Key ${deeplApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: [sourceTranslation.title],
-          target_lang: targetDeepLLang,
-          source_lang: sourceDeepLLang,
-        }),
-      });
-
-      if (!titleRes.ok) {
-        failed.push(targetLocale);
-        continue;
-      }
-
-      const titleData = await titleRes.json() as { translations: { text: string }[] };
-
-      // Translate body
-      const bodyRes = await fetch('https://api-free.deepl.com/v2/translate', {
-        method: 'POST',
-        headers: {
-          'Authorization': `DeepL-Auth-Key ${deeplApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: [sourceTranslation.body],
-          target_lang: targetDeepLLang,
-          source_lang: sourceDeepLLang,
-        }),
-      });
-
-      if (!bodyRes.ok) {
-        failed.push(targetLocale);
-        continue;
-      }
-
-      const bodyData = await bodyRes.json() as { translations: { text: string }[] };
-
-      const translatedTitle = titleData.translations[0]?.text ?? sourceTranslation.title;
-      const translatedBody = bodyData.translations[0]?.text ?? sourceTranslation.body;
+      const result = await translateFn(
+        translationConfig.apiKey,
+        sourceTranslation.title,
+        sourceTranslation.body,
+        body.sourceLocale,
+        targetLocale,
+      );
 
       // Upsert translation
       const existing = await db.query.statusPostTranslations.findFirst({
@@ -1058,15 +1111,15 @@ adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
       if (existing) {
         await updateReturning(
           statusPostTranslations,
-          { title: translatedTitle, body: translatedBody, updatedAt: new Date() },
+          { title: result.title, body: result.body, updatedAt: new Date() },
           eq(statusPostTranslations.id, existing.id),
         );
       } else {
         await insertReturning(statusPostTranslations, {
           postId: id,
           locale: targetLocale,
-          title: translatedTitle,
-          body: translatedBody,
+          title: result.title,
+          body: result.body,
         });
       }
 

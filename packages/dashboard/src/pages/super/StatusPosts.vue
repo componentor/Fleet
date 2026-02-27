@@ -64,6 +64,7 @@ const saving = ref(false)
 const deleting = ref(false)
 const creating = ref(false)
 const autoTranslating = ref(false)
+const translationConfigured = ref(false)
 const error = ref('')
 const success = ref('')
 
@@ -89,12 +90,12 @@ const LOCALES = ['en', 'no', 'de', 'zh'] as const
 const SERVICES = ['api', 'docker', 'storage', 'queue'] as const
 
 const ICON_OPTIONS = [
-  { key: 'incident', emoji: '\u26A0\uFE0F', icon: AlertTriangle },
-  { key: 'maintenance', emoji: '\uD83D\uDD27', icon: Wrench },
-  { key: 'resolved', emoji: '\u2705', icon: CheckCircle },
-  { key: 'info', emoji: '\u2139\uFE0F', icon: Info },
-  { key: 'outage', emoji: '\uD83D\uDED1', icon: AlertOctagon },
-  { key: 'degraded', emoji: '\uD83D\uDCC9', icon: TrendingDown },
+  { key: 'incident', icon: AlertTriangle, color: 'text-amber-500' },
+  { key: 'maintenance', icon: Wrench, color: 'text-blue-500' },
+  { key: 'resolved', icon: CheckCircle, color: 'text-green-500' },
+  { key: 'info', icon: Info, color: 'text-sky-500' },
+  { key: 'outage', icon: AlertOctagon, color: 'text-red-500' },
+  { key: 'degraded', icon: TrendingDown, color: 'text-orange-500' },
 ] as const
 
 const SEVERITY_OPTIONS = ['info', 'warning', 'critical'] as const
@@ -126,9 +127,8 @@ function getPostTitle(post: StatusPost): string {
   return t('super.statusPosts.untitled')
 }
 
-function getPostIcon(post: StatusPost): string {
-  const opt = ICON_OPTIONS.find((o) => o.key === post.icon)
-  return opt?.emoji ?? '\u2139\uFE0F'
+function getPostIconOption(post: StatusPost) {
+  return ICON_OPTIONS.find((o) => o.key === post.icon) ?? ICON_OPTIONS[3]
 }
 
 function translationCount(post: StatusPost): number {
@@ -376,8 +376,19 @@ watch(filterStatus, () => {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
+async function fetchTranslationStatus() {
+  try {
+    const data = await api.get<any>('/settings/translation')
+    const provider = data.provider ?? 'deepl'
+    translationConfigured.value = provider === 'deepl' ? !!data.deeplConfigured : !!data.claudeConfigured
+  } catch {
+    translationConfigured.value = false
+  }
+}
+
 onMounted(() => {
   fetchPosts()
+  fetchTranslationStatus()
 })
 </script>
 
@@ -450,7 +461,7 @@ onMounted(() => {
             ]"
           >
             <div class="flex items-start gap-2.5">
-              <span class="text-lg leading-none mt-0.5">{{ getPostIcon(post) }}</span>
+              <component :is="getPostIconOption(post).icon" :class="['w-5 h-5 shrink-0 mt-0.5', getPostIconOption(post).color]" />
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-gray-900 dark:text-white truncate">
                   {{ getPostTitle(post) }}
@@ -536,7 +547,7 @@ onMounted(() => {
                         : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-650',
                     ]"
                   >
-                    <span class="text-base">{{ opt.emoji }}</span>
+                    <component :is="opt.icon" :class="['w-4 h-4', opt.color]" />
                     <span class="text-xs">{{ t(`super.statusPosts.icons.${opt.key}`) }}</span>
                   </button>
                 </div>
@@ -705,15 +716,20 @@ onMounted(() => {
 
               <!-- Auto-translate + delete translation row -->
               <div class="flex items-center gap-3 pt-2">
-                <button
-                  @click="autoTranslate"
-                  :disabled="autoTranslating || !hasTranslation(editLocale)"
-                  class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                >
-                  <Loader2 v-if="autoTranslating" class="w-4 h-4 animate-spin" />
-                  <Languages v-else class="w-4 h-4" />
-                  {{ t('super.statusPosts.autoTranslate') }}
-                </button>
+                <div class="relative group">
+                  <button
+                    @click="autoTranslate"
+                    :disabled="autoTranslating || !hasTranslation(editLocale) || !translationConfigured"
+                    class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    <Loader2 v-if="autoTranslating" class="w-4 h-4 animate-spin" />
+                    <Languages v-else class="w-4 h-4" />
+                    {{ t('super.statusPosts.autoTranslate') }}
+                  </button>
+                  <div v-if="!translationConfigured" class="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg z-10">
+                    {{ t('super.statusPosts.noApiKey') }}
+                  </div>
+                </div>
                 <button
                   v-if="hasTranslation(editLocale)"
                   @click="deleteTranslation(editLocale)"

@@ -68,6 +68,12 @@ onMounted(async () => {
   // Fetch admin permissions (for nav filtering)
   adminPerms.fetch()
 
+  // Load custom locales for language selector
+  try {
+    const stored = localStorage.getItem('fleet_custom_locales')
+    if (stored) customLocales.value = JSON.parse(stored)
+  } catch { /* ignore */ }
+
   try {
     const notif = await api.get<any>('/updates/notification')
     updateVersion(
@@ -86,53 +92,85 @@ interface NavItem {
   icon: any
   section?: AdminSection
   superOnly?: boolean
-  children?: NavItem[]
 }
 
-const allNavItems: NavItem[] = [
-  { nameKey: 'nav.dashboard', path: '/admin', icon: LayoutDashboard, section: 'dashboard' },
-  { nameKey: 'nav.nodes', path: '/admin/nodes', icon: Server, section: 'nodes' },
+interface NavGroup {
+  labelKey: string
+  items: NavItem[]
+}
+
+const allNavGroups: NavGroup[] = [
   {
-    nameKey: 'nav.status', path: '/admin/status', icon: Activity, section: 'status',
-    children: [
+    labelKey: 'nav.group.overview',
+    items: [
+      { nameKey: 'nav.dashboard', path: '/admin', icon: LayoutDashboard, section: 'dashboard' },
+      { nameKey: 'nav.nodes', path: '/admin/nodes', icon: Server, section: 'nodes' },
+      { nameKey: 'nav.status', path: '/admin/status', icon: Activity, section: 'status' },
       { nameKey: 'nav.statusPosts', path: '/admin/status-posts', icon: Megaphone, section: 'statusPosts' },
     ],
   },
-  { nameKey: 'nav.users', path: '/admin/users', icon: Users, section: 'users' },
-  { nameKey: 'nav.accounts', path: '/admin/accounts', icon: Users, section: 'accounts' },
-  { nameKey: 'nav.services', path: '/admin/services', icon: Layers, section: 'services' },
-  { nameKey: 'nav.storage', path: '/admin/storage', icon: HardDrive, section: 'storage' },
-  { nameKey: 'nav.marketplace', path: '/admin/marketplace', icon: Store, section: 'marketplace' },
-  { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText, section: 'events' },
-  { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug, section: 'errors' },
-  { nameKey: 'nav.jobs', path: '/admin/jobs', icon: ListFilter, section: 'jobs' },
-  { nameKey: 'nav.billing', path: '/admin/billing', icon: CreditCard, section: 'billing' },
-  { nameKey: 'nav.resellers', path: '/admin/resellers', icon: Handshake, section: 'resellers' },
-  { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail, section: 'emailTemplates' },
-  { nameKey: 'nav.sharedDomains', path: '/admin/shared-domains', icon: Globe, section: 'sharedDomains' },
-  { nameKey: 'nav.support', path: '/admin/support', icon: LifeBuoy, section: 'support' },
-  { nameKey: 'nav.roles', path: '/admin/roles', icon: ShieldCheck, superOnly: true },
-  { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings, section: 'settings' },
-  { nameKey: 'nav.updates', path: '/admin/updates', icon: Download, section: 'updates' },
+  {
+    labelKey: 'nav.group.customers',
+    items: [
+      { nameKey: 'nav.accounts', path: '/admin/accounts', icon: Users, section: 'accounts' },
+      { nameKey: 'nav.users', path: '/admin/users', icon: Users, section: 'users' },
+      { nameKey: 'nav.support', path: '/admin/support', icon: LifeBuoy, section: 'support' },
+    ],
+  },
+  {
+    labelKey: 'nav.group.platform',
+    items: [
+      { nameKey: 'nav.services', path: '/admin/services', icon: Layers, section: 'services' },
+      { nameKey: 'nav.storage', path: '/admin/storage', icon: HardDrive, section: 'storage' },
+      { nameKey: 'nav.marketplace', path: '/admin/marketplace', icon: Store, section: 'marketplace' },
+      { nameKey: 'nav.sharedDomains', path: '/admin/shared-domains', icon: Globe, section: 'sharedDomains' },
+    ],
+  },
+  {
+    labelKey: 'nav.group.monitoring',
+    items: [
+      { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText, section: 'events' },
+      { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug, section: 'errors' },
+      { nameKey: 'nav.jobs', path: '/admin/jobs', icon: ListFilter, section: 'jobs' },
+    ],
+  },
+  {
+    labelKey: 'nav.group.business',
+    items: [
+      { nameKey: 'nav.billing', path: '/admin/billing', icon: CreditCard, section: 'billing' },
+      { nameKey: 'nav.resellers', path: '/admin/resellers', icon: Handshake, section: 'resellers' },
+    ],
+  },
+  {
+    labelKey: 'nav.group.system',
+    items: [
+      { nameKey: 'nav.roles', path: '/admin/roles', icon: ShieldCheck, superOnly: true },
+      { nameKey: 'nav.emailTemplates', path: '/admin/email-templates', icon: Mail, section: 'emailTemplates' },
+      { nameKey: 'nav.translations', path: '/admin/translations', icon: Languages, superOnly: true },
+      { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings, section: 'settings' },
+      { nameKey: 'nav.updates', path: '/admin/updates', icon: Download, section: 'updates' },
+    ],
+  },
 ]
 
-const navItems = computed(() => {
-  return allNavItems.filter((item) => {
-    if (item.superOnly) return user.value?.isSuper
-    if (!item.section) return true
-    return adminPerms.can(item.section)
-  })
+const navGroups = computed(() => {
+  return allNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (item.superOnly) return user.value?.isSuper
+        if (!item.section) return true
+        return adminPerms.can(item.section)
+      }),
+    }))
+    .filter((group) => group.items.length > 0)
 })
 
 function isActive(path: string) {
   if (path === '/admin') {
     return route.path === '/admin'
   }
-  return route.path.startsWith(path)
-}
-
-function isGroupActive(item: NavItem) {
-  return isActive(item.path) || (item.children?.some((c) => isActive(c.path)) ?? false)
+  return route.path === path || route.path.startsWith(path + '/')
 }
 
 async function handleLogout() {
@@ -143,6 +181,8 @@ async function handleLogout() {
 function goToPanel() {
   router.push('/panel')
 }
+
+const customLocales = ref<{ code: string; name: string }[]>([])
 
 function changeLocale(newLocale: string) {
   locale.value = newLocale
@@ -195,54 +235,40 @@ function changeLocale(newLocale: string) {
         </div>
       </div>
 
-      <nav :class="['mt-4 space-y-1 overflow-y-auto flex-1', collapsed ? 'px-2 scrollbar-hide' : 'px-3']">
-        <template v-for="item in navItems" :key="item.path">
-          <SidebarTooltip :label="$t(item.nameKey)" :show="collapsed">
-            <RouterLink
-              :to="item.path"
-              :class="[
-                'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
-                collapsed
-                  ? 'justify-center p-2.5'
-                  : 'gap-3 px-3 py-2.5 border-l-[3px]',
-                isActive(item.path)
-                  ? collapsed
-                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                    : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
-                  : collapsed
-                    ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
-              ]"
-              @click="sidebarOpen = false"
-            >
-              <component :is="item.icon" class="w-5 h-5 shrink-0" />
-              <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
-            </RouterLink>
-          </SidebarTooltip>
+      <nav :class="['mt-2 pb-4 overflow-y-auto flex-1', collapsed ? 'px-2 scrollbar-hide' : 'px-3']">
+        <template v-for="(group, gi) in navGroups" :key="group.labelKey">
+          <!-- Group header -->
+          <div v-if="!collapsed" :class="['px-3 pt-4 pb-1', gi === 0 && 'pt-2']">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ $t(group.labelKey) }}</span>
+          </div>
+          <div v-else-if="gi > 0" class="my-2 mx-1 border-t border-gray-200 dark:border-gray-700" />
 
-          <!-- Sub-items (shown when parent or any child is active) -->
-          <template v-if="item.children && !collapsed && isGroupActive(item)">
-            <SidebarTooltip
-              v-for="child in item.children"
-              :key="child.path"
-              :label="$t(child.nameKey)"
-              :show="collapsed"
-            >
-              <RouterLink
-                :to="child.path"
-                :class="[
-                  'flex items-center gap-3 rounded-lg text-sm font-medium transition-all duration-150 pl-8 pr-3 py-2 border-l-[3px]',
-                  isActive(child.path)
-                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
-                ]"
-                @click="sidebarOpen = false"
-              >
-                <component :is="child.icon" class="w-4 h-4 shrink-0" />
-                <span>{{ $t(child.nameKey) }}</span>
-              </RouterLink>
-            </SidebarTooltip>
-          </template>
+          <div class="space-y-0.5">
+            <template v-for="item in group.items" :key="item.path">
+              <SidebarTooltip :label="$t(item.nameKey)" :show="collapsed">
+                <RouterLink
+                  :to="item.path"
+                  :class="[
+                    'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
+                    collapsed
+                      ? 'justify-center p-2.5'
+                      : 'gap-3 px-3 py-2 border-l-[3px]',
+                    isActive(item.path)
+                      ? collapsed
+                        ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                        : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
+                      : collapsed
+                        ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
+                  ]"
+                  @click="sidebarOpen = false"
+                >
+                  <component :is="item.icon" class="w-5 h-5 shrink-0" />
+                  <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
+                </RouterLink>
+              </SidebarTooltip>
+            </template>
+          </div>
         </template>
       </nav>
 
@@ -332,6 +358,7 @@ function changeLocale(newLocale: string) {
             <option value="nb">NO</option>
             <option value="de">DE</option>
             <option value="zh">中文</option>
+            <option v-for="cl in customLocales" :key="cl.code" :value="cl.code">{{ cl.name }}</option>
           </select>
 
           <!-- Theme toggle -->
@@ -353,8 +380,9 @@ function changeLocale(newLocale: string) {
               @click="userMenuOpen = !userMenuOpen"
               class="flex items-center gap-2 p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
-              <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold">
-                {{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}
+              <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold overflow-hidden">
+                <img v-if="user?.avatarUrl" :src="user.avatarUrl" :alt="user.name || 'Avatar'" class="w-full h-full object-cover" />
+                <span v-else>{{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}</span>
               </div>
               <ChevronDown class="w-4 h-4" />
             </button>

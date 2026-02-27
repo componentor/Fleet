@@ -52,6 +52,7 @@ import statusPageRoutes from './routes/status-page.js';
 import adminRoleRoutes from './routes/admin-roles.js';
 import supportRoutes from './routes/support.js';
 import adminSupportRoutes from './routes/admin-support.js';
+import adminI18nRoutes from './routes/admin-i18n.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -274,13 +275,68 @@ const api = new OpenAPIHono({
   },
 });
 
+// Error response logging — catches ALL error responses from sub-routers and logs
+// them to the error_log table. Also normalizes raw Zod validation errors from
+// sub-routers (which lack a defaultHook) into a consistent response format.
+api.use('*', async (c, next) => {
+  await next();
+
+  const status = c.res.status;
+  if (status < 400) return;
+
+  try {
+    const cloned = c.res.clone();
+    const text = await cloned.text();
+    let body: unknown;
+    try { body = JSON.parse(text); } catch { body = text; }
+
+    let errorMessage = `HTTP ${status}`;
+    let metadata: Record<string, unknown> = {};
+
+    if (body && typeof body === 'object' && 'success' in body && (body as any).success === false && (body as any).error?.issues) {
+      // Raw Zod validation error from sub-router — reformat and log
+      const issues = (body as any).error.issues as Array<{ path: PropertyKey[]; message: string }>;
+      const details = issues.map((i: { path: PropertyKey[]; message: string }) => `${i.path.map(String).join('.')}: ${i.message}`);
+      errorMessage = `Validation failed: ${details.join('; ')}`;
+      metadata = { validationErrors: details };
+
+      // Replace response with standard error format
+      c.res = new Response(JSON.stringify({ error: 'Validation failed', details }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } else if (body && typeof body === 'object' && 'error' in body) {
+      const errorField = (body as any).error;
+      errorMessage = typeof errorField === 'string' ? errorField : JSON.stringify(errorField);
+      metadata = body as Record<string, unknown>;
+    }
+
+    let userId: string | null = null;
+    try {
+      const user = c.get('user' as never) as { userId?: string } | undefined;
+      userId = user?.userId ?? null;
+    } catch { /* auth may not have run yet */ }
+
+    logToErrorTable({
+      level: status >= 500 ? 'error' : 'warn',
+      message: errorMessage,
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      statusCode: status,
+      userId,
+      userAgent: c.req.header('user-agent') ?? null,
+      metadata,
+    });
+  } catch { /* Response not readable — skip logging */ }
+});
+
 // Audit logging for mutating requests (POST/PUT/PATCH/DELETE)
 api.use('*', auditMiddleware);
 
 api.route('/auth', authRoutes);
 api.route('/accounts', accountRoutes);
-api.route('/users', userRoutes);
 api.route('/users', userPublicRoutes);
+api.route('/users', userRoutes);
 api.route('/services', serviceRoutes);
 api.route('/deployments', deploymentRoutes);
 api.route('/dns', dnsRoutes);
@@ -317,6 +373,7 @@ api.route('/status-page', statusPageRoutes);
 api.route('/admin', adminRoleRoutes);
 api.route('/support', supportRoutes);
 api.route('/admin/support', adminSupportRoutes);
+api.route('/admin/i18n', adminI18nRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(
@@ -1207,6 +1264,32 @@ app.get('/api/v1/branding/:type', brandingRateLimit, async (c) => {
       'Cache-Control': 'public, max-age=3600',
     },
   });
+});
+
+// ── Public i18n overrides endpoint (no auth, needed before login) ──
+const i18nRateLimit = rateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'i18n-public' });
+
+app.get('/api/v1/i18n/overrides', i18nRateLimit, async (c) => {
+  const { db: dbImport, platformSettings, eq: eqOp } = await import('@fleet/db');
+
+  // Fetch custom locales
+  const customLocalesRow = await dbImport.query.platformSettings.findFirst({
+    where: eqOp(platformSettings.key, 'i18n:custom_locales'),
+  });
+  const customLocales = (customLocalesRow?.value as { code: string; name: string }[] | null) ?? [];
+
+  // Fetch all override entries
+  const allRows = await dbImport.query.platformSettings.findMany();
+  const overrides: Record<string, Record<string, string>> = {};
+  for (const row of allRows) {
+    if (row.key.startsWith('i18n:overrides:')) {
+      const locale = row.key.replace('i18n:overrides:', '');
+      overrides[locale] = (row.value as Record<string, string>) ?? {};
+    }
+  }
+
+  c.header('Cache-Control', 'public, max-age=300');
+  return c.json({ customLocales, overrides });
 });
 
 app.route('/api/v1', api);
