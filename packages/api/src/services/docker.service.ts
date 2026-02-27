@@ -482,6 +482,27 @@ export class DockerService {
     }
   }
 
+  /**
+   * Force-remove any leftover containers from a removed Swarm service.
+   * Stopped/exited containers hold volume references, preventing volume deletion.
+   * Call after waitForServiceTasksGone() to release volume locks.
+   */
+  async forceRemoveServiceContainers(dockerServiceId: string): Promise<void> {
+    try {
+      const containers = await docker.listContainers({
+        all: true,
+        filters: { label: [`com.docker.swarm.service.id=${dockerServiceId}`] },
+      });
+      await Promise.allSettled(
+        containers.map((c) =>
+          docker.getContainer(c.Id).remove({ force: true }).catch(() => {}),
+        ),
+      );
+    } catch {
+      // Docker may reject the filter if the service metadata is already gone — that's fine
+    }
+  }
+
   async inspectService(dockerServiceId: string) {
     const service = docker.getService(dockerServiceId);
     return service.inspect();

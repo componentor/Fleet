@@ -1404,8 +1404,9 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
     } catch (err) {
       logger.error({ err }, 'Docker service removal failed');
     }
-    // Wait for containers to fully stop before volume cleanup
+    // Wait for tasks to stop, then force-remove leftover containers so volumes are released
     await dockerService.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
+    await dockerService.forceRemoveServiceContainers(svc.dockerServiceId);
   }
 
   // Clean up GitHub webhook
@@ -2229,9 +2230,12 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
     }
   }
 
-  // Wait for containers to fully stop before removing volumes
+  // Wait for tasks to stop, then force-remove leftover containers so volumes are released
   await Promise.all(
     removedDockerServiceIds.map((id) => dockerService.waitForServiceTasksGone(id).catch(() => {})),
+  );
+  await Promise.all(
+    removedDockerServiceIds.map((id) => dockerService.forceRemoveServiceContainers(id)),
   );
 
   // Clean up Docker volumes after containers are gone
