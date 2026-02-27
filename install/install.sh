@@ -281,6 +281,9 @@ PORT=3000
 API_URL=http://api:3000
 TRUST_PROXY=1
 GITHUB_TOKEN=${GITHUB_TOKEN}
+REGISTRY_URL=localhost:5000
+REGISTRY_USER=fleet
+REGISTRY_PASSWORD=${REGISTRY_PASSWORD}
 EOF
 
   # Create registry htpasswd file (apache2-utils/httpd-tools installed in install_dependencies)

@@ -18,7 +18,7 @@ RUN pnpm --filter @fleet/api deploy --legacy --prod /app/production
 
 FROM base AS runner
 ENV NODE_ENV=production
-RUN apk add --no-cache su-exec docker-cli
+RUN apk add --no-cache su-exec docker-cli docker-cli-buildx
 RUN addgroup -S fleet && adduser -S fleet -G fleet
 COPY --from=build /app/production ./
 COPY --from=build /app/packages/api/dist ./dist
