@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { dockerService } from './docker.service.js';
+import { dockerService, getRegistryAuthForImage } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
 import { getValkey } from './valkey.service.js';
@@ -692,7 +692,8 @@ export class UpdateService {
         if (swarmServices.length > 0) {
           const svc = swarmServices[0]!;
           const newImage = `${IMAGE_PREFIX}/fleet-api:${imageTag}`;
-          await dockerService.updateService(svc.ID as string, { image: newImage });
+          const apiAuth = await getRegistryAuthForImage(null, newImage);
+          await dockerService.updateService(svc.ID as string, { image: newImage }, apiAuth);
           this.appendLog('fleet_api update initiated. Container will restart momentarily.');
         }
       } catch (err) {
@@ -811,7 +812,8 @@ export class UpdateService {
 
         const svc = swarmServices[0]!;
         const dockerSvcId = svc.ID as string;
-        await dockerService.updateService(dockerSvcId, { image: previousImage });
+        const rbAuth = await getRegistryAuthForImage(null, previousImage);
+        await dockerService.updateService(dockerSvcId, { image: previousImage }, rbAuth);
         this.appendLog(`  ${serviceName}: rollback initiated to ${previousImage}`);
         await this.waitForServiceConvergence(dockerSvcId, serviceName);
         this.appendLog(`  ${serviceName}: rolled back successfully.`);
@@ -1293,7 +1295,9 @@ export class UpdateService {
         return;
       }
 
-      await dockerService.updateService(dockerSvcId, { image: newImage });
+      // Use platform-wide registry credentials (accountId=null) for Fleet system images
+      const registryAuth = await getRegistryAuthForImage(null, newImage);
+      await dockerService.updateService(dockerSvcId, { image: newImage }, registryAuth);
       this.appendLog(`  ${serviceName} update initiated (rolling, start-first).`);
 
       await this.waitForServiceConvergence(dockerSvcId, serviceName, 600_000, newImage);
