@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -374,6 +374,17 @@ export class BuildService {
       this.events.emit(`build:${buildId}`, info);
 
       await mkdir(workDir, { recursive: true });
+
+      // Verify source directory exists before copying
+      try {
+        await stat(sourceDir);
+      } catch {
+        throw new Error(
+          `Source directory not found: ${sourceDir}\n` +
+          `Upload files may have been lost due to container restart. Please re-upload your project.`,
+        );
+      }
+
       await this.exec('cp', ['-r', `${sourceDir}/.`, workDir], workDir);
 
       // Write auto-generated Dockerfile if provided
@@ -488,6 +499,17 @@ export class BuildService {
       this.events.emit(`build:${buildId}`, info);
 
       await mkdir(workDir, { recursive: true });
+
+      // Verify source directory exists before copying
+      try {
+        await stat(sourceDir);
+      } catch {
+        throw new Error(
+          `Source directory not found: ${sourceDir}\n` +
+          `Upload files may have been lost due to container restart. Please re-upload your project.`,
+        );
+      }
+
       await this.exec('cp', ['-r', `${sourceDir}/.`, workDir], workDir);
 
       // 2. Build using docker compose

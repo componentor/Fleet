@@ -233,7 +233,7 @@ init_swarm() {
 # ─── Create directories ──────────────────────────────────────────────
 setup_dirs() {
   log "Creating Fleet directories..."
-  mkdir -p "$FLEET_DIR"/{data,certs,backups,nfs-exports,config}
+  mkdir -p "$FLEET_DIR"/{data,certs,backups,nfs-exports,config,uploads}
   mkdir -p "$FLEET_DIR"/nfs-exports/volumes
 
   # Setup NFS export — restrict to the local subnet

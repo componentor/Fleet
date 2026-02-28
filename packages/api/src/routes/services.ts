@@ -1592,24 +1592,12 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       buildFile,
     };
 
-    if (isQueueAvailable()) {
-      try {
-        await getDeploymentQueue().add('build-and-deploy', jobData, {
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 5000 },
-        });
-      } catch {
-        processDeploymentInline(jobData).catch((err) => {
-          logger.error({ err }, 'Inline redeploy rebuild failed');
-          logToErrorTable({ level: 'error', message: `Inline redeploy rebuild failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'redeploy-inline-rebuild' } });
-        });
-      }
-    } else {
-      processDeploymentInline(jobData).catch((err) => {
-        logger.error({ err }, 'Inline redeploy rebuild failed');
-        logToErrorTable({ level: 'error', message: `Inline redeploy rebuild failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'redeploy-inline-rebuild' } });
-      });
-    }
+    // Upload rebuilds MUST run inline — uploaded files live on this replica's filesystem.
+    // Queuing via BullMQ could route the job to a different replica that doesn't have the files.
+    processDeploymentInline(jobData).catch((err) => {
+      logger.error({ err }, 'Inline redeploy rebuild failed');
+      logToErrorTable({ level: 'error', message: `Inline redeploy rebuild failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'redeploy-inline-rebuild' } });
+    });
 
     eventService.log({
       ...eventContext(c),
