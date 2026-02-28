@@ -36,3 +36,6 @@ export async function getAppUrl(): Promise<string> {
 export function getAppUrlSync(): string {
   return _appUrlCache ?? process.env['APP_URL'] ?? 'http://localhost:5173';
 }
+
+// Warm the cache at module load so getAppUrlSync() returns the DB value immediately
+getAppUrl().catch(() => {});
