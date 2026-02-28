@@ -17,6 +17,7 @@ import { getGitHubConfig } from '../services/github.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { getAppUrl } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 
 const auth = new OpenAPIHono();
@@ -244,7 +245,7 @@ auth.openapi(registerRoute, (async (c: any) => {
   }
 
   // Send verification email AFTER transaction commits (queued with retry)
-  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  const appUrl = await getAppUrl();
   queueEmail({
     templateSlug: 'email-verification',
     to: email,
@@ -685,7 +686,7 @@ auth.openapi(resendVerificationRoute, (async (c: any) => {
     updatedAt: new Date(),
   }).where(eq(users.id, user.id));
 
-  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  const appUrl = await getAppUrl();
   await queueEmail({
     templateSlug: 'email-verification',
     to: user.email!,
@@ -738,7 +739,7 @@ auth.openapi(forgotPasswordRoute, (async (c: any) => {
       updatedAt: new Date(),
     }).where(eq(users.id, user.id));
 
-    const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+    const appUrl = await getAppUrl();
     queueEmail({
       templateSlug: 'password-reset',
       to: email,
@@ -1121,7 +1122,7 @@ auth.get('/github', oauthRateLimit, async (c) => {
   }
 
   const returnTo = c.req.query('returnTo') || '';
-  const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/github/callback`;
+  const redirectUri = `${await getAppUrl()}/api/v1/auth/github/callback`;
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -1431,7 +1432,7 @@ auth.get('/google', oauthRateLimit, async (c) => {
   }
 
   const returnTo = c.req.query('returnTo') || '';
-  const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/google/callback`;
+  const redirectUri = `${await getAppUrl()}/api/v1/auth/google/callback`;
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -1517,7 +1518,7 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
   }
 
   try {
-    const redirectUri = `${process.env['APP_URL'] ?? 'http://localhost:3000'}/api/v1/auth/google/callback`;
+    const redirectUri = `${await getAppUrl()}/api/v1/auth/google/callback`;
 
     // Exchange code for tokens
     const googleTokenController = new AbortController();

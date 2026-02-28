@@ -7,6 +7,7 @@ import { dockerService } from '../services/docker.service.js';
 import { eventService, EventTypes } from '../services/event.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
+import { getAppUrl } from '../services/platform.service.js';
 
 interface HealthCheckData {
   type: 'health-check';
@@ -547,7 +548,7 @@ async function enforceBillingGracePeriod(): Promise<void> {
   const autoDeleteEnabled = config?.autoDeleteEnabled ?? false;
   const suspensionWarningDays = config?.suspensionWarningDays ?? 2;
   const deletionWarningDays = config?.deletionWarningDays ?? 7;
-  const appUrl = process.env['APP_URL'] ?? '';
+  const appUrl = await getAppUrl();
 
   const now = Date.now();
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1010,7 +1011,7 @@ async function checkDomainExpiry(): Promise<void> {
 
     if (expiring.length === 0) return;
 
-    const appUrl = process.env['APP_URL'] ?? '';
+    const appUrl = await getAppUrl();
 
     // Helper to send email (via queue or direct)
     async function sendEmail(templateSlug: string, to: string, variables: Record<string, string>, accountId: string) {

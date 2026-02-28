@@ -35,6 +35,7 @@ import { logger, logToErrorTable } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
+import { getAppUrl, getAppUrlSync } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 async function queueEmail(data: EmailJobData): Promise<void> {
@@ -51,8 +52,8 @@ async function queueEmail(data: EmailJobData): Promise<void> {
 
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
 function validateRedirectUrl(url: string): boolean {
-  const appUrl = process.env['APP_URL'];
-  if (!appUrl) return process.env['NODE_ENV'] !== 'production'; // Reject in production if APP_URL not set
+  const appUrl = getAppUrlSync();
+  if (appUrl === 'http://localhost:5173') return process.env['NODE_ENV'] !== 'production'; // Reject in production if not configured
   // Only allow relative paths starting with / (but not // which is protocol-relative)
   if (url.startsWith('/') && !url.startsWith('//')) return true;
   try {
@@ -1250,7 +1251,7 @@ billing.post('/webhook', async (c) => {
 
           // Email account owners about the failure
           try {
-            const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+            const appUrl = await getAppUrl();
             const ownerMemberships = await db.query.userAccounts.findMany({
               where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
               with: { user: true },
@@ -1459,7 +1460,7 @@ billing.post('/webhook', async (c) => {
 
           // Send confirmation email to account owners
           if (accountId) {
-            const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+            const appUrl = await getAppUrl();
             const price = invoice.metadata.years
               ? `${domain} (${invoice.metadata.years} year${Number(invoice.metadata.years) > 1 ? 's' : ''})`
               : domain;
@@ -1534,7 +1535,7 @@ billing.post('/webhook', async (c) => {
             }).where(eq(accounts.id, account.id));
 
             // Send reactivation email + notification
-            const appUrl = process.env['APP_URL'] ?? '';
+            const appUrl = await getAppUrl();
             const ownerMembers = await db.query.userAccounts.findMany({
               where: and(eq(userAccounts.accountId, account.id), eq(userAccounts.role, 'owner')),
               with: { user: true },
@@ -1590,7 +1591,7 @@ billing.post('/webhook', async (c) => {
           'Domain renewal payment failed');
 
         if (accountId) {
-          const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+          const appUrl = await getAppUrl();
           try {
             const ownerMemberships = await db.query.userAccounts.findMany({
               where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
@@ -1664,7 +1665,7 @@ billing.post('/webhook', async (c) => {
 
         // Send payment-failed email to account owners
         try {
-          const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+          const appUrl = await getAppUrl();
           const ownerMemberships = await db.query.userAccounts.findMany({
             where: and(eq(userAccounts.accountId, dbSub.accountId), eq(userAccounts.role, 'owner')),
             with: { user: true },

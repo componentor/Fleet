@@ -8,14 +8,15 @@ import { stripeService } from '../services/stripe.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
+import { getAppUrlSync } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const searchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 20, keyPrefix: 'domain-search' });
 
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
 function validateRedirectUrl(url: string): boolean {
-  const appUrl = process.env['APP_URL'];
-  if (!appUrl) return process.env['NODE_ENV'] !== 'production'; // Reject in production if APP_URL not set
+  const appUrl = getAppUrlSync();
+  if (appUrl === 'http://localhost:5173') return process.env['NODE_ENV'] !== 'production'; // Reject in production if not configured
   // Only allow relative paths starting with / (but not // which is protocol-relative)
   if (url.startsWith('/') && !url.startsWith('//')) return true;
   try {

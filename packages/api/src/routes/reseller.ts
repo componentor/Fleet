@@ -18,6 +18,7 @@ import {
   isNull,
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
+import { getAppUrl } from '../services/platform.service.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin, requireOwner } from '../middleware/rbac.js';
 import { stripeService } from '../services/stripe.service.js';
@@ -316,7 +317,7 @@ authed.openapi(applyRoute, (async (c: any) => {
         variables: {
           accountName: account?.name ?? 'Unknown',
           message: data.message ?? '',
-          adminUrl: `${process.env['APP_URL'] ?? ''}/admin/resellers`,
+          adminUrl: `${await getAppUrl()}/admin/resellers`,
         },
       }).catch(() => {});
     }
@@ -503,7 +504,7 @@ authed.openapi(postConnectRoute, (async (c: any) => {
     return c.json({ error: 'Not a reseller' }, 403);
   }
 
-  const appUrl = process.env['APP_URL'] ?? '';
+  const appUrl = await getAppUrl();
 
   let connectId = resellerAccount.stripeConnectId;
   if (!connectId) {
