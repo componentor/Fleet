@@ -339,13 +339,13 @@ onUnmounted(() => {
 
       <!-- Table -->
       <template v-else>
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-x-auto">
           <div v-if="filteredErrors.length === 0" class="text-center py-12">
             <Bug class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.errors.noErrors') }}</p>
           </div>
 
-          <table v-else class="w-full">
+          <table v-else class="w-full min-w-[900px]">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.timestamp') }}</th>

@@ -10,6 +10,7 @@ import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, sup
 import { dockerService } from './services/docker.service.js';
 import { logger, logToErrorTable } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
+import { getAppUrlSync } from './services/platform.service.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { securityHeaders } from './middleware/security.js';
 import { rateLimiter } from './middleware/rate-limit.js';
@@ -99,16 +100,16 @@ export const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app }
 // Security headers
 app.use('*', securityHeaders);
 
-// CORS — in production, CORS_ORIGIN or APP_URL must be explicitly set
-const corsOrigin = process.env['CORS_ORIGIN'] || process.env['APP_URL'];
-if (process.env['NODE_ENV'] === 'production' && !corsOrigin) {
+// CORS — uses platform URL from DB (via cache) or CORS_ORIGIN/APP_URL env vars
+const explicitCorsOrigin = process.env['CORS_ORIGIN'];
+if (process.env['NODE_ENV'] === 'production' && !explicitCorsOrigin && !process.env['APP_URL']) {
   throw new Error('CORS_ORIGIN or APP_URL must be set in production');
 }
-if (process.env['NODE_ENV'] === 'production' && corsOrigin === '*') {
+if (process.env['NODE_ENV'] === 'production' && explicitCorsOrigin === '*') {
   throw new Error('CORS_ORIGIN must not be wildcard (*) in production');
 }
 app.use('*', cors({
-  origin: corsOrigin || '*',
+  origin: explicitCorsOrigin || (() => getAppUrlSync()),
   credentials: true,
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Account-Id', 'X-API-Key'],

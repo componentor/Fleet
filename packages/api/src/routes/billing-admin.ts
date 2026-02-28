@@ -29,6 +29,7 @@ import { eventService, EventTypes } from '../services/event.service.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
+import { getAppUrl } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 type AdminEnv = {
@@ -903,7 +904,7 @@ billingAdmin.openapi(suspendAccountRoute, (async (c: any) => {
   }
 
   // Email owners + notification
-  const appUrl = process.env['APP_URL'] ?? '';
+  const appUrl = await getAppUrl();
   const ownerMembers = await db.query.userAccounts.findMany({
     where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
     with: { user: true },
@@ -966,7 +967,7 @@ billingAdmin.openapi(unsuspendAccountRoute, (async (c: any) => {
   }).where(eq(subscriptions.accountId, accountId));
 
   // Email owners + notification
-  const appUrl = process.env['APP_URL'] ?? '';
+  const appUrl = await getAppUrl();
   const ownerMembers = await db.query.userAccounts.findMany({
     where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
     with: { user: true },

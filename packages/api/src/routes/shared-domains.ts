@@ -18,6 +18,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dockerService } from '../services/docker.service.js';
 import { stripeService } from '../services/stripe.service.js';
+import { getAppUrl } from '../services/platform.service.js';
 import { invalidateCache } from '../middleware/cache.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
@@ -444,7 +445,7 @@ sharedDomainRoutes.openapi(claimSubdomainRoute, (async (c: any) => {
     status: 'pending_payment',
   });
 
-  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  const appUrl = await getAppUrl();
 
   // Map recurring pricing types to Stripe intervals
   const RECURRING_INTERVALS: Record<string, { interval: 'month' | 'year'; interval_count?: number; label: string }> = {

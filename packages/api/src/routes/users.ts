@@ -13,6 +13,7 @@ import { logger } from '../services/logger.js';
 import { dockerService } from '../services/docker.service.js';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { STORAGE_BUCKETS } from '../services/storage/storage-provider.js';
+import { getAppUrl } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 
@@ -408,7 +409,7 @@ userRoutes.openapi(changeEmailRoute, (async (c: any) => {
     JSON.stringify({ userId: authUser.userId, newEmail }),
   );
 
-  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  const appUrl = await getAppUrl();
   await queueEmail({
     templateSlug: 'email-change',
     to: newEmail,

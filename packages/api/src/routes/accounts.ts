@@ -13,6 +13,7 @@ import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
+import { getAppUrl } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 async function queueEmail(data: EmailJobData): Promise<void> {
@@ -1031,7 +1032,7 @@ accountRoutes.openapi(inviteMemberRoute, (async (c: any) => {
   }
 
   // Send invite notification email
-  const appUrl = process.env['APP_URL'] ?? 'http://localhost:5173';
+  const appUrl = await getAppUrl();
   queueEmail({
     templateSlug: 'invite',
     to: targetUser.email!,
