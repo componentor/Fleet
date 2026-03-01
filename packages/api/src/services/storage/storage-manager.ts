@@ -343,16 +343,24 @@ class StorageManager {
       ),
     });
 
-    const cluster = dbVolume?.clusterId
-      ? this.clusters.get(dbVolume.clusterId)
-      : undefined;
-    const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
+    if (!dbVolume) {
+      logger.warn({ name, accountId }, 'deleteVolume: no DB record found — nothing to delete');
+      return;
+    }
 
+    // Try to delete via storage provider (GlusterFS/NFS/local).
+    // Wrapped in try-catch so DB cleanup always happens even if provider
+    // lookup or deletion fails (e.g. cluster removed, no default cluster).
     try {
+      const cluster = dbVolume.clusterId
+        ? this.clusters.get(dbVolume.clusterId)
+        : undefined;
+      const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
       await provider.deleteVolume(name);
     } catch (err) {
-      // Provider may fail if the volume doesn't physically exist (e.g. orphaned DB record
-      // from a template deployed without NFS). Still clean up the DB record.
+      // Provider may fail if the volume doesn't physically exist, the cluster
+      // is no longer available, or there's no default cluster. Still clean up
+      // the DB record below.
       logger.warn({ err, name }, 'Volume provider delete failed — cleaning up DB record anyway');
     }
 

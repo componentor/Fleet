@@ -505,7 +505,11 @@
     "resizeHint": "Min {min} GB, max {max} GB",
     "shrinkWarning": "Shrinking a volume cannot be undone. Make sure you have backups.",
     "resizing": "Resizing...",
-    "resizeFailed": "Failed to resize volume"
+    "resizeFailed": "Failed to resize volume",
+    "actualUsed": "Actual Used",
+    "allocated": "Allocated",
+    "limit": "Limit",
+    "usage": "Usage"
   },
   "storageSetup": {
     "title": "Storage",

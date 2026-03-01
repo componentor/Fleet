@@ -505,7 +505,11 @@
     "resizeHint": "Min {min} GB, maks {max} GB",
     "shrinkWarning": "Krymping av et volum kan ikke angres. Sikre at du har sikkerhetskopi.",
     "resizing": "Endrer størrelse...",
-    "resizeFailed": "Kunne ikke endre volumstørrelse"
+    "resizeFailed": "Kunne ikke endre volumstørrelse",
+    "actualUsed": "Faktisk brukt",
+    "allocated": "Tildelt",
+    "limit": "Grense",
+    "usage": "Bruk"
   },
   "storageSetup": {
     "title": "Lagring",

@@ -505,7 +505,11 @@
     "resizeHint": "最小 {min} GB，最大 {max} GB",
     "shrinkWarning": "缩小存储卷无法撤销。请确保已备份数据。",
     "resizing": "调整中...",
-    "resizeFailed": "调整存储卷大小失败"
+    "resizeFailed": "调整存储卷大小失败",
+    "actualUsed": "实际使用",
+    "allocated": "已分配",
+    "limit": "上限",
+    "usage": "用量"
   },
   "storageSetup": {
     "title": "存储",
