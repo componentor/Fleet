@@ -608,7 +608,7 @@ async function fetchBackupDefaults() {
   try {
     const [data, clusters] = await Promise.all([
       api.get<Record<string, any>>('/settings'),
-      api.get<any[]>('/storage/clusters').catch(() => []),
+      api.get<any[]>('/admin/storage/clusters').catch(() => []),
     ])
     defaultBackupClusterId.value = (data['limits:defaultBackupClusterId'] as string) ?? ''
     storageClusters.value = (clusters || [])
