@@ -505,7 +505,11 @@
     "resizeHint": "Min {min} GB, Max {max} GB",
     "shrinkWarning": "Das Verkleinern eines Volumes kann nicht rückgängig gemacht werden. Stellen Sie sicher, dass Sie Backups haben.",
     "resizing": "Wird geändert...",
-    "resizeFailed": "Volume konnte nicht geändert werden"
+    "resizeFailed": "Volume konnte nicht geändert werden",
+    "actualUsed": "Tatsächlich genutzt",
+    "allocated": "Zugewiesen",
+    "limit": "Limit",
+    "usage": "Nutzung"
   },
   "storageSetup": {
     "title": "Speicher",

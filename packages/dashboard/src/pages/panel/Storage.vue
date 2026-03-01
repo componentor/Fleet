@@ -283,18 +283,18 @@ onBeforeUnmount(() => {
           <HardDrive class="w-5 h-5 text-primary-600 dark:text-primary-400" />
         </div>
         <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.actualUsed') || 'Actual Used' }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.actualUsed') }}</p>
           <p class="text-lg font-bold text-gray-900 dark:text-white">{{ actualUsedStorageGb.toFixed(1) }} GB</p>
         </div>
       </div>
       <div class="h-8 w-px bg-gray-200 dark:bg-gray-700 hidden sm:block" />
       <div>
-        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.allocated') || 'Allocated' }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.allocated') }}</p>
         <p class="text-lg font-bold text-gray-900 dark:text-white">{{ allocatedStorageGb }} GB</p>
       </div>
       <div v-if="maxStorageGb !== null" class="h-8 w-px bg-gray-200 dark:bg-gray-700 hidden sm:block" />
       <div v-if="maxStorageGb !== null">
-        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.limit') || 'Limit' }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('storagePage.limit') }}</p>
         <p class="text-lg font-bold text-gray-900 dark:text-white">{{ maxStorageGb }} GB</p>
       </div>
       <div class="ml-auto hidden sm:block">
@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.name') }}</th>
-              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.usage') || 'Usage' }}</th>
+              <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.usage') }}</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('storagePage.driver') }}</th>
               <th v-if="regions.length > 1" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Region</th>
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Services</th>
