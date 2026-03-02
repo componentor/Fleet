@@ -279,7 +279,7 @@ services:
       - fleet_internal
       - fleet_public
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:5000/v2/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qSO /dev/null http://127.0.0.1:5000/v2/ 2>&1 | grep -q 'HTTP/' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
