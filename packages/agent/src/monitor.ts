@@ -3,16 +3,26 @@ import { cpus, freemem, totalmem, hostname as osHostname, platform } from 'node:
 import { statfsSync, readFileSync, readdirSync } from 'node:fs'
 import { logger } from './logger.js'
 
+const ORCHESTRATOR = process.env.ORCHESTRATOR || 'swarm'
+const IS_K8S = ORCHESTRATOR === 'kubernetes'
+
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || '/var/run/docker.sock'
-const docker = new Docker({ socketPath: DOCKER_SOCKET })
+// Only initialise Docker client when running in Swarm mode
+const docker = IS_K8S ? (null as unknown as Docker) : new Docker({ socketPath: DOCKER_SOCKET })
 
 const FETCH_TIMEOUT_MS = 10_000 // 10 second timeout for API calls
 const UNHEALTHY_THRESHOLD = 10 // Consider unhealthy after 10 consecutive failures
 
-// Resolve the real node hostname from Docker Swarm info (os.hostname() returns container ID)
+// Resolve the real node hostname
+// In Swarm: os.hostname() returns container ID, so use docker.info().Name
+// In K8s: NODE_NAME env var is set via Downward API
 let resolvedHostname = ''
 async function getNodeHostname(): Promise<string> {
   if (resolvedHostname) return resolvedHostname
+  if (IS_K8S) {
+    resolvedHostname = process.env.NODE_NAME || osHostname()
+    return resolvedHostname
+  }
   try {
     const info = await docker.info()
     if (info.Name) {
@@ -125,36 +135,66 @@ export class NodeMonitor {
     // Get container count + per-container bandwidth snapshots
     let containerCount = 0
     const containerBandwidth: Record<string, { rx: number; tx: number }> = {}
-    try {
-      const containers = await docker.listContainers()
-      containerCount = containers.length
 
-      // Collect network stats for each container (with concurrency limit)
-      const BATCH_SIZE = 20
-      for (let i = 0; i < containers.length; i += BATCH_SIZE) {
-        const batch = containers.slice(i, i + BATCH_SIZE)
-        const results = await Promise.allSettled(
-          batch.map(async (c) => {
-            const stats = await docker.getContainer(c.Id).stats({ stream: false }) as any
-            let rx = 0
-            let tx = 0
-            if (stats.networks) {
-              for (const net of Object.values(stats.networks) as any[]) {
-                rx += net.rx_bytes ?? 0
-                tx += net.tx_bytes ?? 0
+    if (IS_K8S) {
+      // In K8s mode, use Kubelet summary API for container metrics
+      try {
+        const resp = await fetch('https://localhost:10250/stats/summary', {
+          headers: { Authorization: `Bearer ${readFileSync('/var/run/secrets/kubernetes.io/serviceaccount/token', 'utf-8')}` },
+        }).catch(() =>
+          // Fallback to insecure kubelet read-only port
+          fetch('http://localhost:10255/stats/summary'),
+        )
+        if (resp.ok) {
+          const summary = await resp.json() as any
+          const pods = summary.pods ?? []
+          containerCount = pods.length
+          for (const pod of pods) {
+            const name = pod.podRef?.name ?? ''
+            const net = pod.network?.interfaces?.[0]
+            if (net) {
+              containerBandwidth[name] = {
+                rx: net.rxBytes ?? 0,
+                tx: net.txBytes ?? 0,
               }
             }
-            return { id: c.Id, rx, tx }
-          }),
-        )
-        for (const r of results) {
-          if (r.status === 'fulfilled') {
-            containerBandwidth[r.value.id] = { rx: r.value.rx, tx: r.value.tx }
           }
         }
+      } catch {
+        // Kubelet metrics not available
       }
-    } catch {
-      // Docker socket not available
+    } else {
+      // Swarm mode: use Docker API
+      try {
+        const containers = await docker.listContainers()
+        containerCount = containers.length
+
+        const BATCH_SIZE = 20
+        for (let i = 0; i < containers.length; i += BATCH_SIZE) {
+          const batch = containers.slice(i, i + BATCH_SIZE)
+          const results = await Promise.allSettled(
+            batch.map(async (c) => {
+              const stats = await docker.getContainer(c.Id).stats({ stream: false }) as any
+              let rx = 0
+              let tx = 0
+              if (stats.networks) {
+                for (const net of Object.values(stats.networks) as any[]) {
+                  rx += net.rx_bytes ?? 0
+                  tx += net.tx_bytes ?? 0
+                }
+              }
+              return { id: c.Id, rx, tx }
+            }),
+          )
+          for (const r of results) {
+            if (r.status === 'fulfilled') {
+              containerBandwidth[r.value.id] = { rx: r.value.rx, tx: r.value.tx }
+            }
+          }
+        }
+      } catch {
+        // Docker socket not available
+      }
     }
 
     // Collect disk metrics
