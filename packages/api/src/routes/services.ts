@@ -1575,7 +1575,8 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       const isUsed = usedByOthers.has(v.source);
       logger.info({ volume: v.source, isUsed, shouldDeleteVolumes }, 'Service delete: processing volume');
       if (v.source && !isUsed) {
-        await orchestrator.removeVolume(v.source).catch((err) => {
+        // Remove Docker volume on ALL Swarm nodes (not just the manager)
+        await orchestrator.removeDockerVolumeOnAllNodes(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
           logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-volume' } });
         });
@@ -1587,6 +1588,17 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
             logger.warn({ err, volume: v.source }, 'Failed to delete storage volume on service delete');
             logToErrorTable({ level: 'warn', message: `Failed to delete storage volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-storage-volume' } });
           });
+
+          // Fallback: if no DB record existed (non-marketplace services), also try
+          // to remove the physical directory from shared storage directly
+          try {
+            if (storageManager.volumes.isReady() && storageManager.volumes.getHostMountPath) {
+              const hostPath = storageManager.volumes.getHostMountPath(v.source);
+              if (hostPath) {
+                await orchestrator.runOnLocalHost(`rm -rf "${hostPath}"`, { timeoutMs: 15000 }).catch(() => {});
+              }
+            }
+          } catch { /* storage not initialized — skip */ }
         }
       }
     }
@@ -2389,7 +2401,8 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   for (const volName of volumeNames) {
     if (usedByOthers.has(volName)) continue;
 
-    await orchestrator.removeVolume(volName).catch((err) => {
+    // Remove Docker volume on ALL Swarm nodes (not just the manager)
+    await orchestrator.removeDockerVolumeOnAllNodes(volName).catch((err) => {
       logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
       logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-volume' } });
     });
@@ -2400,6 +2413,16 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
         logger.warn({ err, volume: volName }, 'Failed to delete storage volume during stack delete');
         logToErrorTable({ level: 'warn', message: `Failed to delete storage volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-storage-volume' } });
       });
+
+      // Fallback: remove physical directory from shared storage directly
+      try {
+        if (storageManager.volumes.isReady() && storageManager.volumes.getHostMountPath) {
+          const hostPath = storageManager.volumes.getHostMountPath(volName);
+          if (hostPath) {
+            await orchestrator.runOnLocalHost(`rm -rf "${hostPath}"`, { timeoutMs: 15000 }).catch(() => {});
+          }
+        }
+      } catch { /* storage not initialized */ }
     }
   }
 

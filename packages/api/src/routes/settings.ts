@@ -1576,6 +1576,18 @@ settings.get('/orchestrator/k3s-status', authMiddleware, requireAdmin as any, (a
     logs.push('Could not check k3s status on local host');
   }
 
+  // Persist discovered token/URL to DB so install-k3s-agents can find them
+  if (joinToken) {
+    await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+      .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
+      .catch(() => {});
+  }
+  if (serverUrl) {
+    await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+      .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
+      .catch(() => {});
+  }
+
   // If k3s is available, count K8s nodes
   if (isKubernetesAvailable()) {
     try {
@@ -1692,7 +1704,7 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
   const user = c.get('user') as AuthUser;
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  // Read join token and server URL
+  // Read join token and server URL — try DB first, then read from host file
   let joinToken = '';
   let serverUrl = '';
 
@@ -1703,15 +1715,41 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
   const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
   if (urlRow?.value) serverUrl = urlRow.value as string;
 
+  // If not in DB, try reading from host file via each available orchestrator backend
   if (!joinToken || !serverUrl) {
-    // Try reading directly from host
-    try {
-      const tokenResult = await orchestrator.runOnLocalHost('cat /var/lib/rancher/k3s/server/node-token 2>/dev/null', { timeoutMs: 10000 });
-      joinToken = (tokenResult.stdout ?? '').trim();
-      const ipResult = await orchestrator.runOnLocalHost("ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'", { timeoutMs: 10000 });
-      serverUrl = `https://${(ipResult.stdout ?? '').trim()}:6443`;
-    } catch {
-      return c.json({ error: 'k3s join token not found. Install k3s server first.' }, 400);
+    const backends: OrchestratorType[] = ['swarm', 'kubernetes'];
+    for (const backend of backends) {
+      if (joinToken && serverUrl) break;
+      try {
+        const orch = getOrchestrator(backend);
+        if (!orch) continue;
+
+        if (!joinToken) {
+          const tokenResult = await orch.runOnLocalHost('cat /var/lib/rancher/k3s/server/node-token 2>/dev/null', { timeoutMs: 10000 });
+          const t = (tokenResult.stdout ?? '').trim();
+          if (t) joinToken = t;
+        }
+
+        if (!serverUrl) {
+          const ipResult = await orch.runOnLocalHost("ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'", { timeoutMs: 10000 });
+          const ip = (ipResult.stdout ?? '').trim();
+          if (ip) serverUrl = `https://${ip}:6443`;
+        }
+      } catch {
+        // This backend can't run host commands — try the next one
+      }
+    }
+
+    // Persist discovered token/URL to DB for next time
+    if (joinToken && !tokenRow?.value) {
+      await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+        .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
+        .catch(() => {});
+    }
+    if (serverUrl && !urlRow?.value) {
+      await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+        .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
+        .catch(() => {});
     }
   }
 
