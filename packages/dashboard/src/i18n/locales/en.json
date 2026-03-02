@@ -1700,7 +1700,23 @@
         "targetBackend": "Target",
         "migrate": "Migrate",
         "migrateSuccess": "Service migrated from {from} to {to}",
-        "migrateFailed": "Migration failed"
+        "migrateFailed": "Migration failed",
+        "installK3s": "Install Kubernetes",
+        "installK3sDesc": "Install k3s (lightweight Kubernetes) alongside Docker Swarm. Both can run simultaneously.",
+        "installK3sServer": "Install k3s Server",
+        "installK3sServerDesc": "Installs the k3s control plane on the current node (1-2 minutes).",
+        "installK3sAgents": "Install on Worker Nodes",
+        "installK3sAgentsDesc": "Installs the k3s agent on all worker nodes so they can run Kubernetes workloads.",
+        "installDocker": "Install Docker Swarm",
+        "installDockerDesc": "Install Docker and initialize Swarm mode alongside Kubernetes. Both can run simultaneously.",
+        "installDockerServer": "Install Docker + Init Swarm",
+        "installDockerServerDesc": "Installs Docker and initializes Swarm as manager on the current node.",
+        "installDockerAgents": "Install Docker on Workers",
+        "installDockerAgentsDesc": "Installs Docker on all worker nodes and joins them to the Swarm cluster.",
+        "installing": "Installing...",
+        "installSuccess": "Installed successfully",
+        "installFailed": "Installation failed",
+        "installOnNewNodes": "Install on New Nodes"
       }
     },
     "billing": {

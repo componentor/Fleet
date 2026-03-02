@@ -1695,7 +1695,23 @@
         "targetBackend": "Mål",
         "migrate": "Migrer",
         "migrateSuccess": "Tjeneste migrert fra {from} til {to}",
-        "migrateFailed": "Migrering mislyktes"
+        "migrateFailed": "Migrering mislyktes",
+        "installK3s": "Installer Kubernetes",
+        "installK3sDesc": "Installer k3s (lettvekts Kubernetes) ved siden av Docker Swarm. Begge kan kjøre samtidig.",
+        "installK3sServer": "Installer k3s-server",
+        "installK3sServerDesc": "Installerer k3s-kontrollplanet på denne noden (1-2 minutter).",
+        "installK3sAgents": "Installer på arbeidsnoder",
+        "installK3sAgentsDesc": "Installerer k3s-agenten på alle arbeidsnoder slik at de kan kjøre Kubernetes-arbeidsbelastninger.",
+        "installDocker": "Installer Docker Swarm",
+        "installDockerDesc": "Installer Docker og initialiser Swarm-modus ved siden av Kubernetes. Begge kan kjøre samtidig.",
+        "installDockerServer": "Installer Docker + Init Swarm",
+        "installDockerServerDesc": "Installerer Docker og initialiserer Swarm som manager på denne noden.",
+        "installDockerAgents": "Installer Docker på arbeidsnoder",
+        "installDockerAgentsDesc": "Installerer Docker på alle arbeidsnoder og kobler dem til Swarm-klyngen.",
+        "installing": "Installerer...",
+        "installSuccess": "Installert",
+        "installFailed": "Installasjon mislyktes",
+        "installOnNewNodes": "Installer på nye noder"
       }
     },
     "billing": {

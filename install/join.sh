@@ -250,6 +250,44 @@ configure_nfs_mount() {
   fi
 }
 
+# ─── Optional: Install k3s agent ─────────────────────────────────────
+install_k3s_agent() {
+  # Auto-install if k3s env vars are set (from manager's config)
+  if [ -n "${FLEET_K3S_TOKEN:-}" ] && [ -n "${FLEET_K3S_URL:-}" ]; then
+    log "k3s credentials detected, installing k3s agent..."
+  else
+    # Check NFS mount for k3s config
+    if [ -f /opt/fleet/nfs-exports/../config/env ] && grep -q "K3S_TOKEN" /opt/fleet/nfs-exports/../config/env 2>/dev/null; then
+      source <(grep "^K3S_" /opt/fleet/nfs-exports/../config/env 2>/dev/null)
+      export FLEET_K3S_TOKEN="${K3S_TOKEN:-}"
+      export FLEET_K3S_URL="${K3S_URL:-}"
+    fi
+
+    if [ -z "${FLEET_K3S_TOKEN:-}" ] || [ -z "${FLEET_K3S_URL:-}" ]; then
+      echo ""
+      read -rp "$(echo -e ${BLUE}Install k3s agent for Kubernetes support? [y/N]: ${NC})" INSTALL_K3S </dev/tty
+      if [[ ! "$INSTALL_K3S" =~ ^[Yy] ]]; then
+        log "Skipping k3s agent installation"
+        return
+      fi
+      read -rp "$(echo -e ${BLUE}Enter k3s server URL \(e.g., https://MANAGER_IP:6443\): ${NC})" FLEET_K3S_URL </dev/tty
+      read -rp "$(echo -e ${BLUE}Enter k3s join token: ${NC})" FLEET_K3S_TOKEN </dev/tty
+    fi
+  fi
+
+  if [ -n "$FLEET_K3S_TOKEN" ] && [ -n "$FLEET_K3S_URL" ]; then
+    if command -v k3s &>/dev/null; then
+      log "k3s is already installed"
+    else
+      log "Installing k3s agent..."
+      curl -sfL https://get.k3s.io | K3S_URL="$FLEET_K3S_URL" K3S_TOKEN="$FLEET_K3S_TOKEN" sh -
+      log "k3s agent installed and joined cluster"
+    fi
+  else
+    warn "k3s token or URL not provided. Skipping k3s agent."
+  fi
+}
+
 # ─── Main ────────────────────────────────────────────────────────────
 main() {
   detect_os
@@ -260,6 +298,7 @@ main() {
   load_fuse
   start_wizard
   configure_nfs_mount
+  install_k3s_agent
 
   echo ""
   echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
