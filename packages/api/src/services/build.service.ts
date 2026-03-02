@@ -22,9 +22,27 @@ export interface BuildInfo {
 }
 
 const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
-const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
 const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
 const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
+
+/**
+ * Resolve the registry URL. The registry is proxied through Traefik at
+ * https://<PLATFORM_DOMAIN>/v2/, so the correct REGISTRY value is the
+ * platform domain (no port). Legacy systems may still have localhost:5000
+ * or IP:5000 — detect that and fall back to PLATFORM_DOMAIN.
+ */
+function resolveRegistryUrl(): string {
+  const raw = process.env['REGISTRY_URL'] ?? '';
+  // If it's properly set to a domain (no port suffix), use it directly
+  if (raw && !raw.match(/:\d+$/) && raw !== 'localhost') return raw;
+  // Fall back to PLATFORM_DOMAIN (the registry is proxied through Traefik)
+  const domain = process.env['PLATFORM_DOMAIN'] ?? '';
+  if (domain) return domain;
+  // Last resort: use whatever was configured
+  return raw || 'localhost:5000';
+}
+
+const REGISTRY = resolveRegistryUrl();
 const ORCHESTRATOR = process.env['ORCHESTRATOR'] ?? 'swarm';
 const BUILDKIT_ADDR = process.env['BUILDKIT_ADDR'] ?? 'tcp://buildkitd.fleet-system:1234';
 

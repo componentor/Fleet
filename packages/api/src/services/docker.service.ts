@@ -2166,15 +2166,29 @@ export async function getRegistryAuthForImage(
   }
 
   // Fall back to built-in Fleet registry credentials from env vars.
-  // This handles images pushed to the platform's own registry (proxied through Traefik).
-  const BUILTIN_REGISTRY = process.env['REGISTRY_URL'] ?? '';
+  // The registry is proxied through Traefik at https://<PLATFORM_DOMAIN>/v2/.
+  // Legacy systems may still have REGISTRY_URL=localhost:5000 or IP:5000 in their env,
+  // so resolve the canonical registry URL and also match legacy variants.
+  const RAW_REGISTRY = process.env['REGISTRY_URL'] ?? '';
+  const PLATFORM_DOMAIN = process.env['PLATFORM_DOMAIN'] ?? '';
   const BUILTIN_USER = process.env['REGISTRY_USER'] ?? '';
   const BUILTIN_PASS = process.env['REGISTRY_PASSWORD'] ?? '';
-  if (BUILTIN_REGISTRY && BUILTIN_USER && BUILTIN_PASS && registry === BUILTIN_REGISTRY) {
+  // The canonical registry address is the platform domain (no port).
+  // Legacy address is whatever was in REGISTRY_URL (may include :5000).
+  const canonicalRegistry = (RAW_REGISTRY && !RAW_REGISTRY.match(/:\d+$/) && RAW_REGISTRY !== 'localhost')
+    ? RAW_REGISTRY
+    : PLATFORM_DOMAIN;
+  const isBuiltinRegistry = BUILTIN_USER && BUILTIN_PASS && (
+    registry === canonicalRegistry ||
+    registry === RAW_REGISTRY ||
+    registry === 'localhost:5000' ||
+    registry === `${PLATFORM_DOMAIN}`
+  );
+  if (isBuiltinRegistry && canonicalRegistry) {
     return {
       username: BUILTIN_USER,
       password: BUILTIN_PASS,
-      serveraddress: `https://${BUILTIN_REGISTRY}`,
+      serveraddress: `https://${canonicalRegistry}`,
     };
   }
 

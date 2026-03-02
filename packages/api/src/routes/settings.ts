@@ -2032,7 +2032,9 @@ settings.get('/registry/health', authMiddleware, requireAdmin as any, (async (c:
   const user = c.get('user') as AuthUser;
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const REGISTRY_URL = process.env['REGISTRY_URL'] ?? '';
+  const RAW_REG = process.env['REGISTRY_URL'] ?? '';
+  const PLATFORM_DOM = process.env['PLATFORM_DOMAIN'] ?? '';
+  const REGISTRY_URL = (RAW_REG && !RAW_REG.match(/:\d+$/) && RAW_REG !== 'localhost') ? RAW_REG : (PLATFORM_DOM || RAW_REG);
   const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
   const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
 
@@ -2113,7 +2115,9 @@ settings.post('/registry/repair', authMiddleware, requireAdmin as any, (async (c
 
     // Wait for registry to be healthy
     logs.push('Waiting for registry to become healthy...');
-    const REGISTRY_URL = process.env['REGISTRY_URL'] ?? '';
+    const RAW_REG2 = process.env['REGISTRY_URL'] ?? '';
+    const PLAT_DOM2 = process.env['PLATFORM_DOMAIN'] ?? '';
+    const REGISTRY_URL = (RAW_REG2 && !RAW_REG2.match(/:\d+$/) && RAW_REG2 !== 'localhost') ? RAW_REG2 : (PLAT_DOM2 || RAW_REG2);
     const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
     const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
 
