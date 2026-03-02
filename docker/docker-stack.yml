@@ -278,6 +278,12 @@ services:
       REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
     networks:
       - fleet_internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:5000/v2/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     deploy:
       replicas: 1
       placement:
@@ -290,7 +296,7 @@ services:
         window: 60s
       resources:
         limits:
-          memory: 256M
+          memory: 512M
           cpus: "0.5"
         reservations:
           memory: 64M
