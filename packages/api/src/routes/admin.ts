@@ -4,7 +4,7 @@ import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, 
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission, requireSuperAdmin } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
-import { orchestrator } from '../services/orchestrator.js';
+import { orchestrator, getDefaultOrchestratorType, isKubernetesAvailable, getOrchestrator } from '../services/orchestrator.js';
 import { updateService } from '../services/update.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
@@ -600,6 +600,24 @@ adminRoutes.openapi(statusRoute, (async (c: any) => {
   // --- API uptime ---
   const uptimeSeconds = Math.floor(process.uptime());
 
+  // --- Monitoring (K8s only) ---
+  const orchType = getDefaultOrchestratorType();
+  let monitoring: { orchestratorType: string; metricsServer?: { installed: boolean; healthy: boolean }; kubeletStats?: { available: boolean } } = {
+    orchestratorType: orchType,
+  };
+  if (orchType === 'kubernetes' && isKubernetesAvailable()) {
+    try {
+      const k8s = getOrchestrator('kubernetes') as import('../services/kubernetes.service.js').KubernetesService;
+      const [metricsServer, kubeletAvailable] = await Promise.all([
+        k8s.checkMetricsServer(),
+        k8s.checkKubeletStats(),
+      ]);
+      monitoring = { orchestratorType: 'kubernetes', metricsServer, kubeletStats: { available: kubeletAvailable } };
+    } catch {
+      monitoring = { orchestratorType: 'kubernetes', metricsServer: { installed: false, healthy: false }, kubeletStats: { available: false } };
+    }
+  }
+
   return c.json({
     timestamp: new Date().toISOString(),
     responseTimeMs: Date.now() - startTime,
@@ -619,6 +637,7 @@ adminRoutes.openapi(statusRoute, (async (c: any) => {
       data: queues,
     },
     docker,
+    monitoring,
     nodes: nodeStatuses,
     services: {
       total: allServices.length,

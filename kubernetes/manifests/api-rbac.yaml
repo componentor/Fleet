@@ -35,9 +35,9 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
-  # Node management
+  # Node management + kubelet stats proxy
   - apiGroups: [""]
-    resources: ["nodes"]
+    resources: ["nodes", "nodes/proxy"]
     verbs: ["get", "list", "update", "patch", "delete"]
   # Deployment management
   - apiGroups: ["apps"]

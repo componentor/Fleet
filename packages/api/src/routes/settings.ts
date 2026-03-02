@@ -1897,4 +1897,130 @@ settings.post('/orchestrator/install-docker-agents', authMiddleware, requireAdmi
   }
 }) as any);
 
+// GET /settings/orchestrator/monitoring-status — check K8s monitoring health
+settings.get('/orchestrator/monitoring-status', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  const orchType = getDefaultOrchestratorType();
+  if (orchType !== 'kubernetes' || !isKubernetesAvailable()) {
+    return c.json({
+      orchestratorType: orchType,
+      metricsServer: { installed: false, healthy: false },
+      kubeletStats: { available: false },
+    });
+  }
+
+  const k8s = getOrchestrator('kubernetes') as import('../services/kubernetes.service.js').KubernetesService;
+
+  const [metricsServer, kubeletAvailable] = await Promise.all([
+    k8s.checkMetricsServer(),
+    k8s.checkKubeletStats(),
+  ]);
+
+  return c.json({
+    orchestratorType: 'kubernetes',
+    metricsServer,
+    kubeletStats: { available: kubeletAvailable },
+  });
+}) as any);
+
+// POST /settings/orchestrator/install-metrics-server — install K8s metrics-server
+settings.post('/orchestrator/install-metrics-server', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  if (!isKubernetesAvailable()) {
+    return c.json({ success: false, error: 'Kubernetes is not available' }, 400);
+  }
+
+  const logs: string[] = [];
+
+  try {
+    // Check if metrics-server is already running
+    const k8s = getOrchestrator('kubernetes') as import('../services/kubernetes.service.js').KubernetesService;
+    const current = await k8s.checkMetricsServer();
+    if (current.installed && current.healthy) {
+      return c.json({ success: true, logs: ['metrics-server is already installed and healthy'], alreadyInstalled: true });
+    }
+
+    // Try K3s built-in metrics-server first
+    logs.push('Checking for K3s embedded metrics-server...');
+    const k3sCheck = await orchestrator.runOnLocalHost(
+      'command -v k3s >/dev/null 2>&1 && echo "K3S_FOUND" || echo "NO_K3S"',
+      { timeoutMs: 10000 },
+    );
+
+    if ((k3sCheck.stdout ?? '').includes('K3S_FOUND')) {
+      // K3s: metrics-server is bundled, just ensure it's not disabled
+      logs.push('K3s detected — metrics-server is bundled by default');
+      logs.push('Checking if metrics-server deployment exists...');
+      const checkResult = await orchestrator.runOnLocalHost(
+        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl get deployment metrics-server -n kube-system -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo "NOT_FOUND"',
+        { timeoutMs: 15000 },
+      );
+      const output = (checkResult.stdout ?? '').trim();
+      if (output !== 'NOT_FOUND' && output !== '' && output !== '0') {
+        logs.push(`metrics-server is running with ${output} ready replicas`);
+        return c.json({ success: true, logs });
+      }
+      logs.push('metrics-server not running — applying manifest...');
+    }
+
+    // Install metrics-server from official manifest
+    logs.push('Applying official metrics-server manifest...');
+    const kubeconfig = (k3sCheck.stdout ?? '').includes('K3S_FOUND')
+      ? 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; '
+      : '';
+
+    const installResult = await orchestrator.runOnLocalHost(
+      `${kubeconfig}kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml 2>&1`,
+      { timeoutMs: 60000 },
+    );
+    logs.push(installResult.stdout?.slice(-500) ?? '');
+
+    if (installResult.exitCode !== 0) {
+      logs.push(`metrics-server install failed (exit ${installResult.exitCode})`);
+      return c.json({ success: false, logs }, 500);
+    }
+
+    // For non-public clusters, patch to allow insecure TLS (common in self-hosted)
+    logs.push('Patching metrics-server for insecure kubelet TLS (self-hosted clusters)...');
+    await orchestrator.runOnLocalHost(
+      `${kubeconfig}kubectl patch deployment metrics-server -n kube-system --type='json' ` +
+      `-p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]' 2>&1 || true`,
+      { timeoutMs: 30000 },
+    );
+
+    // Wait for metrics-server to become ready (poll up to 90s)
+    logs.push('Waiting for metrics-server to become ready...');
+    const waitResult = await orchestrator.runOnLocalHost(
+      `${kubeconfig}kubectl rollout status deployment/metrics-server -n kube-system --timeout=90s 2>&1`,
+      { timeoutMs: 120000 },
+    );
+    logs.push(waitResult.stdout?.slice(-300) ?? '');
+
+    // Verify metrics API responds
+    logs.push('Verifying metrics API...');
+    const verify = await k8s.checkMetricsServer();
+    if (verify.healthy) {
+      logs.push('metrics-server is healthy and responding');
+    } else {
+      logs.push('metrics-server deployed but API not yet responding — may need a moment to initialize');
+    }
+
+    return c.json({ success: true, logs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logs.push(`Error: ${message}`);
+    logToErrorTable({
+      level: 'error',
+      message: `metrics-server install failed: ${message}`,
+      stack: err instanceof Error ? err.stack : null,
+      metadata: { context: 'orchestrator', operation: 'install-metrics-server' },
+    });
+    return c.json({ success: false, logs, error: message }, 500);
+  }
+}) as any);
+
 export default settings;
