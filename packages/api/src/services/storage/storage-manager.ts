@@ -334,6 +334,7 @@ class StorageManager {
    * only existed as a plain Docker volume with no backing storage).
    */
   async deleteVolume(accountId: string, name: string): Promise<void> {
+    logger.info({ name, accountId }, 'deleteVolume: looking up volume');
     // Look up the volume to find its cluster
     const dbVolume = await db.query.storageVolumes.findFirst({
       where: and(
@@ -347,6 +348,7 @@ class StorageManager {
       logger.warn({ name, accountId }, 'deleteVolume: no DB record found — nothing to delete');
       return;
     }
+    logger.info({ name, clusterId: dbVolume.clusterId, id: dbVolume.id }, 'deleteVolume: found DB record, proceeding');
 
     // Try to delete via storage provider (GlusterFS/NFS/local).
     // Wrapped in try-catch so DB cleanup always happens even if provider
@@ -364,13 +366,14 @@ class StorageManager {
       logger.warn({ err, name }, 'Volume provider delete failed — cleaning up DB record anyway');
     }
 
-    await db.update(storageVolumes)
+    const result = await db.update(storageVolumes)
       .set({ deletedAt: new Date(), status: 'deleting', updatedAt: new Date() })
       .where(and(
         eq(storageVolumes.name, name),
         eq(storageVolumes.accountId, accountId),
         isNull(storageVolumes.deletedAt),
       ));
+    logger.info({ name, accountId, result }, 'deleteVolume: DB soft-delete completed');
   }
 
   /**

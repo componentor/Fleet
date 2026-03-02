@@ -1444,6 +1444,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
 
   // Clean up Docker volumes (only if no other active services reference them)
   const vols = svc.volumes as Array<{ source: string; target: string }> | null;
+  logger.info({ serviceId, shouldDeleteVolumes, volumeCount: vols?.length ?? 0, volumes: vols }, 'Service delete: volume cleanup');
   if (vols && vols.length > 0) {
     // Check ALL other active services in the account that reference the same volumes
     const otherServices = await db.query.services.findMany({
@@ -1462,7 +1463,9 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
     }
 
     for (const v of vols) {
-      if (v.source && !usedByOthers.has(v.source)) {
+      const isUsed = usedByOthers.has(v.source);
+      logger.info({ volume: v.source, isUsed, shouldDeleteVolumes }, 'Service delete: processing volume');
+      if (v.source && !isUsed) {
         await dockerService.removeVolume(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
           logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-volume' } });
@@ -1470,6 +1473,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
 
         // Also delete storage volumes (GlusterFS + DB record) when requested
         if (shouldDeleteVolumes) {
+          logger.info({ volume: v.source, accountId }, 'Service delete: calling storageManager.deleteVolume');
           await storageManager.deleteVolume(accountId, v.source).catch((err) => {
             logger.warn({ err, volume: v.source }, 'Failed to delete storage volume on service delete');
             logToErrorTable({ level: 'warn', message: `Failed to delete storage volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-storage-volume' } });
@@ -1477,6 +1481,8 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
         }
       }
     }
+  } else {
+    logger.info({ serviceId, shouldDeleteVolumes }, 'Service delete: no volumes on service record');
   }
 
   // Soft-delete the service (keep deployment history)
