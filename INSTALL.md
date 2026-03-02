@@ -108,15 +108,6 @@ gcloud compute firewall-rules create fleet-ssh \
   --source-ranges=0.0.0.0/0 \
   --target-tags=fleet-node \
   --description="Fleet SSH gateway"
-
-# Allow internal registry
-gcloud compute firewall-rules create fleet-registry \
-  --direction=INGRESS \
-  --action=ALLOW \
-  --rules=tcp:5000 \
-  --source-tags=fleet-node \
-  --target-tags=fleet-node \
-  --description="Docker registry between nodes"
 ```
 
 ### 1.3 Create the 3 Manager Nodes
