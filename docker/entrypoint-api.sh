@@ -15,4 +15,9 @@ if [ -S /var/run/docker.sock ]; then
   fi
 fi
 
+# Ensure bind-mounted directories are writable by the fleet user
+for dir in /srv/nfs/uploads /srv/nfs/backups /srv/nfs/log-archives /app/data; do
+  [ -d "$dir" ] && chown fleet:fleet "$dir" 2>/dev/null || true
+done
+
 exec su-exec fleet "$@"

@@ -2170,19 +2170,24 @@ export async function getRegistryAuthForImage(
   // Legacy systems may still have REGISTRY_URL=localhost:5000 or IP:5000 in their env,
   // so resolve the canonical registry URL and also match legacy variants.
   const RAW_REGISTRY = process.env['REGISTRY_URL'] ?? '';
-  const PLATFORM_DOMAIN = process.env['PLATFORM_DOMAIN'] ?? '';
   const BUILTIN_USER = process.env['REGISTRY_USER'] ?? '';
   const BUILTIN_PASS = process.env['REGISTRY_PASSWORD'] ?? '';
+  // Resolve platform domain from DB first, then env var
+  let platformDomain = process.env['PLATFORM_DOMAIN'] ?? '';
+  try {
+    const { getPlatformDomain } = await import('../routes/settings.js');
+    platformDomain = await getPlatformDomain();
+  } catch { /* fall through to env */ }
   // The canonical registry address is the platform domain (no port).
   // Legacy address is whatever was in REGISTRY_URL (may include :5000).
   const canonicalRegistry = (RAW_REGISTRY && !RAW_REGISTRY.match(/:\d+$/) && RAW_REGISTRY !== 'localhost')
     ? RAW_REGISTRY
-    : PLATFORM_DOMAIN;
+    : platformDomain;
   const isBuiltinRegistry = BUILTIN_USER && BUILTIN_PASS && (
     registry === canonicalRegistry ||
     registry === RAW_REGISTRY ||
     registry === 'localhost:5000' ||
-    registry === `${PLATFORM_DOMAIN}`
+    registry === `${platformDomain}`
   );
   if (isBuiltinRegistry && canonicalRegistry) {
     return {

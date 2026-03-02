@@ -26,23 +26,32 @@ const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
 const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
 
 /**
- * Resolve the registry URL. The registry is proxied through Traefik at
- * https://<PLATFORM_DOMAIN>/v2/, so the correct REGISTRY value is the
- * platform domain (no port). Legacy systems may still have localhost:5000
- * or IP:5000 — detect that and fall back to PLATFORM_DOMAIN.
+ * Resolve the registry URL. Prefers DB platform domain over env var.
+ * The registry is proxied through Traefik at https://<PLATFORM_DOMAIN>/v2/,
+ * so the correct REGISTRY value is the platform domain (no port).
+ * Legacy systems may still have localhost:5000 or IP:5000.
  */
-function resolveRegistryUrl(): string {
+async function resolveRegistryUrl(): Promise<string> {
   const raw = process.env['REGISTRY_URL'] ?? '';
   // If it's properly set to a domain (no port suffix), use it directly
   if (raw && !raw.match(/:\d+$/) && raw !== 'localhost') return raw;
-  // Fall back to PLATFORM_DOMAIN (the registry is proxied through Traefik)
+  // Fall back to platform domain from DB (then env)
+  try {
+    const { getPlatformDomain } = await import('../routes/settings.js');
+    const domain = await getPlatformDomain();
+    if (domain && domain !== 'fleet.local') return domain;
+  } catch { /* fall through */ }
   const domain = process.env['PLATFORM_DOMAIN'] ?? '';
   if (domain) return domain;
   // Last resort: use whatever was configured
   return raw || 'localhost:5000';
 }
 
-const REGISTRY = resolveRegistryUrl();
+let _registryCache: string | null = null;
+async function getRegistry(): Promise<string> {
+  if (!_registryCache) _registryCache = await resolveRegistryUrl();
+  return _registryCache;
+}
 const ORCHESTRATOR = process.env['ORCHESTRATOR'] ?? 'swarm';
 const BUILDKIT_ADDR = process.env['BUILDKIT_ADDR'] ?? 'tcp://buildkitd.fleet-system:1234';
 
@@ -103,12 +112,13 @@ export class BuildService {
   private async loginToRegistry(): Promise<void> {
     if (this.registryLoggedIn || !REGISTRY_PASSWORD) return;
     try {
-      await execFileAsync('docker', ['login', REGISTRY, '-u', REGISTRY_USER, '-p', REGISTRY_PASSWORD], {
+      const reg = await getRegistry();
+      await execFileAsync('docker', ['login', reg, '-u', REGISTRY_USER, '-p', REGISTRY_PASSWORD], {
         timeout: 15_000,
       });
       this.registryLoggedIn = true;
     } catch (err) {
-      logger.warn({ err }, `Failed to login to registry ${REGISTRY}`);
+      logger.warn({ err }, `Failed to login to registry`);
     }
   }
 
@@ -128,7 +138,7 @@ export class BuildService {
     if (dockerfile.includes('..') || dockerfile.startsWith('/') || dockerfile.includes('\\')) {
       throw new Error('Invalid dockerfile path: must be relative without directory traversal');
     }
-    const fullImageTag = `${REGISTRY}/${opts.imageTag}`;
+    const fullImageTag = `${await getRegistry()}/${opts.imageTag}`;
 
     const info: BuildInfo = {
       id: buildId,
@@ -395,7 +405,7 @@ export class BuildService {
     if (dockerfile.includes('..') || dockerfile.startsWith('/') || dockerfile.includes('\\')) {
       throw new Error('Invalid dockerfile path: must be relative without directory traversal');
     }
-    const fullImageTag = `${REGISTRY}/${opts.imageTag}`;
+    const fullImageTag = `${await getRegistry()}/${opts.imageTag}`;
 
     const info: BuildInfo = {
       id: buildId,
@@ -541,7 +551,7 @@ export class BuildService {
     if (composeFile.includes('..') || composeFile.startsWith('/') || composeFile.includes('\\')) {
       throw new Error('Invalid compose file path: must be relative without directory traversal');
     }
-    const fullImageTag = `${REGISTRY}/${opts.imageTag}`;
+    const fullImageTag = `${await getRegistry()}/${opts.imageTag}`;
 
     const info: BuildInfo = {
       id: buildId,
