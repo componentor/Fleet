@@ -541,15 +541,9 @@ export class UpdateService {
       }
       this.appendLog('Database health verified — schema is accessible.');
 
-      // 1.5. Reconcile infrastructure: download new stack files and re-deploy
-      // This applies docker-stack.yml config changes (Traefik labels, network, ports, env vars)
-      // that the rolling image update doesn't cover. Runs BEFORE backup so the
-      // infrastructure is stable before we snapshot.
-      if (signal.aborted) throw new Error('Update aborted by admin');
-      this.appendLog('Reconciling infrastructure...');
-      await this.reconcileInfrastructure(imageTag);
-
       // 2. Pre-update backup (controlled by dashboard setting)
+      // Must run BEFORE infrastructure reconciliation, because reconcile runs
+      // `docker stack deploy` which restarts services (including postgres).
       // If the backup fails or times out, the update STOPS. The admin can use
       // Reset to abort and retry, or toggle "Create backup before updating" off in Update Settings.
       if (signal.aborted) throw new Error('Update aborted by admin');
@@ -615,6 +609,14 @@ export class UpdateService {
           throw new Error(`Cannot proceed — failed to snapshot services for rollback: ${missing.join(', ')}`);
         }
       }
+
+      // 3.5. Reconcile infrastructure: download new stack files and re-deploy
+      // This applies docker-stack.yml config changes (Traefik labels, network, ports, env vars)
+      // that the rolling image update doesn't cover. Runs AFTER backup/snapshot
+      // because `docker stack deploy` restarts services (including postgres).
+      if (signal.aborted) throw new Error('Update aborted by admin');
+      this.appendLog('Reconciling infrastructure...');
+      await this.reconcileInfrastructure(imageTag);
 
       // 4. Fetch release checksums from the release body
       this.appendLog('Fetching release checksums...');
