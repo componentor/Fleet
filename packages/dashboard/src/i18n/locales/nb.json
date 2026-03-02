@@ -1679,6 +1679,23 @@
         "confirmSelfHeal": "Start selvreparasjon?",
         "confirmSelfHealDesc": "Dette vil kjøre hele selvreparasjonsløkken: fikse problemet, opprette PR, verifisere CI, merge, opprette en release og oppgradere plattformen. Er du sikker?",
         "selfHeal": "Selvreparasjon"
+      },
+      "orchestrator": {
+        "title": "Orkestrator",
+        "titleDesc": "Velg container-orkestreringsbackend for nye og eksisterende tjenester. Både Docker Swarm og Kubernetes kan kjøre samtidig.",
+        "status": "Status",
+        "defaultBackend": "Standard backend",
+        "defaultDesc": "Nye tjenester vil bli distribuert på standard backend. Eksisterende tjenester påvirkes ikke.",
+        "available": "Tilgjengelig",
+        "unavailable": "Utilgjengelig",
+        "services": "tjenester",
+        "migrateService": "Migrer tjeneste",
+        "migrateServiceDesc": "Flytt en individuell tjeneste fra en orkestrator til en annen. Tjenesten vil bli opprettet på nytt på målbackenden uten nedetid.",
+        "serviceId": "Tjeneste-ID",
+        "targetBackend": "Mål",
+        "migrate": "Migrer",
+        "migrateSuccess": "Tjeneste migrert fra {from} til {to}",
+        "migrateFailed": "Migrering mislyktes"
       }
     },
     "billing": {

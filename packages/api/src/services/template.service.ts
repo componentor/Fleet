@@ -7,7 +7,7 @@ import { db, appTemplates, services, deployments, storageVolumes, insertReturnin
 import { orchestrator } from './orchestrator.js';
 import { getRegistryAuthForImage } from './docker.service.js';
 import { storageManager } from './storage/storage-manager.js';
-import { buildTraefikLabels } from './traefik.js';
+import { buildTraefikLabels, ensureIngressRoute } from './traefik.js';
 import { logger } from './logger.js';
 
 // Resolve the templates directory relative to this file
@@ -539,6 +539,8 @@ export class TemplateService {
         });
 
         dockerServiceId = result.id;
+
+        await ensureIngressRoute(`fleet-account-${accountId}`, swarmName, resolvedDomain, true, primaryPort).catch(() => {});
 
         await db
           .update(services)

@@ -49,6 +49,7 @@ export const services = sqliteTable('services', {
   registryPollDigest: text('registry_poll_digest'),
   registryWebhookSecret: text('registry_webhook_secret'),
   tags: text('tags', { mode: 'json' }).$default(() => ([])),
+  orchestrator: text('orchestrator'),
   stackId: text('stack_id'),
   stoppedAt: integer('stopped_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

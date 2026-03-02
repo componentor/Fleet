@@ -12,7 +12,9 @@ import { logger, logToErrorTable } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
-import { orchestrator } from '../services/orchestrator.js';
+import { orchestrator, getDefaultOrchestratorType, setDefaultOrchestratorType, getAvailableOrchestrators, isKubernetesAvailable, isSwarmAvailable, getOrchestrator } from '../services/orchestrator.js';
+import type { OrchestratorType } from '../services/orchestrator.js';
+import { migrateService, migrateAccountServices } from '../services/orchestrator-migration.service.js';
 
 const UPLOAD_BASE = process.env['UPLOAD_BASE_PATH']
   ?? (process.env['NODE_ENV'] === 'production' ? '/srv/nfs/uploads' : join(process.cwd(), 'data', 'uploads'));
@@ -1426,6 +1428,105 @@ settings.openapi(testSelfHealingRoute, (async (c: any) => {
   }
 
   return c.json(results);
+}) as any);
+
+// ── Orchestrator configuration ──
+
+// GET /settings/orchestrator — current orchestrator config
+settings.get('/orchestrator', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const current = getDefaultOrchestratorType();
+  const available = getAvailableOrchestrators();
+
+  // Get per-service breakdown
+  const allServices = await db.query.services.findMany({
+    columns: { id: true, orchestrator: true, status: true, deletedAt: true },
+  });
+  const active = allServices.filter((s) => !s.deletedAt && s.status !== 'deleted');
+  const swarmCount = active.filter((s) => (s.orchestrator ?? current) === 'swarm').length;
+  const k8sCount = active.filter((s) => (s.orchestrator ?? current) === 'kubernetes').length;
+
+  return c.json({
+    default: current,
+    available,
+    kubernetes: { available: isKubernetesAvailable() },
+    swarm: { available: isSwarmAvailable() },
+    services: { total: active.length, swarm: swarmCount, kubernetes: k8sCount },
+  });
+}) as any);
+
+// PATCH /settings/orchestrator — update default orchestrator
+settings.patch('/orchestrator', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  const body = await c.req.json();
+  const type = body.default as OrchestratorType;
+  if (type !== 'swarm' && type !== 'kubernetes') {
+    return c.json({ error: 'Invalid orchestrator type. Must be "swarm" or "kubernetes"' }, 400);
+  }
+
+  if (type === 'kubernetes' && !isKubernetesAvailable()) {
+    return c.json({ error: 'Kubernetes is not available. Ensure kubeconfig is configured.' }, 400);
+  }
+
+  // Persist to platform settings
+  await db.insert(platformSettings).values({
+    key: 'orchestrator:default',
+    value: JSON.stringify(type),
+  }).onConflictDoUpdate({
+    target: platformSettings.key,
+    set: { value: JSON.stringify(type), updatedAt: new Date() },
+  });
+
+  setDefaultOrchestratorType(type);
+
+  return c.json({ default: type, message: `Default orchestrator set to ${type}` });
+}) as any);
+
+// POST /settings/orchestrator/migrate — migrate a single service
+settings.post('/orchestrator/migrate', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  const body = await c.req.json();
+  const { serviceId, target } = body as { serviceId: string; target: OrchestratorType };
+
+  if (!serviceId || (target !== 'swarm' && target !== 'kubernetes')) {
+    return c.json({ error: 'serviceId and target ("swarm" or "kubernetes") are required' }, 400);
+  }
+
+  if (target === 'kubernetes' && !isKubernetesAvailable()) {
+    return c.json({ error: 'Kubernetes is not available' }, 400);
+  }
+
+  const result = await migrateService(serviceId, target);
+  return c.json(result, result.success ? 200 : 500);
+}) as any);
+
+// POST /settings/orchestrator/migrate-account — migrate all services for an account
+settings.post('/orchestrator/migrate-account', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  const body = await c.req.json();
+  const { accountId, target } = body as { accountId: string; target: OrchestratorType };
+
+  if (!accountId || (target !== 'swarm' && target !== 'kubernetes')) {
+    return c.json({ error: 'accountId and target ("swarm" or "kubernetes") are required' }, 400);
+  }
+
+  if (target === 'kubernetes' && !isKubernetesAvailable()) {
+    return c.json({ error: 'Kubernetes is not available' }, 400);
+  }
+
+  const results = await migrateAccountServices(accountId, target);
+  const successCount = results.filter((r) => r.success).length;
+  return c.json({
+    total: results.length,
+    succeeded: successCount,
+    failed: results.length - successCount,
+    results,
+  });
 }) as any);
 
 export default settings;

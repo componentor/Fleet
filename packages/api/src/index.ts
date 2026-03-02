@@ -123,10 +123,20 @@ try {
   logToErrorTable({ level: 'error', message: `Storage manager initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'storage-init' } })
 }
 
-// Initialize orchestrator (Swarm or Kubernetes based on ORCHESTRATOR env var)
+// Initialize orchestrator (both Swarm + K8s backends, default from DB or env var)
 try {
-  const { initOrchestrator } = await import('./services/orchestrator.js')
+  const { initOrchestrator, setDefaultOrchestratorType } = await import('./services/orchestrator.js')
   await initOrchestrator()
+  // Override default from DB setting if configured
+  const dbSetting = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'orchestrator:default') })
+  if (dbSetting?.value) {
+    const val = typeof dbSetting.value === 'string' ? dbSetting.value : JSON.stringify(dbSetting.value);
+    const parsed = val.replace(/"/g, '');
+    if (parsed === 'swarm' || parsed === 'kubernetes') {
+      setDefaultOrchestratorType(parsed)
+      logger.info(`Orchestrator default set to ${parsed} (from database)`)
+    }
+  }
 } catch (err) {
   logger.error({ err }, 'Orchestrator initialization failed')
   logToErrorTable({ level: 'error', message: `Orchestrator initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'orchestrator-init' } })

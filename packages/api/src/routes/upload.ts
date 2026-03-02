@@ -26,7 +26,7 @@ const uploadRoutes = new OpenAPIHono<{
 uploadRoutes.use('*', authMiddleware);
 uploadRoutes.use('*', tenantMiddleware);
 
-import { buildTraefikLabels } from '../services/traefik.js';
+import { buildTraefikLabels, ensureIngressRoute } from '../services/traefik.js';
 
 // POST /deploy — upload and deploy a new service
 const deployRoute = createRoute({
@@ -202,6 +202,8 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
         rollbackOnFailure: true,
         networkId,
       });
+
+      await ensureIngressRoute(`fleet-account-${accountId}`, swarmServiceName, domain, sslEnabled, primaryTargetPort).catch(() => {});
 
       await db.update(services)
         .set({ dockerServiceId: result.id })

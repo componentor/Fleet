@@ -1679,6 +1679,23 @@
         "confirmSelfHeal": "Selbstreparatur starten?",
         "confirmSelfHealDesc": "Dies führt den vollständigen Selbstreparaturprozess aus: Problem beheben, PR erstellen, CI überprüfen, mergen, Release erstellen und Plattform aktualisieren. Sind Sie sicher?",
         "selfHeal": "Selbstreparatur"
+      },
+      "orchestrator": {
+        "title": "Orchestrator",
+        "titleDesc": "Wählen Sie das Container-Orchestrierungs-Backend für neue und bestehende Dienste. Docker Swarm und Kubernetes können gleichzeitig laufen.",
+        "status": "Status",
+        "defaultBackend": "Standard-Backend",
+        "defaultDesc": "Neue Dienste werden auf dem Standard-Backend bereitgestellt. Bestehende Dienste sind nicht betroffen.",
+        "available": "Verfügbar",
+        "unavailable": "Nicht verfügbar",
+        "services": "Dienste",
+        "migrateService": "Dienst migrieren",
+        "migrateServiceDesc": "Verschieben Sie einen einzelnen Dienst von einem Orchestrator zu einem anderen. Der Dienst wird auf dem Ziel-Backend ohne Ausfallzeit neu erstellt.",
+        "serviceId": "Dienst-ID",
+        "targetBackend": "Ziel",
+        "migrate": "Migrieren",
+        "migrateSuccess": "Dienst von {from} nach {to} migriert",
+        "migrateFailed": "Migration fehlgeschlagen"
       }
     },
     "billing": {

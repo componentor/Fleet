@@ -53,6 +53,7 @@ export const services = mysqlTable('services', {
   registryPollDigest: varchar('registry_poll_digest', { length: 255 }),
   registryWebhookSecret: varchar('registry_webhook_secret', { length: 255 }),
   tags: json('tags').$default(() => ([])),
+  orchestrator: varchar('orchestrator', { length: 20 }),
   stackId: varchar('stack_id', { length: 36 }),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),

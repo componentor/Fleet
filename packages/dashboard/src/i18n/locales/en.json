@@ -1684,6 +1684,23 @@
         "confirmSelfHeal": "Start Self-Repair?",
         "confirmSelfHealDesc": "This will run the full self-repair loop: fix the issue, create a PR, verify CI, merge, create a release, and upgrade the platform. Are you sure?",
         "selfHeal": "Self-Repair"
+      },
+      "orchestrator": {
+        "title": "Orchestrator",
+        "titleDesc": "Choose the container orchestration backend for new and existing services. Both Docker Swarm and Kubernetes can run simultaneously.",
+        "status": "Status",
+        "defaultBackend": "Default Backend",
+        "defaultDesc": "New services will be deployed on the default backend. Existing services are not affected.",
+        "available": "Available",
+        "unavailable": "Unavailable",
+        "services": "services",
+        "migrateService": "Migrate Service",
+        "migrateServiceDesc": "Move an individual service from one orchestrator to another. The service will be recreated on the target backend with zero downtime.",
+        "serviceId": "Service ID",
+        "targetBackend": "Target",
+        "migrate": "Migrate",
+        "migrateSuccess": "Service migrated from {from} to {to}",
+        "migrateFailed": "Migration failed"
       }
     },
     "billing": {

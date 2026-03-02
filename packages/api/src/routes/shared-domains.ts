@@ -35,7 +35,7 @@ const RESERVED_SUBDOMAINS = new Set([
 // Subdomain format: lowercase alphanumeric + hyphens, 1-63 chars, can't start/end with hyphen
 const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
-import { buildTraefikLabels } from '../services/traefik.js';
+import { buildTraefikLabels, ensureIngressRoute, removeIngressRoutes } from '../services/traefik.js';
 
 // ─── Shared Domains Routes ────────────────────────────────────────────
 
@@ -648,6 +648,8 @@ async function assignDomainToService(serviceId: string, accountId: string, domai
         },
         networkIds: [accountNetId, publicNetId],
       });
+
+      await ensureIngressRoute(`fleet-account-${accountId}`, svc.name, domain, true).catch(() => {});
     }
 
     await invalidateCache(`GET:/services:${accountId}`);
@@ -684,6 +686,8 @@ async function clearServiceDomain(serviceId: string) {
         },
         networkIds: [accountNetId],
       });
+
+      await removeIngressRoutes(`fleet-account-${svc.accountId}`, svc.name).catch(() => {});
     }
 
     await invalidateCache(`GET:/services:${svc.accountId}`);
