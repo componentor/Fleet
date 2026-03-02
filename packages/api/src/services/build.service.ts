@@ -97,14 +97,15 @@ export class BuildService {
     this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
 
     // Run the build pipeline asynchronously
+    // Pipeline's internal catch already sets status/log/emits — this is just a safety net
     this.runBuildPipeline(buildId, workDir, opts.cloneUrl, opts.branch, dockerfile, fullImageTag, opts.buildArgs ?? {}, info, opts.generatedDockerfile)
       .catch((err) => {
-        if (info.status !== 'cancelled') {
+        if (info.status !== 'failed' && info.status !== 'cancelled') {
           info.status = 'failed';
           info.log += `\n[error] ${String(err)}`;
+          info.finishedAt = new Date();
+          this.events.emit(`build:${buildId}`, info);
         }
-        info.finishedAt = new Date();
-        this.events.emit(`build:${buildId}`, info);
       });
 
     return info;
@@ -344,14 +345,15 @@ export class BuildService {
     this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
 
     // Copy source to temp build dir, then build + push
+    // Pipeline's internal catch already sets status/log/emits — this is just a safety net
     this.runDirectoryBuildPipeline(buildId, workDir, opts.sourceDir, dockerfile, fullImageTag, opts.buildArgs ?? {}, info, opts.generatedDockerfile)
       .catch((err) => {
-        if (info.status !== 'cancelled') {
+        if (info.status !== 'failed' && info.status !== 'cancelled') {
           info.status = 'failed';
           info.log += `\n[error] ${String(err)}`;
+          info.finishedAt = new Date();
+          this.events.emit(`build:${buildId}`, info);
         }
-        info.finishedAt = new Date();
-        this.events.emit(`build:${buildId}`, info);
       });
 
     return info;
@@ -471,14 +473,15 @@ export class BuildService {
 
     this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
 
+    // Pipeline's internal catch already sets status/log/emits — this is just a safety net
     this.runComposeBuildPipeline(buildId, workDir, opts.sourceDir, composeFile, fullImageTag, info)
       .catch((err) => {
-        if (info.status !== 'cancelled') {
+        if (info.status !== 'failed' && info.status !== 'cancelled') {
           info.status = 'failed';
           info.log += `\n[error] ${String(err)}`;
+          info.finishedAt = new Date();
+          this.events.emit(`build:${buildId}`, info);
         }
-        info.finishedAt = new Date();
-        this.events.emit(`build:${buildId}`, info);
       });
 
     return info;

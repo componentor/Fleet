@@ -292,7 +292,9 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
             resolve();
           } else if (info.status === 'failed' || info.status === 'cancelled') {
             unsubscribe();
-            reject(new Error(`Build ${info.status}`));
+            // Include log excerpt in rejection so the catch block has context
+            const lastErrors = info.log.split('\n').filter(l => l.includes('[error]')).slice(-2).join('\n');
+            reject(new Error(`Build ${info.status}${lastErrors ? ': ' + lastErrors : ''}`));
           }
         });
 
@@ -306,7 +308,8 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         } else if (build.status === 'failed' || build.status === 'cancelled') {
           unsubscribe();
           flushToDb(build);
-          reject(new Error(`Build ${build.status}`));
+          const lastErrors = build.log.split('\n').filter(l => l.includes('[error]')).slice(-2).join('\n');
+          reject(new Error(`Build ${build.status}${lastErrors ? ': ' + lastErrors : ''}`));
         }
       }),
       new Promise<never>((_, reject) =>
@@ -369,10 +372,15 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     // Scrub error messages to prevent token leakage (e.g. git clone URLs with OAuth tokens)
     const safeError = scrubSecrets(String(err));
 
-    // Preserve build log from buildInfo if available, append the error
+    // Preserve build log from buildInfo if available
+    // The build log already contains [error] lines from the build pipeline —
+    // only append the wrapper error if the log is empty (no build output captured)
     const existingLog = (buildInfo?.log ?? '').trim();
+    const hasErrorLines = existingLog.includes('[error]');
     const failLog = existingLog
-      ? `${existingLog}\n\n[error] Build/deploy failed: ${safeError}`
+      ? hasErrorLines
+        ? existingLog  // Log already has detailed error context
+        : `${existingLog}\n\n[error] Build/deploy failed: ${safeError}`
       : `Build/deploy failed: ${safeError}`;
 
     await db.update(deployments)

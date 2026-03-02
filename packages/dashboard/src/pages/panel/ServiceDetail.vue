@@ -357,27 +357,43 @@ watch(() => deployStream.logLines.value.length, () => {
 const buildErrorSummary = computed(() => {
   if (!latestDeployment.value || latestDeployment.value.status !== 'failed') return null
   const log = latestDeployment.value.log || ''
+  // Skip generic wrapper lines added by the deployment worker
+  const skipPatterns = [
+    /Build\/deploy failed/i,
+    /^Build failed$/i,
+    /^\[error\]\s*Error:\s*Build\s+(failed|cancelled)/i,
+  ]
   // Look for common error patterns
   const patterns = [
-    /error:\s*(.+)/i,
-    /Error:\s*(.+)/,
-    /FATAL:\s*(.+)/i,
+    /failed to solve:?\s*(.+)/i,
     /Module not found:\s*(.+)/i,
     /Cannot find module\s+'([^']+)'/,
-    /failed to solve:?\s*(.+)/i,
     /npm ERR!\s+(.+)/,
+    /FATAL:\s*(.+)/i,
+    /error:\s*(.+)/i,
+    /Error:\s*(.+)/,
     /exited with code (\d+)/i,
   ]
   const lines = log.split('\n').reverse()
   for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.length < 5) continue
+    // Skip generic wrapper error lines
+    if (skipPatterns.some((sp) => sp.test(trimmed))) continue
     for (const pat of patterns) {
-      const m = line.match(pat)
-      if (m) return m[0].trim()
+      const m = trimmed.match(pat)
+      if (m) return m[0].trim().slice(0, 300)
     }
   }
-  // Fallback: last meaningful line
+  // Fallback: last meaningful [error] line that isn't a wrapper
+  const errorLine = lines.find((l: string) => {
+    const t = l.trim()
+    return t.length > 10 && t.includes('[error]') && !skipPatterns.some((sp) => sp.test(t))
+  })
+  if (errorLine) return errorLine.trim().slice(0, 300)
+  // Last resort: last meaningful line
   const lastLine = lines.find((l: string) => l.trim().length > 10)
-  return lastLine?.trim().slice(0, 200) || null
+  return lastLine?.trim().slice(0, 300) || null
 })
 
 // Docker tab
@@ -1500,7 +1516,7 @@ onUnmounted(() => {
               <XCircle class="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <div class="min-w-0 flex-1">
                 <h4 class="text-sm font-semibold text-red-800 dark:text-red-200">Deployment Failed</h4>
-                <p class="text-xs font-mono text-red-700 dark:text-red-300 mt-1 break-all whitespace-pre-wrap">{{ buildErrorSummary || latestDeployment.log.slice(0, 500) }}</p>
+                <p class="text-xs font-mono text-red-700 dark:text-red-300 mt-1 break-all whitespace-pre-wrap">{{ buildErrorSummary || latestDeployment.log.slice(-500) }}</p>
                 <div class="flex items-center gap-3 mt-2">
                   <button @click="onTabChange('deployments')" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline">View Deployments</button>
                   <button @click="onTabChange('logs')" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline">View Logs</button>
