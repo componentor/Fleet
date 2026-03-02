@@ -1567,7 +1567,12 @@ if ! grep -q '^REGISTRY_HTTP_SECRET=' "\${ENV_FILE}"; then
   echo "Added REGISTRY_HTTP_SECRET to env"
 fi
 
-# 5. Re-deploy the stack to apply config changes
+# 5. Ensure required bind-mount directories exist on the local node
+# (These may be new in the updated stack file and not yet created on existing installs)
+mkdir -p "\${FLEET_DIR}/nfs-exports/uploads"
+mkdir -p "\${FLEET_DIR}/traefik"
+
+# 6. Re-deploy the stack to apply config changes
 # Source env for variable substitution
 set -a
 . "\${ENV_FILE}"
@@ -1578,6 +1583,15 @@ VALKEY_PASSWORD=\$(echo "\${VALKEY_URL}" | sed -n 's|redis://:\\([^@]*\\)@.*|\\1
 export VALKEY_PASSWORD
 
 cd "\${FLEET_DIR}"
+
+# Ensure required bind-mount directories exist on ALL Swarm nodes before deploying
+# (prevents "bind source path does not exist" errors during rolling updates)
+docker service create --name fleet-pre-deploy-dirs --mode global --restart-condition none \
+  --mount type=bind,source=/,target=/host \
+  alpine sh -c 'mkdir -p /host/opt/fleet/nfs-exports/uploads && echo done' 2>/dev/null || true
+sleep 5
+docker service rm fleet-pre-deploy-dirs 2>/dev/null || true
+
 docker stack deploy -c docker-stack.yml --with-registry-auth fleet 2>&1 || echo "WARN: stack deploy had errors (non-fatal)"
 echo "Infrastructure reconciliation complete"
 `;
