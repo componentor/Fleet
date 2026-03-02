@@ -175,7 +175,7 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
       const networkId = await dockerService.ensureNetwork(networkName);
 
       const accountShort = accountId.replace(/-/g, '').substring(0, 12);
-      const swarmServiceName = `fleet-${accountShort}-${name}`;
+      const swarmServiceName = `fleet-${accountShort}-${name}`.toLowerCase();
       const result = await dockerService.createService({
         name: swarmServiceName,
         image: 'alpine:latest', // Placeholder until build completes

@@ -1004,7 +1004,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     }
 
     const accountShort = accountId.replace(/-/g, '').substring(0, 12);
-    const swarmServiceName = `fleet-${accountShort}-${data.name}`;
+    const swarmServiceName = `fleet-${accountShort}-${data.name}`.toLowerCase();
     const storageLimitMb = await getContainerDiskLimit(accountId);
 
     // Port management: domain services use Traefik (no ingress ports),
@@ -1733,7 +1733,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
     }
 
     const accountShort = accountId.replace(/-/g, '').substring(0, 12);
-    const swarmServiceName = `fleet-${accountShort}-${svc!.name}`;
+    const swarmServiceName = `fleet-${accountShort}-${svc!.name}`.toLowerCase();
     const svcPorts = (svc!.ports as any[]) ?? [];
     const primaryTargetPort = svcPorts[0]?.target ?? 80;
     const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true, primaryTargetPort);
@@ -1998,7 +1998,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
       }
 
       const accountShort = accountId.replace(/-/g, '').substring(0, 12);
-      const swarmServiceName = `fleet-${accountShort}-${svc.name}`;
+      const swarmServiceName = `fleet-${accountShort}-${svc.name}`.toLowerCase();
       const svcPorts = (svc.ports as any[]) ?? [];
       const primaryTargetPort = svcPorts[0]?.target ?? 80;
 

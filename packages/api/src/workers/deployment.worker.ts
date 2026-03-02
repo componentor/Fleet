@@ -131,7 +131,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     return;
   }
 
-  const imageTag = `${accountId}-${svc.name}:${commitSha?.slice(0, 7) ?? Date.now()}`;
+  const imageTag = `${accountId}-${svc.name}:${commitSha?.slice(0, 7) ?? Date.now()}`.toLowerCase();
 
   // Track deployment start time
   await db.update(deployments)
