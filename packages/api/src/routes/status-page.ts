@@ -10,7 +10,7 @@ import {
   or,
   gte,
 } from '@fleet/db';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { getValkey } from '../services/valkey.service.js';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
@@ -65,7 +65,7 @@ statusPage.openapi(healthRoute, (async (c: any) => {
     let status: ServiceStatus = 'healthy';
     let responseMs: number | null = null;
     try {
-      await dockerService.getSwarmInfo();
+      await orchestrator.getClusterInfo();
       responseMs = Date.now() - start;
     } catch {
       status = 'down';

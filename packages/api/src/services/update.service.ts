@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { dockerService, getRegistryAuthForImage } from './docker.service.js';
+import { orchestrator } from './orchestrator.js';
+import { getRegistryAuthForImage } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
 import { getValkey } from './valkey.service.js';
@@ -110,7 +111,7 @@ export class UpdateService {
 
     // Fallback: detect version from running fleet_api image tag
     try {
-      const swarmServices = await dockerService.listServices({ name: ['fleet_api'] });
+      const swarmServices = await orchestrator.listServices({ name: ['fleet_api'] });
       if (swarmServices.length > 0) {
         const spec = swarmServices[0]!.Spec as { TaskTemplate?: { ContainerSpec?: { Image?: string } } };
         const image = spec?.TaskTemplate?.ContainerSpec?.Image ?? '';
@@ -688,12 +689,12 @@ export class UpdateService {
       //     The new container starts with 'completed' state already persisted.
       this.appendLog(`Updating fleet_api to ${imageTag} — API will restart...`);
       try {
-        const swarmServices = await dockerService.listServices({ name: ['fleet_api'] });
+        const swarmServices = await orchestrator.listServices({ name: ['fleet_api'] });
         if (swarmServices.length > 0) {
           const svc = swarmServices[0]!;
           const newImage = `${IMAGE_PREFIX}/fleet-api:${imageTag}`;
           const apiAuth = await getRegistryAuthForImage(null, newImage);
-          await dockerService.updateService(svc.ID as string, { image: newImage }, apiAuth);
+          await orchestrator.updateService(svc.ID as string, { image: newImage }, apiAuth);
           this.appendLog('fleet_api update initiated. Container will restart momentarily.');
         }
       } catch (err) {
@@ -801,7 +802,7 @@ export class UpdateService {
       }
 
       try {
-        const swarmServices = await dockerService.listServices({
+        const swarmServices = await orchestrator.listServices({
           name: [serviceName],
         });
 
@@ -813,7 +814,7 @@ export class UpdateService {
         const svc = swarmServices[0]!;
         const dockerSvcId = svc.ID as string;
         const rbAuth = await getRegistryAuthForImage(null, previousImage);
-        await dockerService.updateService(dockerSvcId, { image: previousImage }, rbAuth);
+        await orchestrator.updateService(dockerSvcId, { image: previousImage }, rbAuth);
         this.appendLog(`  ${serviceName}: rollback initiated to ${previousImage}`);
         await this.waitForServiceConvergence(dockerSvcId, serviceName);
         this.appendLog(`  ${serviceName}: rolled back successfully.`);
@@ -1187,7 +1188,7 @@ export class UpdateService {
   private async snapshotCurrentImages(): Promise<void> {
     for (const serviceName of FLEET_SERVICES) {
       try {
-        const swarmServices = await dockerService.listServices({
+        const swarmServices = await orchestrator.listServices({
           name: [serviceName],
         });
 
@@ -1232,7 +1233,7 @@ export class UpdateService {
     }
 
     try {
-      const swarmServices = await dockerService.listServices({
+      const swarmServices = await orchestrator.listServices({
         name: [serviceName],
       });
 
@@ -1270,7 +1271,7 @@ export class UpdateService {
     this.appendLog(`Updating ${serviceName} to tag ${imageTag}...`);
 
     try {
-      const swarmServices = await dockerService.listServices({
+      const swarmServices = await orchestrator.listServices({
         name: [serviceName],
       });
 
@@ -1297,7 +1298,7 @@ export class UpdateService {
 
       // Use platform-wide registry credentials (accountId=null) for Fleet system images
       const registryAuth = await getRegistryAuthForImage(null, newImage);
-      await dockerService.updateService(dockerSvcId, { image: newImage }, registryAuth);
+      await orchestrator.updateService(dockerSvcId, { image: newImage }, registryAuth);
       this.appendLog(`  ${serviceName} update initiated (rolling, start-first).`);
 
       await this.waitForServiceConvergence(dockerSvcId, serviceName, 600_000, newImage);
@@ -1320,7 +1321,7 @@ export class UpdateService {
     let updateStarted = false;
     while (Date.now() - startTime < timeoutMs) {
       try {
-        const info = await dockerService.inspectService(dockerServiceId);
+        const info = await orchestrator.inspectService(dockerServiceId);
         const updateState = (info as any).UpdateStatus?.State as string | undefined;
 
         if (updateState === 'updating') {
@@ -1362,14 +1363,14 @@ export class UpdateService {
     while (Date.now() - startTime < timeoutMs) {
       try {
         // Check Docker's UpdateStatus first
-        const info = await dockerService.inspectService(dockerServiceId);
+        const info = await orchestrator.inspectService(dockerServiceId);
         const updateState = (info as any).UpdateStatus?.State as string | undefined;
 
         if (updateState === 'paused' || updateState === 'rollback_started') {
           throw new Error(`${serviceName}: Docker update ${updateState} — task may have failed`);
         }
 
-        const tasks = await dockerService.getServiceTasks(dockerServiceId);
+        const tasks = await orchestrator.getServiceTasks(dockerServiceId);
         const running = tasks.filter((t) => t.status === 'running' && t.desiredState === 'running');
         const pending = tasks.filter(
           (t) => t.desiredState === 'running' && t.status !== 'running' && t.status !== 'failed',
@@ -1410,14 +1411,14 @@ export class UpdateService {
   private async verifyServiceHealth(serviceNames: readonly string[] = FLEET_SERVICES): Promise<void> {
     for (const serviceName of serviceNames) {
       try {
-        const swarmServices = await dockerService.listServices({
+        const swarmServices = await orchestrator.listServices({
           name: [serviceName],
         });
 
         if (swarmServices.length === 0) continue;
 
         const svc = swarmServices[0]!;
-        const tasks = await dockerService.getServiceTasks(svc.ID as string);
+        const tasks = await orchestrator.getServiceTasks(svc.ID as string);
         const running = tasks.filter((t) => t.status === 'running');
         const failed = tasks.filter((t) => t.status === 'failed');
 

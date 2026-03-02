@@ -7,7 +7,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireAdmin, requireOwner } from '../middleware/rbac.js';
 import { generateTokens, setRefreshTokenCookie } from './auth.js';
 import { cache, invalidateCache } from '../middleware/cache.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
@@ -653,7 +653,7 @@ accountRoutes.openapi(deleteAccountRoute, (async (c: any) => {
     for (const svc of accountServices) {
       if (svc.dockerServiceId && svc.status !== 'stopped') {
         try {
-          await dockerService.scaleService(svc.dockerServiceId, 0);
+          await orchestrator.scaleService(svc.dockerServiceId, 0);
         } catch (err) {
           logger.error({ err, serviceId: svc.id }, 'Failed to stop service during deletion scheduling');
           logToErrorTable({ level: 'error', message: `Service scale-to-0 during deletion scheduling failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'accounts', operation: 'deletion-scheduling-scale-to-zero' } });

@@ -23,7 +23,7 @@ import {
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { stripeSyncService } from '../services/stripe-sync.service.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { notificationService } from '../services/notification.service.js';
 import { eventService, EventTypes } from '../services/event.service.js';
 import { emailService } from '../services/email.service.js';
@@ -894,7 +894,7 @@ billingAdmin.openapi(suspendAccountRoute, (async (c: any) => {
   for (const svc of accountServices) {
     try {
       if (svc.dockerServiceId) {
-        await dockerService.scaleService(svc.dockerServiceId, 0);
+        await orchestrator.scaleService(svc.dockerServiceId, 0);
         await db.update(services).set({ status: 'suspended', updatedAt: now }).where(eq(services.id, svc.id));
       }
     } catch (err) {

@@ -12,7 +12,7 @@ import { logger, logToErrorTable } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 
 const UPLOAD_BASE = process.env['UPLOAD_BASE_PATH']
   ?? (process.env['NODE_ENV'] === 'production' ? '/srv/nfs/uploads' : join(process.cwd(), 'data', 'uploads'));
@@ -94,7 +94,7 @@ async function updateFleetServiceDomain(newDomain: string): Promise<void> {
   ];
 
   for (const cfg of serviceConfigs) {
-    const services = await dockerService.listServices({ name: [cfg.name] });
+    const services = await orchestrator.listServices({ name: [cfg.name] });
     const svc = services.find((s: any) => s.Spec?.Name === cfg.name);
     if (!svc) {
       logger.warn({ service: cfg.name }, `${cfg.name} not found — skipping Traefik label update`);
@@ -110,7 +110,7 @@ async function updateFleetServiceDomain(newDomain: string): Promise<void> {
       ...cfg.extraLabels,
     };
 
-    await dockerService.updateService((svc as any).ID, { labels });
+    await orchestrator.updateService((svc as any).ID, { labels });
     logger.info({ service: cfg.name, domain: newDomain }, `Updated Traefik labels on ${cfg.name}`);
   }
 }

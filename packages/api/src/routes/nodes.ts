@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import net from 'node:net';
 import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte, desc, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
@@ -431,7 +431,7 @@ adminNodeRoutes.openapi(listNodesRoute, (async (c: any) => {
 
   // Also fetch live Docker node info and sync back to DB
   try {
-    const dockerNodes = await dockerService.listNodes();
+    const dockerNodes = await orchestrator.listNodes();
     const dockerMap = new Map(
       dockerNodes.map((n: any) => [n.ID, n]),
     );
@@ -502,7 +502,7 @@ adminNodeRoutes.openapi(registerNodeRoute, (async (c: any) => {
   // Get swarm join token
   let joinToken = null;
   try {
-    const tokens = await dockerService.getSwarmJoinToken();
+    const tokens = await orchestrator.getJoinToken();
     joinToken = data.role === 'manager' ? tokens.manager : tokens.worker;
   } catch {
     // Docker may not be available
@@ -526,7 +526,7 @@ adminNodeRoutes.openapi(getNodeRoute, (async (c: any) => {
   let dockerInfo = null;
   if (node.dockerNodeId) {
     try {
-      dockerInfo = await dockerService.inspectNode(node.dockerNodeId);
+      dockerInfo = await orchestrator.inspectNode(node.dockerNodeId);
     } catch {
       // Node may not be reachable
     }
@@ -560,7 +560,7 @@ adminNodeRoutes.openapi(updateNodeRoute, (async (c: any) => {
           delete mergedLabels['region'];
         }
       }
-      await dockerService.updateNode(node.dockerNodeId, {
+      await orchestrator.updateNode(node.dockerNodeId, {
         role: data.role,
         labels: mergedLabels,
       });
@@ -593,8 +593,8 @@ adminNodeRoutes.openapi(deleteNodeRoute, (async (c: any) => {
   // Drain and remove from Docker Swarm
   if (node.dockerNodeId) {
     try {
-      await dockerService.drainNode(node.dockerNodeId);
-      await dockerService.removeNode(node.dockerNodeId, true);
+      await orchestrator.drainNode(node.dockerNodeId);
+      await orchestrator.removeNode(node.dockerNodeId, true);
     } catch (err) {
       logger.error({ err }, 'Docker node removal failed');
       logToErrorTable({ level: 'error', message: `Docker node removal failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'nodes', operation: 'docker-drain-remove' } });
@@ -619,7 +619,7 @@ adminNodeRoutes.openapi(drainNodeRoute, (async (c: any) => {
   }
 
   try {
-    await dockerService.drainNode(node.dockerNodeId);
+    await orchestrator.drainNode(node.dockerNodeId);
 
     await db
       .update(nodes)
@@ -647,7 +647,7 @@ adminNodeRoutes.openapi(activateNodeRoute, (async (c: any) => {
   }
 
   try {
-    await dockerService.activateNode(node.dockerNodeId);
+    await orchestrator.activateNode(node.dockerNodeId);
 
     await db
       .update(nodes)

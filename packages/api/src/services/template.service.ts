@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { db, appTemplates, services, deployments, storageVolumes, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
-import { dockerService, getRegistryAuthForImage } from './docker.service.js';
+import { orchestrator } from './orchestrator.js';
+import { getRegistryAuthForImage } from './docker.service.js';
 import { storageManager } from './storage/storage-manager.js';
 import { buildTraefikLabels } from './traefik.js';
 import { logger } from './logger.js';
@@ -322,8 +323,8 @@ export class TemplateService {
 
     // Create overlay network so services can resolve each other via DNS
     const networkName = `fleet-account-${accountId}`;
-    const networkId = await dockerService.ensureNetwork(networkName);
-    const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+    const networkId = await orchestrator.ensureNetwork(networkName);
+    const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
 
     // Build volume resolution map from volumeGroups so grouped template volumes
     // resolve to the same physical Docker volume name.
@@ -503,7 +504,7 @@ export class TemplateService {
         const svcPorts = svcDef.ports ?? [];
         const ingressPorts = resolvedDomain
           ? []
-          : await dockerService.allocateIngressPorts(
+          : await orchestrator.allocateIngressPorts(
               svcPorts.map((p) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
             );
 
@@ -512,7 +513,7 @@ export class TemplateService {
         const traefikLabels = buildTraefikLabels(swarmName, resolvedDomain, true, primaryPort);
 
         const templateAuth = await getRegistryAuthForImage(accountId, image);
-        const result = await dockerService.createService({
+        const result = await orchestrator.createService({
           name: swarmName,
           image,
           replicas,

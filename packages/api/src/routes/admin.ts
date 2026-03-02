@@ -4,7 +4,7 @@ import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, 
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission, requireSuperAdmin } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { updateService } from '../services/update.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { isQueueAvailable, getDeploymentQueue, getBackupQueue, getMaintenanceQueue } from '../services/queue.service.js';
@@ -129,7 +129,7 @@ adminRoutes.openapi(statsRoute, (async (c: any) => {
 
   let swarmInfo = null;
   try {
-    swarmInfo = await dockerService.getSwarmInfo();
+    swarmInfo = await orchestrator.getClusterInfo();
   } catch {
     // Docker may not be available
   }
@@ -523,8 +523,8 @@ adminRoutes.openapi(statusRoute, (async (c: any) => {
   let docker: { status: string; nodes: number; managers: number; workers: number } | null = null;
   let dockerNodeList: any[] = [];
   try {
-    const swarm = await dockerService.getSwarmInfo();
-    dockerNodeList = await dockerService.listNodes();
+    const swarm = await orchestrator.getClusterInfo();
+    dockerNodeList = await orchestrator.listNodes();
     const managers = dockerNodeList.filter((n: any) => n.Spec?.Role === 'manager').length;
     docker = {
       status: 'connected',
@@ -1169,14 +1169,14 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
 
   try {
     // Find the Docker service by name
-    const allServices = await dockerService.listServices({ name: [serviceName] });
+    const allServices = await orchestrator.listServices({ name: [serviceName] });
     const svc = allServices.find((s: any) => s.Spec?.Name === serviceName);
 
     if (!svc) {
       return c.json({ logs: '', service: serviceName, warning: `Service "${serviceName}" not found in Docker Swarm.`, availableServices: ALLOWED_FLEET_SERVICES });
     }
 
-    const result = await dockerService.getServiceLogs(svc.ID, { tail, follow: false });
+    const result = await orchestrator.getServiceLogs(svc.ID, { tail, follow: false });
 
     // Dockerode returns a Buffer when follow=false
     let raw: Buffer;

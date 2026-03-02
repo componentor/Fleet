@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { hash } from 'argon2';
 import { SignJWT } from 'jose';
 import { db, users, accounts, userAccounts, platformSettings, insertReturning, upsert, countSql } from '@fleet/db';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { getValkey } from '../services/valkey.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, noSecurity } from './_schemas.js';
 
@@ -62,7 +62,7 @@ async function detectDocker(): Promise<{
   managerAddress?: string;
 }> {
   try {
-    const info = await dockerService.getSwarmInfo();
+    const info = await orchestrator.getClusterInfo();
     // If swarmInspect succeeds, Swarm is active and we're a manager
     return {
       available: true,
@@ -78,7 +78,7 @@ async function detectDocker(): Promise<{
     // Try a basic docker ping to see if Docker is available
     try {
       // Use listNodes as a lighter check — if it throws "not a swarm", Docker is there but no swarm
-      await dockerService.listNodes();
+      await orchestrator.listNodes();
       // If this succeeds, swarm is active
       return { available: true, swarm: 'active', role: 'manager' };
     } catch (innerErr: any) {
@@ -231,7 +231,7 @@ setup.openapi(swarmInitRoute, async (c) => {
 
       // Create the default overlay network for Fleet services
       try {
-        await dockerService.createNetwork('fleet-net', { 'com.fleet.managed': 'true' });
+        await orchestrator.createNetwork('fleet-net', { 'com.fleet.managed': 'true' });
       } catch {
         // Network may already exist
       }

@@ -3,7 +3,7 @@ import { db, nodes, deployments, backups, backupSchedules, accounts, services, u
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { eventService, EventTypes } from '../services/event.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
@@ -155,8 +155,8 @@ async function syncServiceStatus(): Promise<void> {
   let tasksByService: Map<string, { running: number; failed: number; total: number }>;
   try {
     const [allDockerSvcs, allTasks] = await Promise.all([
-      dockerService.listServices({ label: ['fleet.service-id'] }),
-      dockerService.listTasks({ label: ['fleet.service-id'] }),
+      orchestrator.listServices({ label: ['fleet.service-id'] }),
+      orchestrator.listTasks({ label: ['fleet.service-id'] }),
     ]);
 
     // O(n) set build for O(1) lookups
@@ -356,7 +356,7 @@ async function executeScheduledDeletions(): Promise<void> {
       for (const svc of accountServices) {
         if (svc.dockerServiceId) {
           try {
-            await dockerService.removeService(svc.dockerServiceId);
+            await orchestrator.removeService(svc.dockerServiceId);
           } catch (err) {
             logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during account deletion');
             logToErrorTable({ level: 'error', message: `Failed to remove Docker service during account deletion: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'account-deletion', serviceId: svc.id } });
@@ -398,7 +398,7 @@ async function executeScheduledDeletions(): Promise<void> {
         for (const svc of descServices) {
           if (svc.dockerServiceId) {
             try {
-              await dockerService.removeService(svc.dockerServiceId);
+              await orchestrator.removeService(svc.dockerServiceId);
             } catch (err) {
               logger.error({ err, serviceId: svc.id }, 'Failed to remove Docker service during descendant deletion');
               logToErrorTable({ level: 'error', message: `Failed to remove Docker service during descendant deletion: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { worker: 'maintenance', task: 'account-deletion', serviceId: svc.id } });
@@ -611,7 +611,7 @@ async function enforceBillingGracePeriod(): Promise<void> {
         for (const svc of accountServices) {
           try {
             if (svc.dockerServiceId) {
-              await dockerService.scaleService(svc.dockerServiceId, 0);
+              await orchestrator.scaleService(svc.dockerServiceId, 0);
               await db.update(services).set({ status: 'suspended', updatedAt: new Date() }).where(eq(services.id, svc.id));
             }
           } catch (svcErr) {
@@ -1290,7 +1290,7 @@ async function syncDomainPrices(): Promise<void> {
 
 async function pruneDeadContainers(): Promise<void> {
   try {
-    const removed = await dockerService.pruneDeadContainers();
+    const removed = await orchestrator.pruneDeadContainers();
     if (removed > 0) {
       logger.info({ removed }, `Container prune: removed ${removed} dead container(s)`);
     }
@@ -1830,7 +1830,7 @@ async function pollRegistryDigests(): Promise<void> {
           // Force-update Docker service to pull new image
           if (svc.dockerServiceId) {
             try {
-              await dockerService.updateService(svc.dockerServiceId, {
+              await orchestrator.updateService(svc.dockerServiceId, {
                 image: svc.image,
               }, auth);
 
@@ -1880,7 +1880,7 @@ async function recordUptimeSnapshot(): Promise<void> {
   // Docker Swarm
   try {
     const t0 = Date.now();
-    await dockerService.getSwarmInfo();
+    await orchestrator.getClusterInfo();
     snapshots.push({ service: 'docker', status: 'healthy', responseMs: Date.now() - t0 });
   } catch {
     snapshots.push({ service: 'docker', status: 'down', responseMs: null });

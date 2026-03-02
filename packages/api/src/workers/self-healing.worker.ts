@@ -34,7 +34,7 @@ export function createSelfHealingWorker(connection: ConnectionOptions): Worker {
 
         // The container handles everything else via callbacks.
         // We just need to wait for it to finish. Poll every 10s for up to 2 hours.
-        const docker = (await import('../services/docker.service.js')).dockerService.getDockerClient();
+        const { orchestrator } = await import('../services/orchestrator.js');
         const maxWait = 2 * 60 * 60 * 1000; // 2 hours
         const startTime = Date.now();
 
@@ -42,8 +42,8 @@ export function createSelfHealingWorker(connection: ConnectionOptions): Worker {
           await new Promise((r) => setTimeout(r, 10_000));
 
           try {
-            const tasks = await docker.listTasks({
-              filters: { service: [serviceId] },
+            const tasks = await orchestrator.listTasks({
+              service: [serviceId],
             });
 
             const allDone = tasks.length > 0 && tasks.every(
@@ -55,7 +55,7 @@ export function createSelfHealingWorker(connection: ConnectionOptions): Worker {
               break;
             }
           } catch {
-            // Docker API error — service may already be removed
+            // Orchestrator API error — service may already be removed
             break;
           }
         }
