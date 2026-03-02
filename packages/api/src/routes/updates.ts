@@ -389,6 +389,15 @@ updateRoutes.openapi(statusRoute, (async (c: any) => {
     const { UpdateService } = await import('../services/update.service.js');
     const persisted = await UpdateService.loadPersistedState();
     if (persisted && persisted.status !== 'idle') {
+      // Auto-clear stale persisted state that's been stuck for over 30 minutes
+      const startedAt = persisted.startedAt ? new Date(persisted.startedAt).getTime() : 0;
+      const staleMs = 30 * 60 * 1000;
+      if (startedAt > 0 && Date.now() - startedAt > staleMs) {
+        logger.warn({ persistedStatus: persisted.status, startedAt: persisted.startedAt }, 'Auto-clearing stale persisted update state (>30 min old)');
+        await updateService.forceReset();
+        return c.json(updateService.getState());
+      }
+
       const hasSnapshot = Object.keys(persisted.previousImageTags ?? {}).length > 0;
       const allowedForRollback = ['idle', 'completed', 'failed'].includes(persisted.status);
       let rollbackTarget: string | null = null;
@@ -529,21 +538,37 @@ updateRoutes.openapi(seedRoute, (async (c: any) => {
 updateRoutes.openapi(resetRoute, (async (c: any) => {
   const state = updateService.getState();
 
-  // Only allow reset when in a non-terminal state (stuck) or failed
+  // Check both in-memory AND DB-persisted state — another replica may have left stale state
   const allowedStates = ['failed', 'checking', 'backing-up', 'pulling', 'verifying-images', 'migrating', 'updating', 'seeding', 'verifying', 'rolling-back'];
+  let persistedStatus: string | null = null;
+
   if (!allowedStates.includes(state.status)) {
-    return c.json({
-      error: `System is currently "${state.status}" — no reset needed. Reset is for stuck or failed states.`,
-      currentStatus: state.status,
-    }, 400);
+    // In-memory is idle/completed — check if DB has stale state from another replica
+    try {
+      const { UpdateService } = await import('../services/update.service.js');
+      const persisted = await UpdateService.loadPersistedState();
+      if (persisted && persisted.status !== 'idle') {
+        persistedStatus = persisted.status;
+      }
+    } catch {
+      // DB read failed
+    }
+
+    if (!persistedStatus) {
+      return c.json({
+        error: `System is currently "${state.status}" — no reset needed. Reset is for stuck or failed states.`,
+        currentStatus: state.status,
+      }, 400);
+    }
   }
 
   const result = await updateService.forceReset();
-  logger.warn({ previousStatus: result.previousStatus, user: c.get('user').userId }, 'Update state force-reset by admin');
+  const effectiveStatus = persistedStatus ?? result.previousStatus;
+  logger.warn({ previousStatus: effectiveStatus, user: c.get('user').userId }, 'Update state force-reset by admin');
 
   return c.json({
-    message: `Update state reset successfully. Previous status was "${result.previousStatus}".`,
-    previousStatus: result.previousStatus,
+    message: `Update state reset successfully. Previous status was "${effectiveStatus}".`,
+    previousStatus: effectiveStatus,
     currentStatus: 'idle',
   });
 }) as any);
