@@ -1,7 +1,8 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
 import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull, inArray } from '@fleet/db';
 import { buildService, scrubSecrets } from '../services/build.service.js';
-import { dockerService, getRegistryAuthForImage } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
+import { getRegistryAuthForImage } from '../services/docker.service.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
@@ -335,7 +336,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     if (svc.dockerServiceId) {
       // Clean up old failed/dead containers before deploying new version
       try {
-        const pruned = await dockerService.pruneServiceContainers(svc.dockerServiceId);
+        const pruned = await orchestrator.pruneServiceContainers(svc.dockerServiceId);
         if (pruned > 0) {
           logger.info({ serviceId: svc.id, pruned }, 'Pruned dead containers before deploy');
         }
@@ -344,7 +345,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       }
 
       const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
-      await dockerService.updateService(svc.dockerServiceId, {
+      await orchestrator.updateService(svc.dockerServiceId, {
         image: fullImageTag,
         replicas: svc.replicas ?? 1,
       }, deployRegistryAuth);
