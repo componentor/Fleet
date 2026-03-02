@@ -1,4 +1,4 @@
-import { db, storageClusters, storageVolumes, resourceLimits, eq, and, isNull, sql } from '@fleet/db';
+import { db, storageClusters, storageVolumes, resourceLimits, eq, and, or, isNull, sql } from '@fleet/db';
 import { logger } from '../logger.js';
 import type {
   VolumeStorageProvider,
@@ -335,8 +335,9 @@ class StorageManager {
    */
   async deleteVolume(accountId: string, name: string): Promise<void> {
     logger.info({ name, accountId }, 'deleteVolume: looking up volume');
-    // Look up the volume to find its cluster
-    const dbVolume = await db.query.storageVolumes.findFirst({
+    // Look up the volume — try exact name match first, then fallback to displayName
+    // to handle cases where the service record stores a different format than the DB
+    let dbVolume = await db.query.storageVolumes.findFirst({
       where: and(
         eq(storageVolumes.name, name),
         eq(storageVolumes.accountId, accountId),
@@ -345,10 +346,30 @@ class StorageManager {
     });
 
     if (!dbVolume) {
+      // Fallback: try matching by displayName or partial name match
+      dbVolume = await db.query.storageVolumes.findFirst({
+        where: and(
+          or(
+            eq(storageVolumes.displayName, name),
+            // Also try matching if the caller passed just the suffix (without vol-<accountId>- prefix)
+            eq(storageVolumes.name, `vol-${accountId}-${name}`),
+          ),
+          eq(storageVolumes.accountId, accountId),
+          isNull(storageVolumes.deletedAt),
+        ),
+      });
+      if (dbVolume) {
+        logger.info({ name, resolvedName: dbVolume.name, accountId }, 'deleteVolume: resolved via displayName/prefix fallback');
+      }
+    }
+
+    if (!dbVolume) {
       logger.warn({ name, accountId }, 'deleteVolume: no DB record found — nothing to delete');
       return;
     }
-    logger.info({ name, clusterId: dbVolume.clusterId, id: dbVolume.id }, 'deleteVolume: found DB record, proceeding');
+
+    const resolvedName = dbVolume.name;
+    logger.info({ name, resolvedName, clusterId: dbVolume.clusterId, id: dbVolume.id }, 'deleteVolume: found DB record, proceeding');
 
     // Try to delete via storage provider (GlusterFS/NFS/local).
     // Wrapped in try-catch so DB cleanup always happens even if provider
@@ -358,22 +379,21 @@ class StorageManager {
         ? this.clusters.get(dbVolume.clusterId)
         : undefined;
       const provider = cluster?.volumeProvider ?? this.getDefaultCluster().volumeProvider;
-      await provider.deleteVolume(name);
+      await provider.deleteVolume(resolvedName);
     } catch (err) {
       // Provider may fail if the volume doesn't physically exist, the cluster
       // is no longer available, or there's no default cluster. Still clean up
       // the DB record below.
-      logger.warn({ err, name }, 'Volume provider delete failed — cleaning up DB record anyway');
+      logger.warn({ err, name: resolvedName }, 'Volume provider delete failed — cleaning up DB record anyway');
     }
 
     const result = await db.update(storageVolumes)
       .set({ deletedAt: new Date(), status: 'deleting', updatedAt: new Date() })
       .where(and(
-        eq(storageVolumes.name, name),
-        eq(storageVolumes.accountId, accountId),
+        eq(storageVolumes.id, dbVolume.id),
         isNull(storageVolumes.deletedAt),
       ));
-    logger.info({ name, accountId, result }, 'deleteVolume: DB soft-delete completed');
+    logger.info({ resolvedName, accountId, result }, 'deleteVolume: DB soft-delete completed');
   }
 
   /**

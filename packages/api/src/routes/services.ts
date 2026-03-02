@@ -105,7 +105,8 @@ const serviceRoutes = new OpenAPIHono<{
 serviceRoutes.use('*', authMiddleware);
 serviceRoutes.use('*', tenantMiddleware);
 
-import { buildTraefikLabels } from '../services/traefik.js';
+import { buildTraefikLabels, ensureIngressRoute, removeIngressRoutes } from '../services/traefik.js';
+import { resolveOrchestratorType } from '../services/orchestrator-migration.service.js';
 
 /** Convenience wrapper for port allocation */
 async function allocateIngressPorts(
@@ -1045,6 +1046,8 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       storageLimitMb,
     });
 
+    await ensureIngressRoute(`fleet-account-${accountId}`, swarmServiceName, data.domain ?? null, data.sslEnabled ?? true, primaryTargetPort).catch(() => {});
+
     await db
       .update(services)
       .set({
@@ -1447,6 +1450,10 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
         restartDelay: dockerFields.restartDelay,
         networkIds: networkUpdate,
       }, updateRegistryAuth);
+
+      const updateAccountShort = accountId.replace(/-/g, '').substring(0, 12);
+      const updateSwarmName = `fleet-${updateAccountShort}-${dockerFields.name ?? svc.name}`.toLowerCase();
+      await ensureIngressRoute(`fleet-account-${accountId}`, updateSwarmName, effectiveDomain, dockerFields.sslEnabled ?? svc.sslEnabled ?? true, primaryTargetPort).catch(() => {});
     } catch (err) {
       logger.error({ err }, 'Docker service update failed — DB not updated');
       logToErrorTable({
@@ -1503,6 +1510,8 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   }
 
   // Remove from Docker Swarm
+  const deleteAccountShort = accountId.replace(/-/g, '').substring(0, 12);
+  const deleteSwarmServiceName = `fleet-${deleteAccountShort}-${svc.name}`.toLowerCase();
   if (svc.dockerServiceId) {
     try {
       await orchestrator.removeService(svc.dockerServiceId);
@@ -1510,6 +1519,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       logger.error({ err }, 'Docker service removal failed');
       logToErrorTable({ level: 'error', message: `Docker service removal failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-service' } });
     }
+    await removeIngressRoutes(`fleet-account-${accountId}`, deleteSwarmServiceName).catch(() => {});
     // Wait for tasks to stop, then force-remove leftover containers so volumes are released
     await orchestrator.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
     await orchestrator.forceRemoveServiceContainers(svc.dockerServiceId);
@@ -1779,6 +1789,8 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
       registryAuth: recreateAuth,
     });
 
+    await ensureIngressRoute(`fleet-account-${accountId}`, swarmServiceName, svc!.domain ?? null, svc!.sslEnabled ?? true, primaryTargetPort).catch(() => {});
+
     // Save allocated ports back to DB
     if (ingressPorts.length > 0) {
       await db.update(services).set({ ports: ingressPorts }).where(eq(services.id, serviceId));
@@ -2045,6 +2057,8 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
         storageLimitMb,
         registryAuth: stackRegistryAuth,
       });
+
+      await ensureIngressRoute(`fleet-account-${accountId}`, swarmServiceName, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort).catch(() => {});
 
       await db
         .update(services)
@@ -2314,6 +2328,9 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
           logger.warn({ err, serviceId: svc.id }, 'Docker removal failed during stack delete');
           logToErrorTable({ level: 'warn', message: `Docker removal failed during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-removal' } });
         });
+        const stackDeleteAccountShort = accountId.replace(/-/g, '').substring(0, 12);
+        const stackDeleteSwarmName = `fleet-${stackDeleteAccountShort}-${svc.name}`.toLowerCase();
+        await removeIngressRoutes(`fleet-account-${accountId}`, stackDeleteSwarmName).catch(() => {});
         removedDockerServiceIds.push(svc.dockerServiceId);
       }
 

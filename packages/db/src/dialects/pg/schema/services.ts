@@ -53,6 +53,7 @@ export const services = pgTable('services', {
   registryPollDigest: varchar('registry_poll_digest'),
   registryWebhookSecret: varchar('registry_webhook_secret'),
   tags: jsonb('tags').default([]),
+  orchestrator: varchar('orchestrator', { length: 20 }),
   stackId: varchar('stack_id'),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),

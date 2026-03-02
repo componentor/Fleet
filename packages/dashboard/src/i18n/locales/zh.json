@@ -1679,6 +1679,23 @@
         "confirmSelfHeal": "开始自动修复？",
         "confirmSelfHealDesc": "这将运行完整的自动修复流程：修复问题、创建 PR、验证 CI、合并、创建发布并升级平台。确定要继续吗？",
         "selfHeal": "自动修复"
+      },
+      "orchestrator": {
+        "title": "编排器",
+        "titleDesc": "选择新服务和现有服务的容器编排后端。Docker Swarm 和 Kubernetes 可以同时运行。",
+        "status": "状态",
+        "defaultBackend": "默认后端",
+        "defaultDesc": "新服务将部署在默认后端上。现有服务不受影响。",
+        "available": "可用",
+        "unavailable": "不可用",
+        "services": "个服务",
+        "migrateService": "迁移服务",
+        "migrateServiceDesc": "将单个服务从一个编排器迁移到另一个。服务将在目标后端上零停机重新创建。",
+        "serviceId": "服务 ID",
+        "targetBackend": "目标",
+        "migrate": "迁移",
+        "migrateSuccess": "服务已从 {from} 迁移到 {to}",
+        "migrateFailed": "迁移失败"
       }
     },
     "billing": {

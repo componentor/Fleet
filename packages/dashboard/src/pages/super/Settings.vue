@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -31,6 +31,7 @@ const sections = [
   { id: 'support', label: () => 'Support' },
   { id: 'translation', label: () => t('super.settings.translationConfig') },
   { id: 'self-healing', label: () => t('super.settings.selfHealing.title') },
+  { id: 'orchestrator', label: () => t('super.settings.orchestrator.title') },
 ]
 
 // General settings
@@ -165,6 +166,19 @@ const shDefaultBranch = ref('main')
 const savingSelfHealing = ref(false)
 const testingSelfHealing = ref(false)
 const shTestResult = ref<{ success: boolean; message: string } | null>(null)
+
+// Orchestrator
+const orchDefault = ref<'swarm' | 'kubernetes'>('swarm')
+const orchAvailable = ref<string[]>([])
+const orchK8sAvailable = ref(false)
+const orchSwarmAvailable = ref(false)
+const orchServiceCounts = ref({ total: 0, swarm: 0, kubernetes: 0 })
+const orchLoading = ref(false)
+const orchSaving = ref(false)
+const orchMigrating = ref(false)
+const orchMigrateServiceId = ref('')
+const orchMigrateTarget = ref<'swarm' | 'kubernetes'>('kubernetes')
+const orchMigrateResult = ref<{ success: boolean; message: string } | null>(null)
 
 async function fetchSettings() {
   loading.value = true
@@ -757,6 +771,65 @@ async function testSelfHealing() {
   }
 }
 
+async function fetchOrchestrator() {
+  orchLoading.value = true
+  try {
+    const data = await api.get<any>('/settings/orchestrator')
+    orchDefault.value = data.default ?? 'swarm'
+    orchAvailable.value = data.available ?? ['swarm']
+    orchK8sAvailable.value = data.kubernetes?.available ?? false
+    orchSwarmAvailable.value = data.swarm?.available ?? false
+    orchServiceCounts.value = data.services ?? { total: 0, swarm: 0, kubernetes: 0 }
+  } catch {
+    // Not available
+  } finally {
+    orchLoading.value = false
+  }
+}
+
+async function saveOrchestratorDefault(type: 'swarm' | 'kubernetes') {
+  orchSaving.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await api.patch('/settings/orchestrator', { default: type })
+    orchDefault.value = type
+    success.value = t('common.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to update orchestrator'
+  } finally {
+    orchSaving.value = false
+  }
+}
+
+async function migrateServiceOrchestrator() {
+  if (!orchMigrateServiceId.value) return
+  orchMigrating.value = true
+  orchMigrateResult.value = null
+  error.value = ''
+  try {
+    const result = await api.post<any>('/settings/orchestrator/migrate', {
+      serviceId: orchMigrateServiceId.value,
+      target: orchMigrateTarget.value,
+    })
+    orchMigrateResult.value = {
+      success: result.success,
+      message: result.success
+        ? t('super.settings.orchestrator.migrateSuccess', { from: result.from, to: result.to })
+        : result.error || t('super.settings.orchestrator.migrateFailed'),
+    }
+    if (result.success) {
+      orchMigrateServiceId.value = ''
+      await fetchOrchestrator()
+    }
+  } catch (err: any) {
+    orchMigrateResult.value = { success: false, message: err?.body?.error || 'Migration failed' }
+  } finally {
+    orchMigrating.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -771,6 +844,7 @@ onMounted(() => {
   fetchSupportSettings()
   fetchTranslation()
   fetchSelfHealing()
+  fetchOrchestrator()
 })
 </script>
 
@@ -1923,6 +1997,131 @@ onMounted(() => {
               <p class="text-sm" :class="shTestResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
                 {{ shTestResult.message }}
               </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Orchestrator -->
+        <div v-if="activeSection === 'orchestrator'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Server class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.orchestrator.title') }}</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.orchestrator.titleDesc') }}</p>
+          </div>
+
+          <div v-if="orchLoading" class="p-6 flex justify-center">
+            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          </div>
+
+          <div v-else class="p-6 space-y-6">
+            <!-- Current Status -->
+            <div>
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{{ t('super.settings.orchestrator.status') }}</h3>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('super.settings.orchestrator.defaultBackend') }}</p>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white capitalize">{{ orchDefault }}</p>
+                </div>
+                <div class="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Docker Swarm</p>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full" :class="orchSwarmAvailable ? 'bg-green-500' : 'bg-red-500'"></span>
+                    <span class="text-sm font-medium text-gray-900 dark:text-white">
+                      {{ orchSwarmAvailable ? t('super.settings.orchestrator.available') : t('super.settings.orchestrator.unavailable') }}
+                    </span>
+                    <span v-if="orchServiceCounts.swarm > 0" class="text-xs text-gray-500 dark:text-gray-400 ml-auto">{{ orchServiceCounts.swarm }} {{ t('super.settings.orchestrator.services') }}</span>
+                  </div>
+                </div>
+                <div class="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Kubernetes</p>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full" :class="orchK8sAvailable ? 'bg-green-500' : 'bg-red-500'"></span>
+                    <span class="text-sm font-medium text-gray-900 dark:text-white">
+                      {{ orchK8sAvailable ? t('super.settings.orchestrator.available') : t('super.settings.orchestrator.unavailable') }}
+                    </span>
+                    <span v-if="orchServiceCounts.kubernetes > 0" class="text-xs text-gray-500 dark:text-gray-400 ml-auto">{{ orchServiceCounts.kubernetes }} {{ t('super.settings.orchestrator.services') }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Default Orchestrator Selection -->
+            <div>
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.orchestrator.defaultBackend') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.orchestrator.defaultDesc') }}</p>
+              <div class="flex items-center gap-3">
+                <button
+                  @click="saveOrchestratorDefault('swarm')"
+                  :disabled="orchSaving || !orchSwarmAvailable"
+                  :class="[
+                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors border',
+                    orchDefault === 'swarm'
+                      ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300'
+                      : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50'
+                  ]"
+                >
+                  <Check v-if="orchDefault === 'swarm'" class="w-4 h-4" />
+                  Docker Swarm
+                </button>
+                <button
+                  @click="saveOrchestratorDefault('kubernetes')"
+                  :disabled="orchSaving || !orchK8sAvailable"
+                  :class="[
+                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors border',
+                    orchDefault === 'kubernetes'
+                      ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300'
+                      : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50'
+                  ]"
+                >
+                  <Check v-if="orchDefault === 'kubernetes'" class="w-4 h-4" />
+                  Kubernetes
+                </button>
+                <Loader2 v-if="orchSaving" class="w-4 h-4 animate-spin text-gray-400" />
+              </div>
+            </div>
+
+            <!-- Migrate a Single Service -->
+            <div class="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.orchestrator.migrateService') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.orchestrator.migrateServiceDesc') }}</p>
+              <div class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+                <div class="w-full sm:w-auto sm:flex-1 max-w-sm">
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.settings.orchestrator.serviceId') }}</label>
+                  <input
+                    v-model="orchMigrateServiceId"
+                    type="text"
+                    placeholder="Service UUID"
+                    class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.settings.orchestrator.targetBackend') }}</label>
+                  <select
+                    v-model="orchMigrateTarget"
+                    class="px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <option value="swarm">Docker Swarm</option>
+                    <option value="kubernetes">Kubernetes</option>
+                  </select>
+                </div>
+                <button
+                  @click="migrateServiceOrchestrator"
+                  :disabled="orchMigrating || !orchMigrateServiceId"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="orchMigrating" class="w-4 h-4 animate-spin" />
+                  <ArrowRightLeft v-else class="w-4 h-4" />
+                  {{ t('super.settings.orchestrator.migrate') }}
+                </button>
+              </div>
+
+              <div v-if="orchMigrateResult" class="mt-3 p-3 rounded-lg border" :class="orchMigrateResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+                <p class="text-sm" :class="orchMigrateResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                  {{ orchMigrateResult.message }}
+                </p>
+              </div>
             </div>
           </div>
         </div>
