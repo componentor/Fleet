@@ -38,6 +38,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   LifeBuoy,
+  FileText,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -142,6 +143,7 @@ const allNavGroups: NavGroup[] = [
       { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
       { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
       { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
+      { nameKey: 'nav.logs', path: '/panel/logs', icon: FileText },
       { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
       { nameKey: 'nav.apiKeys', path: '/panel/api-keys', icon: KeyRound, requireAdmin: true },
     ],
