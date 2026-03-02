@@ -219,15 +219,56 @@ export class UpdateService {
     };
   }
 
+  private lastDbVersionCheck = 0;
+  private static readonly DB_VERSION_CHECK_INTERVAL_MS = 30_000; // re-read DB version every 30s
+
   /** Returns the cached update notification (no GitHub API call). */
   getNotification(): UpdateNotification {
+    // Always keep cachedNotification.current in sync with the authoritative state
+    this.cachedNotification.current = this.state.currentVersion;
+
     // Guard: never report "available" if we're already on that version
     if (this.cachedNotification.available && this.cachedNotification.latest?.tag) {
       if (!this.isNewerVersion(this.cachedNotification.latest.tag, this.state.currentVersion)) {
         this.cachedNotification.available = false;
       }
     }
+
+    // Multi-replica freshness: periodically re-read currentVersion from DB
+    // so replicas that didn't run the update learn about the new version.
+    const now = Date.now();
+    if (now - this.lastDbVersionCheck > UpdateService.DB_VERSION_CHECK_INTERVAL_MS) {
+      this.lastDbVersionCheck = now;
+      this.syncVersionFromDb().catch(() => {});
+    }
+
     return this.cachedNotification;
+  }
+
+  /** Re-read the persisted version from DB — non-blocking, for multi-replica freshness. */
+  private async syncVersionFromDb(): Promise<void> {
+    try {
+      const row = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, 'platform:currentVersion'),
+      });
+      const persisted = row?.value as string | null;
+      if (persisted && typeof persisted === 'string' && persisted !== '') {
+        const clean = persisted.replace(/^v/, '');
+        if (this.isNewerVersion(clean, this.state.currentVersion) || clean !== this.state.currentVersion) {
+          logger.info({ old: this.state.currentVersion, new: clean }, 'Synced version from DB (another replica may have updated)');
+          this.state.currentVersion = clean;
+          this.cachedNotification.current = clean;
+          // Re-evaluate availability with the new version
+          if (this.cachedNotification.available && this.cachedNotification.latest?.tag) {
+            if (!this.isNewerVersion(this.cachedNotification.latest.tag, clean)) {
+              this.cachedNotification.available = false;
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-critical — will retry on next call
+    }
   }
 
   onUpdate(callback: (state: UpdateState) => void): () => void {
@@ -288,8 +329,25 @@ export class UpdateService {
       this.state.preUpdateBackupId = persisted.preUpdateBackupId;
       // Restore previous image tags so rollback button works after container restart
       this.state.previousImageTags = new Map(Object.entries(persisted.previousImageTags ?? {}));
-      this.cachedNotification.current = persisted.currentVersion;
+      // Set notification to definitive "not available" — we just completed or failed an update.
+      // This prevents stale Valkey caches from making us show "update available" for the
+      // version we just installed.
+      this.cachedNotification = {
+        available: false,
+        current: persisted.currentVersion,
+        latest: this.cachedNotification.latest,
+        checkedAt: new Date().toISOString(),
+      };
       this.events.emit('update', this.state);
+      // Clear stale Valkey notification cache so other replicas / future reads don't
+      // see an outdated "available: true" for the version we're now running.
+      try {
+        const valkey = await getValkey();
+        if (valkey) {
+          await valkey.del('fleet:update-notification');
+          await valkey.del('fleet:update-check-lock');
+        }
+      } catch { /* non-critical */ }
       // Don't clear persisted state yet — keep it until the next update starts
       // so rollback remains available across multiple container restarts.
       // Only clear the lock so the system can accept new updates.
@@ -483,6 +541,14 @@ export class UpdateService {
       }
       this.appendLog('Database health verified — schema is accessible.');
 
+      // 1.5. Reconcile infrastructure: download new stack files and re-deploy
+      // This applies docker-stack.yml config changes (Traefik labels, network, ports, env vars)
+      // that the rolling image update doesn't cover. Runs BEFORE backup so the
+      // infrastructure is stable before we snapshot.
+      if (signal.aborted) throw new Error('Update aborted by admin');
+      this.appendLog('Reconciling infrastructure...');
+      await this.reconcileInfrastructure(imageTag);
+
       // 2. Pre-update backup (controlled by dashboard setting)
       // If the backup fails or times out, the update STOPS. The admin can use
       // Reset to abort and retry, or toggle "Create backup before updating" off in Update Settings.
@@ -664,6 +730,9 @@ export class UpdateService {
       } catch (err) {
         this.appendLog(`Warning: Could not persist version to DB: ${errorToString(err)}`);
       }
+
+      // Update FLEET_VERSION in env file so future stack deploys use the correct image tags
+      await this.updateEnvVersion(cleanVersion);
 
       await this.persistState();
       // Do NOT clear persisted state here — the new container after fleet_api
@@ -1041,7 +1110,17 @@ export class UpdateService {
           // Another replica is handling or recently handled the check
           const cached = await valkey.get('fleet:update-notification');
           if (cached) {
-            try { this.cachedNotification = JSON.parse(cached); } catch { /* ignore */ }
+            try {
+              const parsed = JSON.parse(cached);
+              this.cachedNotification = parsed;
+              // Re-validate: the cache may be stale from before an update
+              this.cachedNotification.current = this.state.currentVersion;
+              if (this.cachedNotification.available && this.cachedNotification.latest?.tag) {
+                if (!this.isNewerVersion(this.cachedNotification.latest.tag, this.state.currentVersion)) {
+                  this.cachedNotification.available = false;
+                }
+              }
+            } catch { /* ignore malformed cache */ }
           }
           return;
         }
@@ -1410,6 +1489,128 @@ export class UpdateService {
     }
 
     throw new Error(`${serviceName} did not converge within ${timeoutMs / 1000}s — possible deployment issue`);
+  }
+
+  /**
+   * Reconcile infrastructure: download new stack files from the release,
+   * update env file with new config, and re-deploy the stack.
+   * This handles changes to docker-stack.yml (Traefik labels, network config,
+   * port changes, new env vars) that the rolling image update doesn't cover.
+   *
+   * Uses `docker stack deploy` which is idempotent — it only changes
+   * services whose config has actually changed.
+   * The FLEET_VERSION in env is kept at the OLD value so images don't change
+   * (the rolling update handles image changes separately).
+   */
+  private async reconcileInfrastructure(targetTag: string): Promise<void> {
+    this.appendLog('Reconciling infrastructure (stack files, env config)...');
+    const token = process.env['GITHUB_TOKEN'] ?? '';
+    const repo = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
+
+    // Use the tag as-is for the raw GitHub URL (could be "1.2.3" or "v1.2.3")
+    // Try with 'v' prefix first (standard release tag), fall back to plain
+    const versions = targetTag.startsWith('v') ? [targetTag, targetTag.slice(1)] : [`v${targetTag}`, targetTag];
+
+    const authCurl = token ? `-H "Authorization: token ${token}"` : '';
+
+    // Build the shell script that runs on the host
+    const script = `
+set -e
+
+FLEET_DIR="/opt/fleet"
+STACK_FILE="\${FLEET_DIR}/docker-stack.yml"
+TRAEFIK_DIR="\${FLEET_DIR}/traefik"
+ENV_FILE="\${FLEET_DIR}/config/env"
+
+mkdir -p "\${TRAEFIK_DIR}"
+
+# 1. Download new stack files from the release tag
+DOWNLOADED=false
+for TAG in ${versions.join(' ')}; do
+  STACK_URL="https://raw.githubusercontent.com/${repo}/\${TAG}/docker/docker-stack.yml"
+  TRAEFIK_URL="https://raw.githubusercontent.com/${repo}/\${TAG}/docker/traefik/traefik.yml"
+  if curl -fsSL ${authCurl} "\${STACK_URL}" -o "\${STACK_FILE}.new" 2>/dev/null; then
+    curl -fsSL ${authCurl} "\${TRAEFIK_URL}" -o "\${TRAEFIK_DIR}/traefik.yml.new" 2>/dev/null || true
+    DOWNLOADED=true
+    echo "Downloaded stack files from tag \${TAG}"
+    break
+  fi
+done
+
+if [ "\${DOWNLOADED}" != "true" ]; then
+  echo "WARN: Could not download stack files — skipping infrastructure reconciliation"
+  exit 0
+fi
+
+# 2. Backup old files and move new ones in place
+cp "\${STACK_FILE}" "\${STACK_FILE}.bak" 2>/dev/null || true
+mv "\${STACK_FILE}.new" "\${STACK_FILE}"
+if [ -f "\${TRAEFIK_DIR}/traefik.yml.new" ]; then
+  cp "\${TRAEFIK_DIR}/traefik.yml" "\${TRAEFIK_DIR}/traefik.yml.bak" 2>/dev/null || true
+  mv "\${TRAEFIK_DIR}/traefik.yml.new" "\${TRAEFIK_DIR}/traefik.yml"
+  # Substitute ACME email in Traefik config
+  ACME_EMAIL=\$(grep '^ADMIN_EMAIL=' "\${ENV_FILE}" | cut -d= -f2)
+  sed -i "s|\\\${ACME_EMAIL}|\${ACME_EMAIL}|g" "\${TRAEFIK_DIR}/traefik.yml"
+fi
+
+# 3. Update env file: migrate REGISTRY_URL from IP:5000 to platform domain
+PLATFORM_DOMAIN=\$(grep '^PLATFORM_DOMAIN=' "\${ENV_FILE}" | cut -d= -f2)
+CURRENT_REGISTRY=\$(grep '^REGISTRY_URL=' "\${ENV_FILE}" | cut -d= -f2)
+if echo "\${CURRENT_REGISTRY}" | grep -q ':5000'; then
+  sed -i "s|^REGISTRY_URL=.*|REGISTRY_URL=\${PLATFORM_DOMAIN}|" "\${ENV_FILE}"
+  echo "Migrated REGISTRY_URL from \${CURRENT_REGISTRY} to \${PLATFORM_DOMAIN}"
+fi
+
+# 4. Add REGISTRY_HTTP_SECRET if missing
+if ! grep -q '^REGISTRY_HTTP_SECRET=' "\${ENV_FILE}"; then
+  echo "REGISTRY_HTTP_SECRET=\$(openssl rand -hex 32)" >> "\${ENV_FILE}"
+  echo "Added REGISTRY_HTTP_SECRET to env"
+fi
+
+# 5. Re-deploy the stack to apply config changes
+# Source env for variable substitution
+set -a
+. "\${ENV_FILE}"
+set +a
+
+# Extract passwords for stack substitution
+VALKEY_PASSWORD=\$(echo "\${VALKEY_URL}" | sed -n 's|redis://:\\([^@]*\\)@.*|\\1|p')
+export VALKEY_PASSWORD
+
+cd "\${FLEET_DIR}"
+docker stack deploy -c docker-stack.yml --with-registry-auth fleet 2>&1 || echo "WARN: stack deploy had errors (non-fatal)"
+echo "Infrastructure reconciliation complete"
+`;
+
+    try {
+      const result = await orchestrator.runOnLocalHost(script, { timeoutMs: 120000 });
+      for (const line of result.stdout.split('\n').filter(Boolean)) {
+        this.appendLog(`  [infra] ${line}`);
+      }
+    } catch (err) {
+      // Non-fatal — the update can still proceed even if infra reconciliation fails.
+      // The new code will work, just some stack config changes won't be applied until
+      // the admin manually re-deploys or the next update.
+      this.appendLog(`  [infra] WARNING: Infrastructure reconciliation failed: ${errorToString(err)}`);
+      this.appendLog('  [infra] Stack config changes may not be fully applied. Check Settings > Registry for health.');
+    }
+  }
+
+  /**
+   * Update FLEET_VERSION in the env file on the host after a successful update.
+   * This ensures future `docker stack deploy` runs use the correct image version.
+   */
+  private async updateEnvVersion(version: string): Promise<void> {
+    const cleanVersion = version.replace(/^v/, '');
+    try {
+      await orchestrator.runOnLocalHost(
+        `sed -i "s|^FLEET_VERSION=.*|FLEET_VERSION=${cleanVersion}|" /opt/fleet/config/env`,
+        { timeoutMs: 10000 },
+      );
+      this.appendLog(`Updated FLEET_VERSION in env to ${cleanVersion}`);
+    } catch {
+      this.appendLog('Warning: Could not update FLEET_VERSION in env file (non-fatal).');
+    }
   }
 
   private async verifyServiceHealth(serviceNames: readonly string[] = FLEET_SERVICES): Promise<void> {

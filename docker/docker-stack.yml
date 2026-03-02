@@ -261,13 +261,11 @@ services:
           cpus: "0.1"
 
   # ─── Container Registry ────────────────────────────────────────────
+  # Proxied through Traefik at https://<PLATFORM_DOMAIN>/v2/
+  # No published port — all traffic goes through Traefik (TLS, no insecure).
+  # Docker push/pull uses the platform domain as the registry URL.
   registry:
     image: registry:2
-    ports:
-      - target: 5000
-        published: 5000
-        protocol: tcp
-        mode: ingress
     volumes:
       - registry_data:/var/lib/registry
       - /opt/fleet/registry-auth:/auth:ro
@@ -276,8 +274,10 @@ services:
       REGISTRY_AUTH: htpasswd
       REGISTRY_AUTH_HTPASSWD_REALM: "Fleet Registry"
       REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET:-fleet-registry-secret}
     networks:
       - fleet_internal
+      - fleet_public
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:5000/v2/ || exit 1"]
       interval: 15s
@@ -301,6 +301,12 @@ services:
         reservations:
           memory: 64M
           cpus: "0.1"
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.registry.rule=Host(`${PLATFORM_DOMAIN}`) && PathPrefix(`/v2`)"
+        - "traefik.http.routers.registry.entrypoints=websecure"
+        - "traefik.http.routers.registry.tls.certresolver=letsencrypt"
+        - "traefik.http.services.registry.loadbalancer.server.port=5000"
 
 # ─── Networks ──────────────────────────────────────────────────────────
 networks:

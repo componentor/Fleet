@@ -1680,6 +1680,26 @@
         "confirmSelfHealDesc": "Dies führt den vollständigen Selbstreparaturprozess aus: Problem beheben, PR erstellen, CI überprüfen, mergen, Release erstellen und Plattform aktualisieren. Sind Sie sicher?",
         "selfHeal": "Selbstreparatur"
       },
+      "registry": {
+        "title": "Integrierte Registry",
+        "desc": "Die integrierte Docker-Registry der Plattform, über Traefik mit TLS vermittelt. Wird für benutzerdefinierte Upload-Bereitstellungen verwendet.",
+        "checkHealth": "Zustand prüfen",
+        "service": "Dienst",
+        "running": "Läuft",
+        "stopped": "Gestoppt",
+        "endpoint": "Endpunkt",
+        "reachable": "Erreichbar",
+        "unreachable": "Nicht erreichbar",
+        "auth": "Authentifizierung",
+        "authenticated": "OK",
+        "authFailed": "Auth fehlgeschlagen",
+        "url": "Registry-URL",
+        "repair": "Registry reparieren",
+        "repairing": "Wird repariert...",
+        "repairDesc": "Erzwingt einen Neustart des Registry-Dienstes und überprüft, ob er wieder funktionsfähig wird.",
+        "repairSuccess": "Registry erfolgreich repariert",
+        "repairFailed": "Registry-Reparatur fehlgeschlagen"
+      },
       "orchestrator": {
         "title": "Orchestrator",
         "titleDesc": "Wählen Sie das Container-Orchestrierungs-Backend für neue und bestehende Dienste. Docker Swarm und Kubernetes können gleichzeitig laufen.",

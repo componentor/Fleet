@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft, Wrench } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -137,6 +137,12 @@ const newCredUsername = ref('')
 const newCredPassword = ref('')
 const credError = ref('')
 const connectingGithub = ref(false)
+
+// Built-in registry health
+const registryHealth = ref<{ registryUrl: string; reachable: boolean; authWorks: boolean; serviceRunning: boolean; error?: string } | null>(null)
+const checkingRegistryHealth = ref(false)
+const repairingRegistry = ref(false)
+const registryRepairResult = ref<{ success: boolean; message: string } | null>(null)
 
 // Support
 const supportEnabledSetting = ref(false)
@@ -725,6 +731,34 @@ async function removeCredential(id: string) {
   }
 }
 
+// Built-in registry health
+async function checkRegistryHealth() {
+  checkingRegistryHealth.value = true
+  registryRepairResult.value = null
+  try {
+    const res = await api.get<any>('/settings/registry/health')
+    registryHealth.value = res
+  } catch (err: any) {
+    registryHealth.value = { registryUrl: '', reachable: false, authWorks: false, serviceRunning: false, error: err?.body?.error || 'Health check failed' }
+  } finally {
+    checkingRegistryHealth.value = false
+  }
+}
+
+async function repairRegistry() {
+  repairingRegistry.value = true
+  registryRepairResult.value = null
+  try {
+    const res = await api.post<any>('/settings/registry/repair', {})
+    registryRepairResult.value = { success: res.success, message: res.success ? 'Registry repaired successfully' : (res.error || 'Repair failed') }
+    if (res.success) await checkRegistryHealth()
+  } catch (err: any) {
+    registryRepairResult.value = { success: false, message: err?.body?.error || 'Repair failed' }
+  } finally {
+    repairingRegistry.value = false
+  }
+}
+
 // Self-Healing settings
 async function fetchSelfHealing() {
   try {
@@ -925,6 +959,7 @@ onMounted(() => {
   fetchLogArchiveSettings()
   fetchBackupDefaults()
   fetchRegistryCreds()
+  checkRegistryHealth()
   fetchSupportSettings()
   fetchTranslation()
   fetchSelfHealing()
@@ -1717,6 +1752,80 @@ onMounted(() => {
         </div>
 
         <!-- Registry Credentials -->
+        <!-- Built-in Registry Health -->
+        <div v-if="activeSection === 'registry'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden mb-6">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <Server class="w-5 h-5 text-primary-500" />
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.registry.title') }}</h2>
+                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.registry.desc') }}</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  @click="checkRegistryHealth"
+                  :disabled="checkingRegistryHealth"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                >
+                  <Loader2 v-if="checkingRegistryHealth" class="w-4 h-4 animate-spin" />
+                  <RefreshCw v-else class="w-4 h-4" />
+                  {{ t('super.settings.registry.checkHealth') }}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="p-6 space-y-4">
+            <div v-if="registryHealth" class="space-y-3">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="p-3 rounded-lg border" :class="registryHealth.serviceRunning ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
+                  <p class="text-xs font-medium" :class="registryHealth.serviceRunning ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">{{ t('super.settings.registry.service') }}</p>
+                  <p class="text-sm font-semibold mt-1" :class="registryHealth.serviceRunning ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200'">
+                    {{ registryHealth.serviceRunning ? t('super.settings.registry.running') : t('super.settings.registry.stopped') }}
+                  </p>
+                </div>
+                <div class="p-3 rounded-lg border" :class="registryHealth.reachable ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
+                  <p class="text-xs font-medium" :class="registryHealth.reachable ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">{{ t('super.settings.registry.endpoint') }}</p>
+                  <p class="text-sm font-semibold mt-1" :class="registryHealth.reachable ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200'">
+                    {{ registryHealth.reachable ? t('super.settings.registry.reachable') : t('super.settings.registry.unreachable') }}
+                  </p>
+                </div>
+                <div class="p-3 rounded-lg border" :class="registryHealth.authWorks ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20'">
+                  <p class="text-xs font-medium" :class="registryHealth.authWorks ? 'text-green-700 dark:text-green-300' : 'text-yellow-700 dark:text-yellow-300'">{{ t('super.settings.registry.auth') }}</p>
+                  <p class="text-sm font-semibold mt-1" :class="registryHealth.authWorks ? 'text-green-800 dark:text-green-200' : 'text-yellow-800 dark:text-yellow-200'">
+                    {{ registryHealth.authWorks ? t('super.settings.registry.authenticated') : t('super.settings.registry.authFailed') }}
+                  </p>
+                </div>
+              </div>
+              <div v-if="registryHealth.registryUrl" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('super.settings.registry.url') }}: <code class="text-gray-700 dark:text-gray-300">{{ registryHealth.registryUrl }}</code>
+              </div>
+              <div v-if="registryHealth.error" class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p class="text-sm text-red-700 dark:text-red-300">{{ registryHealth.error }}</p>
+              </div>
+              <div v-if="!registryHealth.reachable || !registryHealth.serviceRunning" class="flex items-center gap-3">
+                <button
+                  @click="repairRegistry"
+                  :disabled="repairingRegistry"
+                  class="flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="repairingRegistry" class="w-4 h-4 animate-spin" />
+                  <Wrench v-else class="w-4 h-4" />
+                  {{ repairingRegistry ? t('super.settings.registry.repairing') : t('super.settings.registry.repair') }}
+                </button>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('super.settings.registry.repairDesc') }}</p>
+              </div>
+              <div v-if="registryRepairResult" class="p-3 rounded-lg border" :class="registryRepairResult.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
+                <p class="text-sm" :class="registryRepairResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">{{ registryRepairResult.message }}</p>
+              </div>
+            </div>
+            <div v-else-if="checkingRegistryHealth" class="flex items-center justify-center py-6">
+              <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+            </div>
+          </div>
+        </div>
+
         <div v-if="activeSection === 'registry'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between">

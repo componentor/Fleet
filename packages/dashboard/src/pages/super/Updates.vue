@@ -145,6 +145,15 @@ async function fetchAll() {
     const statusVersion = statusData?.currentVersion?.replace(/^v/, '') ?? ''
     const notifVersion = notif.current?.replace(/^v/, '') ?? ''
     currentVersion.value = statusVersion || notifVersion || currentVersion.value
+    // Final guard: never show "update available" if current version matches latest
+    // This catches any stale cache, multi-replica inconsistency, or race condition.
+    if (updateAvailable.value && latestVersion.value && currentVersion.value) {
+      const cleanCurrent = currentVersion.value.replace(/^v/, '').replace(/-.*$/, '')
+      const cleanLatest = latestVersion.value.replace(/^v/, '').replace(/-.*$/, '')
+      if (cleanCurrent === cleanLatest) {
+        updateAvailable.value = false
+      }
+    }
     // Sync to shared store so SuperLayout sidebar stays in sync
     if (currentVersion.value) {
       updateVersion(currentVersion.value, latestVersion.value, updateAvailable.value)
@@ -357,6 +366,15 @@ function startPolling() {
               clearInterval(pingInterval)
               const savedState = { ...updateState.value }
               await fetchAll()
+              // Force a fresh check — the cached /notification on a newly restarted
+              // API may still have stale "available: true" from before the update.
+              try {
+                const freshCheck = await api.get<any>('/updates/check')
+                updateAvailable.value = freshCheck.available ?? false
+                currentVersion.value = freshCheck.current?.replace(/^v/, '') ?? currentVersion.value
+                latestVersion.value = freshCheck.latest?.tag ?? latestVersion.value
+                updateVersion(currentVersion.value, latestVersion.value, updateAvailable.value)
+              } catch { /* non-critical — fetchAll already ran */ }
               updateState.value = savedState
               waitingForRestart.value = false
             } catch {

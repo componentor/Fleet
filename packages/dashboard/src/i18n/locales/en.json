@@ -1685,6 +1685,26 @@
         "confirmSelfHealDesc": "This will run the full self-repair loop: fix the issue, create a PR, verify CI, merge, create a release, and upgrade the platform. Are you sure?",
         "selfHeal": "Self-Repair"
       },
+      "registry": {
+        "title": "Built-in Registry",
+        "desc": "The platform's built-in Docker registry, proxied through Traefik with TLS. Used for custom upload deployments.",
+        "checkHealth": "Check Health",
+        "service": "Service",
+        "running": "Running",
+        "stopped": "Stopped",
+        "endpoint": "Endpoint",
+        "reachable": "Reachable",
+        "unreachable": "Unreachable",
+        "auth": "Authentication",
+        "authenticated": "OK",
+        "authFailed": "Auth Failed",
+        "url": "Registry URL",
+        "repair": "Repair Registry",
+        "repairing": "Repairing...",
+        "repairDesc": "Force-restarts the registry service and verifies it becomes healthy.",
+        "repairSuccess": "Registry repaired successfully",
+        "repairFailed": "Registry repair failed"
+      },
       "orchestrator": {
         "title": "Orchestrator",
         "titleDesc": "Choose the container orchestration backend for new and existing services. Both Docker Swarm and Kubernetes can run simultaneously.",

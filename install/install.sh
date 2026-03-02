@@ -263,6 +263,7 @@ collect_config() {
   DB_PASSWORD=$(openssl rand -hex 16)
   VALKEY_PASSWORD=$(openssl rand -hex 16)
   REGISTRY_PASSWORD=$(openssl rand -hex 16)
+  REGISTRY_HTTP_SECRET=$(openssl rand -hex 32)
 
   # Save config
   cat > "$FLEET_DIR/config/env" <<EOF
@@ -282,9 +283,10 @@ PORT=3000
 API_URL=http://api:3000
 TRUST_PROXY=1
 GITHUB_TOKEN=${GITHUB_TOKEN}
-REGISTRY_URL=localhost:5000
+REGISTRY_URL=${PLATFORM_DOMAIN}
 REGISTRY_USER=fleet
 REGISTRY_PASSWORD=${REGISTRY_PASSWORD}
+REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
 EOF
 
   # Create registry htpasswd file (apache2-utils/httpd-tools installed in install_dependencies)

@@ -1680,6 +1680,26 @@
         "confirmSelfHealDesc": "这将运行完整的自动修复流程：修复问题、创建 PR、验证 CI、合并、创建发布并升级平台。确定要继续吗？",
         "selfHeal": "自动修复"
       },
+      "registry": {
+        "title": "内置注册表",
+        "desc": "平台的内置 Docker 注册表，通过 Traefik 代理并启用 TLS。用于自定义上传部署。",
+        "checkHealth": "检查健康",
+        "service": "服务",
+        "running": "运行中",
+        "stopped": "已停止",
+        "endpoint": "端点",
+        "reachable": "可达",
+        "unreachable": "不可达",
+        "auth": "认证",
+        "authenticated": "正常",
+        "authFailed": "认证失败",
+        "url": "注册表 URL",
+        "repair": "修复注册表",
+        "repairing": "修复中...",
+        "repairDesc": "强制重启注册表服务并验证其恢复健康状态。",
+        "repairSuccess": "注册表修复成功",
+        "repairFailed": "注册表修复失败"
+      },
       "orchestrator": {
         "title": "编排器",
         "titleDesc": "选择新服务和现有服务的容器编排后端。Docker Swarm 和 Kubernetes 可以同时运行。",

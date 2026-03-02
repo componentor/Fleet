@@ -2023,4 +2023,129 @@ settings.post('/orchestrator/install-metrics-server', authMiddleware, requireAdm
   }
 }) as any);
 
+// ────────────────────────────────────────────────────────────────────────────
+// Registry health check & repair
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /settings/registry/health — check internal registry health
+settings.get('/registry/health', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  const REGISTRY_URL = process.env['REGISTRY_URL'] ?? '';
+  const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
+  const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
+
+  const result: {
+    registryUrl: string;
+    reachable: boolean;
+    authWorks: boolean;
+    serviceRunning: boolean;
+    error?: string;
+  } = {
+    registryUrl: REGISTRY_URL,
+    reachable: false,
+    authWorks: false,
+    serviceRunning: false,
+  };
+
+  try {
+    // Check if the registry Swarm/K8s service is running
+    try {
+      const services = await orchestrator.listServices({ name: ['fleet_registry', 'registry'] });
+      result.serviceRunning = services.some((s: any) => {
+        const replicas = (s as any).Spec?.Mode?.Replicated?.Replicas ?? (s as any).spec?.replicas ?? 0;
+        return replicas > 0;
+      });
+    } catch {
+      // If listServices fails, try checking via the orchestrator's own mechanism
+      result.serviceRunning = false;
+    }
+
+    // Check /v2/ endpoint through Traefik (HTTPS)
+    if (REGISTRY_URL) {
+      try {
+        const resp = await fetch(`https://${REGISTRY_URL}/v2/`, {
+          signal: AbortSignal.timeout(10000),
+          headers: REGISTRY_USER && REGISTRY_PASSWORD
+            ? { Authorization: `Basic ${Buffer.from(`${REGISTRY_USER}:${REGISTRY_PASSWORD}`).toString('base64')}` }
+            : {},
+        });
+        result.reachable = resp.status === 200 || resp.status === 401;
+        result.authWorks = resp.status === 200;
+      } catch (err) {
+        result.error = `Registry unreachable at https://${REGISTRY_URL}/v2/: ${String(err)}`;
+      }
+    }
+
+    return c.json(result);
+  } catch (err) {
+    logToErrorTable({ level: 'error', message: `Registry health check failed: ${String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'registry', operation: 'health' } });
+    return c.json({ ...result, error: String(err) }, 500);
+  }
+}) as any);
+
+// POST /settings/registry/repair — force-restart the registry service
+settings.post('/registry/repair', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  const logs: string[] = [];
+  try {
+    // Force-update the registry service (recreates containers)
+    logs.push('Force-restarting registry service...');
+    const result = await orchestrator.runOnLocalHost(
+      'docker service update --force fleet_registry 2>&1 || echo "SWARM_FAIL"',
+      { timeoutMs: 60000 },
+    );
+    logs.push(result.stdout);
+
+    if (result.stdout.includes('SWARM_FAIL')) {
+      logs.push('Swarm force-update failed, trying full recreate...');
+      // Remove and re-deploy just the registry service
+      const removeResult = await orchestrator.runOnLocalHost(
+        'docker service rm fleet_registry 2>&1; sleep 2; ' +
+        'cd /opt/fleet && docker stack deploy -c docker-stack.yml --with-registry-auth fleet 2>&1',
+        { timeoutMs: 120000 },
+      );
+      logs.push(removeResult.stdout);
+    }
+
+    // Wait for registry to be healthy
+    logs.push('Waiting for registry to become healthy...');
+    const REGISTRY_URL = process.env['REGISTRY_URL'] ?? '';
+    const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
+    const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
+
+    let healthy = false;
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      try {
+        const resp = await fetch(`https://${REGISTRY_URL}/v2/`, {
+          signal: AbortSignal.timeout(5000),
+          headers: REGISTRY_USER && REGISTRY_PASSWORD
+            ? { Authorization: `Basic ${Buffer.from(`${REGISTRY_USER}:${REGISTRY_PASSWORD}`).toString('base64')}` }
+            : {},
+        });
+        if (resp.status === 200) {
+          healthy = true;
+          break;
+        }
+      } catch { /* retry */ }
+    }
+
+    if (healthy) {
+      logs.push('Registry is healthy and responding.');
+      return c.json({ success: true, logs });
+    } else {
+      logs.push('Registry did not become healthy within 60 seconds.');
+      return c.json({ success: false, logs, error: 'Registry did not become healthy' }, 500);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({ level: 'error', message: `Registry repair failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'registry', operation: 'repair' } });
+    return c.json({ success: false, logs, error: message }, 500);
+  }
+}) as any);
+
 export default settings;
