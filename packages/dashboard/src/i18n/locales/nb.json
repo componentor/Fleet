@@ -1680,6 +1680,26 @@
         "confirmSelfHealDesc": "Dette vil kjøre hele selvreparasjonsløkken: fikse problemet, opprette PR, verifisere CI, merge, opprette en release og oppgradere plattformen. Er du sikker?",
         "selfHeal": "Selvreparasjon"
       },
+      "registry": {
+        "title": "Innebygd Register",
+        "desc": "Plattformens innebygde Docker-register, proxyet gjennom Traefik med TLS. Brukes for egendefinerte opplastingsimplementeringer.",
+        "checkHealth": "Sjekk Helse",
+        "service": "Tjeneste",
+        "running": "Kjører",
+        "stopped": "Stoppet",
+        "endpoint": "Endepunkt",
+        "reachable": "Tilgjengelig",
+        "unreachable": "Utilgjengelig",
+        "auth": "Autentisering",
+        "authenticated": "OK",
+        "authFailed": "Autentisering Feilet",
+        "url": "Register-URL",
+        "repair": "Reparer Register",
+        "repairing": "Reparerer...",
+        "repairDesc": "Tvangsstarter registertjenesten på nytt og verifiserer at den blir frisk.",
+        "repairSuccess": "Registeret ble reparert",
+        "repairFailed": "Registerreparasjon feilet"
+      },
       "orchestrator": {
         "title": "Orkestrator",
         "titleDesc": "Velg container-orkestreringsbackend for nye og eksisterende tjenester. Både Docker Swarm og Kubernetes kan kjøre samtidig.",

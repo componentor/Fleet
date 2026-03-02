@@ -157,6 +157,28 @@ try {
   await buildService.initCancelSubscription()
 } catch { /* non-critical */ }
 
+// Verify built-in registry is reachable (non-blocking startup check)
+try {
+  const REGISTRY_URL = process.env['REGISTRY_URL'] ?? ''
+  const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet'
+  const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? ''
+  if (REGISTRY_URL) {
+    const resp = await fetch(`https://${REGISTRY_URL}/v2/`, {
+      signal: AbortSignal.timeout(10000),
+      headers: REGISTRY_USER && REGISTRY_PASSWORD
+        ? { Authorization: `Basic ${Buffer.from(`${REGISTRY_USER}:${REGISTRY_PASSWORD}`).toString('base64')}` }
+        : {},
+    })
+    if (resp.status === 200) {
+      logger.info({ registry: REGISTRY_URL }, 'Built-in registry is healthy')
+    } else {
+      logger.warn({ registry: REGISTRY_URL, status: resp.status }, 'Registry returned non-200 — builds may fail until repaired')
+    }
+  }
+} catch (err) {
+  logger.warn({ err }, 'Built-in registry health check failed — builds may fail. Use Settings > Registry > Repair to fix.')
+}
+
 // Initialize background job scheduler (registers repeatable BullMQ jobs)
 try { await schedulerService.initialize() } catch (err) {
   logger.error({ err }, 'Scheduler initialization failed')

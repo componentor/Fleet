@@ -2157,10 +2157,26 @@ export async function getRegistryAuthForImage(
     where: and(isNull(registryCredentials.accountId), eq(registryCredentials.registry, registry)),
   });
 
-  if (!cred) return undefined;
-  return {
-    username: cred.username,
-    password: decrypt(cred.password),
-    serveraddress: `https://${cred.registry}`,
-  };
+  if (cred) {
+    return {
+      username: cred.username,
+      password: decrypt(cred.password),
+      serveraddress: `https://${cred.registry}`,
+    };
+  }
+
+  // Fall back to built-in Fleet registry credentials from env vars.
+  // This handles images pushed to the platform's own registry (proxied through Traefik).
+  const BUILTIN_REGISTRY = process.env['REGISTRY_URL'] ?? '';
+  const BUILTIN_USER = process.env['REGISTRY_USER'] ?? '';
+  const BUILTIN_PASS = process.env['REGISTRY_PASSWORD'] ?? '';
+  if (BUILTIN_REGISTRY && BUILTIN_USER && BUILTIN_PASS && registry === BUILTIN_REGISTRY) {
+    return {
+      username: BUILTIN_USER,
+      password: BUILTIN_PASS,
+      serveraddress: `https://${BUILTIN_REGISTRY}`,
+    };
+  }
+
+  return undefined;
 }
