@@ -122,6 +122,11 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/Errors.vue'),
       },
       {
+        path: 'logs',
+        name: 'super-logs',
+        component: () => import('@/pages/super/Logs.vue'),
+      },
+      {
         path: 'updates',
         name: 'super-updates',
         component: () => import('@/pages/super/Updates.vue'),
@@ -269,6 +274,11 @@ const panelRoutes: RouteRecordRaw[] = [
         path: 'backups',
         name: 'panel-backups',
         component: () => import('@/pages/panel/Backups.vue'),
+      },
+      {
+        path: 'logs',
+        name: 'panel-logs',
+        component: () => import('@/pages/panel/Logs.vue'),
       },
       {
         path: 'ssh',

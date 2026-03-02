@@ -39,6 +39,7 @@ import {
   Megaphone,
   LifeBuoy,
   Bot,
+  FileText,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -132,6 +133,7 @@ const allNavGroups: NavGroup[] = [
     items: [
       { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText, section: 'events' },
       { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug, section: 'errors' },
+      { nameKey: 'nav.logs', path: '/admin/logs', icon: FileText, section: 'services' },
       { nameKey: 'nav.jobs', path: '/admin/jobs', icon: ListFilter, section: 'jobs' },
     ],
   },

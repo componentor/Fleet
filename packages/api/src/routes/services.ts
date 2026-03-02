@@ -635,7 +635,105 @@ const updateDockerfileRoute = createRoute({
   },
 });
 
+const aggregatedLogsQuerySchema = z.object({
+  tail: z.string().optional().openapi({ description: 'Number of log lines per service (default 100, max 1000)' }),
+  serviceId: z.string().optional().openapi({ description: 'Filter to a single service ID' }),
+});
+
+const aggregatedLogsRoute = createRoute({
+  method: 'get',
+  path: '/logs',
+  tags: ['Services'],
+  summary: 'Get aggregated container logs across all account services',
+  security: bearerSecurity,
+  request: {
+    query: aggregatedLogsQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Aggregated service logs'),
+    ...standardErrors,
+  },
+});
+
 // ── Route handlers ──
+
+// GET /logs — aggregated container logs across all account services
+serviceRoutes.openapi(aggregatedLogsRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const tail = Math.min(parseInt(c.req.query('tail') ?? '100', 10) || 100, 1000);
+  const filterServiceId = c.req.query('serviceId') || '';
+
+  // Fetch account services that have Docker deployments
+  const where = filterServiceId
+    ? and(eq(services.id, filterServiceId), eq(services.accountId, accountId), isNull(services.deletedAt))
+    : and(eq(services.accountId, accountId), isNull(services.deletedAt));
+
+  const accountServices = await db.query.services.findMany({
+    where,
+    columns: { id: true, name: true, dockerServiceId: true },
+  });
+
+  const deployedServices = accountServices.filter((s) => s.dockerServiceId);
+  const serviceList = accountServices.map((s) => ({ id: s.id, name: s.name, hasDocker: !!s.dockerServiceId }));
+
+  // Fetch logs from each service in parallel (limited to 10 at a time)
+  const logEntries: { serviceName: string; serviceId: string; line: string; timestamp: string }[] = [];
+
+  const fetchPromises = deployedServices.slice(0, 10).map(async (svc) => {
+    try {
+      const result = await dockerService.getServiceLogs(svc.dockerServiceId!, { tail: Math.min(tail, 200), follow: false });
+
+      let raw: Buffer;
+      if (Buffer.isBuffer(result)) {
+        raw = result;
+      } else {
+        const chunks: Buffer[] = [];
+        for await (const chunk of result) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+        }
+        raw = Buffer.concat(chunks);
+      }
+
+      // Demultiplex Docker frame headers
+      const lines: string[] = [];
+      let offset = 0;
+      while (offset + 8 <= raw.length) {
+        const size = raw.readUInt32BE(offset + 4);
+        if (offset + 8 + size > raw.length) break;
+        const payload = raw.subarray(offset + 8, offset + 8 + size).toString('utf-8');
+        lines.push(payload);
+        offset += 8 + size;
+      }
+
+      const text = lines.length > 0 ? lines.join('') : raw.toString('utf-8');
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        // Docker timestamps are at the start: "2024-01-01T00:00:00.000000000Z ..."
+        const tsMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)\s/);
+        logEntries.push({
+          serviceName: svc.name,
+          serviceId: svc.id,
+          line: tsMatch ? trimmed.slice(tsMatch[0].length) : trimmed,
+          timestamp: tsMatch?.[1] ?? new Date().toISOString(),
+        });
+      }
+    } catch {
+      // Service may not exist in Docker — skip
+    }
+  });
+
+  await Promise.all(fetchPromises);
+
+  // Sort by timestamp descending (newest first)
+  logEntries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+  return c.json({ logs: logEntries.slice(0, tail * 10), services: serviceList });
+}) as any);
 
 // GET / — list services for the current account (with live Docker status sync)
 serviceRoutes.openapi(listServicesRoute, (async (c: any) => {

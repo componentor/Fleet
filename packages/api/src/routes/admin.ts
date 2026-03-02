@@ -1132,4 +1132,95 @@ adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
   return c.json({ translated, failed });
 }) as any);
 
+// ── Platform Logs (Docker container logs for fleet infrastructure) ──
+
+const ALLOWED_FLEET_SERVICES = ['fleet_api', 'fleet_dashboard', 'fleet_traefik'] as const;
+
+const platformLogsQuerySchema = z.object({
+  service: z.string().optional().openapi({ description: 'Docker service name (default: fleet_api)' }),
+  tail: z.string().optional().openapi({ description: 'Number of log lines (default 500, max 5000)' }),
+  search: z.string().optional().openapi({ description: 'Filter log lines containing this text' }),
+});
+
+const platformLogsRoute = createRoute({
+  method: 'get',
+  path: '/logs',
+  tags: ['Admin'],
+  summary: 'Get Docker container logs for fleet infrastructure services',
+  security: bearerSecurity,
+  middleware: [requireAdminPermission('services', 'read')] as const,
+  request: {
+    query: platformLogsQuerySchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Platform logs'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
+  const serviceName = c.req.query('service') || 'fleet_api';
+  const tail = Math.min(parseInt(c.req.query('tail') ?? '500', 10) || 500, 5000);
+  const search = c.req.query('search')?.trim() || '';
+
+  if (!ALLOWED_FLEET_SERVICES.includes(serviceName as any)) {
+    return c.json({ error: `Invalid service. Allowed: ${ALLOWED_FLEET_SERVICES.join(', ')}` }, 400);
+  }
+
+  try {
+    // Find the Docker service by name
+    const allServices = await dockerService.listServices({ name: [serviceName] });
+    const svc = allServices.find((s: any) => s.Spec?.Name === serviceName);
+
+    if (!svc) {
+      return c.json({ logs: '', service: serviceName, warning: `Service "${serviceName}" not found in Docker Swarm.`, availableServices: ALLOWED_FLEET_SERVICES });
+    }
+
+    const result = await dockerService.getServiceLogs(svc.ID, { tail, follow: false });
+
+    // Dockerode returns a Buffer when follow=false
+    let raw: Buffer;
+    if (Buffer.isBuffer(result)) {
+      raw = result;
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of result) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
+      raw = Buffer.concat(chunks);
+    }
+
+    // Docker multiplexed log format: each frame has an 8-byte header
+    // [stream_type(1), 0, 0, 0, size(4 big-endian)] followed by payload
+    const lines: string[] = [];
+    let offset = 0;
+    while (offset + 8 <= raw.length) {
+      const size = raw.readUInt32BE(offset + 4);
+      if (offset + 8 + size > raw.length) break;
+      const payload = raw.subarray(offset + 8, offset + 8 + size).toString('utf-8');
+      lines.push(payload);
+      offset += 8 + size;
+    }
+
+    let logText = lines.length > 0 ? lines.join('') : raw.toString('utf-8');
+
+    // Server-side search filter
+    if (search) {
+      const lowerSearch = search.toLowerCase();
+      logText = logText
+        .split('\n')
+        .filter((line) => line.toLowerCase().includes(lowerSearch))
+        .join('\n');
+    }
+
+    return c.json({ logs: logText, service: serviceName, availableServices: ALLOWED_FLEET_SERVICES });
+  } catch (err: any) {
+    if (err?.statusCode === 404 || err?.reason === 'no such service') {
+      return c.json({ logs: '', service: serviceName, warning: `Docker service "${serviceName}" not found.`, availableServices: ALLOWED_FLEET_SERVICES });
+    }
+    logger.error({ err }, 'Platform log fetch failed');
+    return c.json({ error: 'Failed to fetch platform logs' }, 500);
+  }
+}) as any);
+
 export default adminRoutes;
