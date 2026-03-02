@@ -19,6 +19,7 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { migrationService } from '../services/storage/migration.service.js';
 import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { getMaintenanceQueue, isQueueAvailable } from '../services/queue.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import {
@@ -158,7 +159,7 @@ storageAdmin.openapi(getClusterRoute, (async (c: any) => {
   const cluster = clusters[0] ?? null;
   const health = await storageManager.getHealth();
   const nodes = await db.query.storageNodes.findMany();
-  const platformVolumeMode = await dockerService.getPlatformVolumeMode();
+  const platformVolumeMode = await orchestrator.getPlatformVolumeMode();
 
   return c.json({
     cluster: cluster ?? {
@@ -364,7 +365,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
       logger.info({ packages: prerequisites.map((p) => p.package) }, 'Installing storage prerequisites on all nodes (this may take a few minutes)...');
       const installCommands = prerequisites.map((p) => p.installCommand);
       const command = `apt-get update -qq && ${installCommands.join(' && ')}`;
-      prereqResult = await dockerService.runOnAllNodes(command, { timeoutMs: 300_000 });
+      prereqResult = await orchestrator.runOnAllNodes(command, { timeoutMs: 300_000 });
 
       if (!prereqResult.success) {
         logger.warn({ results: prereqResult.results }, 'Some nodes failed prerequisite installation');
@@ -398,7 +399,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
     let serviceVolumes: { applied: boolean; message: string } | undefined;
     try {
       if (storageManager.isVolumeDistributed) {
-        const svcResult = await dockerService.ensureServiceVolumeMount();
+        const svcResult = await orchestrator.ensureServiceVolumeMount();
         serviceVolumes = svcResult;
         logger.info({ serviceVolumes }, 'Service volume mount set up after storage cluster config');
       }
@@ -411,7 +412,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
     let platformVolumes: { mode: string; applied: boolean; message: string } | undefined;
     try {
       const volumeMode = storageManager.isVolumeDistributed ? 'distributed' : 'local';
-      const result = await dockerService.updatePlatformVolumeMounts(volumeMode);
+      const result = await orchestrator.updatePlatformVolumeMounts(volumeMode);
       platformVolumes = { mode: volumeMode, ...result };
       logger.info({ platformVolumes }, 'Platform volumes updated after storage cluster config');
     } catch (err) {
@@ -426,7 +427,7 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
     try {
       const useHostMount = storageManager.volumes.isReady() && !!storageManager.volumes.getHostMountPath;
       if (useHostMount || !storageManager.isVolumeDistributed) {
-        const allSvcs: any[] = await dockerService.listServices();
+        const allSvcs: any[] = await orchestrator.listServices();
         const userServices = allSvcs.filter((s) =>
           s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
         );
@@ -458,14 +459,14 @@ storageAdmin.openapi(postClusterRoute, (async (c: any) => {
               const hostPath = storageManager.volumes.getHostMountPath!(volumeName) ?? volumeName;
               try { await storageManager.volumes.createVolume(volumeName, 0); } catch { /* may exist */ }
               try {
-                await dockerService.copyVolumeData(volumeName, hostPath);
+                await orchestrator.copyVolumeData(volumeName, hostPath);
                 migrated.push(`${spec.Name}:${volumeName}`);
               } catch { /* best effort */ }
               newMounts.push({ Source: hostPath, Target: mount.Target, Type: 'bind' as const, ReadOnly: mount.ReadOnly ?? false });
             } else if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
               const volumeName = mount.Source.split('/').pop()!;
               try {
-                await dockerService.copyVolumeData(mount.Source, volumeName);
+                await orchestrator.copyVolumeData(mount.Source, volumeName);
                 migrated.push(`${spec.Name}:${volumeName}`);
               } catch { /* best effort */ }
               newMounts.push({ Source: volumeName, Target: mount.Target, Type: 'volume' as const, ReadOnly: mount.ReadOnly ?? false });
@@ -712,7 +713,7 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
   // Switch platform volumes back to local
   try {
     await storageManager.reload();
-    await dockerService.updatePlatformVolumeMounts('local');
+    await orchestrator.updatePlatformVolumeMounts('local');
     logger.info('Platform volumes switched back to local after storage reset');
   } catch (err) {
     logger.warn({ err }, 'Failed to switch platform volumes to local after storage reset');
@@ -870,7 +871,7 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
   const useHostMount = storageManager.volumes.isReady() && !!storageManager.volumes.getHostMountPath;
 
   // List all Docker services managed by Fleet (user services, not platform)
-  const allServices: any[] = await dockerService.listServices();
+  const allServices: any[] = await orchestrator.listServices();
   const fleetServices = allServices.filter((s) =>
     s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
   );
@@ -931,7 +932,7 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
 
         // Copy data from old Docker volume to new distributed mount
         try {
-          await dockerService.copyVolumeData(volumeName, hostPath);
+          await orchestrator.copyVolumeData(volumeName, hostPath);
           migrated.push(`${spec.Name}:${volumeName}`);
           logger.info({ service: spec.Name, volume: volumeName, hostPath }, 'Migrated volume data to distributed storage');
         } catch (err) {
@@ -950,7 +951,7 @@ storageAdmin.openapi(repairServicesRoute, (async (c: any) => {
 
         // Copy data from distributed mount back to Docker volume
         try {
-          await dockerService.copyVolumeData(mount.Source, volumeName);
+          await orchestrator.copyVolumeData(mount.Source, volumeName);
           migrated.push(`${spec.Name}:${volumeName}`);
           logger.info({ service: spec.Name, hostPath: mount.Source, volume: volumeName }, 'Migrated volume data from distributed storage to Docker volume');
         } catch (err) {
@@ -1014,8 +1015,8 @@ const applyPlatformVolumesRoute = createRoute({
 storageAdmin.openapi(applyPlatformVolumesRoute, (async (c: any) => {
   try {
     const mode = storageManager.isVolumeDistributed ? 'distributed' : 'local';
-    const result = await dockerService.updatePlatformVolumeMounts(mode);
-    const currentMode = await dockerService.getPlatformVolumeMode();
+    const result = await orchestrator.updatePlatformVolumeMounts(mode);
+    const currentMode = await orchestrator.getPlatformVolumeMode();
 
     return c.json({
       mode,
@@ -1086,7 +1087,7 @@ storageAdmin.openapi(installPrerequisitesRoute, (async (c: any) => {
   logger.info({ prerequisites: prerequisites.map((p) => p.package), command }, 'Installing storage prerequisites on all nodes');
 
   try {
-    const result = await dockerService.runOnAllNodes(command, { timeoutMs: 180_000 });
+    const result = await orchestrator.runOnAllNodes(command, { timeoutMs: 180_000 });
 
     if (result.success) {
       logger.info({ results: result.results }, 'Storage prerequisites installed on all nodes');

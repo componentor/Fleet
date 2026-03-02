@@ -6,71 +6,27 @@ import { storageManager } from './storage/storage-manager.js';
 import { logger } from './logger.js';
 import { db, registryCredentials, eq, and, isNull } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
+import type {
+  OrchestratorService,
+  CreateServiceOptions,
+  ContainerStats,
+  ServiceTaskInfo,
+  RegistryAuth,
+  RunOnNodesResult,
+  OneOffServiceOptions,
+} from './orchestrator.interface.js';
 
 const PLATFORM_CERTS_VOLUME = 'fleet-platform-certs';
 
 const docker = new Dockerode({ socketPath: '/var/run/docker.sock', version: 'v1.45' });
 
-export interface CreateSwarmServiceOptions {
-  name: string;
-  image: string;
-  replicas: number;
-  env: Record<string, string>;
-  ports: Array<{ target: number; published: number; protocol?: string }>;
-  volumes: Array<{ source: string; target: string; readonly?: boolean }>;
-  labels: Record<string, string>;
-  constraints: string[];
-  cpuLimit?: number;
-  memoryLimit?: number;
-  healthCheck?: {
-    cmd: string;
-    interval: number;
-    timeout: number;
-    retries: number;
-  };
-  updateParallelism: number;
-  updateDelay: string;
-  rollbackOnFailure: boolean;
-  networkId?: string;
-  networkIds?: string[];
-  readOnly?: boolean;
-  user?: string;
-  /** Max container writable layer size in MB (e.g. 10240 = 10 GB). Requires overlay2 + xfs pquota. */
-  storageLimitMb?: number;
-  restartCondition?: 'none' | 'on-failure' | 'any';
-  restartMaxAttempts?: number;
-  restartDelay?: string;
-  registryAuth?: { username: string; password: string; serveraddress: string };
-}
+/** @deprecated Use CreateServiceOptions from orchestrator.interface.ts */
+export type CreateSwarmServiceOptions = CreateServiceOptions;
 
-export interface ContainerStats {
-  cpuPercent: number;
-  memoryUsageBytes: number;
-  memoryLimitBytes: number;
-  memoryPercent: number;
-  networkRxBytes: number;
-  networkTxBytes: number;
-  blockReadBytes: number;
-  blockWriteBytes: number;
-  pids: number;
-}
+// Re-export interface types for backward compatibility
+export type { ContainerStats, ServiceTaskInfo } from './orchestrator.interface.js';
 
-export interface ServiceTaskInfo {
-  id: string;
-  nodeId: string;
-  status: string;
-  desiredState: string;
-  message: string;
-  error?: string;
-  containerStatus?: {
-    containerId: string;
-    pid: number;
-    exitCode?: number;
-  };
-  createdAt: string;
-}
-
-export class DockerService {
+export class DockerService implements OrchestratorService {
   /** Expose the raw Dockerode client for advanced operations. */
   getDockerClient(): Dockerode {
     return docker;
@@ -2031,6 +1987,104 @@ export class DockerService {
     }
 
     return { applied: false, message: `Unsupported storage provider: ${provider}` };
+  }
+
+  // ── Interface aliases (map generic names to Swarm-specific methods) ──
+
+  async getClusterInfo(): Promise<any> {
+    return this.getSwarmInfo();
+  }
+
+  async getJoinToken(): Promise<{ worker: string; manager: string }> {
+    return this.getSwarmJoinToken();
+  }
+
+  // ── One-off services (extracted from self-healing raw Dockerode usage) ──
+
+  async createOneOffService(opts: OneOffServiceOptions): Promise<{ id: string }> {
+    const spec: any = {
+      Name: opts.name,
+      Labels: opts.labels ?? {},
+      TaskTemplate: {
+        ContainerSpec: {
+          Image: opts.image,
+          Args: opts.cmd,
+          Env: opts.env
+            ? Object.entries(opts.env).map(([k, v]) => `${k}=${v}`)
+            : [],
+          Mounts: opts.mounts?.map((m) => ({
+            Type: 'volume' as const,
+            Source: m.source,
+            Target: m.target,
+            ReadOnly: m.readonly ?? false,
+          })),
+        },
+        RestartPolicy: {
+          Condition: opts.restartCondition ?? ('none' as const),
+          MaxAttempts: 0,
+        },
+        Resources: opts.memoryLimitMb
+          ? { Limits: { MemoryBytes: opts.memoryLimitMb * 1024 * 1024 } }
+          : undefined,
+        Networks: opts.networkIds?.map((id) => ({ Target: id })),
+      },
+      Mode: { Replicated: { Replicas: 1 } },
+    };
+
+    const svc = await docker.createService(spec);
+    return { id: svc.id };
+  }
+
+  async pollTaskCompletion(
+    serviceId: string,
+    timeoutMs = 300_000,
+  ): Promise<{ status: string; containerId?: string }> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 3000));
+
+      const tasks = await docker.listTasks({
+        filters: { service: [serviceId] },
+      });
+
+      const running = tasks.find((t: any) => t.Status?.State === 'running');
+      if (running?.Status?.ContainerStatus?.ContainerID) {
+        return {
+          status: 'running',
+          containerId: running.Status.ContainerStatus.ContainerID,
+        };
+      }
+
+      const completed = tasks.find((t: any) => t.Status?.State === 'complete');
+      if (completed) {
+        return {
+          status: 'complete',
+          containerId: completed.Status?.ContainerStatus?.ContainerID,
+        };
+      }
+
+      const failed = tasks.find(
+        (t: any) => t.Status?.State === 'failed' || t.Status?.State === 'rejected',
+      );
+      if (failed) {
+        return {
+          status: 'failed',
+          containerId: failed.Status?.ContainerStatus?.ContainerID,
+        };
+      }
+    }
+
+    return { status: 'timeout' };
+  }
+
+  async removeOneOffService(serviceId: string): Promise<void> {
+    try {
+      const service = docker.getService(serviceId);
+      await service.remove();
+    } catch {
+      /* ignore cleanup failures */
+    }
   }
 }
 

@@ -5,7 +5,8 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { buildService } from '../services/build.service.js';
-import { dockerService, getRegistryAuthForImage } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
+import { getRegistryAuthForImage } from '../services/docker.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
 import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.js';
@@ -364,7 +365,7 @@ webhookRoutes.openapi(registryWebhookRoute, (async (c: any) => {
   if (svc.dockerServiceId) {
     try {
       const registryAuth = await getRegistryAuthForImage(svc.accountId, svc.image);
-      await dockerService.updateService(svc.dockerServiceId, {
+      await orchestrator.updateService(svc.dockerServiceId, {
         image: svc.image,
       }, registryAuth);
 
@@ -670,7 +671,7 @@ authenticatedRoutes.openapi(rollbackRoute, (async (c: any) => {
   if (svc.dockerServiceId) {
     try {
       const rollbackAuth = await getRegistryAuthForImage(accountId, deployment.imageTag);
-      await dockerService.updateService(svc.dockerServiceId, {
+      await orchestrator.updateService(svc.dockerServiceId, {
         image: deployment.imageTag,
       }, rollbackAuth);
 

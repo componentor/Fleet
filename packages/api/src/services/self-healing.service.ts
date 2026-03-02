@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { db, selfHealingJobs, eq } from '@fleet/db';
 import { encrypt, decrypt } from './crypto.service.js';
-import { dockerService } from './docker.service.js';
+import { orchestrator } from './orchestrator.js';
 import { getValkey } from './valkey.service.js';
 import { logger } from './logger.js';
 
@@ -303,45 +303,30 @@ export async function launchWorkerContainer(jobId: string): Promise<string> {
   const serviceName = `fleet-heal-${jobId.slice(0, 12)}`;
   const promptB64 = Buffer.from(job.prompt).toString('base64');
 
-  const docker = dockerService.getDockerClient();
-
-  const svc = await docker.createService({
-    Name: serviceName,
-    Labels: {
+  const svc = await orchestrator.createOneOffService({
+    name: serviceName,
+    image: 'node:20-bookworm',
+    cmd: ['bash', '-c', ORCHESTRATOR_SCRIPT],
+    env: {
+      FLEET_JOB_ID: jobId,
+      FLEET_CALLBACK_URL: callbackUrl,
+      FLEET_CALLBACK_TOKEN: callbackToken,
+      ANTHROPIC_API_KEY: config.anthropicApiKey,
+      GITHUB_PAT: config.githubPat,
+      REPO_OWNER: config.repoOwner,
+      REPO_NAME: config.repoName,
+      BASE_BRANCH: job.baseBranch || config.defaultBranch,
+      PROMPT: promptB64,
+      OPTIONS: JSON.stringify(job.options || {}),
+    },
+    labels: {
       'fleet.internal': 'true',
       'fleet.self-healing': 'true',
       'fleet.self-healing.job-id': jobId,
     },
-    TaskTemplate: {
-      ContainerSpec: {
-        Image: 'node:20-bookworm',
-        Env: [
-          `FLEET_JOB_ID=${jobId}`,
-          `FLEET_CALLBACK_URL=${callbackUrl}`,
-          `FLEET_CALLBACK_TOKEN=${callbackToken}`,
-          `ANTHROPIC_API_KEY=${config.anthropicApiKey}`,
-          `GITHUB_PAT=${config.githubPat}`,
-          `REPO_OWNER=${config.repoOwner}`,
-          `REPO_NAME=${config.repoName}`,
-          `BASE_BRANCH=${job.baseBranch || config.defaultBranch}`,
-          `PROMPT=${promptB64}`,
-          `OPTIONS=${JSON.stringify(job.options || {})}`,
-        ],
-        Args: ['bash', '-c', ORCHESTRATOR_SCRIPT],
-      },
-      RestartPolicy: {
-        Condition: 'none' as const,
-        MaxAttempts: 0,
-      },
-      Resources: {
-        Limits: {
-          MemoryBytes: 4 * 1024 * 1024 * 1024,
-          NanoCPUs: 2_000_000_000,
-        },
-      },
-    },
-    Mode: { Replicated: { Replicas: 1 } },
-  } as any);
+    memoryLimitMb: 4096,
+    restartCondition: 'none',
+  });
 
   const serviceId = svc.id;
 
@@ -357,15 +342,14 @@ export async function launchWorkerContainer(jobId: string): Promise<string> {
 // ── Container polling ──
 
 export async function waitForContainerRunning(jobId: string, serviceId: string, timeoutMs = 120_000): Promise<string | null> {
-  const docker = dockerService.getDockerClient();
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
     await new Promise((r) => setTimeout(r, 3000));
 
     try {
-      const tasks = await docker.listTasks({
-        filters: { service: [serviceId] },
+      const tasks = await orchestrator.listTasks({
+        service: [serviceId],
       });
       const running = tasks.find((t: any) => t.Status?.State === 'running');
       if (running?.Status?.ContainerStatus?.ContainerID) {
@@ -472,9 +456,7 @@ export async function handleCallback(
 
 export async function cleanupContainer(dockerServiceId: string): Promise<void> {
   try {
-    const docker = dockerService.getDockerClient();
-    const service = docker.getService(dockerServiceId);
-    await service.remove();
+    await orchestrator.removeOneOffService(dockerServiceId);
   } catch { /* ignore cleanup failures */ }
 }
 

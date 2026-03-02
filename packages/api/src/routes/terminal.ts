@@ -4,7 +4,7 @@ import { db, services, sshAccessRules, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { sshService } from '../services/ssh.service.js';
 import { logger } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
@@ -92,7 +92,7 @@ terminalRoutes.openapi(infoRoute, (async (c: any) => {
 
   // Get running tasks to find a container to connect to
   try {
-    const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+    const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
     const runningTasks = tasks.filter((t) => t.status === 'running' && t.containerStatus?.containerId);
 
     return c.json({
@@ -166,7 +166,7 @@ terminalRoutes.openapi(execRoute, (async (c: any) => {
   }
 
   try {
-    const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+    const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
     const running = tasks.find((t) => t.status === 'running' && t.containerStatus?.containerId);
 
     if (!running?.containerStatus) {
@@ -174,7 +174,7 @@ terminalRoutes.openapi(execRoute, (async (c: any) => {
     }
 
     const containerId = running.containerStatus.containerId;
-    const { stream } = await dockerService.execInContainer(containerId, command);
+    const { stream } = await orchestrator.execInContainer(containerId, command);
 
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {

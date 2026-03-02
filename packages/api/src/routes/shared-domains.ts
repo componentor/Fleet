@@ -16,7 +16,7 @@ import {
 } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { stripeService } from '../services/stripe.service.js';
 import { getAppUrl } from '../services/platform.service.js';
 import { invalidateCache } from '../middleware/cache.js';
@@ -637,10 +637,10 @@ async function assignDomainToService(serviceId: string, accountId: string, domai
       const labels = buildTraefikLabels(svc.name, domain, true);
 
       // Attach to Traefik's public network so it can route traffic to this service
-      const accountNetId = await dockerService.ensureNetwork(`fleet-account-${accountId}`);
-      const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+      const accountNetId = await orchestrator.ensureNetwork(`fleet-account-${accountId}`);
+      const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
 
-      await dockerService.updateService(svc.dockerServiceId, {
+      await orchestrator.updateService(svc.dockerServiceId, {
         labels: {
           ...labels,
           'fleet.account-id': accountId,
@@ -674,9 +674,9 @@ async function clearServiceDomain(serviceId: string) {
       const labels = buildTraefikLabels(svc.name, null, false);
 
       // Remove from Traefik public network since domain is being cleared
-      const accountNetId = await dockerService.ensureNetwork(`fleet-account-${svc.accountId}`);
+      const accountNetId = await orchestrator.ensureNetwork(`fleet-account-${svc.accountId}`);
 
-      await dockerService.updateService(svc.dockerServiceId, {
+      await orchestrator.updateService(svc.dockerServiceId, {
         labels: {
           ...labels,
           'fleet.account-id': svc.accountId,

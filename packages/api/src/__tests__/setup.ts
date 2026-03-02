@@ -725,50 +725,70 @@ vi.mock('argon2', () => ({
   verify: vi.fn().mockImplementation(async (hash: string, password: string) => hash === `hashed:${password}`),
 }));
 
+// ── Mock orchestrator methods (shared between docker.service and orchestrator mocks) ──
+const mockOrchestratorMethods = {
+  createService: vi.fn().mockResolvedValue({ id: 'docker-svc-123' }),
+  updateService: vi.fn().mockResolvedValue(undefined),
+  removeService: vi.fn().mockResolvedValue(undefined),
+  inspectService: vi.fn().mockResolvedValue({
+    CreatedAt: new Date().toISOString(),
+    UpdatedAt: new Date().toISOString(),
+  }),
+  getServiceTasks: vi.fn().mockResolvedValue([]),
+  getServiceLogs: vi.fn().mockResolvedValue({
+    [Symbol.asyncIterator]: async function* () {
+      yield Buffer.from('test log');
+    },
+  }),
+  listNodes: vi.fn().mockResolvedValue([]),
+  inspectNode: vi.fn().mockResolvedValue({}),
+  updateNode: vi.fn().mockResolvedValue(undefined),
+  drainNode: vi.fn().mockResolvedValue(undefined),
+  activateNode: vi.fn().mockResolvedValue(undefined),
+  removeNode: vi.fn().mockResolvedValue(undefined),
+  getSwarmInfo: vi.fn().mockResolvedValue({
+    ID: 'swarm-1',
+    CreatedAt: new Date().toISOString(),
+    Version: { Index: 1 },
+  }),
+  getSwarmJoinToken: vi.fn().mockResolvedValue({
+    worker: 'worker-token',
+    manager: 'manager-token',
+  }),
+  getClusterInfo: vi.fn().mockResolvedValue({
+    ID: 'swarm-1',
+    CreatedAt: new Date().toISOString(),
+    Version: { Index: 1 },
+  }),
+  getJoinToken: vi.fn().mockResolvedValue({
+    worker: 'worker-token',
+    manager: 'manager-token',
+  }),
+  listServices: vi.fn().mockResolvedValue([]),
+  listTasks: vi.fn().mockResolvedValue([]),
+  scaleService: vi.fn().mockResolvedValue(undefined),
+  ensureNetwork: vi.fn().mockResolvedValue('network-id'),
+  createNetwork: vi.fn().mockResolvedValue('network-id'),
+  removeNetwork: vi.fn().mockResolvedValue(undefined),
+  waitForServiceTasksGone: vi.fn().mockResolvedValue(undefined),
+  removeVolume: vi.fn().mockResolvedValue(undefined),
+  allocateIngressPorts: vi.fn().mockImplementation(
+    async (targets: Array<{ target: number; protocol: string }>) =>
+      targets.map((p, i) => ({ target: p.target, published: 30000 + i, protocol: p.protocol })),
+  ),
+  createOneOffService: vi.fn().mockResolvedValue({ id: 'oneoff-svc-123' }),
+  pollTaskCompletion: vi.fn().mockResolvedValue({ status: 'complete' }),
+  removeOneOffService: vi.fn().mockResolvedValue(undefined),
+};
+
 // ── Mock Docker service ──
 vi.mock('../services/docker.service.js', () => ({
-  dockerService: {
-    createService: vi.fn().mockResolvedValue({ id: 'docker-svc-123' }),
-    updateService: vi.fn().mockResolvedValue(undefined),
-    removeService: vi.fn().mockResolvedValue(undefined),
-    inspectService: vi.fn().mockResolvedValue({
-      CreatedAt: new Date().toISOString(),
-      UpdatedAt: new Date().toISOString(),
-    }),
-    getServiceTasks: vi.fn().mockResolvedValue([]),
-    getServiceLogs: vi.fn().mockResolvedValue({
-      [Symbol.asyncIterator]: async function* () {
-        yield Buffer.from('test log');
-      },
-    }),
-    listNodes: vi.fn().mockResolvedValue([]),
-    inspectNode: vi.fn().mockResolvedValue({}),
-    updateNode: vi.fn().mockResolvedValue(undefined),
-    drainNode: vi.fn().mockResolvedValue(undefined),
-    activateNode: vi.fn().mockResolvedValue(undefined),
-    removeNode: vi.fn().mockResolvedValue(undefined),
-    getSwarmInfo: vi.fn().mockResolvedValue({
-      ID: 'swarm-1',
-      CreatedAt: new Date().toISOString(),
-      Version: { Index: 1 },
-    }),
-    getSwarmJoinToken: vi.fn().mockResolvedValue({
-      worker: 'worker-token',
-      manager: 'manager-token',
-    }),
-    listServices: vi.fn().mockResolvedValue([]),
-    listTasks: vi.fn().mockResolvedValue([]),
-    scaleService: vi.fn().mockResolvedValue(undefined),
-    ensureNetwork: vi.fn().mockResolvedValue('network-id'),
-    createNetwork: vi.fn().mockResolvedValue('network-id'),
-    removeNetwork: vi.fn().mockResolvedValue(undefined),
-    waitForServiceTasksGone: vi.fn().mockResolvedValue(undefined),
-    removeVolume: vi.fn().mockResolvedValue(undefined),
-    allocateIngressPorts: vi.fn().mockImplementation(
-      async (targets: Array<{ target: number; protocol: string }>) =>
-        targets.map((p, i) => ({ target: p.target, published: 30000 + i, protocol: p.protocol })),
-    ),
-  },
+  dockerService: mockOrchestratorMethods,
+}));
+
+// ── Mock orchestrator (same mock object — callers now import from orchestrator.ts) ──
+vi.mock('../services/orchestrator.js', () => ({
+  orchestrator: mockOrchestratorMethods,
 }));
 
 // ── Mock storage manager ──

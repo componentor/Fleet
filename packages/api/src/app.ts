@@ -7,7 +7,7 @@ import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
 import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, selfHealingJobs, users as usersTable } from '@fleet/db';
-import { dockerService } from './services/docker.service.js';
+import { orchestrator } from './services/orchestrator.js';
 import { logger, logToErrorTable } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
 import { getAppUrlSync } from './services/platform.service.js';
@@ -426,7 +426,7 @@ api.get(
             return;
           }
 
-          const raw = await dockerService.getServiceLogs(svc.dockerServiceId, {
+          const raw = await orchestrator.getServiceLogs(svc.dockerServiceId, {
             tail: 200,
             follow: true,
           });
@@ -1020,7 +1020,7 @@ api.get(
             return;
           }
 
-          const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+          const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
           const runningTasks = tasks.filter(
             (t) => t.status === 'running' && t.containerStatus?.containerId,
           );
@@ -1042,12 +1042,12 @@ api.get(
           const targetNodeId = targetTask.nodeId;
 
           // Check if container is on this node or a remote node
-          const localNodeId = await dockerService.getLocalNodeId();
+          const localNodeId = await orchestrator.getLocalNodeId();
           const isLocal = targetNodeId === localNodeId;
 
           if (!isLocal) {
             // ── Remote node: proxy through Fleet agent WebSocket ──
-            const agentUrl = await dockerService.getAgentAddress(targetNodeId);
+            const agentUrl = await orchestrator.getAgentAddress(targetNodeId);
             if (!agentUrl) {
               ws.close(4004, 'No agent on target node');
               return;
@@ -1107,7 +1107,7 @@ api.get(
             let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
             for (const shell of ['/bin/sh', '/bin/bash', '/bin/ash']) {
               try {
-                result = await dockerService.execInContainer(targetContainer, [shell]);
+                result = await orchestrator.execInContainer(targetContainer, [shell]);
                 break;
               } catch {
                 // Try next shell
@@ -1162,7 +1162,7 @@ api.get(
               // Forward resize to agent WebSocket as JSON
               dockerStream.write(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
             } else {
-              await dockerService.resizeExec(execId, msg.rows, msg.cols);
+              await orchestrator.resizeExec(execId, msg.rows, msg.cols);
             }
           }
         } catch {
@@ -1227,7 +1227,7 @@ api.get(
           }
 
           // Find the running container
-          const tasks = await dockerService.getServiceTasks(job.dockerServiceId);
+          const tasks = await orchestrator.getServiceTasks(job.dockerServiceId);
           const runningTask = tasks.find(
             (t) => t.status === 'running' && t.containerStatus?.containerId,
           );
@@ -1239,11 +1239,11 @@ api.get(
 
           const targetContainer = runningTask.containerStatus.containerId;
           const targetNodeId = runningTask.nodeId;
-          const localNodeId = await dockerService.getLocalNodeId();
+          const localNodeId = await orchestrator.getLocalNodeId();
           const isLocal = targetNodeId === localNodeId;
 
           if (!isLocal) {
-            const agentUrl = await dockerService.getAgentAddress(targetNodeId);
+            const agentUrl = await orchestrator.getAgentAddress(targetNodeId);
             if (!agentUrl) {
               ws.close(4004, 'No agent on target node');
               return;
@@ -1271,7 +1271,7 @@ api.get(
             let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
             for (const shell of ['/bin/bash', '/bin/sh', '/bin/ash']) {
               try {
-                result = await dockerService.execInContainer(targetContainer, [shell]);
+                result = await orchestrator.execInContainer(targetContainer, [shell]);
                 break;
               } catch { /* try next */ }
             }
@@ -1312,7 +1312,7 @@ api.get(
             if (execId === '__proxy__') {
               dockerStream.write(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
             } else {
-              await dockerService.resizeExec(execId, msg.rows, msg.cols);
+              await orchestrator.resizeExec(execId, msg.rows, msg.cols);
             }
           }
         } catch { /* ignore */ }

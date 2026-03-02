@@ -6,7 +6,7 @@ import { db, services, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
@@ -254,7 +254,7 @@ async function getPrimaryKeyColumns(
     sql = `SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${escapeValue(engine, tableName)} AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY ORDINAL_POSITION`;
   }
   const { cmd, env } = buildCommand(info, sql);
-  const result = await dockerService.nodeAwareExecCommand(containerId, nodeId, cmd, 30_000, env);
+  const result = await orchestrator.nodeAwareExecCommand(containerId, nodeId, cmd, 30_000, env);
   return result.stdout.trim().split('\n').filter(s => s.trim()).map(s => s.trim());
 }
 
@@ -274,7 +274,7 @@ async function getDbContainer(accountId: string, serviceId: string) {
   const engine = detectEngine(svc.image);
   if (!engine) return null;
 
-  const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+  const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
   const running = tasks.find((t: any) => t.status === 'running' && t.containerStatus?.containerId);
   if (!running) return null;
 
@@ -393,7 +393,7 @@ databaseRoutes.openapi(getDbInfoRoute, (async (c: any) => {
     if (engine === 'mongo') {
       const js = `JSON.stringify(db.adminCommand({listDatabases:1}).databases.map(d=>d.name))`;
       const cmd = buildMongoEvalCommand(container.info, js);
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
       try { databases = JSON.parse(result.stdout.trim()); } catch { databases = []; }
     } else {
       let sql: string;
@@ -403,7 +403,7 @@ databaseRoutes.openapi(getDbInfoRoute, (async (c: any) => {
         sql = "SHOW DATABASES";
       }
       const { cmd, env } = buildCommand(container.info, sql);
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
       databases = result.stdout.trim().split('\n').filter(s => s.trim().length > 0);
     }
   } catch (err) {
@@ -454,7 +454,7 @@ databaseRoutes.openapi(getTablesRoute, (async (c: any) => {
     if (container.engine === 'mongo') {
       const js = `JSON.stringify(db.getCollectionNames().sort().map(n=>({name:n,type:'collection'})))`;
       const cmd = buildMongoEvalCommand(info, js);
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
       try {
         const parsed = JSON.parse(result.stdout.trim());
         return c.json({ tables: parsed });
@@ -471,7 +471,7 @@ databaseRoutes.openapi(getTablesRoute, (async (c: any) => {
     }
 
     const { cmd, env } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
     const tables = result.stdout.trim().split('\n').filter(s => s.trim()).map(line => {
       const parts = line.split('\t');
       return { name: parts[0]?.trim() ?? '', type: (parts[1]?.trim() ?? 'table').toLowerCase().includes('view') ? 'view' : 'table' };
@@ -549,7 +549,7 @@ databaseRoutes.openapi(getColumnsRoute, (async (c: any) => {
   return JSON.stringify(columns);
 })()`;
       const cmd = buildMongoEvalCommand(info, js);
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
       try {
         const columns = JSON.parse(result.stdout.trim());
         return c.json({ columns });
@@ -566,7 +566,7 @@ databaseRoutes.openapi(getColumnsRoute, (async (c: any) => {
     }
 
     const { cmd, env } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
 
     // Fetch primary key columns
     let pkSet = new Set<string>();
@@ -646,7 +646,7 @@ databaseRoutes.openapi(getTableDataRoute, (async (c: any) => {
 
       const countJs = `db.getCollection("${coll}").countDocuments({})`;
       const countCmd = buildMongoEvalCommand(info, countJs);
-      const countResult = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, countCmd);
+      const countResult = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, countCmd);
       const totalRows = parseInt(countResult.stdout.trim(), 10) || 0;
 
       const dataJs = `
@@ -669,7 +669,7 @@ databaseRoutes.openapi(getTableDataRoute, (async (c: any) => {
   return JSON.stringify({columns:cols,rows:rows});
 })()`;
       const dataCmd = buildMongoEvalCommand(info, dataJs);
-      const dataResult = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, dataCmd);
+      const dataResult = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, dataCmd);
       try {
         const parsed = JSON.parse(dataResult.stdout.trim());
         return c.json({ columns: parsed.columns, rows: parsed.rows, totalRows, page, pageSize });
@@ -681,7 +681,7 @@ databaseRoutes.openapi(getTableDataRoute, (async (c: any) => {
     // SQL engines
     const qi = (n: string) => quoteIdentifier(container.engine, n);
     const { cmd: countCmd, env: countEnv } = buildCommand(info, `SELECT COUNT(*) FROM ${qi(tableName)}`);
-    const countResult = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, countCmd, 30_000, countEnv);
+    const countResult = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, countCmd, 30_000, countEnv);
     const totalRows = parseInt(countResult.stdout.trim(), 10) || 0;
 
     let colSql: string;
@@ -691,13 +691,13 @@ databaseRoutes.openapi(getTableDataRoute, (async (c: any) => {
       colSql = `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${escapeValue(container.engine, tableName)} ORDER BY ORDINAL_POSITION`;
     }
     const { cmd: colCmd, env: colEnv } = buildCommand(info, colSql);
-    const colResult = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, colCmd, 30_000, colEnv);
+    const colResult = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, colCmd, 30_000, colEnv);
     const columns = colResult.stdout.trim().split('\n').filter(s => s.trim()).map(s => s.trim());
 
     const orderClause = orderBy ? ` ORDER BY ${qi(orderBy)} ${orderDir}` : '';
     const dataSql = `SELECT * FROM ${qi(tableName)}${orderClause} LIMIT ${pageSize} OFFSET ${offset}`;
     const { cmd: dataCmd, env: dataEnv } = buildCommand(info, dataSql);
-    const dataResult = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, dataCmd, 30_000, dataEnv);
+    const dataResult = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, dataCmd, 30_000, dataEnv);
     const rows = dataResult.stdout.trim().split('\n').filter(s => s.length > 0).map(line => line.split('\t'));
 
     return c.json({ columns, rows, totalRows, page, pageSize });
@@ -771,7 +771,7 @@ databaseRoutes.openapi(executeQueryRoute, (async (c: any) => {
     try {
       const start = Date.now();
       const cmd = buildMongoEvalCommand(info, wrappedJs);
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd);
       const executionTimeMs = Date.now() - start;
 
       try {
@@ -814,7 +814,7 @@ databaseRoutes.openapi(executeQueryRoute, (async (c: any) => {
   try {
     const start = Date.now();
     const { cmd, env } = buildCommand(info, limitedQuery);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, cmd, 30_000, env);
     const executionTimeMs = Date.now() - start;
 
     const lines = result.stdout.trim().split('\n').filter(s => s.length > 0);
@@ -879,7 +879,7 @@ databaseRoutes.openapi(insertRowRoute, (async (c: any) => {
       .join(',');
     const js = `JSON.stringify(db.getCollection("${escapeMongoString(tableName)}").insertOne({${fields}}))`;
     try {
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
       if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Insert failed' }, 500);
       return c.json({ success: true });
     } catch (err) {
@@ -902,7 +902,7 @@ databaseRoutes.openapi(insertRowRoute, (async (c: any) => {
 
   try {
     const { cmd: insertCmd, env: insertEnv } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, insertCmd, 30_000, insertEnv);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, insertCmd, 30_000, insertEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Insert failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -957,7 +957,7 @@ databaseRoutes.openapi(updateRowRoute, (async (c: any) => {
       .join(',');
     const js = `JSON.stringify(db.getCollection("${escapeMongoString(tableName)}").updateOne(${filter},{$set:{${setFields}}}))`;
     try {
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
       if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Update failed' }, 500);
       return c.json({ success: true });
     } catch (err) {
@@ -984,7 +984,7 @@ databaseRoutes.openapi(updateRowRoute, (async (c: any) => {
 
   try {
     const { cmd: updateCmd, env: updateEnv } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, updateCmd, 30_000, updateEnv);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, updateCmd, 30_000, updateEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Update failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -1035,7 +1035,7 @@ databaseRoutes.openapi(deleteRowRoute, (async (c: any) => {
     const filter = `{_id:${wrapMongoId(idValue)}}`;
     const js = `JSON.stringify(db.getCollection("${escapeMongoString(tableName)}").deleteOne(${filter}))`;
     try {
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
       if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Delete failed' }, 500);
       return c.json({ success: true });
     } catch (err) {
@@ -1059,7 +1059,7 @@ databaseRoutes.openapi(deleteRowRoute, (async (c: any) => {
 
   try {
     const { cmd: delCmd, env: delEnv } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, delCmd, 30_000, delEnv);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, delCmd, 30_000, delEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Delete failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -1106,7 +1106,7 @@ databaseRoutes.openapi(createTableRoute, (async (c: any) => {
     if (!VALID_MONGO_COLLECTION_NAME.test(name)) return c.json({ error: 'Invalid collection name' }, 400);
     const js = `JSON.stringify(db.createCollection("${escapeMongoString(name)}"))`;
     try {
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
       if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Create collection failed' }, 500);
       return c.json({ success: true });
     } catch (err) {
@@ -1139,7 +1139,7 @@ databaseRoutes.openapi(createTableRoute, (async (c: any) => {
 
   try {
     const { cmd: createCmd, env: createEnv } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, createCmd, 30_000, createEnv);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, createCmd, 30_000, createEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Create table failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -1183,7 +1183,7 @@ databaseRoutes.openapi(dropTableRoute, (async (c: any) => {
     if (!VALID_MONGO_COLLECTION_NAME.test(tableName)) return c.json({ error: 'Invalid collection name' }, 400);
     const js = `db.getCollection("${escapeMongoString(tableName)}").drop()`;
     try {
-      const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
+      const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, buildMongoEvalCommand(info, js));
       if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Drop collection failed' }, 500);
       return c.json({ success: true });
     } catch (err) {
@@ -1198,7 +1198,7 @@ databaseRoutes.openapi(dropTableRoute, (async (c: any) => {
 
   try {
     const { cmd: dropCmd, env: dropEnv } = buildCommand(info, sql);
-    const result = await dockerService.nodeAwareExecCommand(container.containerId, container.nodeId, dropCmd, 30_000, dropEnv);
+    const result = await orchestrator.nodeAwareExecCommand(container.containerId, container.nodeId, dropCmd, 30_000, dropEnv);
     if (result.exitCode !== 0) return c.json({ error: result.stdout || 'Drop table failed' }, 500);
     return c.json({ success: true });
   } catch (err) {
@@ -1356,7 +1356,7 @@ databaseRoutes.openapi(importDatabaseRoute, (async (c: any) => {
     const buffer = Buffer.from(await file.arrayBuffer());
     const inputStream = Readable.from(buffer);
 
-    const result = await dockerService.nodeAwareExecCommandWithInput(container.containerId, container.nodeId, cmd, inputStream, 600_000, cmdEnv);
+    const result = await orchestrator.nodeAwareExecCommandWithInput(container.containerId, container.nodeId, cmd, inputStream, 600_000, cmdEnv);
     if (result.exitCode !== 0) {
       const errMsg = result.stderr?.slice(0, 500) || 'Import failed';
       return c.json({ error: errMsg }, 500);
@@ -1439,7 +1439,7 @@ databaseDownloadRoutes.openapi(exportDownloadRoute, (async (c: any) => {
   }
 
   try {
-    const { stream } = await dockerService.nodeAwareExecCommandStream(container.containerId, container.nodeId, cmd, 300_000, cmdEnv);
+    const { stream } = await orchestrator.nodeAwareExecCommandStream(container.containerId, container.nodeId, cmd, 300_000, cmdEnv);
     c.header('Content-Type', contentType);
     c.header('Content-Disposition', `attachment; filename="${filename}"`);
     return c.body(stream as any);

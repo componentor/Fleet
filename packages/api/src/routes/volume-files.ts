@@ -5,6 +5,7 @@ import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
 import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { VolumeFileService } from '../services/volume-file.service.js';
 import { logger } from '../services/logger.js';
 import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';

@@ -10,7 +10,7 @@ import { getValkey } from '../services/valkey.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import { emailService } from '../services/email.service.js';
 import { logger } from '../services/logger.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { STORAGE_BUCKETS } from '../services/storage/storage-provider.js';
 import { getAppUrl } from '../services/platform.service.js';
@@ -653,7 +653,7 @@ userRoutes.openapi(deleteMeRoute, (async (c: any) => {
         for (const svc of accountServices) {
           if (svc.dockerServiceId && svc.status !== 'stopped') {
             try {
-              await dockerService.scaleService(svc.dockerServiceId, 0);
+              await orchestrator.scaleService(svc.dockerServiceId, 0);
             } catch (err) {
               logger.error({ err, serviceId: svc.id }, 'Failed to stop service during user deletion');
             }

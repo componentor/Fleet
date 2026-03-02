@@ -9,7 +9,7 @@ const realModule = await vi.importActual('../services/template.service.js') as a
 const realTemplateService = new realModule.TemplateService();
 
 // ── Mocked services for assertions ──
-const { dockerService } = await import('../services/docker.service.js') as any;
+const { orchestrator: dockerService } = await import('../services/orchestrator.js') as any;
 const { storageManager } = await import('../services/storage/storage-manager.js') as any;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

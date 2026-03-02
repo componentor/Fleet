@@ -28,7 +28,7 @@ import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { stripeService } from '../services/stripe.service.js';
 import { stripeSyncService } from '../services/stripe-sync.service.js';
 import { usageService } from '../services/usage.service.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { calculateResellerPricing } from './reseller.js';
 import { logger, logToErrorTable } from '../services/logger.js';
@@ -1063,7 +1063,7 @@ async function suspendAccountServices(accountId: string) {
   for (const svc of accountServices) {
     try {
       if (svc.dockerServiceId) {
-        await dockerService.scaleService(svc.dockerServiceId, 0);
+        await orchestrator.scaleService(svc.dockerServiceId, 0);
       }
       await db.update(services)
         .set({ status: 'suspended', stoppedAt: new Date(), updatedAt: new Date() })

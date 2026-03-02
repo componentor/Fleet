@@ -17,7 +17,7 @@ import {
 } from '@fleet/db';
 import type { UsageSummary } from '@fleet/types';
 import { stripeService } from './stripe.service.js';
-import { dockerService } from './docker.service.js';
+import { orchestrator } from './orchestrator.js';
 import { uploadService } from './upload.service.js';
 import { getValkey } from './valkey.service.js';
 import { logger } from './logger.js';
@@ -153,7 +153,7 @@ class UsageService {
       if (dockerServiceIds.length === 0) return result;
 
       // Bulk-fetch tasks for all fleet services via Swarm API (works cluster-wide)
-      const allTasks = await dockerService.listTasks({
+      const allTasks = await orchestrator.listTasks({
         'desired-state': ['running'],
       });
 
@@ -199,7 +199,7 @@ class UsageService {
         for (let i = 0; i < missingContainers.length; i += STATS_CONCURRENCY) {
           const batch = missingContainers.slice(i, i + STATS_CONCURRENCY);
           const batchResults = await Promise.all(
-            batch.map((cid) => dockerService.getContainerNetworkBytes(cid)),
+            batch.map((cid) => orchestrator.getContainerNetworkBytes(cid)),
           );
           for (const r of batchResults) {
             if (r) statsByContainer.set(r.containerId, r.rxBytes + r.txBytes);

@@ -3,7 +3,8 @@ import { z } from '@hono/zod-openapi';
 import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
-import { dockerService, getRegistryAuthForImage } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
+import { getRegistryAuthForImage } from '../services/docker.service.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
@@ -110,7 +111,7 @@ import { buildTraefikLabels } from '../services/traefik.js';
 async function allocateIngressPorts(
   targetPorts: Array<{ target: number; protocol: string }>,
 ): Promise<Array<{ target: number; published: number; protocol: string }>> {
-  return dockerService.allocateIngressPorts(targetPorts);
+  return orchestrator.allocateIngressPorts(targetPorts);
 }
 
 // ── Schemas ──
@@ -685,7 +686,7 @@ serviceRoutes.openapi(aggregatedLogsRoute, (async (c: any) => {
 
   const fetchPromises = deployedServices.slice(0, 10).map(async (svc) => {
     try {
-      const result = await dockerService.getServiceLogs(svc.dockerServiceId!, { tail: Math.min(tail, 200), follow: false });
+      const result = await orchestrator.getServiceLogs(svc.dockerServiceId!, { tail: Math.min(tail, 200), follow: false });
 
       let raw: Buffer;
       if (Buffer.isBuffer(result)) {
@@ -755,8 +756,8 @@ serviceRoutes.openapi(listServicesRoute, (async (c: any) => {
     try {
       const dockerIds = active.map((s) => s.dockerServiceId!);
       const [dockerSvcs, dockerTasks] = await Promise.all([
-        dockerService.listServices({ label: [`fleet.account-id=${accountId}`] }),
-        dockerService.listTasks({ label: [`fleet.account-id=${accountId}`] }),
+        orchestrator.listServices({ label: [`fleet.account-id=${accountId}`] }),
+        orchestrator.listTasks({ label: [`fleet.account-id=${accountId}`] }),
       ]);
       const dockerSvcSet = new Set(dockerSvcs.map((s: any) => s.ID));
 
@@ -994,12 +995,12 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   // Try to deploy to Docker Swarm (non-fatal — service record is always kept)
   try {
     const networkName = `fleet-account-${accountId}`;
-    const networkId = await dockerService.ensureNetwork(networkName);
+    const networkId = await orchestrator.ensureNetwork(networkName);
 
     // Domain services need the Traefik public network for routing
     const networkIds = [networkId];
     if (data.domain) {
-      const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+      const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
       networkIds.push(publicNetId);
     }
 
@@ -1016,7 +1017,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
         );
 
     const registryAuth = await getRegistryAuthForImage(accountId, data.image);
-    const result = await dockerService.createService({
+    const result = await orchestrator.createService({
       name: swarmServiceName,
       image: data.image,
       replicas: data.replicas,
@@ -1105,8 +1106,8 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
   let correctedStatus: string | null = null;
   if (svc.dockerServiceId) {
     try {
-      const info = await dockerService.inspectService(svc.dockerServiceId);
-      const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+      const info = await orchestrator.inspectService(svc.dockerServiceId);
+      const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
       const runningTasks = tasks.filter((t) => t.status === 'running').length;
       const failedTasks = tasks.filter((t) => t.status === 'failed' || t.status === 'rejected').length;
       // Extract volume mount driver info from Docker service spec
@@ -1127,7 +1128,7 @@ serviceRoutes.openapi(getServiceRoute, (async (c: any) => {
       const specNetworks = (info.Spec?.TaskTemplate as any)?.Networks ?? [];
       for (const net of specNetworks) {
         try {
-          const netInfo = await dockerService.inspectNetwork(net.Target);
+          const netInfo = await orchestrator.inspectNetwork(net.Target);
           networkNames.push(netInfo.Name);
         } catch { /* ignore — network may be gone */ }
       }
@@ -1198,7 +1199,7 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
   }
 
   try {
-    const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+    const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
     const runningTasks = tasks.filter((t) => t.status === 'running');
 
     // Fetch stats for all running containers in parallel (limit concurrency)
@@ -1210,7 +1211,7 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
         batch.map(async (t) => {
           const containerId = t.containerStatus?.containerId;
           if (!containerId) return { containerId: '', stats: null };
-          const stats = await dockerService.getContainerStats(containerId);
+          const stats = await orchestrator.getContainerStats(containerId);
           return { containerId, stats };
         }),
       );
@@ -1379,7 +1380,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
             // Mount path had a different volume before — migrate data
             try {
               logger.info({ from: oldSource, to: newVol.source, path: newVol.target }, 'Migrating volume data');
-              await dockerService.copyVolumeData(oldSource, newVol.source);
+              await orchestrator.copyVolumeData(oldSource, newVol.source);
             } catch (err) {
               logger.warn({ err, from: oldSource, to: newVol.source }, 'Volume data migration failed — continuing with empty volume');
               logToErrorTable({ level: 'warn', message: `Volume data migration failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'update-volume-migration' } });
@@ -1408,9 +1409,9 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
       // If domain is changing, manage Traefik public network attachment
       let networkUpdate: string[] | undefined;
       if (dockerFields.domain !== undefined) {
-        const accountNetId = await dockerService.ensureNetwork(`fleet-account-${accountId}`);
+        const accountNetId = await orchestrator.ensureNetwork(`fleet-account-${accountId}`);
         if (effectiveDomain) {
-          const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+          const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
           networkUpdate = [accountNetId, publicNetId];
         } else {
           networkUpdate = [accountNetId];
@@ -1419,7 +1420,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
 
       const updateImage = dockerFields.image ?? svc.image;
       const updateRegistryAuth = updateImage ? await getRegistryAuthForImage(accountId, updateImage) : undefined;
-      await dockerService.updateService(svc.dockerServiceId, {
+      await orchestrator.updateService(svc.dockerServiceId, {
         image: dockerFields.image,
         replicas: dockerFields.replicas,
         env: dockerFields.env,
@@ -1504,14 +1505,14 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   // Remove from Docker Swarm
   if (svc.dockerServiceId) {
     try {
-      await dockerService.removeService(svc.dockerServiceId);
+      await orchestrator.removeService(svc.dockerServiceId);
     } catch (err) {
       logger.error({ err }, 'Docker service removal failed');
       logToErrorTable({ level: 'error', message: `Docker service removal failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-service' } });
     }
     // Wait for tasks to stop, then force-remove leftover containers so volumes are released
-    await dockerService.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
-    await dockerService.forceRemoveServiceContainers(svc.dockerServiceId);
+    await orchestrator.waitForServiceTasksGone(svc.dockerServiceId).catch(() => {});
+    await orchestrator.forceRemoveServiceContainers(svc.dockerServiceId);
   }
 
   // Clean up GitHub webhook
@@ -1564,7 +1565,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       const isUsed = usedByOthers.has(v.source);
       logger.info({ volume: v.source, isUsed, shouldDeleteVolumes }, 'Service delete: processing volume');
       if (v.source && !isUsed) {
-        await dockerService.removeVolume(v.source).catch((err) => {
+        await orchestrator.removeVolume(v.source).catch((err) => {
           logger.warn({ err, volume: v.source }, 'Failed to remove Docker volume on service delete');
           logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-volume' } });
         });
@@ -1621,7 +1622,7 @@ serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
   try {
     // Force update triggers a rolling restart
     const restartAuth = await getRegistryAuthForImage(accountId, svc.image);
-    await dockerService.updateService(svc.dockerServiceId, {
+    await orchestrator.updateService(svc.dockerServiceId, {
       image: svc.image,
     }, restartAuth);
 
@@ -1723,12 +1724,12 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
   // Helper to create a fresh Docker Swarm service
   async function createDockerService() {
     const networkName = `fleet-account-${accountId}`;
-    const networkId = await dockerService.ensureNetwork(networkName);
+    const networkId = await orchestrator.ensureNetwork(networkName);
 
     // Domain services need the Traefik public network for routing
     const networkIds = [networkId];
     if (svc!.domain) {
-      const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+      const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
       networkIds.push(publicNetId);
     }
 
@@ -1752,7 +1753,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
         );
 
     const recreateAuth = await getRegistryAuthForImage(accountId!, svc!.image);
-    const result = await dockerService.createService({
+    const result = await orchestrator.createService({
       name: swarmServiceName,
       image: svc!.image,
       replicas: svc!.replicas ?? 1,
@@ -1792,10 +1793,10 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
     if (dockerSvcId) {
       // Check if the Docker service still exists in Swarm
       try {
-        await dockerService.inspectService(dockerSvcId);
+        await orchestrator.inspectService(dockerSvcId);
         // Exists — force re-pull the image
         const repullAuth = await getRegistryAuthForImage(accountId, svc.image);
-        await dockerService.updateService(dockerSvcId, {
+        await orchestrator.updateService(dockerSvcId, {
           image: svc.image,
         }, repullAuth);
       } catch {
@@ -1878,7 +1879,7 @@ serviceRoutes.openapi(stopServiceRoute, (async (c: any) => {
 
   if (svc.dockerServiceId) {
     try {
-      await dockerService.scaleService(svc.dockerServiceId, 0);
+      await orchestrator.scaleService(svc.dockerServiceId, 0);
     } catch (err) {
       logger.error({ err }, 'Docker scale-to-zero failed');
       logToErrorTable({ level: 'error', message: `Docker scale-to-zero failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stop-scale-to-zero' } });
@@ -1988,12 +1989,12 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
     // No Docker service exists — deploy it now
     try {
       const networkName = `fleet-account-${accountId}`;
-      const networkId = await dockerService.ensureNetwork(networkName);
+      const networkId = await orchestrator.ensureNetwork(networkName);
 
       // Domain services need the Traefik public network for routing
       const networkIds = [networkId];
       if (svc.domain) {
-        const publicNetId = await dockerService.ensureNetwork('fleet_fleet_public');
+        const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
         networkIds.push(publicNetId);
       }
 
@@ -2019,7 +2020,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
           );
 
       const stackRegistryAuth = await getRegistryAuthForImage(accountId, svc.image);
-      const result = await dockerService.createService({
+      const result = await orchestrator.createService({
         name: swarmServiceName,
         image: svc.image,
         replicas: svc.replicas ?? 1,
@@ -2067,7 +2068,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
   }
 
   try {
-    await dockerService.scaleService(svc.dockerServiceId, svc.replicas ?? 1);
+    await orchestrator.scaleService(svc.dockerServiceId, svc.replicas ?? 1);
   } catch (err) {
     logger.error({ err }, 'Docker scale-up failed');
     logToErrorTable({ level: 'error', message: `Service start scale-up failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'start-scale-up' } });
@@ -2117,8 +2118,8 @@ serviceRoutes.openapi(syncServiceRoute, (async (c: any) => {
     }
   } else {
     try {
-      await dockerService.inspectService(svc.dockerServiceId);
-      const tasks = await dockerService.getServiceTasks(svc.dockerServiceId);
+      await orchestrator.inspectService(svc.dockerServiceId);
+      const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
       const running = tasks.filter((t) => t.status === 'running').length;
       const failed = tasks.filter((t) => t.status === 'failed' || t.status === 'rejected').length;
 
@@ -2173,10 +2174,10 @@ serviceRoutes.openapi(volumeMigrateRoute, (async (c: any) => {
   try {
     if (data.clean) {
       logger.info({ volume: data.targetVolume }, 'Cleaning target volume before migration');
-      await dockerService.cleanVolume(data.targetVolume);
+      await orchestrator.cleanVolume(data.targetVolume);
     }
     logger.info({ from: data.sourceVolume, to: data.targetVolume }, 'Migrating volume data (manual retry)');
-    await dockerService.copyVolumeData(data.sourceVolume, data.targetVolume);
+    await orchestrator.copyVolumeData(data.sourceVolume, data.targetVolume);
     return c.json({ message: 'Volume data migrated successfully' });
   } catch (err) {
     logger.error({ err, from: data.sourceVolume, to: data.targetVolume }, 'Volume migration failed');
@@ -2205,7 +2206,7 @@ serviceRoutes.openapi(getServiceLogsRoute, (async (c: any) => {
   const tail = Math.min(parseInt(c.req.query('tail') ?? '100', 10), 5000);
 
   try {
-    const result = await dockerService.getServiceLogs(svc.dockerServiceId, {
+    const result = await orchestrator.getServiceLogs(svc.dockerServiceId, {
       tail,
       follow: false,
     });
@@ -2309,7 +2310,7 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   for (const svc of stackServices) {
     try {
       if (svc.dockerServiceId) {
-        await dockerService.removeService(svc.dockerServiceId).catch((err) => {
+        await orchestrator.removeService(svc.dockerServiceId).catch((err) => {
           logger.warn({ err, serviceId: svc.id }, 'Docker removal failed during stack delete');
           logToErrorTable({ level: 'warn', message: `Docker removal failed during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-removal' } });
         });
@@ -2344,10 +2345,10 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
 
   // Wait for tasks to stop, then force-remove leftover containers so volumes are released
   await Promise.all(
-    removedDockerServiceIds.map((id) => dockerService.waitForServiceTasksGone(id).catch(() => {})),
+    removedDockerServiceIds.map((id) => orchestrator.waitForServiceTasksGone(id).catch(() => {})),
   );
   await Promise.all(
-    removedDockerServiceIds.map((id) => dockerService.forceRemoveServiceContainers(id)),
+    removedDockerServiceIds.map((id) => orchestrator.forceRemoveServiceContainers(id)),
   );
 
   // Check which volumes are still used by other services outside this stack
@@ -2371,7 +2372,7 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   for (const volName of volumeNames) {
     if (usedByOthers.has(volName)) continue;
 
-    await dockerService.removeVolume(volName).catch((err) => {
+    await orchestrator.removeVolume(volName).catch((err) => {
       logger.warn({ err, volume: volName }, 'Failed to remove Docker volume during stack delete');
       logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-volume' } });
     });
@@ -2425,7 +2426,7 @@ serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
 
     try {
       const stackRestartAuth = await getRegistryAuthForImage(accountId, svc.image);
-      await dockerService.updateService(svc.dockerServiceId, { image: svc.image }, stackRestartAuth);
+      await orchestrator.updateService(svc.dockerServiceId, { image: svc.image }, stackRestartAuth);
       results.push({ id: svc.id, name: svc.name, success: true });
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to restart stack service');

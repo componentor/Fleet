@@ -5,7 +5,7 @@ import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
-import { dockerService } from '../services/docker.service.js';
+import { orchestrator } from '../services/orchestrator.js';
 import { uploadService } from '../services/upload.service.js';
 import { logger } from '../services/logger.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
@@ -134,7 +134,7 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
     // Port management: domain services use Traefik (no ingress ports),
     // non-domain services get auto-allocated published ports
     if (!domain && ports.length > 0) {
-      ports = await dockerService.allocateIngressPorts(
+      ports = await orchestrator.allocateIngressPorts(
         ports.map((p) => ({ target: p.target, protocol: p.protocol || 'tcp' })),
       );
     } else if (domain) {
@@ -172,11 +172,11 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
     // Try to create Docker Swarm service (non-fatal — service record is always kept)
     try {
       const networkName = `fleet-account-${accountId}`;
-      const networkId = await dockerService.ensureNetwork(networkName);
+      const networkId = await orchestrator.ensureNetwork(networkName);
 
       const accountShort = accountId.replace(/-/g, '').substring(0, 12);
       const swarmServiceName = `fleet-${accountShort}-${name}`.toLowerCase();
-      const result = await dockerService.createService({
+      const result = await orchestrator.createService({
         name: swarmServiceName,
         image: 'alpine:latest', // Placeholder until build completes
         replicas: 0, // Don't start until build is done

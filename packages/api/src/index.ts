@@ -123,6 +123,15 @@ try {
   logToErrorTable({ level: 'error', message: `Storage manager initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'storage-init' } })
 }
 
+// Initialize orchestrator (Swarm or Kubernetes based on ORCHESTRATOR env var)
+try {
+  const { initOrchestrator } = await import('./services/orchestrator.js')
+  await initOrchestrator()
+} catch (err) {
+  logger.error({ err }, 'Orchestrator initialization failed')
+  logToErrorTable({ level: 'error', message: `Orchestrator initialization failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'startup', operation: 'orchestrator-init' } })
+}
+
 // Sync built-in marketplace templates from disk into DB
 try { await templateService.syncBuiltinTemplates() } catch {}
 
@@ -146,8 +155,8 @@ try { await schedulerService.initialize() } catch (err) {
 
 // Configure Docker Swarm task history limit (auto-clean old failed task records)
 try {
-  const { dockerService } = await import('./services/docker.service.js')
-  await dockerService.configureTaskHistoryLimit(3)
+  const { orchestrator } = await import('./services/orchestrator.js')
+  await orchestrator.configureTaskHistoryLimit(3)
 } catch {
   // Swarm may not be initialized yet
 }
@@ -157,12 +166,13 @@ try {
 // or a server crash during volume migration.
 try {
   const { storageManager } = await import('./services/storage/storage-manager.js')
+  const { orchestrator } = await import('./services/orchestrator.js')
   const { dockerService } = await import('./services/docker.service.js')
 
   // Ensure service volume base mount exists on all nodes (idempotent)
   if (storageManager.isVolumeDistributed) {
     try {
-      await dockerService.ensureServiceVolumeMount()
+      await orchestrator.ensureServiceVolumeMount()
     } catch (err) {
       logger.warn({ err }, 'Failed to ensure service volume mount on startup')
     }
@@ -170,10 +180,10 @@ try {
 
   // Ensure platform volumes (Traefik certs) match the configured storage provider
   const expectedMode = storageManager.isVolumeDistributed ? 'distributed' : 'local'
-  const currentMode = await dockerService.getPlatformVolumeMode()
+  const currentMode = await orchestrator.getPlatformVolumeMode()
   if (expectedMode !== currentMode) {
     logger.info({ expectedMode, currentMode }, 'Platform volume mode mismatch detected — applying correct configuration')
-    await dockerService.updatePlatformVolumeMounts(expectedMode)
+    await orchestrator.updatePlatformVolumeMounts(expectedMode)
   }
 
   // Auto-repair user services with stale volume mounts.
@@ -182,7 +192,7 @@ try {
   // Data is copied from old volume before switching; old volume is NEVER deleted (safe to retry).
   try {
     const useHostMount = storageManager.volumes.isReady() && !!storageManager.volumes.getHostMountPath
-    const allSvcs: any[] = await dockerService.listServices()
+    const allSvcs: any[] = await orchestrator.listServices()
     const userServices = allSvcs.filter((s: any) =>
       s.Spec?.Name?.startsWith('fleet-') && !s.Spec?.Name?.startsWith('fleet_'),
     )
@@ -230,7 +240,7 @@ try {
             }
           }
           if (volumeReady) {
-            try { await dockerService.copyVolumeData(volumeName, hostPath) } catch { /* best effort — old volume preserved */ }
+            try { await orchestrator.copyVolumeData(volumeName, hostPath) } catch { /* best effort — old volume preserved */ }
             newMounts.push({ Source: hostPath, Target: mount.Target, Type: 'bind', ReadOnly: mount.ReadOnly ?? false })
             mountChanged = true
           } else {
@@ -239,7 +249,7 @@ try {
           }
         } else if (!useHostMount && mount.Type === 'bind' && mount.Source?.startsWith('/mnt/fleet-volumes/')) {
           const volumeName = mount.Source.split('/').pop()!
-          try { await dockerService.copyVolumeData(mount.Source, volumeName) } catch { /* best effort */ }
+          try { await orchestrator.copyVolumeData(mount.Source, volumeName) } catch { /* best effort */ }
           newMounts.push({ Source: volumeName, Target: mount.Target, Type: 'volume', ReadOnly: mount.ReadOnly ?? false })
           mountChanged = true
         } else {
@@ -249,6 +259,7 @@ try {
       if (!mountChanged) continue
 
       try {
+        // Raw Swarm spec update — Swarm-specific mount repair
         const dockerSvc = dockerService.getDockerClient().getService(svc.ID)
         spec.TaskTemplate.ContainerSpec.Mounts = newMounts
         await dockerSvc.update({
