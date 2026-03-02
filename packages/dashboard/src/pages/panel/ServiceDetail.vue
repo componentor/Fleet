@@ -305,6 +305,8 @@ async function rollbackToDeployment(deploymentId: string) {
 // Deployment notes
 const editingNotes = ref<string | null>(null)
 const editNotesValue = ref('')
+// Expanded build log in deployments tab
+const expandedDeployLog = ref<string | null>(null)
 
 async function saveDeploymentNotes(deploymentId: string) {
   try {
@@ -2020,9 +2022,8 @@ onUnmounted(() => {
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                  <template v-for="deploy in deployments" :key="deploy.id">
                   <tr
-                    v-for="deploy in deployments"
-                    :key="deploy.id"
                     class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group"
                   >
                     <td class="px-5 py-3.5 text-sm font-mono text-gray-900 dark:text-white">{{ deploy.imageTag || '--' }}</td>
@@ -2054,6 +2055,18 @@ onUnmounted(() => {
                     <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ deploy.commitSha ? deploy.commitSha.slice(0, 7) : '--' }}</td>
                     <td class="px-5 py-3.5 text-right">
                       <div class="flex items-center justify-end gap-2">
+                        <!-- Build Log -->
+                        <button
+                          v-if="deploy.log"
+                          @click="expandedDeployLog = expandedDeployLog === deploy.id ? null : deploy.id"
+                          class="text-xs font-medium hover:underline transition-colors"
+                          :class="[
+                            deploy.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-primary-600 dark:text-primary-400',
+                            expandedDeployLog === deploy.id || deploy.status === 'failed' ? '' : 'opacity-0 group-hover:opacity-100'
+                          ]"
+                        >
+                          {{ expandedDeployLog === deploy.id ? 'Hide Log' : 'Build Log' }}
+                        </button>
                         <!-- Notes -->
                         <button
                           v-if="editingNotes !== deploy.id"
@@ -2074,6 +2087,13 @@ onUnmounted(() => {
                       </div>
                     </td>
                   </tr>
+                  <!-- Expanded build log row -->
+                  <tr v-if="expandedDeployLog === deploy.id && deploy.log" :key="'log-' + deploy.id">
+                    <td colspan="7" class="px-5 py-3 bg-gray-50 dark:bg-gray-900/50">
+                      <pre class="p-3 rounded-lg bg-gray-950 text-gray-200 text-xs font-mono leading-5 whitespace-pre-wrap break-all max-h-96 overflow-auto border border-gray-700">{{ deploy.log }}</pre>
+                    </td>
+                  </tr>
+                  </template>
                   <!-- Notes editing row -->
                   <tr v-if="editingNotes" v-for="deploy in deployments.filter(d => d.id === editingNotes)" :key="'notes-' + deploy.id">
                     <td colspan="7" class="px-5 py-3 bg-gray-50 dark:bg-gray-900/50">
@@ -2132,6 +2152,13 @@ onUnmounted(() => {
                 <div v-if="deploy.notes" class="text-xs text-gray-500 dark:text-gray-400 italic">{{ deploy.notes }}</div>
                 <div class="flex items-center gap-3 pt-1">
                   <button
+                    v-if="deploy.log"
+                    @click="expandedDeployLog = expandedDeployLog === deploy.id ? null : deploy.id"
+                    class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    {{ expandedDeployLog === deploy.id ? 'Hide Build Log' : 'View Build Log' }}
+                  </button>
+                  <button
                     v-if="deploy.status === 'succeeded' && deploy.imageTag && deployments[0]?.id !== deploy.id"
                     @click="rollbackToDeployment(deploy.id)"
                     class="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline"
@@ -2145,6 +2172,11 @@ onUnmounted(() => {
                     {{ deploy.notes ? 'Edit note' : '+ Note' }}
                   </button>
                 </div>
+                <!-- Expanded build log -->
+                <pre
+                  v-if="expandedDeployLog === deploy.id && deploy.log"
+                  class="mt-2 p-3 rounded-lg bg-gray-950 text-gray-200 text-xs font-mono leading-5 whitespace-pre-wrap break-all max-h-96 overflow-auto border border-gray-700"
+                >{{ deploy.log }}</pre>
                 <!-- Mobile notes editing -->
                 <div v-if="editingNotes === deploy.id" class="flex items-center gap-2">
                   <input
