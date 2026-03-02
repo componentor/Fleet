@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleet-ssh-gateway
+  namespace: fleet-system
+  labels:
+    app.kubernetes.io/name: fleet-ssh-gateway
+    app.kubernetes.io/part-of: fleet
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fleet-ssh-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fleet-ssh-gateway
+    spec:
+      containers:
+        - name: ssh-gateway
+          image: ghcr.io/componentor/fleet-ssh:latest
+          ports:
+            - name: ssh
+              containerPort: 2222
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: fleet-ssh-env
+          resources:
+            limits:
+              memory: 256Mi
+              cpu: 500m
+            requests:
+              memory: 64Mi
+              cpu: 100m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-ssh-gateway
+  namespace: fleet-system
+  labels:
+    app.kubernetes.io/name: fleet-ssh-gateway
+    app.kubernetes.io/part-of: fleet
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: fleet-ssh-gateway
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: 2222
+      nodePort: 2222
+      protocol: TCP

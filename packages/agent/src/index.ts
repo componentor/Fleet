@@ -6,9 +6,13 @@ import { NfsManager } from './nfs.js'
 import { handleExecRequest, handleExecStreamRequest, handleExecInputRequest, handleExecWebSocket } from './exec.js'
 import { logger } from './logger.js'
 
+const ORCHESTRATOR = process.env.ORCHESTRATOR || 'swarm'
+const IS_K8S = ORCHESTRATOR === 'kubernetes'
+
 function detectNodeId(): string {
+  // K8s: NODE_ID injected via Downward API (spec.nodeName)
   if (process.env.NODE_ID) return process.env.NODE_ID
-  // Auto-detect Docker Swarm node ID via docker info
+  // Swarm: auto-detect from docker info
   try {
     const swarmNodeId = execSync("docker info --format '{{.Swarm.NodeID}}'", { timeout: 5000 })
       .toString().trim().replace(/'/g, '')
@@ -78,10 +82,12 @@ healthServer = createServer((req, res) => {
     res.end(JSON.stringify({
       status: status ? 'ok' : 'degraded',
       node: NODE_ID,
+      orchestrator: ORCHESTRATOR,
       uptime: Math.floor(process.uptime()),
       consecutiveFailures: monitor?.getConsecutiveFailures() ?? 0,
     }))
-  } else if (req.url === '/exec' && req.method === 'POST') {
+  } else if (!IS_K8S && req.url === '/exec' && req.method === 'POST') {
+    // Exec endpoints only available in Swarm mode — K8s uses the K8s exec API directly
     handleExecRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
       logger.error({ err }, 'Exec request handler error')
       if (!res.headersSent) {
@@ -89,7 +95,7 @@ healthServer = createServer((req, res) => {
         res.end(JSON.stringify({ error: 'Internal error' }))
       }
     })
-  } else if (req.url === '/exec-stream' && req.method === 'POST') {
+  } else if (!IS_K8S && req.url === '/exec-stream' && req.method === 'POST') {
     handleExecStreamRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
       logger.error({ err }, 'Exec stream handler error')
       if (!res.headersSent) {
@@ -97,7 +103,7 @@ healthServer = createServer((req, res) => {
         res.end(JSON.stringify({ error: 'Internal error' }))
       }
     })
-  } else if (req.url === '/exec-input' && req.method === 'POST') {
+  } else if (!IS_K8S && req.url === '/exec-input' && req.method === 'POST') {
     handleExecInputRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
       logger.error({ err }, 'Exec input handler error')
       if (!res.headersSent) {
@@ -111,40 +117,41 @@ healthServer = createServer((req, res) => {
   }
 })
 
-// WebSocket server for interactive terminal sessions
-const wss = new WebSocketServer({ noServer: true })
+// WebSocket server for interactive terminal sessions (Swarm mode only)
+// In K8s mode, the API uses the K8s exec API directly — no agent involvement
+if (!IS_K8S) {
+  const wss = new WebSocketServer({ noServer: true })
 
-healthServer.on('upgrade', (req, socket, head) => {
-  const url = new URL(req.url!, `http://${req.headers.host}`)
+  healthServer.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url!, `http://${req.headers.host}`)
 
-  if (url.pathname === '/ws/exec') {
-    // Verify auth token
-    const token = url.searchParams.get('token')
-    if (NODE_AUTH_TOKEN && token !== NODE_AUTH_TOKEN) {
-      socket.destroy()
-      return
-    }
+    if (url.pathname === '/ws/exec') {
+      const token = url.searchParams.get('token')
+      if (NODE_AUTH_TOKEN && token !== NODE_AUTH_TOKEN) {
+        socket.destroy()
+        return
+      }
 
-    const containerId = url.searchParams.get('containerId')
-    if (!containerId) {
-      socket.destroy()
-      return
-    }
+      const containerId = url.searchParams.get('containerId')
+      if (!containerId) {
+        socket.destroy()
+        return
+      }
 
-    // Collect shells to try
-    const shell = url.searchParams.get('shell')
-    const shells = shell ? [shell] : ['/bin/sh', '/bin/bash', '/bin/ash']
+      const shell = url.searchParams.get('shell')
+      const shells = shell ? [shell] : ['/bin/sh', '/bin/bash', '/bin/ash']
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      handleExecWebSocket(ws, containerId, shells).catch((err) => {
-        logger.error({ err, containerId }, 'WebSocket exec handler error')
-        ws.close(1011, 'Internal error')
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleExecWebSocket(ws, containerId, shells).catch((err) => {
+          logger.error({ err, containerId }, 'WebSocket exec handler error')
+          ws.close(1011, 'Internal error')
+        })
       })
-    })
-  } else {
-    socket.destroy()
-  }
-})
+    } else {
+      socket.destroy()
+    }
+  })
+}
 
 healthServer.listen(HEALTH_PORT, () => {
   logger.info(`Health/exec server listening on port ${HEALTH_PORT}`)
@@ -153,11 +160,13 @@ healthServer.listen(HEALTH_PORT, () => {
 // Start health reporting
 monitor.start(HEARTBEAT_INTERVAL)
 
-// Initialize NFS mounts (non-fatal if not available)
-try {
-  await nfs.initialize()
-} catch {
-  // NFS not available in this environment
+// Initialize NFS mounts (Swarm mode only — K8s uses PVCs)
+if (!IS_K8S) {
+  try {
+    await nfs.initialize()
+  } catch {
+    // NFS not available in this environment
+  }
 }
 
-logger.info('Agent running')
+logger.info(`Agent running (orchestrator: ${ORCHESTRATOR})`)

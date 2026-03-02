@@ -235,6 +235,7 @@ setup_dirs() {
   log "Creating Fleet directories..."
   mkdir -p "$FLEET_DIR"/{data,certs,backups,nfs-exports,config,uploads}
   mkdir -p "$FLEET_DIR"/nfs-exports/volumes
+  mkdir -p "$FLEET_DIR"/nfs-exports/uploads
 
   # Setup NFS export — restrict to the local subnet
   if ! grep -q "$FLEET_DIR/nfs-exports" /etc/exports 2>/dev/null; then

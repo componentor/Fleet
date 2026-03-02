@@ -225,7 +225,7 @@ start_wizard() {
 # ─── Configure NFS mount ─────────────────────────────────────────────
 configure_nfs_mount() {
   log "Configuring NFS mount..."
-  mkdir -p /mnt/fleet-nfs
+  mkdir -p /opt/fleet/nfs-exports
 
   local NFS_SERVER=""
   if [ -n "${FLEET_NFS_SERVER:-}" ]; then
@@ -235,12 +235,16 @@ configure_nfs_mount() {
   fi
 
   if [ -n "$NFS_SERVER" ]; then
-    # Guard against duplicate fstab entries
-    if ! grep -q "/mnt/fleet-nfs" /etc/fstab 2>/dev/null; then
-      echo "$NFS_SERVER:/opt/fleet/nfs-exports /mnt/fleet-nfs nfs defaults 0 0" >> /etc/fstab
+    # Guard against duplicate fstab entries — mount at same path as primary for consistency
+    if ! grep -q "/opt/fleet/nfs-exports" /etc/fstab 2>/dev/null; then
+      echo "$NFS_SERVER:/opt/fleet/nfs-exports /opt/fleet/nfs-exports nfs defaults 0 0" >> /etc/fstab
     fi
     mount -a
-    log "NFS mounted from $NFS_SERVER"
+    # Keep legacy symlink for backwards compatibility
+    if [ ! -e /mnt/fleet-nfs ]; then
+      ln -s /opt/fleet/nfs-exports /mnt/fleet-nfs
+    fi
+    log "NFS mounted from $NFS_SERVER at /opt/fleet/nfs-exports"
   else
     warn "Skipping NFS mount. Configure manually later."
   fi

@@ -25,6 +25,8 @@ const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
 const REGISTRY = process.env['REGISTRY_URL'] ?? 'localhost:5000';
 const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet';
 const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? '';
+const ORCHESTRATOR = process.env['ORCHESTRATOR'] ?? 'swarm';
+const BUILDKIT_ADDR = process.env['BUILDKIT_ADDR'] ?? 'tcp://buildkitd.fleet-system:1234';
 
 export function scrubSecrets(log: string): string {
   return log
@@ -53,6 +55,32 @@ export class BuildService {
   private activeBuilds = new Map<string, { aborted: boolean; info: BuildInfo; processes: Set<import('node:child_process').ChildProcess> }>();
   private events = new EventEmitter();
   private registryLoggedIn = false;
+
+  private async pushWithRetry(
+    buildId: string,
+    info: BuildInfo,
+    imageTag: string,
+    workDir: string,
+    maxRetries = 2,
+  ): Promise<void> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await this.loginToRegistry();
+        await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000);
+        return;
+      } catch (err) {
+        if (attempt < maxRetries) {
+          const delay = (attempt + 1) * 3000;
+          info.log += `\n[push] Push failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay / 1000}s...\n`;
+          this.events.emit(`build:${buildId}`, info);
+          await new Promise((r) => setTimeout(r, delay));
+          this.registryLoggedIn = false; // Force re-login on retry
+        } else {
+          throw err;
+        }
+      }
+    }
+  }
 
   private async loginToRegistry(): Promise<void> {
     if (this.registryLoggedIn || !REGISTRY_PASSWORD) return;
@@ -159,22 +187,41 @@ export class BuildService {
         'SOURCE_DATE_EPOCH', 'TARGETPLATFORM', 'TARGETOS', 'TARGETARCH', 'TARGETVARIANT',
         'BUILDPLATFORM', 'BUILDOS', 'BUILDARCH', 'BUILDVARIANT',
       ]);
-      const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
-      for (const [key, val] of Object.entries(buildArgs)) {
-        if (RESERVED_BUILD_ARGS.has(key)) continue;
-        buildCmdArgs.push('--build-arg', `${key}=${val}`);
+
+      if (ORCHESTRATOR === 'kubernetes') {
+        // BuildKit: single command builds + pushes in one step
+        const buildctlArgs = [
+          '--addr', BUILDKIT_ADDR,
+          'build',
+          '--frontend', 'dockerfile.v0',
+          '--local', `context=${workDir}`,
+          '--local', `dockerfile=${workDir}`,
+          '--opt', `filename=${dockerfile}`,
+          '--output', `type=image,name=${imageTag},push=true`,
+        ];
+        for (const [key, val] of Object.entries(buildArgs)) {
+          if (RESERVED_BUILD_ARGS.has(key)) continue;
+          buildctlArgs.push('--opt', `build-arg:${key}=${val}`);
+        }
+        await this.execStreaming(buildId, info, 'buildctl', buildctlArgs, workDir, 600_000);
+      } else {
+        // Docker: build then push separately
+        const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
+        for (const [key, val] of Object.entries(buildArgs)) {
+          if (RESERVED_BUILD_ARGS.has(key)) continue;
+          buildCmdArgs.push('--build-arg', `${key}=${val}`);
+        }
+        buildCmdArgs.push(workDir);
+
+        await this.execStreaming(buildId, info, 'docker', buildCmdArgs, workDir, 600_000);
+
+        // 3. Push
+        info.status = 'pushing';
+        info.log += `\n[push] Pushing ${imageTag}...\n`;
+        this.events.emit(`build:${buildId}`, info);
+
+        await this.pushWithRetry(buildId, info, imageTag, workDir);
       }
-      buildCmdArgs.push(workDir);
-
-      await this.execStreaming(buildId, info, 'docker', buildCmdArgs, workDir, 600_000); // 10 minute timeout
-
-      // 3. Push
-      info.status = 'pushing';
-      info.log += `\n[push] Pushing ${imageTag}...\n`;
-      this.events.emit(`build:${buildId}`, info);
-
-      await this.loginToRegistry();
-      await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000); // 10 minute timeout
 
       // Done
       info.status = 'succeeded';
@@ -411,22 +458,39 @@ export class BuildService {
         'SOURCE_DATE_EPOCH', 'TARGETPLATFORM', 'TARGETOS', 'TARGETARCH', 'TARGETVARIANT',
         'BUILDPLATFORM', 'BUILDOS', 'BUILDARCH', 'BUILDVARIANT',
       ]);
-      const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
-      for (const [key, val] of Object.entries(buildArgs)) {
-        if (RESERVED_BUILD_ARGS.has(key)) continue;
-        buildCmdArgs.push('--build-arg', `${key}=${val}`);
+
+      if (ORCHESTRATOR === 'kubernetes') {
+        const buildctlArgs = [
+          '--addr', BUILDKIT_ADDR,
+          'build',
+          '--frontend', 'dockerfile.v0',
+          '--local', `context=${workDir}`,
+          '--local', `dockerfile=${workDir}`,
+          '--opt', `filename=${dockerfile}`,
+          '--output', `type=image,name=${imageTag},push=true`,
+        ];
+        for (const [key, val] of Object.entries(buildArgs)) {
+          if (RESERVED_BUILD_ARGS.has(key)) continue;
+          buildctlArgs.push('--opt', `build-arg:${key}=${val}`);
+        }
+        await this.execStreaming(buildId, info, 'buildctl', buildctlArgs, workDir, 600_000);
+      } else {
+        const buildCmdArgs = ['build', '-t', imageTag, '-f', join(workDir, dockerfile)];
+        for (const [key, val] of Object.entries(buildArgs)) {
+          if (RESERVED_BUILD_ARGS.has(key)) continue;
+          buildCmdArgs.push('--build-arg', `${key}=${val}`);
+        }
+        buildCmdArgs.push(workDir);
+
+        await this.execStreaming(buildId, info, 'docker', buildCmdArgs, workDir, 600_000);
+
+        // 3. Push
+        info.status = 'pushing';
+        info.log += `\n[push] Pushing ${imageTag}...\n`;
+        this.events.emit(`build:${buildId}`, info);
+
+        await this.pushWithRetry(buildId, info, imageTag, workDir);
       }
-      buildCmdArgs.push(workDir);
-
-      await this.execStreaming(buildId, info, 'docker', buildCmdArgs, workDir, 600_000);
-
-      // 3. Push
-      info.status = 'pushing';
-      info.log += `\n[push] Pushing ${imageTag}...\n`;
-      this.events.emit(`build:${buildId}`, info);
-
-      await this.loginToRegistry();
-      await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000);
 
       // Done
       info.status = 'succeeded';
@@ -548,12 +612,12 @@ export class BuildService {
 
       await this.exec('docker', ['tag', composeBuildImage, imageTag], workDir);
 
-      // 4. Push
+      // 4. Push (with retry for transient registry failures)
       info.status = 'pushing';
       info.log += `\n[push] Pushing ${imageTag}...\n`;
       this.events.emit(`build:${buildId}`, info);
 
-      await this.execStreaming(buildId, info, 'docker', ['push', imageTag], workDir, 600_000);
+      await this.pushWithRetry(buildId, info, imageTag, workDir);
 
       // Cleanup local compose image
       await this.exec('docker', ['rmi', composeBuildImage], workDir).catch(() => {});
@@ -684,6 +748,19 @@ export class BuildService {
   }
 
   async cleanupImages(olderThanHours = 24): Promise<string> {
+    if (ORCHESTRATOR === 'kubernetes') {
+      // BuildKit manages its own cache — prune via buildctl
+      try {
+        return await this.exec(
+          'buildctl',
+          ['--addr', BUILDKIT_ADDR, 'prune'],
+          '/tmp',
+          30_000,
+        );
+      } catch (err) {
+        return `BuildKit cleanup failed: ${String(err)}`;
+      }
+    }
     try {
       return await this.exec(
         'docker',
