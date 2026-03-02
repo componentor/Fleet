@@ -27,6 +27,22 @@ const NODEPORT_MIN = 30000;
 const NODEPORT_MAX = 32767;
 const STORAGE_CLASS = 'fleet-default';
 
+// Kubelet stats cache: avoids hitting kubelet for every container stats call
+// The /stats/summary endpoint returns ALL pods on a node, so we cache per-node.
+const KUBELET_STATS_CACHE_TTL_MS = 10_000;
+interface KubeletStatsCache {
+  data: any;
+  fetchedAt: number;
+}
+const kubeletStatsCache = new Map<string, KubeletStatsCache>();
+
+interface KubeletPodStats {
+  networkRxBytes: number;
+  networkTxBytes: number;
+  rootfsUsedBytes: number;
+  logsUsedBytes: number;
+}
+
 // ── Helpers ──
 
 /** Parse "namespace/podName" container ID format used in K8s mode. */
@@ -598,7 +614,7 @@ export class KubernetesService implements OrchestratorService {
     const { namespace, pod } = parsePodId(containerId);
 
     try {
-      // Use metrics-server PodMetrics API
+      // Use metrics-server PodMetrics API for CPU/memory
       const metrics = await this.customApi.getNamespacedCustomObject(
         { group: 'metrics.k8s.io', version: 'v1beta1', namespace, plural: 'pods', name: pod },
       ) as any;
@@ -615,15 +631,18 @@ export class KubernetesService implements OrchestratorService {
       const limits = podInfo.spec?.containers?.[0]?.resources?.limits;
       const memLimit = limits?.memory ? this.parseMemoryString(limits.memory) : 0;
 
+      // Fetch network/disk I/O from kubelet stats summary
+      const kubeletStats = await this.getKubeletPodStats(namespace, pod);
+
       return {
         cpuPercent: cpuNano / 1e9 * 100, // Convert to percentage
         memoryUsageBytes: memBytes,
         memoryLimitBytes: memLimit,
         memoryPercent: memLimit > 0 ? (memBytes / memLimit) * 100 : 0,
-        networkRxBytes: 0, // Not available from metrics-server
-        networkTxBytes: 0,
-        blockReadBytes: 0,
-        blockWriteBytes: 0,
+        networkRxBytes: kubeletStats?.networkRxBytes ?? 0,
+        networkTxBytes: kubeletStats?.networkTxBytes ?? 0,
+        blockReadBytes: kubeletStats?.rootfsUsedBytes ?? 0,
+        blockWriteBytes: kubeletStats?.logsUsedBytes ?? 0,
         pids: 0,
       };
     } catch {
@@ -634,9 +653,18 @@ export class KubernetesService implements OrchestratorService {
   async getContainerNetworkBytes(
     containerId: string,
   ): Promise<{ containerId: string; rxBytes: number; txBytes: number } | null> {
-    // K8s metrics-server doesn't expose network I/O.
-    // Would need cAdvisor or Prometheus for this — return null.
-    return null;
+    const { namespace, pod } = parsePodId(containerId);
+    try {
+      const kubeletStats = await this.getKubeletPodStats(namespace, pod);
+      if (!kubeletStats) return null;
+      return {
+        containerId,
+        rxBytes: kubeletStats.networkRxBytes,
+        txBytes: kubeletStats.networkTxBytes,
+      };
+    } catch {
+      return null;
+    }
   }
 
   async pruneServiceContainers(_serviceId: string): Promise<number> {
@@ -1650,6 +1678,108 @@ export class KubernetesService implements OrchestratorService {
       },
       _k8s: node,
     };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  Kubelet Stats (network I/O, disk I/O)
+  // ══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Fetch kubelet stats summary for a specific pod.
+   * Uses the K8s API proxy: /api/v1/nodes/{node}/proxy/stats/summary
+   * Results are cached per-node for KUBELET_STATS_CACHE_TTL_MS to avoid
+   * hammering the kubelet when fetching stats for multiple containers.
+   */
+  private async getKubeletPodStats(namespace: string, podName: string): Promise<KubeletPodStats | null> {
+    try {
+      // Find which node the pod is running on
+      const pod = await this.coreApi.readNamespacedPod({ name: podName, namespace });
+      const nodeName = pod.spec?.nodeName;
+      if (!nodeName) return null;
+
+      // Check cache
+      const cached = kubeletStatsCache.get(nodeName);
+      let summary: any;
+      if (cached && Date.now() - cached.fetchedAt < KUBELET_STATS_CACHE_TTL_MS) {
+        summary = cached.data;
+      } else {
+        // Fetch kubelet stats summary via API proxy
+        const result = await this.coreApi.connectGetNodeProxyWithPath({
+          name: nodeName,
+          path: 'stats/summary',
+        });
+        summary = typeof result === 'string' ? JSON.parse(result) : result;
+        kubeletStatsCache.set(nodeName, { data: summary, fetchedAt: Date.now() });
+      }
+
+      // Find matching pod in the summary
+      const pods = summary?.pods as any[] | undefined;
+      if (!pods) return null;
+
+      const podStats = pods.find(
+        (p: any) => p.podRef?.name === podName && p.podRef?.namespace === namespace,
+      );
+      if (!podStats) return null;
+
+      // Extract network stats
+      const net = podStats.network;
+      const networkRxBytes = net?.rxBytes ?? 0;
+      const networkTxBytes = net?.txBytes ?? 0;
+
+      // Extract filesystem stats from first container
+      const container = podStats.containers?.[0];
+      const rootfsUsedBytes = container?.rootfs?.usedBytes ?? 0;
+      const logsUsedBytes = container?.logs?.usedBytes ?? 0;
+
+      return { networkRxBytes, networkTxBytes, rootfsUsedBytes, logsUsedBytes };
+    } catch (err) {
+      logger.debug({ err }, 'Failed to fetch kubelet pod stats — falling back to zeros');
+      return null;
+    }
+  }
+
+  /**
+   * Check whether metrics-server is installed and healthy.
+   * Returns { installed, healthy } for use in admin monitoring status.
+   */
+  async checkMetricsServer(): Promise<{ installed: boolean; healthy: boolean }> {
+    try {
+      await this.customApi.listClusterCustomObject({
+        group: 'metrics.k8s.io',
+        version: 'v1beta1',
+        plural: 'nodes',
+      });
+      return { installed: true, healthy: true };
+    } catch (err: any) {
+      // 404 = API group not registered (metrics-server not installed)
+      // Other errors = installed but unhealthy
+      const status = err?.response?.statusCode ?? err?.statusCode;
+      if (status === 404 || status === 503) {
+        return { installed: false, healthy: false };
+      }
+      return { installed: true, healthy: false };
+    }
+  }
+
+  /**
+   * Check whether kubelet stats proxy is accessible.
+   */
+  async checkKubeletStats(): Promise<boolean> {
+    try {
+      const nodes = await this.coreApi.listNode();
+      const readyNode = nodes.items.find((n) =>
+        n.status?.conditions?.some((c) => c.type === 'Ready' && c.status === 'True'),
+      );
+      if (!readyNode?.metadata?.name) return false;
+
+      const result = await this.coreApi.connectGetNodeProxyWithPath({
+        name: readyNode.metadata.name,
+        path: 'stats/summary',
+      });
+      return !!result;
+    } catch {
+      return false;
+    }
   }
 
   /** Parse K8s CPU string (e.g. "500m", "2") to cores as a float. */

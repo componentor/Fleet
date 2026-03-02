@@ -450,7 +450,6 @@ export class UpdateService {
     }
 
     this.appendLog('Lock acquired.');
-    this.state.status = 'backing-up';
     this.state.previousImageTags.clear();
     this.state.preUpdateBackupId = null;
     this.state.servicesUpdated = [];
@@ -459,10 +458,37 @@ export class UpdateService {
     await this.persistState();
 
     try {
-      // 0. Pre-update backup (controlled by dashboard setting)
+      // 0. Run database migrations FIRST (transactional + advisory-locked)
+      // Migrations must run before backup because the Drizzle ORM schema
+      // may reference new columns that don't exist in the DB yet.
+      // Migrations are transactional — they roll back cleanly on failure.
+      if (signal.aborted) throw new Error('Update aborted by admin');
+      this.state.status = 'migrating';
+      await this.persistState();
+      this.appendLog('Running database migrations (transactional)...');
+      try {
+        const result = await runMigrations();
+        this.appendLog(`Migrations completed: ${result.applied} migration(s) applied.`);
+      } catch (err) {
+        this.appendLog(`Migration FAILED (rolled back): ${errorToString(err)}`);
+        throw new Error(`Migration failed — database was NOT modified: ${errorToString(err)}`);
+      }
+
+      // 1. Verify database health after migrations
+      this.appendLog('Verifying database health post-migration...');
+      const { verifyDatabase } = await import('@fleet/db/migrate');
+      const dbHealth = await verifyDatabase();
+      if (!dbHealth.ok) {
+        throw new Error(`Database health check failed after migrations: ${dbHealth.error ?? 'unknown error'}. Rolling back is safe — services are still on old version.`);
+      }
+      this.appendLog('Database health verified — schema is accessible.');
+
+      // 2. Pre-update backup (controlled by dashboard setting)
       // If the backup fails or times out, the update STOPS. The admin can use
       // Reset to abort and retry, or toggle "Create backup before updating" off in Update Settings.
       if (signal.aborted) throw new Error('Update aborted by admin');
+      this.state.status = 'backing-up';
+      await this.persistState();
       const skipBackup = options?.skipBackup ?? false;
       if (skipBackup) {
         this.appendLog('Skipping pre-update backup (user opted out).');
@@ -508,7 +534,7 @@ export class UpdateService {
         ]);
       }
 
-      // 1. Snapshot current image tags (with digests) for rollback
+      // 3. Snapshot current image tags (with digests) for rollback
       if (signal.aborted) throw new Error('Update aborted by admin');
       this.state.status = 'pulling';
       this.appendLog('Snapshotting current service images for rollback...');
@@ -524,12 +550,12 @@ export class UpdateService {
         }
       }
 
-      // 2. Fetch release checksums from the release body
+      // 4. Fetch release checksums from the release body
       this.appendLog('Fetching release checksums...');
       const release = await this.fetchRelease(targetVersion);
       const expectedChecksums = release?.checksums ?? {};
 
-      // 3. Validate checksums are present (required for production)
+      // 5. Validate checksums are present (required for production)
       this.state.status = 'verifying-images';
       await this.persistState();
       const hasChecksums = Object.keys(expectedChecksums).length > 0;
@@ -546,28 +572,6 @@ export class UpdateService {
       } else {
         this.appendLog(`Found checksums for ${Object.keys(expectedChecksums).length} image(s) — will verify after each service update.`);
       }
-
-      // 4. Run database migrations (transactional + advisory-locked)
-      if (signal.aborted) throw new Error('Update aborted by admin');
-      this.state.status = 'migrating';
-      await this.persistState();
-      this.appendLog('Running database migrations (transactional)...');
-      try {
-        const result = await runMigrations();
-        this.appendLog(`Migrations completed: ${result.applied} migration(s) applied.`);
-      } catch (err) {
-        this.appendLog(`Migration FAILED (rolled back): ${errorToString(err)}`);
-        throw new Error(`Migration failed — database was NOT modified: ${errorToString(err)}`);
-      }
-
-      // 5. Verify database health after migrations, before updating services
-      this.appendLog('Verifying database health post-migration...');
-      const { verifyDatabase } = await import('@fleet/db/migrate');
-      const dbHealth = await verifyDatabase();
-      if (!dbHealth.ok) {
-        throw new Error(`Database health check failed after migrations: ${dbHealth.error ?? 'unknown error'}. Rolling back is safe — services are still on old version.`);
-      }
-      this.appendLog('Database health verified — schema is accessible.');
 
       // 6. Rolling update non-API services first (one at a time, start-first)
       //    fleet_api is updated LAST in a separate step because updating it kills

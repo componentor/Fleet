@@ -15,6 +15,8 @@ import {
   Zap,
   HardDrive,
   GitCommit,
+  BarChart3,
+  Download,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
@@ -130,6 +132,27 @@ const deployStatusColor: Record<string, string> = {
   failed: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
   building: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
   deploying: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
+}
+
+const isKubernetes = computed(() => status.value?.monitoring?.orchestratorType === 'kubernetes')
+const installingMetrics = ref(false)
+const installLogs = ref<string[]>([])
+
+async function installMetricsServer() {
+  installingMetrics.value = true
+  installLogs.value = []
+  try {
+    const result = await api.post<{ success: boolean; logs: string[]; alreadyInstalled?: boolean }>('/settings/orchestrator/install-metrics-server', {})
+    installLogs.value = result.logs ?? []
+    if (result.success) {
+      // Refresh status to pick up the new monitoring state
+      await fetchStatus()
+    }
+  } catch (err: any) {
+    installLogs.value = [err?.message ?? 'Failed to install metrics-server']
+  } finally {
+    installingMetrics.value = false
+  }
 }
 
 onMounted(() => {
@@ -306,6 +329,72 @@ onUnmounted(() => {
             <div v-if="Object.keys(status.services.byStatus).length === 0" class="text-center py-1">
               <span class="text-gray-400 dark:text-gray-500">{{ $t('super.status.noServices') }}</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monitoring (Kubernetes only) -->
+      <div v-if="isKubernetes" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-6">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+          <BarChart3 class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Monitoring</h2>
+          <span class="ml-auto text-xs text-gray-400 dark:text-gray-500">Kubernetes</span>
+        </div>
+        <div class="p-5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <!-- Metrics Server -->
+            <div class="flex items-center justify-between px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div>
+                <p class="text-sm font-medium text-gray-900 dark:text-white">Metrics Server</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">CPU & memory metrics</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <template v-if="status.monitoring?.metricsServer?.healthy">
+                  <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                  <span class="text-xs font-medium text-green-600 dark:text-green-400">Healthy</span>
+                </template>
+                <template v-else-if="status.monitoring?.metricsServer?.installed">
+                  <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                  <span class="text-xs font-medium text-yellow-600 dark:text-yellow-400">Installed</span>
+                </template>
+                <template v-else>
+                  <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span class="text-xs font-medium text-red-600 dark:text-red-400">Not Installed</span>
+                  <button
+                    @click="installMetricsServer"
+                    :disabled="installingMetrics"
+                    class="ml-2 flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Loader2 v-if="installingMetrics" class="w-3 h-3 animate-spin" />
+                    <Download v-else class="w-3 h-3" />
+                    Install
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <!-- Kubelet Stats -->
+            <div class="flex items-center justify-between px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div>
+                <p class="text-sm font-medium text-gray-900 dark:text-white">Kubelet Stats</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Network & disk I/O</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <template v-if="status.monitoring?.kubeletStats?.available">
+                  <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                  <span class="text-xs font-medium text-green-600 dark:text-green-400">Available</span>
+                </template>
+                <template v-else>
+                  <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span class="text-xs font-medium text-red-600 dark:text-red-400">Unavailable</span>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- Install logs -->
+          <div v-if="installLogs.length > 0" class="mt-4 p-3 bg-gray-900 rounded-lg text-xs text-gray-300 font-mono max-h-40 overflow-y-auto">
+            <p v-for="(log, i) in installLogs" :key="i">{{ log }}</p>
           </div>
         </div>
       </div>
