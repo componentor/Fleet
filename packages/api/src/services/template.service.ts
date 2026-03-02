@@ -305,7 +305,7 @@ export class TemplateService {
     const stackNamespace = `${swarmNamePrefix}-${slug}-${stackShort}`;
     const serviceNameMap: Record<string, string> = {};
     for (const svcDef of parsed.services) {
-      serviceNameMap[svcDef.name] = `${swarmNamePrefix}-${svcDef.name}-${stackShort}`;
+      serviceNameMap[svcDef.name] = `${swarmNamePrefix}-${svcDef.name}-${stackShort}`.toLowerCase();
     }
 
     // Helper to interpolate {{variable}} and {{service:name}} placeholders
