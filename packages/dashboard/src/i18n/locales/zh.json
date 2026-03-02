@@ -1695,7 +1695,23 @@
         "targetBackend": "目标",
         "migrate": "迁移",
         "migrateSuccess": "服务已从 {from} 迁移到 {to}",
-        "migrateFailed": "迁移失败"
+        "migrateFailed": "迁移失败",
+        "installK3s": "安装 Kubernetes",
+        "installK3sDesc": "在 Docker Swarm 旁安装 k3s（轻量级 Kubernetes）。两者可以同时运行。",
+        "installK3sServer": "安装 k3s 服务器",
+        "installK3sServerDesc": "在当前节点上安装 k3s 控制平面（1-2 分钟）。",
+        "installK3sAgents": "安装到工作节点",
+        "installK3sAgentsDesc": "在所有工作节点上安装 k3s 代理以运行 Kubernetes 工作负载。",
+        "installDocker": "安装 Docker Swarm",
+        "installDockerDesc": "在 Kubernetes 旁安装 Docker 并初始化 Swarm 模式。两者可以同时运行。",
+        "installDockerServer": "安装 Docker + 初始化 Swarm",
+        "installDockerServerDesc": "在当前节点上安装 Docker 并初始化为 Swarm 管理节点。",
+        "installDockerAgents": "在工作节点安装 Docker",
+        "installDockerAgentsDesc": "在所有工作节点上安装 Docker 并将它们加入 Swarm 集群。",
+        "installing": "安装中...",
+        "installSuccess": "安装成功",
+        "installFailed": "安装失败",
+        "installOnNewNodes": "安装到新节点"
       }
     },
     "billing": {

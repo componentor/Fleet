@@ -890,6 +890,56 @@ EOF
   docker stack services fleet 2>/dev/null || true
 }
 
+# ─── Optional: Install k3s alongside Docker Swarm ────────────────────
+install_k3s() {
+  echo ""
+  read -rp "$(echo -e ${BLUE}Also install Kubernetes \(k3s\) alongside Docker Swarm? [y/N]: ${NC})" INSTALL_K3S </dev/tty
+  if [[ ! "$INSTALL_K3S" =~ ^[Yy] ]]; then
+    log "Skipping Kubernetes installation"
+    return
+  fi
+
+  log "Installing k3s server..."
+  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
+    --flannel-backend=none \
+    --disable-network-policy \
+    --disable=traefik \
+    --disable=servicelb \
+    --write-kubeconfig-mode=644" sh -
+
+  export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+  log "Waiting for k3s to be ready..."
+  for i in $(seq 1 30); do
+    kubectl get nodes &>/dev/null && break
+    sleep 2
+  done
+
+  # Install Cilium CNI
+  log "Installing Cilium CNI..."
+  if ! command -v cilium &>/dev/null; then
+    CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+    curl -L --fail --remote-name-all \
+      "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz" 2>/dev/null
+    tar xzf cilium-linux-amd64.tar.gz -C /usr/local/bin
+    rm -f cilium-linux-amd64.tar.gz
+  fi
+  cilium install --set kubeProxyReplacement=true
+  cilium status --wait --wait-duration 120s || true
+
+  # Store k3s token for worker join
+  K3S_TOKEN=$(cat /var/lib/rancher/k3s/server/node-token 2>/dev/null)
+  K3S_IP=$(ip -4 route get 1.1.1.1 | awk '{print $7; exit}')
+  if [ -n "$K3S_TOKEN" ]; then
+    echo "K3S_TOKEN=${K3S_TOKEN}" >> "$FLEET_DIR/config/env"
+    echo "K3S_URL=https://${K3S_IP}:6443" >> "$FLEET_DIR/config/env"
+    log "k3s join token saved to $FLEET_DIR/config/env"
+  fi
+
+  log "Kubernetes (k3s) installed successfully"
+  kubectl get nodes
+}
+
 # ─── Main ────────────────────────────────────────────────────────────
 main() {
   detect_os
@@ -905,6 +955,7 @@ main() {
   create_seccomp_profile
   configure_firewall
   deploy_stack
+  install_k3s
 
   echo ""
   echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
@@ -917,12 +968,21 @@ main() {
   echo "  To add more nodes, copy join.sh to the server and run:"
   echo "  GITHUB_TOKEN=<token> bash join.sh"
   echo ""
-  echo "  Join token:"
+  echo "  Join token (Swarm):"
   docker swarm join-token worker -q 2>/dev/null || echo "  (run 'docker swarm join-token worker' to get the token)"
+  if [ -f /var/lib/rancher/k3s/server/node-token ]; then
+    echo ""
+    echo "  Join token (k3s):"
+    echo "  K3S_URL=https://${K3S_IP:-$(ip -4 route get 1.1.1.1 | awk '{print $7; exit}')}:6443"
+    echo "  K3S_TOKEN=$(cat /var/lib/rancher/k3s/server/node-token)"
+  fi
   echo ""
   echo "  Useful commands:"
   echo "    docker stack services fleet     — list all services"
   echo "    docker service logs fleet_api   — view API logs"
+  if command -v kubectl &>/dev/null; then
+    echo "    kubectl -n fleet-system get pods — list K8s pods"
+  fi
   echo ""
 }
 

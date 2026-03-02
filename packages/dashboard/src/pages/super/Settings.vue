@@ -180,6 +180,14 @@ const orchMigrateServiceId = ref('')
 const orchMigrateTarget = ref<'swarm' | 'kubernetes'>('kubernetes')
 const orchMigrateResult = ref<{ success: boolean; message: string } | null>(null)
 
+// Orchestrator install
+const orchInstallingK3s = ref(false)
+const orchInstallingK3sAgents = ref(false)
+const orchInstallingDocker = ref(false)
+const orchInstallingDockerAgents = ref(false)
+const orchInstallLogs = ref<string[]>([])
+const orchInstallResult = ref<{ success: boolean; message: string } | null>(null)
+
 async function fetchSettings() {
   loading.value = true
   try {
@@ -827,6 +835,82 @@ async function migrateServiceOrchestrator() {
     orchMigrateResult.value = { success: false, message: err?.body?.error || 'Migration failed' }
   } finally {
     orchMigrating.value = false
+  }
+}
+
+async function installK3sServer() {
+  orchInstallingK3s.value = true
+  orchInstallLogs.value = []
+  orchInstallResult.value = null
+  try {
+    const result = await api.post<any>('/settings/orchestrator/install-k3s', {})
+    orchInstallLogs.value = result.logs ?? []
+    orchInstallResult.value = {
+      success: result.success,
+      message: result.success ? t('super.settings.orchestrator.installSuccess') : (result.error || t('super.settings.orchestrator.installFailed')),
+    }
+    if (result.success) await fetchOrchestrator()
+  } catch (err: any) {
+    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+  } finally {
+    orchInstallingK3s.value = false
+  }
+}
+
+async function installK3sAgents() {
+  orchInstallingK3sAgents.value = true
+  orchInstallResult.value = null
+  try {
+    const result = await api.post<any>('/settings/orchestrator/install-k3s-agents', {})
+    orchInstallResult.value = {
+      success: result.success !== false,
+      message: result.success !== false
+        ? t('super.settings.orchestrator.installSuccess')
+        : (result.error || t('super.settings.orchestrator.installFailed')),
+    }
+    if (result.success !== false) await fetchOrchestrator()
+  } catch (err: any) {
+    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+  } finally {
+    orchInstallingK3sAgents.value = false
+  }
+}
+
+async function installDockerServer() {
+  orchInstallingDocker.value = true
+  orchInstallLogs.value = []
+  orchInstallResult.value = null
+  try {
+    const result = await api.post<any>('/settings/orchestrator/install-docker', {})
+    orchInstallLogs.value = result.logs ?? []
+    orchInstallResult.value = {
+      success: result.success,
+      message: result.success ? t('super.settings.orchestrator.installSuccess') : (result.error || t('super.settings.orchestrator.installFailed')),
+    }
+    if (result.success) await fetchOrchestrator()
+  } catch (err: any) {
+    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+  } finally {
+    orchInstallingDocker.value = false
+  }
+}
+
+async function installDockerAgents() {
+  orchInstallingDockerAgents.value = true
+  orchInstallResult.value = null
+  try {
+    const result = await api.post<any>('/settings/orchestrator/install-docker-agents', {})
+    orchInstallResult.value = {
+      success: result.success !== false,
+      message: result.success !== false
+        ? t('super.settings.orchestrator.installSuccess')
+        : (result.error || t('super.settings.orchestrator.installFailed')),
+    }
+    if (result.success !== false) await fetchOrchestrator()
+  } catch (err: any) {
+    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+  } finally {
+    orchInstallingDockerAgents.value = false
   }
 }
 
@@ -2122,6 +2206,106 @@ onMounted(() => {
                   {{ orchMigrateResult.message }}
                 </p>
               </div>
+            </div>
+
+            <!-- Install Kubernetes (when not available) -->
+            <div v-if="!orchK8sAvailable" class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.orchestrator.installK3s') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.orchestrator.installK3sDesc') }}</p>
+              <div class="flex flex-col sm:flex-row items-start gap-3">
+                <div>
+                  <button
+                    @click="installK3sServer"
+                    :disabled="orchInstallingK3s"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    <Loader2 v-if="orchInstallingK3s" class="w-4 h-4 animate-spin" />
+                    <Server v-else class="w-4 h-4" />
+                    {{ orchInstallingK3s ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installK3sServer') }}
+                  </button>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ t('super.settings.orchestrator.installK3sServerDesc') }}</p>
+                </div>
+                <div>
+                  <button
+                    @click="installK3sAgents"
+                    :disabled="orchInstallingK3sAgents || orchInstallingK3s"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+                  >
+                    <Loader2 v-if="orchInstallingK3sAgents" class="w-4 h-4 animate-spin" />
+                    <Server v-else class="w-4 h-4" />
+                    {{ orchInstallingK3sAgents ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installK3sAgents') }}
+                  </button>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ t('super.settings.orchestrator.installK3sAgentsDesc') }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Install Docker Swarm (when not available) -->
+            <div v-if="!orchSwarmAvailable" class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.orchestrator.installDocker') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.orchestrator.installDockerDesc') }}</p>
+              <div class="flex flex-col sm:flex-row items-start gap-3">
+                <div>
+                  <button
+                    @click="installDockerServer"
+                    :disabled="orchInstallingDocker"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    <Loader2 v-if="orchInstallingDocker" class="w-4 h-4 animate-spin" />
+                    <Server v-else class="w-4 h-4" />
+                    {{ orchInstallingDocker ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installDockerServer') }}
+                  </button>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ t('super.settings.orchestrator.installDockerServerDesc') }}</p>
+                </div>
+                <div>
+                  <button
+                    @click="installDockerAgents"
+                    :disabled="orchInstallingDockerAgents || orchInstallingDocker"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+                  >
+                    <Loader2 v-if="orchInstallingDockerAgents" class="w-4 h-4 animate-spin" />
+                    <Server v-else class="w-4 h-4" />
+                    {{ orchInstallingDockerAgents ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installDockerAgents') }}
+                  </button>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ t('super.settings.orchestrator.installDockerAgentsDesc') }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Install on new nodes (when both are available) -->
+            <div v-if="orchK8sAvailable && orchSwarmAvailable" class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.orchestrator.installOnNewNodes') }}</h3>
+              <div class="flex items-center gap-3">
+                <button
+                  @click="installK3sAgents"
+                  :disabled="orchInstallingK3sAgents"
+                  class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+                >
+                  <Loader2 v-if="orchInstallingK3sAgents" class="w-4 h-4 animate-spin" />
+                  k3s Agents
+                </button>
+                <button
+                  @click="installDockerAgents"
+                  :disabled="orchInstallingDockerAgents"
+                  class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
+                >
+                  <Loader2 v-if="orchInstallingDockerAgents" class="w-4 h-4 animate-spin" />
+                  Docker Workers
+                </button>
+              </div>
+            </div>
+
+            <!-- Install logs / result -->
+            <div v-if="orchInstallLogs.length > 0" class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div class="bg-gray-900 rounded-lg p-4 max-h-48 overflow-y-auto font-mono text-xs text-gray-300">
+                <div v-for="(log, i) in orchInstallLogs" :key="i" class="py-0.5">{{ log }}</div>
+              </div>
+            </div>
+
+            <div v-if="orchInstallResult" class="mt-3 p-3 rounded-lg border" :class="orchInstallResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+              <p class="text-sm" :class="orchInstallResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                {{ orchInstallResult.message }}
+              </p>
             </div>
           </div>
         </div>

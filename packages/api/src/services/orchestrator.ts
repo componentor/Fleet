@@ -98,3 +98,32 @@ export function getAvailableOrchestrators(): OrchestratorType[] {
   if (k8sInstance) available.push('kubernetes');
   return available;
 }
+
+/**
+ * Re-attempt initialization of both backends.
+ * Call after installing a new orchestrator (k3s or Docker) at runtime.
+ */
+export async function reloadOrchestrators(): Promise<void> {
+  // Try Swarm
+  if (!swarmInstance) {
+    try {
+      const { dockerService } = await import('./docker.service.js');
+      swarmInstance = dockerService;
+    } catch { /* Docker not available */ }
+  }
+
+  // Try K8s
+  if (!k8sInstance) {
+    try {
+      const { KubernetesService } = await import('./kubernetes.service.js');
+      k8sInstance = new KubernetesService();
+    } catch { /* kubeconfig not available */ }
+  }
+
+  // Update the default orchestrator export
+  if (defaultType === 'kubernetes' && k8sInstance) {
+    orchestrator = k8sInstance;
+  } else if (swarmInstance) {
+    orchestrator = swarmInstance;
+  }
+}
