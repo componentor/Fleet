@@ -159,7 +159,10 @@ try {
 
 // Verify built-in registry is reachable (non-blocking startup check)
 try {
-  const REGISTRY_URL = process.env['REGISTRY_URL'] ?? ''
+  const RAW_REG = process.env['REGISTRY_URL'] ?? ''
+  const PLATFORM_DOM = process.env['PLATFORM_DOMAIN'] ?? ''
+  // Resolve the canonical registry URL (same logic as build.service.ts)
+  const REGISTRY_URL = (RAW_REG && !RAW_REG.match(/:\d+$/) && RAW_REG !== 'localhost') ? RAW_REG : (PLATFORM_DOM || RAW_REG)
   const REGISTRY_USER = process.env['REGISTRY_USER'] ?? 'fleet'
   const REGISTRY_PASSWORD = process.env['REGISTRY_PASSWORD'] ?? ''
   if (REGISTRY_URL) {
