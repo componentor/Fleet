@@ -541,15 +541,9 @@ export class UpdateService {
       }
       this.appendLog('Database health verified — schema is accessible.');
 
-      // 1.5. Reconcile infrastructure: download new stack files and re-deploy
-      // This applies docker-stack.yml config changes (Traefik labels, network, ports, env vars)
-      // that the rolling image update doesn't cover. Runs BEFORE backup so the
-      // infrastructure is stable before we snapshot.
-      if (signal.aborted) throw new Error('Update aborted by admin');
-      this.appendLog('Reconciling infrastructure...');
-      await this.reconcileInfrastructure(imageTag);
-
       // 2. Pre-update backup (controlled by dashboard setting)
+      // Must run BEFORE infrastructure reconciliation, because reconcile runs
+      // `docker stack deploy` which restarts services (including postgres).
       // If the backup fails or times out, the update STOPS. The admin can use
       // Reset to abort and retry, or toggle "Create backup before updating" off in Update Settings.
       if (signal.aborted) throw new Error('Update aborted by admin');
@@ -615,6 +609,14 @@ export class UpdateService {
           throw new Error(`Cannot proceed — failed to snapshot services for rollback: ${missing.join(', ')}`);
         }
       }
+
+      // 3.5. Reconcile infrastructure: download new stack files and re-deploy
+      // This applies docker-stack.yml config changes (Traefik labels, network, ports, env vars)
+      // that the rolling image update doesn't cover. Runs AFTER backup/snapshot
+      // because `docker stack deploy` restarts services (including postgres).
+      if (signal.aborted) throw new Error('Update aborted by admin');
+      this.appendLog('Reconciling infrastructure...');
+      await this.reconcileInfrastructure(imageTag);
 
       // 4. Fetch release checksums from the release body
       this.appendLog('Fetching release checksums...');
@@ -1567,7 +1569,12 @@ if ! grep -q '^REGISTRY_HTTP_SECRET=' "\${ENV_FILE}"; then
   echo "Added REGISTRY_HTTP_SECRET to env"
 fi
 
-# 5. Re-deploy the stack to apply config changes
+# 5. Ensure required bind-mount directories exist on the local node
+# (These may be new in the updated stack file and not yet created on existing installs)
+mkdir -p "\${FLEET_DIR}/nfs-exports/uploads"
+mkdir -p "\${FLEET_DIR}/traefik"
+
+# 6. Re-deploy the stack to apply config changes
 # Source env for variable substitution
 set -a
 . "\${ENV_FILE}"
@@ -1578,6 +1585,15 @@ VALKEY_PASSWORD=\$(echo "\${VALKEY_URL}" | sed -n 's|redis://:\\([^@]*\\)@.*|\\1
 export VALKEY_PASSWORD
 
 cd "\${FLEET_DIR}"
+
+# Ensure required bind-mount directories exist on ALL Swarm nodes before deploying
+# (prevents "bind source path does not exist" errors during rolling updates)
+docker service create --name fleet-pre-deploy-dirs --mode global --restart-condition none \
+  --mount type=bind,source=/,target=/host \
+  alpine sh -c 'mkdir -p /host/opt/fleet/nfs-exports/uploads && echo done' 2>/dev/null || true
+sleep 5
+docker service rm fleet-pre-deploy-dirs 2>/dev/null || true
+
 docker stack deploy -c docker-stack.yml --with-registry-auth fleet 2>&1 || echo "WARN: stack deploy had errors (non-fatal)"
 echo "Infrastructure reconciliation complete"
 `;
