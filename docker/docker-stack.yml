@@ -80,7 +80,7 @@ services:
       - /opt/fleet/config/env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/fleet/uploads:/srv/nfs/uploads
+      - /opt/fleet/nfs-exports/uploads:/srv/nfs/uploads
     networks:
       - fleet_internal
       - fleet_public
