@@ -1509,6 +1509,21 @@ export class UpdateService {
     const token = process.env['GITHUB_TOKEN'] ?? '';
     const repo = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 
+    // Sync DB platform domain to env file so the shell script uses the correct value
+    try {
+      const { getPlatformDomain } = await import('../routes/settings.js');
+      const dbDomain = await getPlatformDomain();
+      if (dbDomain && dbDomain !== 'fleet.local') {
+        await orchestrator.runOnLocalHost(
+          `grep -q '^PLATFORM_DOMAIN=' /opt/fleet/config/env && sed -i "s|^PLATFORM_DOMAIN=.*|PLATFORM_DOMAIN=${dbDomain}|" /opt/fleet/config/env || echo "PLATFORM_DOMAIN=${dbDomain}" >> /opt/fleet/config/env`,
+          { timeoutMs: 10_000 },
+        );
+        this.appendLog(`Synced PLATFORM_DOMAIN=${dbDomain} from DB to env file`);
+      }
+    } catch (err) {
+      this.appendLog(`WARN: Could not sync platform domain to env: ${err}`);
+    }
+
     // Use the tag as-is for the raw GitHub URL (could be "1.2.3" or "v1.2.3")
     // Try with 'v' prefix first (standard release tag), fall back to plain
     const versions = targetTag.startsWith('v') ? [targetTag, targetTag.slice(1)] : [`v${targetTag}`, targetTag];
