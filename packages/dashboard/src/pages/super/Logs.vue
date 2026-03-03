@@ -66,17 +66,11 @@ async function fetchLogs() {
     // Read metadata from response headers
     const svcHeader = response.headers.get('X-Fleet-Available-Services')
     if (svcHeader) availableServices.value = svcHeader.split(',')
+    const warnHeader = response.headers.get('X-Fleet-Warning')
+    if (warnHeader) warning.value = warnHeader
   } catch (err: any) {
     if (err?.name === 'AbortError') return
-    // Fallback: endpoint may have returned JSON (e.g. warning / not found)
-    if (err?.body) {
-      const body = err.body as Record<string, any>
-      logs.value = body?.logs ?? ''
-      warning.value = body?.warning ?? 'Failed to fetch logs'
-      if (body?.availableServices) availableServices.value = body.availableServices
-    } else {
-      warning.value = 'Failed to fetch logs'
-    }
+    warning.value = 'Failed to fetch logs'
   } finally {
     loading.value = false
   }
@@ -125,7 +119,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="p-6 max-w-full">
+  <div class="max-w-full">
     <!-- Header -->
     <div class="flex items-center justify-between mb-6">
       <div class="flex items-center gap-3">
