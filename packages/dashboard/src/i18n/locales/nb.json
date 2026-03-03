@@ -181,6 +181,7 @@
     "roles": "Roller",
     "support": "Brukerstotte",
     "selfHealing": "Selvreparasjon",
+    "database": "Database",
     "logs": "Logger",
     "translations": "Oversettelser",
     "group": {
@@ -2154,6 +2155,57 @@
       "overwriteExisting": "Overskriv eksisterende oversettelser",
       "editingLocale": "Redigerer: {name}",
       "totalKeys": "{count} nøkler totalt"
+    },
+    "platformDb": {
+      "title": "Database",
+      "subtitle": "Utforsk og administrer plattformdatabasen direkte",
+      "tabs": {
+        "data": "Data",
+        "structure": "Struktur",
+        "query": "Spørring",
+        "connection": "Tilkobling",
+        "access": "Tilgang"
+      },
+      "tables": "Tabeller",
+      "selectTable": "Velg en tabell for å se dataene.",
+      "createTable": "Opprett tabell",
+      "dropTable": "Slett tabell",
+      "tableName": "Tabellnavn",
+      "columns": "Kolonner",
+      "addColumn": "Legg til kolonne",
+      "column": "Kolonne",
+      "type": "Type",
+      "nullable": "Nullable",
+      "default": "Standard",
+      "addRow": "Legg til rad",
+      "insertRow": "Sett inn rad",
+      "editHint": "Dobbeltklikk en celle for å redigere",
+      "noPrimaryKey": "Ingen primærnøkkel — redigering deaktivert",
+      "noData": "Ingen data.",
+      "cancel": "Avbryt",
+      "sqlQuery": "SQL-spørring",
+      "execute": "Kjør",
+      "queryHint": "Trykk Ctrl+Enter for å kjøre. Full lese-/skrivetilgang — vær forsiktig med destruktive spørringer.",
+      "connectionDetails": "Tilkoblingsdetaljer",
+      "host": "Vert",
+      "port": "Port",
+      "database": "Database",
+      "username": "Brukernavn",
+      "connString": "Tilkoblingsstreng",
+      "cliCommand": "CLI-kommando",
+      "sshTunnel": "SSH-tunnel",
+      "sshTunnelDesc": "Hvis databasen ikke er direkte tilgjengelig, bruk en SSH-tunnel for å videresende porten til din lokale maskin:",
+      "sshTunnelAfter": "Koble deretter til localhost med den videresendte porten med din foretrukne klient.",
+      "externalTools": "Eksterne verktøy",
+      "pgAdminDesc": "Bruk tilkoblingsdetaljene ovenfor for å legge til en ny server i pgAdmin.",
+      "dbeaverDesc": "Opprett en ny tilkobling med vert, port og legitimasjon ovenfor.",
+      "tablePlusDesc": "Opprett en ny tilkobling og lim inn tilkoblingsstrengen.",
+      "ipAllowlist": "IP-tilgangsliste for fjerntilgang",
+      "allowlistInfo": "Begrens eksterne databasetilkoblinger til bestemte IP-adresser. Dette påvirker ikke webgrensesnittet — kun direkte tilkoblinger via CLI eller eksterne verktøy. La stå tom for å tillate alle IP-er.",
+      "yourIp": "Din IP",
+      "addIp": "Legg til",
+      "removeIp": "Fjern",
+      "noAllowlistEntries": "Ingen IP-begrensninger — alle IP-er kan koble til databasen eksternt."
     }
   },
   "setup": {
@@ -3547,7 +3599,8 @@
       "noResults": "Ingen hendelser matcher søket",
       "prev": "Forrige",
       "next": "Neste",
-      "page": "Side {page} av {total}"
+      "page": "Side {page} av {total}",
+      "updated": "Oppdatert"
     },
     "icons": {
       "incident": "Hendelse",
@@ -3714,7 +3767,8 @@
       "settings": "Innstillinger",
       "updates": "Oppdateringer",
       "support": "Støtte",
-      "roles": "Roller"
+      "roles": "Roller",
+      "database": "Database"
     }
   }
 }

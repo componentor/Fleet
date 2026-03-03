@@ -208,7 +208,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         } else {
           // No Dockerfile found — try runtime detection
           const { detectRuntime } = await import('../services/runtime.service.js');
-          const runtimeResult = await detectRuntime(detection.allFiles, null);
+          const runtimeResult = await detectRuntime(detection.allFiles, null, svc.nginxConfig);
           if (runtimeResult) {
             generatedDockerfile = runtimeResult.dockerfile;
             // Store the generated Dockerfile on the service record

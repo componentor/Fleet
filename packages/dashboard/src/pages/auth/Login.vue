@@ -129,9 +129,14 @@ function loginWithGoogle() {
         </div>
 
         <div>
-          <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-            {{ $t('auth.passwordLabel') }}
-          </label>
+          <div class="flex items-center justify-between mb-1.5">
+            <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ $t('auth.passwordLabel') }}
+            </label>
+            <RouterLink to="/forgot-password" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">
+              {{ $t('auth.forgotPassword') }}
+            </RouterLink>
+          </div>
           <input
             id="password"
             v-model="password"

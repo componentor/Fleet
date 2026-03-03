@@ -134,6 +134,8 @@ const statusPostItemSchema = z.object({
   severity: z.string(),
   affectedServices: z.any(),
   publishedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
   title: z.string(),
   body: z.string(),
 }).openapi('StatusPostItem');
@@ -213,6 +215,8 @@ statusPage.openapi(postsRoute, (async (c: any) => {
       severity: post.severity,
       affectedServices: post.affectedServices,
       publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
+      createdAt: post.createdAt ? post.createdAt.toISOString() : new Date().toISOString(),
+      updatedAt: post.updatedAt ? post.updatedAt.toISOString() : new Date().toISOString(),
       title: translation?.title ?? '',
       body: translation?.body ?? '',
     };

@@ -55,6 +55,7 @@ import supportRoutes from './routes/support.js';
 import adminSupportRoutes from './routes/admin-support.js';
 import adminI18nRoutes from './routes/admin-i18n.js';
 import selfHealingRoutes from './routes/self-healing.js';
+import platformDbRoutes from './routes/platform-db.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -483,6 +484,7 @@ api.route('/support', supportRoutes);
 api.route('/admin/support', adminSupportRoutes);
 api.route('/admin/i18n', adminI18nRoutes);
 api.route('/admin/self-healing', selfHealingRoutes);
+api.route('/admin/platform-db', platformDbRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(
@@ -1455,8 +1457,17 @@ api.get(
           const wsUser = await verifyWsToken(token);
 
           if (!wsUser.isSuper) {
-            ws.close(4003, 'Super admin access required');
-            return;
+            // Check if user has admin role with nodes permission
+            const dbUser = await db.query.users.findFirst({
+              where: eq(usersTable.id, wsUser.userId),
+              columns: { adminRoleId: true },
+              with: { adminRole: { columns: { permissions: true } } },
+            });
+            const perms = (dbUser as any)?.adminRole?.permissions as Record<string, string[]> | undefined;
+            if (!perms?.nodes?.includes('read')) {
+              ws.close(4003, 'Admin access with nodes permission required');
+              return;
+            }
           }
 
           if (!containerId || !nodeId) {

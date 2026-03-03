@@ -181,6 +181,7 @@
     "roles": "角色",
     "support": "支持",
     "selfHealing": "自动修复",
+    "database": "数据库",
     "translations": "翻译管理",
     "logs": "日志",
     "group": {
@@ -2153,6 +2154,57 @@
       "overwriteExisting": "覆盖现有翻译",
       "editingLocale": "编辑中：{name}",
       "totalKeys": "共 {count} 个键"
+    },
+    "platformDb": {
+      "title": "数据库",
+      "subtitle": "直接浏览和管理平台数据库",
+      "tabs": {
+        "data": "数据",
+        "structure": "结构",
+        "query": "查询",
+        "connection": "连接",
+        "access": "访问"
+      },
+      "tables": "表",
+      "selectTable": "选择一个表来查看其数据。",
+      "createTable": "创建表",
+      "dropTable": "删除表",
+      "tableName": "表名",
+      "columns": "列",
+      "addColumn": "添加列",
+      "column": "列",
+      "type": "类型",
+      "nullable": "可空",
+      "default": "默认值",
+      "addRow": "添加行",
+      "insertRow": "插入行",
+      "editHint": "双击单元格进行编辑",
+      "noPrimaryKey": "无主键 — 编辑已禁用",
+      "noData": "无数据。",
+      "cancel": "取消",
+      "sqlQuery": "SQL 查询",
+      "execute": "执行",
+      "queryHint": "按 Ctrl+Enter 执行。完全读写权限 — 请谨慎执行破坏性查询。",
+      "connectionDetails": "连接详情",
+      "host": "主机",
+      "port": "端口",
+      "database": "数据库",
+      "username": "用户名",
+      "connString": "连接字符串",
+      "cliCommand": "CLI 命令",
+      "sshTunnel": "SSH 隧道",
+      "sshTunnelDesc": "如果数据库无法直接访问，请使用 SSH 隧道将端口转发到本地机器：",
+      "sshTunnelAfter": "然后使用您首选的客户端通过转发端口连接到 localhost。",
+      "externalTools": "外部工具",
+      "pgAdminDesc": "使用上面的连接详情在 pgAdmin 中添加新服务器。",
+      "dbeaverDesc": "使用上面的主机、端口和凭据创建新连接。",
+      "tablePlusDesc": "创建新连接并粘贴连接字符串。",
+      "ipAllowlist": "远程访问 IP 白名单",
+      "allowlistInfo": "将远程数据库连接限制为特定 IP 地址。这不影响 Web 仪表板 — 仅限通过 CLI 或外部工具的直接连接。留空则允许所有 IP。",
+      "yourIp": "您的 IP",
+      "addIp": "添加",
+      "removeIp": "移除",
+      "noAllowlistEntries": "无 IP 限制 — 所有 IP 均可远程连接数据库。"
     }
   },
   "setup": {
@@ -3546,7 +3598,8 @@
       "noResults": "没有匹配的事件",
       "prev": "上一页",
       "next": "下一页",
-      "page": "第 {page} 页，共 {total} 页"
+      "page": "第 {page} 页，共 {total} 页",
+      "updated": "更新于"
     },
     "icons": {
       "incident": "事件",
@@ -3713,7 +3766,8 @@
       "settings": "设置",
       "updates": "更新",
       "support": "支持",
-      "roles": "角色"
+      "roles": "角色",
+      "database": "数据库"
     }
   }
 }

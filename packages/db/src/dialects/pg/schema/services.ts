@@ -55,6 +55,7 @@ export const services = pgTable('services', {
   tags: jsonb('tags').default([]),
   orchestrator: varchar('orchestrator', { length: 20 }),
   robotsConfig: jsonb('robots_config'),
+  nginxConfig: text('nginx_config'),
   stackId: varchar('stack_id'),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),

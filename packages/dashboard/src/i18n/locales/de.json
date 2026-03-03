@@ -181,6 +181,7 @@
     "roles": "Rollen",
     "support": "Support",
     "selfHealing": "Selbstreparatur",
+    "database": "Datenbank",
     "translations": "Übersetzungen",
     "logs": "Protokolle",
     "group": {
@@ -2153,6 +2154,57 @@
       "overwriteExisting": "Vorhandene Übersetzungen überschreiben",
       "editingLocale": "Bearbeitung: {name}",
       "totalKeys": "{count} Schlüssel insgesamt"
+    },
+    "platformDb": {
+      "title": "Datenbank",
+      "subtitle": "Plattformdatenbank direkt durchsuchen und verwalten",
+      "tabs": {
+        "data": "Daten",
+        "structure": "Struktur",
+        "query": "Abfrage",
+        "connection": "Verbindung",
+        "access": "Zugriff"
+      },
+      "tables": "Tabellen",
+      "selectTable": "Wählen Sie eine Tabelle aus, um deren Daten anzuzeigen.",
+      "createTable": "Tabelle erstellen",
+      "dropTable": "Tabelle löschen",
+      "tableName": "Tabellenname",
+      "columns": "Spalten",
+      "addColumn": "Spalte hinzufügen",
+      "column": "Spalte",
+      "type": "Typ",
+      "nullable": "Nullable",
+      "default": "Standard",
+      "addRow": "Zeile hinzufügen",
+      "insertRow": "Zeile einfügen",
+      "editHint": "Doppelklicken Sie auf eine Zelle zum Bearbeiten",
+      "noPrimaryKey": "Kein Primärschlüssel — Bearbeitung deaktiviert",
+      "noData": "Keine Daten.",
+      "cancel": "Abbrechen",
+      "sqlQuery": "SQL-Abfrage",
+      "execute": "Ausführen",
+      "queryHint": "Strg+Enter zum Ausführen drücken. Voller Lese-/Schreibzugriff — seien Sie vorsichtig mit destruktiven Abfragen.",
+      "connectionDetails": "Verbindungsdetails",
+      "host": "Host",
+      "port": "Port",
+      "database": "Datenbank",
+      "username": "Benutzername",
+      "connString": "Verbindungszeichenfolge",
+      "cliCommand": "CLI-Befehl",
+      "sshTunnel": "SSH-Tunnel",
+      "sshTunnelDesc": "Wenn die Datenbank nicht direkt erreichbar ist, verwenden Sie einen SSH-Tunnel, um den Port auf Ihren lokalen Rechner weiterzuleiten:",
+      "sshTunnelAfter": "Verbinden Sie sich dann über den weitergeleiteten Port mit localhost über Ihren bevorzugten Client.",
+      "externalTools": "Externe Tools",
+      "pgAdminDesc": "Verwenden Sie die obigen Verbindungsdaten, um einen neuen Server in pgAdmin hinzuzufügen.",
+      "dbeaverDesc": "Erstellen Sie eine neue Verbindung mit Host, Port und Anmeldedaten.",
+      "tablePlusDesc": "Erstellen Sie eine neue Verbindung und fügen Sie den Verbindungsstring ein.",
+      "ipAllowlist": "IP-Zugriffsliste für Fernzugriff",
+      "allowlistInfo": "Beschränken Sie externe Datenbankverbindungen auf bestimmte IP-Adressen. Dies betrifft nicht das Web-Dashboard — nur direkte Verbindungen über CLI oder externe Tools. Leer lassen für unbeschränkten Zugriff.",
+      "yourIp": "Ihre IP",
+      "addIp": "Hinzufügen",
+      "removeIp": "Entfernen",
+      "noAllowlistEntries": "Keine IP-Beschränkungen — alle IPs können sich extern mit der Datenbank verbinden."
     }
   },
   "setup": {
@@ -3546,7 +3598,8 @@
       "noResults": "Keine Vorfälle entsprechen Ihrer Suche",
       "prev": "Zurück",
       "next": "Weiter",
-      "page": "Seite {page} von {total}"
+      "page": "Seite {page} von {total}",
+      "updated": "Aktualisiert"
     },
     "icons": {
       "incident": "Vorfall",
@@ -3713,7 +3766,8 @@
       "settings": "Einstellungen",
       "updates": "Aktualisierungen",
       "support": "Support",
-      "roles": "Rollen"
+      "roles": "Rollen",
+      "database": "Datenbank"
     }
   }
 }

@@ -40,6 +40,7 @@ import {
   LifeBuoy,
   Bot,
   FileText,
+  Database,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -152,6 +153,7 @@ const allNavGroups: NavGroup[] = [
       { nameKey: 'nav.translations', path: '/admin/translations', icon: Languages, superOnly: true },
       { nameKey: 'nav.settings', path: '/admin/settings', icon: Settings, section: 'settings' },
       { nameKey: 'nav.selfHealing', path: '/admin/self-healing', icon: Bot, superOnly: true },
+      { nameKey: 'nav.database', path: '/admin/database', icon: Database, section: 'database' },
       { nameKey: 'nav.updates', path: '/admin/updates', icon: Download, section: 'updates' },
     ],
   },
@@ -256,17 +258,15 @@ function changeLocale(newLocale: string) {
                 <RouterLink
                   :to="item.path"
                   :class="[
-                    'flex items-center rounded-lg text-sm font-medium transition-all duration-150',
+                    'flex items-center rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px]',
                     collapsed
-                      ? 'justify-center p-2.5'
-                      : 'gap-3 px-3 py-2 border-l-[3px]',
+                      ? 'justify-center p-2.5 border-l-transparent'
+                      : 'gap-3 px-3 py-2',
                     isActive(item.path)
                       ? collapsed
                         ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                         : 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-l-primary-500'
-                      : collapsed
-                        ? 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border-l-transparent',
                   ]"
                   @click="sidebarOpen = false"
                 >

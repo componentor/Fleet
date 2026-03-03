@@ -177,5 +177,8 @@ export const selfHealingJobsRelations = _schema.selfHealingJobsRelations;
 export { insertReturning, updateReturning, deleteReturning, upsert, upsertIgnore, countSql, safeTransaction } from './helpers';
 export { getDialect } from './config';
 
+// --- Raw SQL client (used by platform DB admin) ---
+export const rawClient = _schema.rawClient;
+
 // --- Re-export drizzle-orm operators so consumers use the same instance ---
 export { eq, and, or, not, like, ilike, isNull, isNotNull, inArray, notInArray, between, sql, asc, desc, gte, lte, gt, lt } from 'drizzle-orm';

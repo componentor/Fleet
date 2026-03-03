@@ -20,6 +20,7 @@ export const sshKeys = pgTable('ssh_keys', {
   name: varchar('name').notNull(),
   publicKey: text('public_key').notNull(),
   fingerprint: varchar('fingerprint').notNull(),
+  nodeAccess: boolean('node_access').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
   index('idx_ssh_keys_user_id').on(table.userId),

@@ -54,6 +54,8 @@ interface IncidentPost {
   severity: string
   affectedServices: string[]
   publishedAt: string
+  createdAt: string
+  updatedAt: string
   title: string
   body: string
 }
@@ -599,10 +601,13 @@ function nextPage() {
 
                     <!-- Card content -->
                     <div class="flex-1 rounded-xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/50 p-5 transition-colors">
-                      <!-- Date -->
-                      <p class="mb-1 text-xs text-surface-400 dark:text-surface-500">
-                        {{ formatDate(post.publishedAt) }}
-                      </p>
+                      <!-- Timestamps -->
+                      <div class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-surface-400 dark:text-surface-500">
+                        <span>{{ formatDate(post.createdAt) }}</span>
+                        <span v-if="post.updatedAt !== post.createdAt" class="italic">
+                          {{ t('statusPage.timeline.updated') }} {{ formatDate(post.updatedAt) }}
+                        </span>
+                      </div>
 
                       <!-- Title -->
                       <h3 class="text-base font-bold text-gray-900 dark:text-white">

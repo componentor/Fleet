@@ -18,6 +18,7 @@ import { storageManager } from '../services/storage/storage-manager.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
+import { isNginxService, DEFAULT_NGINX_CONFIG } from '../services/runtime.service.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -641,6 +642,59 @@ const updateDockerfileRoute = createRoute({
   },
 });
 
+// ── Nginx config routes ─────────────────────────────────────────────────
+
+const getNginxConfigRoute = createRoute({
+  method: 'get',
+  path: '/{serviceId}/nginx-config',
+  tags: ['Services'],
+  summary: 'Get nginx config for a service',
+  security: bearerSecurity,
+  request: {
+    params: serviceIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Nginx config'),
+    ...standardErrors,
+  },
+});
+
+const updateNginxConfigRoute = createRoute({
+  method: 'put',
+  path: '/{serviceId}/nginx-config',
+  tags: ['Services'],
+  summary: 'Update nginx config for a service',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: serviceIdParamSchema,
+    body: jsonBody(z.object({
+      config: z.string().min(1).max(50_000),
+      applyNow: z.boolean().optional().default(false),
+    }).openapi('NginxConfigUpdateRequest')),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Nginx config updated'),
+    ...standardErrors,
+  },
+});
+
+const resetNginxConfigRoute = createRoute({
+  method: 'post',
+  path: '/{serviceId}/nginx-config/reset',
+  tags: ['Services'],
+  summary: 'Reset nginx config to default',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: serviceIdParamSchema,
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Config reset'),
+    ...standardErrors,
+  },
+});
+
 const aggregatedLogsQuerySchema = z.object({
   tail: z.string().optional().openapi({ description: 'Number of log lines per service (default 100, max 1000)' }),
   serviceId: z.string().optional().openapi({ description: 'Filter to a single service ID' }),
@@ -700,7 +754,7 @@ serviceRoutes.openapi(aggregatedLogsRoute, (async (c: any) => {
       } else {
         raw = await new Promise<Buffer>((resolve) => {
           const chunks: Buffer[] = [];
-          const stream = result as NodeJS.ReadableStream;
+          const stream = result as NodeJS.ReadableStream & { destroy(): void };
           const finish = () => {
             stream.removeAllListeners();
             stream.destroy();
@@ -2272,7 +2326,7 @@ serviceRoutes.openapi(getServiceLogsRoute, (async (c: any) => {
     } else {
       raw = await new Promise<Buffer>((resolve) => {
         const chunks: Buffer[] = [];
-        const stream = result as NodeJS.ReadableStream;
+        const stream = result as NodeJS.ReadableStream & { destroy(): void };
         const finish = () => {
           stream.removeAllListeners();
           stream.destroy();
@@ -2687,6 +2741,146 @@ serviceRoutes.openapi(updateDockerfileRoute, (async (c: any) => {
   }
 
   return c.json({ message: 'Dockerfile updated' });
+}) as any);
+
+// ── Nginx config handlers ─────────────────────────────────────────────────
+
+// GET /:serviceId/nginx-config — get current config
+serviceRoutes.openapi(getNginxConfigRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { serviceId } = c.req.valid('param');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  if (!isNginxService(svc.image, svc.dockerfile)) {
+    return c.json({ error: 'Service does not use nginx' }, 400);
+  }
+
+  return c.json({
+    config: svc.nginxConfig ?? DEFAULT_NGINX_CONFIG,
+    isCustom: !!svc.nginxConfig,
+    defaultConfig: DEFAULT_NGINX_CONFIG,
+  });
+}) as any);
+
+// PUT /:serviceId/nginx-config — save (and optionally apply live)
+serviceRoutes.openapi(updateNginxConfigRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const user = c.get('user');
+  const { serviceId } = c.req.valid('param');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  if (!isNginxService(svc.image, svc.dockerfile)) {
+    return c.json({ error: 'Service does not use nginx' }, 400);
+  }
+
+  const body = c.req.valid('json');
+
+  // Save to DB
+  await db.update(services)
+    .set({ nginxConfig: body.config, updatedAt: new Date() })
+    .where(eq(services.id, serviceId));
+
+  logger.info({ userId: user.userId, serviceId }, 'Nginx config updated');
+
+  let applied = false;
+  let validationError: string | undefined;
+
+  // Apply to running container(s) if requested
+  if (body.applyNow && svc.dockerServiceId && svc.status === 'running') {
+    try {
+      const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
+      const running = tasks.filter((t: any) => t.status === 'running' && t.containerStatus?.containerId);
+
+      for (const task of running) {
+        const containerId = task.containerStatus!.containerId;
+        const nodeId = task.nodeId;
+
+        // Write config and validate
+        const writeCmd = ['sh', '-c', `cat > /etc/nginx/conf.d/default.conf && nginx -t 2>&1`];
+        const { Readable } = await import('node:stream');
+        const input = Readable.from([body.config]);
+        const writeResult = await orchestrator.nodeAwareExecCommandWithInput(containerId, nodeId, writeCmd, input);
+
+        if (writeResult.exitCode !== 0) {
+          validationError = writeResult.stdout?.trim() || writeResult.stderr?.trim() || 'nginx -t failed';
+          // Restore old config on validation failure
+          const oldConfig = svc.nginxConfig ?? DEFAULT_NGINX_CONFIG;
+          const restoreInput = Readable.from([oldConfig]);
+          await orchestrator.nodeAwareExecCommandWithInput(containerId, nodeId,
+            ['sh', '-c', 'cat > /etc/nginx/conf.d/default.conf'],
+            restoreInput,
+          );
+          break;
+        }
+
+        // Reload nginx
+        await orchestrator.nodeAwareExecCommand(containerId, nodeId, ['nginx', '-s', 'reload']);
+      }
+
+      if (!validationError && running.length > 0) {
+        applied = true;
+      }
+    } catch (err) {
+      logger.warn({ err, serviceId }, 'Failed to apply nginx config live');
+      validationError = err instanceof Error ? err.message : 'Failed to apply config';
+    }
+  }
+
+  return c.json({
+    message: applied ? 'Nginx config saved and applied' : 'Nginx config saved',
+    applied,
+    ...(validationError ? { validationError } : {}),
+  });
+}) as any);
+
+// POST /:serviceId/nginx-config/reset — reset to default
+serviceRoutes.openapi(resetNginxConfigRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const user = c.get('user');
+  const { serviceId } = c.req.valid('param');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  await db.update(services)
+    .set({ nginxConfig: null, updatedAt: new Date() })
+    .where(eq(services.id, serviceId));
+
+  logger.info({ userId: user.userId, serviceId }, 'Nginx config reset to default');
+
+  // Apply default to running container if possible
+  if (svc.dockerServiceId && svc.status === 'running') {
+    try {
+      const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
+      const running = tasks.filter((t: any) => t.status === 'running' && t.containerStatus?.containerId);
+      for (const task of running) {
+        const { Readable } = await import('node:stream');
+        const input = Readable.from([DEFAULT_NGINX_CONFIG]);
+        await orchestrator.nodeAwareExecCommandWithInput(
+          task.containerStatus!.containerId, task.nodeId,
+          ['sh', '-c', 'cat > /etc/nginx/conf.d/default.conf && nginx -s reload'],
+          input,
+        );
+      }
+    } catch (err) {
+      logger.warn({ err, serviceId }, 'Failed to apply default nginx config to running container');
+    }
+  }
+
+  return c.json({ message: 'Nginx config reset to default' });
 }) as any);
 
 export default serviceRoutes;

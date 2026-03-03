@@ -12,6 +12,52 @@ export interface RuntimeDetection {
 type FileReader = (name: string) => Promise<string | null>;
 
 /**
+ * Convert a multi-line config string into a Dockerfile RUN instruction
+ * that writes it to a file using printf. Works without BuildKit.
+ */
+function writeFileRun(config: string, targetPath: string): string {
+  const lines = config.split('\n');
+  const parts: string[] = [`RUN printf '%s\\n' \\`];
+  for (let i = 0; i < lines.length; i++) {
+    const escaped = (lines[i] ?? '').replace(/'/g, "'\\''" );
+    const isLast = i === lines.length - 1;
+    if (isLast) {
+      parts.push(`  '${escaped}' > ${targetPath}`);
+    } else {
+      parts.push(`  '${escaped}' \\`);
+    }
+  }
+  return parts.join('\n');
+}
+
+/** Default nginx server block used for static sites and build-only Node.js projects. */
+export const DEFAULT_NGINX_CONFIG = `server {
+  listen 80;
+  include /etc/nginx/mime.types;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Hashed assets (JS/CSS) — immutable caching
+  location ~* \\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif)$ {
+    try_files $uri =404;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  # SPA fallback — only for HTML navigation requests
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}`;
+
+/** Check whether a service uses nginx based on its image name and/or stored Dockerfile. */
+export function isNginxService(image: string | null, dockerfile: string | null): boolean {
+  if (image && /^nginx(:|$)/i.test(image)) return true;
+  if (dockerfile && /^FROM\s+nginx/mi.test(dockerfile)) return true;
+  return false;
+}
+
+/**
  * Detect the runtime from a list of root-level file names.
  * Uses an optional readFile callback to inspect file contents (e.g. package.json).
  * Detection order matters — first match wins.
@@ -19,6 +65,7 @@ type FileReader = (name: string) => Promise<string | null>;
 export async function detectRuntime(
   files: string[],
   readFile?: FileReader | null,
+  nginxConfig?: string | null,
 ): Promise<RuntimeDetection | null> {
   const fileSet = new Set(files);
 
@@ -52,7 +99,7 @@ export async function detectRuntime(
     if (packageJson && !packageJson.hasStartScript && packageJson.hasBuildScript) {
       return {
         runtime: 'static',
-        dockerfile: generateNodeBuildDockerfile(fileSet, packageJson),
+        dockerfile: generateNodeBuildDockerfile(fileSet, packageJson, nginxConfig),
         port: 80,
       };
     }
@@ -68,7 +115,7 @@ export async function detectRuntime(
   if (fileSet.has('index.html')) {
     return {
       runtime: 'static',
-      dockerfile: generateStaticDockerfile(),
+      dockerfile: generateStaticDockerfile(nginxConfig),
       port: 80,
     };
   }
@@ -114,32 +161,16 @@ export async function detectRuntime(
 
 // ── Static (nginx) ──────────────────────────────────────────────────────────
 
-function generateStaticDockerfile(): string {
-  return `FROM nginx:alpine
-COPY . /usr/share/nginx/html
-RUN <<'EOF' cat > /etc/nginx/conf.d/default.conf
-server {
-  listen 80;
-  include /etc/nginx/mime.types;
-  root /usr/share/nginx/html;
-  index index.html;
-
-  # Hashed assets (JS/CSS) — immutable caching
-  location ~* \\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif)$ {
-    try_files $uri =404;
-    expires 1y;
-    add_header Cache-Control "public, immutable";
-  }
-
-  # SPA fallback — only for HTML navigation requests
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
-}
-EOF
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-`;
+function generateStaticDockerfile(nginxConfig?: string | null): string {
+  const config = nginxConfig ?? DEFAULT_NGINX_CONFIG;
+  const lines = [
+    'FROM nginx:alpine',
+    'COPY . /usr/share/nginx/html',
+    writeFileRun(config, '/etc/nginx/conf.d/default.conf'),
+    'EXPOSE 80',
+    'CMD ["nginx", "-g", "daemon off;"]',
+  ];
+  return lines.join('\n') + '\n';
 }
 
 // ── PHP (Apache) ────────────────────────────────────────────────────────────
@@ -247,7 +278,7 @@ function generateNodeDockerfile(fileSet: Set<string>, pkg: PackageJsonInfo | nul
 
 // ── Node.js build-only (Vite / React / Vue → nginx) ─────────────────────────
 
-function generateNodeBuildDockerfile(fileSet: Set<string>, pkg: PackageJsonInfo): string {
+function generateNodeBuildDockerfile(fileSet: Set<string>, pkg: PackageJsonInfo, nginxConfig?: string | null): string {
   const nodeVersion = pkg.nodeVersion ?? '20';
 
   let pm: 'npm' | 'yarn' | 'pnpm' = pkg.packageManager ?? 'npm';
@@ -285,27 +316,11 @@ function generateNodeBuildDockerfile(fileSet: Set<string>, pkg: PackageJsonInfo)
   lines.push(`RUN ${buildCmd}`);
 
   // Serve the built output with nginx
+  const config = nginxConfig ?? DEFAULT_NGINX_CONFIG;
   lines.push('');
   lines.push('FROM nginx:alpine');
   lines.push(`COPY --from=builder /app/dist /usr/share/nginx/html`);
-  lines.push(`RUN <<'NGINXEOF' cat > /etc/nginx/conf.d/default.conf`);
-  lines.push('server {');
-  lines.push('  listen 80;');
-  lines.push('  include /etc/nginx/mime.types;');
-  lines.push('  root /usr/share/nginx/html;');
-  lines.push('  index index.html;');
-  lines.push('');
-  lines.push('  location ~* \\\\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif)$ {');
-  lines.push('    try_files $uri =404;');
-  lines.push('    expires 1y;');
-  lines.push('    add_header Cache-Control "public, immutable";');
-  lines.push('  }');
-  lines.push('');
-  lines.push('  location / {');
-  lines.push('    try_files $uri $uri/ /index.html;');
-  lines.push('  }');
-  lines.push('}');
-  lines.push('NGINXEOF');
+  lines.push(writeFileRun(config, '/etc/nginx/conf.d/default.conf'));
   lines.push('EXPOSE 80');
   lines.push('CMD ["nginx", "-g", "daemon off;"]');
 

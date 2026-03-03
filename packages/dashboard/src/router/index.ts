@@ -194,6 +194,11 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/SelfHealing.vue'),
       },
       {
+        path: 'database',
+        name: 'super-database',
+        component: () => import('@/pages/super/PlatformDatabase.vue'),
+      },
+      {
         path: 'support',
         name: 'super-support',
         component: () => import('@/pages/super/Support.vue'),
@@ -525,9 +530,9 @@ router.beforeEach(async (to) => {
     }
   }
 
-  // Check super user access for admin routes
+  // Check admin access for admin routes (super users + role-based admins)
   if (to.matched.some((record) => record.meta.requiresSuper)) {
-    if (!authStore.isSuper) {
+    if (!authStore.isSuper && !authStore.user?.adminRoleId) {
       return { path: '/panel' }
     }
   }

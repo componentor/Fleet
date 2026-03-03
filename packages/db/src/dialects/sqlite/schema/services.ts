@@ -51,6 +51,7 @@ export const services = sqliteTable('services', {
   tags: text('tags', { mode: 'json' }).$default(() => ([])),
   orchestrator: text('orchestrator'),
   robotsConfig: text('robots_config', { mode: 'json' }),
+  nginxConfig: text('nginx_config'),
   stackId: text('stack_id'),
   stoppedAt: integer('stopped_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

@@ -17,6 +17,7 @@ export const sshKeys = sqliteTable('ssh_keys', {
   name: text('name').notNull(),
   publicKey: text('public_key').notNull(),
   fingerprint: text('fingerprint').notNull(),
+  nodeAccess: integer('node_access', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_ssh_keys_user_id').on(table.userId),

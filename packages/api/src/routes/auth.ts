@@ -322,6 +322,12 @@ auth.openapi(loginRoute, (async (c: any) => {
     return c.json({ error: 'Email not verified', code: 'EMAIL_NOT_VERIFIED' }, 403);
   }
 
+  // Check if password login is disabled for this user
+  const disabledMethods: string[] = (user as any).disabledLoginMethods ?? [];
+  if (disabledMethods.includes('password')) {
+    return c.json({ error: 'Password login is disabled for this account. Use GitHub or Google to sign in.', code: 'LOGIN_METHOD_DISABLED' }, 403);
+  }
+
   // Check 2FA
   if (user.twoFactorEnabled) {
     // Generate a short-lived temp token for 2FA flow
@@ -1385,6 +1391,12 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
       return c.redirect('/auth/callback?error=User+not+found');
     }
 
+    // Check if GitHub login is disabled for this user
+    const ghDisabledMethods: string[] = (user as any).disabledLoginMethods ?? [];
+    if (ghDisabledMethods.includes('github')) {
+      return c.redirect('/auth/callback?error=GitHub+login+is+disabled+for+this+account');
+    }
+
     // 2FA check — if user has 2FA enabled, redirect to 2FA challenge
     if (user.twoFactorEnabled) {
       const secret = JWT_SECRET_KEY();
@@ -1671,6 +1683,12 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
 
     if (!user) {
       return c.redirect('/auth/callback?error=User+not+found');
+    }
+
+    // Check if Google login is disabled for this user
+    const googleDisabledMethods: string[] = (user as any).disabledLoginMethods ?? [];
+    if (googleDisabledMethods.includes('google')) {
+      return c.redirect('/auth/callback?error=Google+login+is+disabled+for+this+account');
     }
 
     // 2FA check — if user has 2FA enabled, redirect to 2FA challenge

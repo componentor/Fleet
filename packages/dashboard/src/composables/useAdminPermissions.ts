@@ -23,6 +23,7 @@ export type AdminSection =
   | 'updates'
   | 'support'
   | 'roles'
+  | 'database'
 
 export type AdminPermissionLevel = 'read' | 'write' | 'impersonate'
 

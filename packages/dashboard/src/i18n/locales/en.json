@@ -183,6 +183,7 @@
     "roles": "Roles",
     "support": "Support",
     "selfHealing": "Self-Repair",
+    "database": "Database",
     "group": {
       "overview": "Overview",
       "customers": "Customers",
@@ -1389,6 +1390,16 @@
     "githubConnected": "GitHub connected successfully",
     "googleConnected": "Google connected successfully",
     "connectionFailed": "Connection failed",
+    "methodsReEnabled": "Login methods re-enabled for safety: {methods}",
+    "loginMethods": "Login Methods",
+    "loginMethodsDesc": "Control which methods can be used to sign into your account.",
+    "passwordLogin": "Password",
+    "loginEnabled": "Enabled",
+    "loginDisabled": "Disabled",
+    "loginMethodDisabled": "{method} login disabled",
+    "loginMethodEnabled": "{method} login enabled",
+    "loginMethodUpdateFailed": "Failed to update login method",
+    "cantDisableLast": "Cannot disable — this is your only login method",
     "dataExport": "Data Export",
     "dataExportDesc": "Download a copy of all your data (GDPR).",
     "dataExportDetails": "This export includes your profile, account memberships, services, deployments, SSH keys, API keys, domains, and activity log.",
@@ -2157,6 +2168,57 @@
       "overwriteExisting": "Overwrite existing translations",
       "editingLocale": "Editing: {name}",
       "totalKeys": "{count} total keys"
+    },
+    "platformDb": {
+      "title": "Database",
+      "subtitle": "Browse and manage the platform database directly",
+      "tabs": {
+        "data": "Data",
+        "structure": "Structure",
+        "query": "Query",
+        "connection": "Connection",
+        "access": "Access"
+      },
+      "tables": "Tables",
+      "selectTable": "Select a table to view its data.",
+      "createTable": "Create Table",
+      "dropTable": "Drop Table",
+      "tableName": "Table Name",
+      "columns": "Columns",
+      "addColumn": "Add Column",
+      "column": "Column",
+      "type": "Type",
+      "nullable": "Nullable",
+      "default": "Default",
+      "addRow": "Add Row",
+      "insertRow": "Insert Row",
+      "editHint": "Double-click a cell to edit",
+      "noPrimaryKey": "No primary key — editing disabled",
+      "noData": "No data.",
+      "cancel": "Cancel",
+      "sqlQuery": "SQL Query",
+      "execute": "Execute",
+      "queryHint": "Press Ctrl+Enter to execute. Full read/write access — be careful with destructive queries.",
+      "connectionDetails": "Connection Details",
+      "host": "Host",
+      "port": "Port",
+      "database": "Database",
+      "username": "Username",
+      "connString": "Connection String",
+      "cliCommand": "CLI Command",
+      "sshTunnel": "SSH Tunnel",
+      "sshTunnelDesc": "If the database is not directly accessible, use an SSH tunnel to forward the port to your local machine:",
+      "sshTunnelAfter": "Then connect to localhost with the forwarded port using your preferred client.",
+      "externalTools": "External Tools",
+      "pgAdminDesc": "Use the connection details above to add a new server in pgAdmin.",
+      "dbeaverDesc": "Create a new connection using the host, port, and credentials above.",
+      "tablePlusDesc": "Create a new connection and paste the connection string.",
+      "ipAllowlist": "Remote Access IP Allowlist",
+      "allowlistInfo": "Restrict remote database connections to specific IP addresses. This does not affect the web dashboard — only direct connections via CLI or external tools. Leave empty to allow all IPs.",
+      "yourIp": "Your IP",
+      "addIp": "Add",
+      "removeIp": "Remove",
+      "noAllowlistEntries": "No IP restrictions — all IPs can connect remotely to the database."
     }
   },
   "setup": {
@@ -3550,7 +3612,8 @@
       "noResults": "No incidents match your search",
       "prev": "Previous",
       "next": "Next",
-      "page": "Page {page} of {total}"
+      "page": "Page {page} of {total}",
+      "updated": "Updated"
     },
     "icons": {
       "incident": "Incident",
@@ -3717,7 +3780,8 @@
       "settings": "Settings",
       "updates": "Updates",
       "support": "Support",
-      "roles": "Roles"
+      "roles": "Roles",
+      "database": "Database"
     }
   }
 }

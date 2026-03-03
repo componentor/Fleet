@@ -55,6 +55,7 @@ export const services = mysqlTable('services', {
   tags: json('tags').$default(() => ([])),
   orchestrator: varchar('orchestrator', { length: 20 }),
   robotsConfig: json('robots_config'),
+  nginxConfig: text('nginx_config'),
   stackId: varchar('stack_id', { length: 36 }),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
