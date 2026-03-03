@@ -450,19 +450,24 @@ router.beforeEach(async (to) => {
 
   const isAuthenticated = authStore.isAuthenticated
 
-  // Check if platform needs first-run setup (skip for setup routes themselves)
-  if (!to.path.startsWith('/setup')) {
+  // Check if platform needs first-run setup (skip for setup routes themselves).
+  // CRITICAL: Never redirect authenticated users to /setup. A valid JWT proves
+  // users exist — redirecting could expose the setup wizard to production users
+  // during transient API/DB issues (e.g. container restarts during updates).
+  if (!to.path.startsWith('/setup') && !isAuthenticated) {
     const setupDone = localStorage.getItem('fleet_setup_done')
-    // Always re-check when not authenticated (handles DB reset / fresh install)
-    if (!setupDone || !isAuthenticated) {
+    if (!setupDone) {
       try {
         const res = await fetch('/api/v1/setup/status')
-        const { needsSetup } = await res.json()
-        if (needsSetup) {
-          localStorage.removeItem('fleet_setup_done')
-          return { path: '/setup' }
+        if (res.ok) {
+          const data = await res.json()
+          if (data?.needsSetup === true) {
+            localStorage.removeItem('fleet_setup_done')
+            return { path: '/setup' }
+          }
+          localStorage.setItem('fleet_setup_done', 'true')
         }
-        localStorage.setItem('fleet_setup_done', 'true')
+        // Non-200 responses (500, 502, etc.) are ignored — never redirect on errors
       } catch {
         // API not available, continue normally
       }

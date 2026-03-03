@@ -48,8 +48,14 @@ function slugify(text: string): string {
 }
 
 async function isSetupComplete(): Promise<boolean> {
-  const [result] = await db.select({ count: countSql() }).from(users);
-  return (result?.count ?? 0) > 0;
+  try {
+    const [result] = await db.select({ count: countSql() }).from(users);
+    return (result?.count ?? 0) > 0;
+  } catch {
+    // If DB is unreachable, assume setup is complete (safe default).
+    // Returning false here would expose the setup wizard to production users.
+    return true;
+  }
 }
 
 // Detect Docker and Swarm state
