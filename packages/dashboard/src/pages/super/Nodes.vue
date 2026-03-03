@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { Server, Plus, RefreshCw, Loader2, Cpu, MemoryStick, MapPin, Pencil, Check, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
+const router = useRouter()
 const api = useApi()
 
 const nodes = ref<any[]>([])
@@ -264,7 +266,8 @@ onMounted(() => {
             <tr
               v-for="node in nodes"
               :key="node.id"
-              class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              @click="router.push({ name: 'super-node-detail', params: { id: node.id } })"
+              class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer"
             >
               <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
                 <div class="flex items-center gap-2">
@@ -290,7 +293,7 @@ onMounted(() => {
               </td>
               <td class="px-6 py-4 text-sm">
                 <!-- Inline region editing -->
-                <div v-if="editingRegionNodeId === node.id" class="flex items-center gap-1.5">
+                <div v-if="editingRegionNodeId === node.id" class="flex items-center gap-1.5" @click.stop>
                   <select
                     v-model="editingRegionValue"
                     class="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -311,7 +314,7 @@ onMounted(() => {
                     {{ locations.find(l => l.key === node.location)?.label || node.location }}
                   </span>
                   <span v-else class="text-xs text-gray-400 dark:text-gray-500">--</span>
-                  <button @click="startEditRegion(node)" class="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button @click.stop="startEditRegion(node)" class="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Pencil class="w-3 h-3" />
                   </button>
                 </div>
@@ -363,7 +366,7 @@ onMounted(() => {
                 <span v-else class="text-gray-400">not linked</span>
               </td>
               <td class="px-6 py-4 text-right">
-                <div class="flex items-center justify-end gap-2">
+                <div class="flex items-center justify-end gap-2" @click.stop>
                   <button
                     v-if="node.status === 'active'"
                     @click="drainNode(node.id)"

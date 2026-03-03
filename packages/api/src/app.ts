@@ -1327,6 +1327,125 @@ api.get(
   }),
 );
 
+// ── WebSocket: Admin container terminal (any container, super admin only) ──
+api.get(
+  '/terminal/admin/:containerId',
+  upgradeWebSocket((c) => {
+    const containerId = c.req.param('containerId');
+    const nodeId = c.req.query('nodeId') ?? '';
+    const token = extractWsToken(c);
+    let dockerStream: import('node:stream').Duplex | null = null;
+    let execId: string | null = null;
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000) {
+            ws.close(4001, 'Invalid token');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+
+          if (!wsUser.isSuper) {
+            ws.close(4003, 'Super admin access required');
+            return;
+          }
+
+          if (!containerId || !nodeId) {
+            ws.close(4004, 'containerId and nodeId are required');
+            return;
+          }
+
+          const localNodeId = await orchestrator.getLocalNodeId();
+          const isLocal = nodeId === localNodeId;
+
+          if (!isLocal) {
+            const agentUrl = await orchestrator.getAgentAddress(nodeId);
+            if (!agentUrl) {
+              ws.close(4004, 'No agent on target node');
+              return;
+            }
+
+            const nodeToken = process.env['NODE_AUTH_TOKEN'] || '';
+            const agentWsUrl = agentUrl.replace('http://', 'ws://');
+            const proxyUrl = `${agentWsUrl}/ws/exec?token=${encodeURIComponent(nodeToken)}&containerId=${encodeURIComponent(containerId)}`;
+
+            const { default: WebSocket } = await import('ws');
+            const agentWs = new WebSocket(proxyUrl);
+
+            agentWs.on('message', (data: Buffer | string) => {
+              ws.send(typeof data === 'string' ? data : data.toString('utf-8'));
+            });
+            agentWs.on('close', () => ws.close(1000, 'Agent disconnected'));
+            agentWs.on('error', () => ws.close(1011, 'Agent connection failed'));
+
+            dockerStream = {
+              write: (data: any) => { if (agentWs.readyState === WebSocket.OPEN) agentWs.send(data); },
+              destroy: () => { agentWs.close(); },
+            } as any;
+            execId = '__proxy__';
+          } else {
+            let result: { stream: NodeJS.ReadWriteStream; execId: string } | null = null;
+            for (const shell of ['/bin/sh', '/bin/bash', '/bin/ash']) {
+              try {
+                result = await orchestrator.execInContainer(containerId, [shell]);
+                break;
+              } catch { /* try next */ }
+            }
+            if (!result) {
+              ws.close(4004, 'No shell available in container');
+              return;
+            }
+            dockerStream = result.stream as import('node:stream').Duplex;
+            execId = result.execId;
+
+            dockerStream.on('data', (chunk: Buffer) => ws.send(chunk.toString('utf-8')));
+            dockerStream.on('end', () => ws.close(1000, 'Container stream ended'));
+            dockerStream.on('error', () => ws.close(1011, 'Container error'));
+          }
+
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 25_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS admin terminal auth failed');
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      async onMessage(evt: { data: unknown }, _ws: unknown) {
+        if (!dockerStream) return;
+        try {
+          const msg = JSON.parse(
+            typeof evt.data === 'string' ? evt.data : evt.data?.toString?.() ?? '',
+          ) as { type: string; data?: string; cols?: number; rows?: number };
+
+          if (msg.type === 'input' && msg.data) {
+            dockerStream.write(msg.data);
+          } else if (msg.type === 'resize' && msg.cols && msg.rows && execId) {
+            if (execId === '__proxy__') {
+              dockerStream.write(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
+            } else {
+              await orchestrator.resizeExec(execId, msg.rows, msg.cols);
+            }
+          }
+        } catch { /* ignore */ }
+      },
+
+      onClose() {
+        if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+        if (dockerStream) { dockerStream.destroy(); dockerStream = null; }
+        execId = null;
+      },
+    };
+  }),
+);
+
 // ── Public branding endpoints (no auth) ──
 const brandingRateLimit = rateLimiter({ windowMs: 60_000, max: 60, keyPrefix: 'branding' });
 
