@@ -340,7 +340,7 @@ function changeLocale(newLocale: string) {
         </button>
 
         <!-- Search trigger -->
-        <div class="hidden sm:block flex-1 max-w-md">
+        <div class="hidden sm:block flex-1 max-w-md lg:ml-2">
           <button
             @click="commandPalette.open()"
             class="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
