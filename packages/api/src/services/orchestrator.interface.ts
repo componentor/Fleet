@@ -135,6 +135,11 @@ export interface OrchestratorService {
     opts?: { tail?: number; since?: number; follow?: boolean },
   ): Promise<Buffer | NodeJS.ReadableStream>;
 
+  getContainerLogs(
+    containerId: string,
+    opts?: { tail?: number; since?: number; follow?: boolean; timestamps?: boolean },
+  ): Promise<Buffer | NodeJS.ReadableStream>;
+
   // ── Port management ──
 
   getUsedIngressPorts(): Promise<Set<number>>;

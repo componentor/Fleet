@@ -570,6 +570,24 @@ export class DockerService implements OrchestratorService {
     }) as Promise<Buffer | NodeJS.ReadableStream>;
   }
 
+  async getContainerLogs(
+    containerId: string,
+    opts: { tail?: number; since?: number; follow?: boolean; timestamps?: boolean } = {},
+  ): Promise<Buffer | NodeJS.ReadableStream> {
+    const container = docker.getContainer(containerId);
+    const baseOpts = {
+      stdout: true,
+      stderr: true,
+      tail: opts.tail ?? 100,
+      since: opts.since ?? 0,
+      timestamps: opts.timestamps ?? true,
+    };
+    if (opts.follow) {
+      return container.logs({ ...baseOpts, follow: true }) as Promise<NodeJS.ReadableStream>;
+    }
+    return container.logs({ ...baseOpts, follow: false }) as Promise<Buffer>;
+  }
+
   async getServiceTasks(dockerServiceId: string): Promise<ServiceTaskInfo[]> {
     const tasks = await docker.listTasks({
       filters: { service: [dockerServiceId] },

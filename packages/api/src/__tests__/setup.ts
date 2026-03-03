@@ -740,6 +740,7 @@ const mockOrchestratorMethods = {
       yield Buffer.from('test log');
     },
   }),
+  getContainerLogs: vi.fn().mockResolvedValue(Buffer.from('test container log')),
   listNodes: vi.fn().mockResolvedValue([]),
   inspectNode: vi.fn().mockResolvedValue({}),
   updateNode: vi.fn().mockResolvedValue(undefined),

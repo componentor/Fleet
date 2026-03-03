@@ -1154,7 +1154,13 @@ adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
 
 // ── Platform Logs (Docker container logs for fleet infrastructure) ──
 
+// Docker Swarm uses underscores; Kubernetes uses hyphens
 const ALLOWED_FLEET_SERVICES = ['fleet_api', 'fleet_dashboard', 'fleet_traefik'] as const;
+const K8S_SERVICE_NAMES: Record<string, string> = {
+  fleet_api: 'fleet-api',
+  fleet_dashboard: 'fleet-dashboard',
+  fleet_traefik: 'fleet-traefik',
+};
 
 const platformLogsQuerySchema = z.object({
   service: z.string().optional().openapi({ description: 'Docker service name (default: fleet_api)' }),
@@ -1223,35 +1229,75 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
       if (filtered) await stream.write(filtered.endsWith('\n') ? filtered : filtered + '\n');
     };
 
+    const isK8s = getDefaultOrchestratorType() === 'kubernetes';
+
     try {
-      // Find the Docker service by name
+      // Find the service by name — try both Docker Swarm and Kubernetes naming
+      const namesToTry = [serviceName];
+      const k8sName = K8S_SERVICE_NAMES[serviceName];
+      if (k8sName) namesToTry.push(k8sName);
+
       const allServices = await Promise.race([
-        orchestrator.listServices({ name: [serviceName] }),
+        orchestrator.listServices({ name: namesToTry }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out listing Docker services')), FETCH_TIMEOUT_MS),
+          setTimeout(() => reject(new Error('Timed out listing services')), FETCH_TIMEOUT_MS),
         ),
       ]);
-      const svc = allServices.find((s: any) => s.Spec?.Name === serviceName);
+      const svc = allServices.find((s: any) =>
+        namesToTry.includes(s.Spec?.Name),
+      );
 
       if (!svc) {
-        await stream.write(`Service "${serviceName}" not found in Docker Swarm.\n`);
+        await stream.write(`Service "${serviceName}" not found.\n`);
         return;
       }
 
-      // Fetch logs with a timeout so we never hang forever
-      const result = await Promise.race([
-        orchestrator.getServiceLogs(svc.ID, { tail, follow: false }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out fetching logs from Docker')), FETCH_TIMEOUT_MS),
-        ),
-      ]);
+      // Try container-level logs first (fast, no cross-node aggregation).
+      // Docker's service-level logs API aggregates across all replicas/nodes
+      // and can be extremely slow in multi-node Swarm clusters.
+      let result: Buffer | NodeJS.ReadableStream | null = null;
+      try {
+        const tasks = await Promise.race([
+          orchestrator.getServiceTasks(svc.ID),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timed out listing tasks')), FETCH_TIMEOUT_MS),
+          ),
+        ]);
+        const runningTask = tasks.find((t: any) => t.status === 'running' && t.containerStatus?.containerId);
+        if (runningTask?.containerStatus?.containerId) {
+          result = await Promise.race([
+            orchestrator.getContainerLogs(runningTask.containerStatus.containerId, { tail, follow: false, timestamps: true }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Timed out fetching container logs')), FETCH_TIMEOUT_MS),
+            ),
+          ]);
+        }
+      } catch {
+        // Container-level approach failed — fall back to service logs
+      }
+
+      // Fall back to service-level logs if container approach didn't work
+      if (!result) {
+        result = await Promise.race([
+          orchestrator.getServiceLogs(svc.ID, { tail, follow: false }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timed out fetching logs from Docker')), FETCH_TIMEOUT_MS),
+          ),
+        ]);
+      }
 
       if (Buffer.isBuffer(result)) {
-        // Entire log returned as a buffer — demux and write at once
-        const { text, rest } = demux(result);
-        await filterAndWrite(text || rest.toString('utf-8'));
+        // Entire log returned as a buffer
+        if (isK8s) {
+          // Kubernetes returns plain text — no Docker frame headers
+          await filterAndWrite(result.toString('utf-8'));
+        } else {
+          // Docker multiplexed format — demux and write
+          const { text, rest } = demux(result);
+          await filterAndWrite(text || rest.toString('utf-8'));
+        }
       } else {
-        // Dockerode returned a stream — pipe through demuxer in real time.
+        // Stream response — pipe through in real time.
         // Use event listeners (not `for await`) to avoid hanging on streams
         // that never signal completion.
         await new Promise<void>((resolve) => {
@@ -1266,14 +1312,19 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
 
           dockerStream.on('data', (chunk: Buffer | string) => {
             const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            pending = Buffer.concat([pending, buf]) as Buffer;
-            const { text, rest } = demux(pending);
-            pending = rest;
-            if (text) filterAndWrite(text).catch(() => {});
+            if (isK8s) {
+              // K8s streams are plain text
+              filterAndWrite(buf.toString('utf-8')).catch(() => {});
+            } else {
+              pending = Buffer.concat([pending, buf]) as Buffer;
+              const { text, rest } = demux(pending);
+              pending = rest;
+              if (text) filterAndWrite(text).catch(() => {});
+            }
           });
 
           dockerStream.on('end', async () => {
-            if (pending.length > 0) {
+            if (!isK8s && pending.length > 0) {
               await filterAndWrite(pending.toString('utf-8')).catch(() => {});
             }
             finish();
@@ -1285,7 +1336,7 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
       }
     } catch (err: any) {
       const msg = err?.statusCode === 404 || err?.reason === 'no such service'
-        ? `Docker service "${serviceName}" not found.`
+        ? `Service "${serviceName}" not found.`
         : `Failed to fetch logs: ${err.message || 'unknown error'}`;
       logger.error({ err, serviceName }, 'Platform log fetch failed');
       await stream.write(`[Error] ${msg}\n`).catch(() => {});

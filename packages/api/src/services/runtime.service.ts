@@ -47,6 +47,7 @@ export const DEFAULT_NGINX_CONFIG = `server {
   # SPA fallback — only for HTML navigation requests
   location / {
     try_files $uri $uri/ /index.html;
+    add_header Cache-Control "no-cache";
   }
 }`;
 
