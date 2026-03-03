@@ -7,6 +7,7 @@ import {
   storageNodes,
   storageVolumes,
   storageMigrations,
+  platformSettings,
   eq,
   and,
   or,
@@ -680,6 +681,18 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
     // Reset only the specified cluster
     if (!uuidRe.test(clusterId)) return c.json({ error: 'Invalid cluster ID' }, 400);
 
+    // Safety: prevent deleting cluster that hosts the platform database
+    try {
+      const dbClusterRow = await db.query.platformSettings.findFirst({
+        where: eq(platformSettings.key, 'platform:dbClusterId'),
+      });
+      if (dbClusterRow?.value && String(dbClusterRow.value) === clusterId) {
+        return c.json({
+          error: 'Cannot delete this storage cluster — the platform database is stored on it. Migrate the database to local storage first.',
+        }, 409);
+      }
+    } catch { /* ignore — safe to proceed if check fails */ }
+
     const clusterNodes = await db.query.storageNodes.findMany({
       where: eq(storageNodes.clusterId, clusterId),
     });
@@ -696,6 +709,18 @@ storageAdmin.openapi(resetAllNodesRoute, (async (c: any) => {
 
     return c.json({ message: `Removed ${clusterNodes.length} storage node(s) and cluster ${clusterId}` });
   }
+
+  // Safety: prevent reset-all if database is on any NFS cluster
+  try {
+    const dbClusterRow = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'platform:dbClusterId'),
+    });
+    if (dbClusterRow?.value) {
+      return c.json({
+        error: 'Cannot reset storage — the platform database is stored on a storage cluster. Migrate the database to local storage first.',
+      }, 409);
+    }
+  } catch { /* ignore — safe to proceed if check fails */ }
 
   // Reset ALL clusters and nodes
   const all = await db.query.storageNodes.findMany();

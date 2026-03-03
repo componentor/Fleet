@@ -1,6 +1,8 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, platformSettings, eq } from '@fleet/db';
+import { db, platformSettings, storageClusters, eq } from '@fleet/db';
+import { storageManager } from '../services/storage/storage-manager.js';
+import { dockerService } from '../services/docker.service.js';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { emailService } from '../services/email.service.js';
@@ -2201,6 +2203,853 @@ settings.post('/registry/repair', authMiddleware, requireAdmin as any, (async (c
     const message = err instanceof Error ? err.message : String(err);
     logToErrorTable({ level: 'error', message: `Registry repair failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'registry', operation: 'repair' } });
     return c.json({ success: false, logs, error: message }, 500);
+  }
+}) as any);
+
+// ── Database Management ──────────────────────────────────────────────────────
+
+// GET /settings/database-status — current database location and mode
+const databaseStatusRoute = createRoute({
+  method: 'get',
+  path: '/database-status',
+  tags: ['Settings'],
+  summary: 'Get database location status',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      mode: z.enum(['local', 'nfs']),
+      currentNode: z.string().nullable(),
+      pinnedNode: z.string().nullable(),
+      mismatch: z.boolean(),
+      managerNodes: z.array(z.object({
+        id: z.string(),
+        hostname: z.string(),
+        role: z.string(),
+      })),
+      storageClusters: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        provider: z.string(),
+        status: z.string(),
+      })),
+      activeClusterId: z.string().nullable(),
+    }), 'Database status'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(databaseStatusRoute, (async (c: any) => {
+  const user: AuthUser = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Super admin only' }, 403);
+
+  try {
+    // Get current node running postgres
+    let currentNode: string | null = null;
+    try {
+      const services = await orchestrator.listServices({ name: ['fleet_postgres'] });
+      if (services.length > 0) {
+        const tasks = await orchestrator.listTasks?.({ service: (services[0] as any).ID || (services[0] as any).id });
+        const running = (tasks ?? []).find((t: any) => t.Status?.State === 'running' || t.status?.state === 'running');
+        if (running) {
+          currentNode = running.NodeID || running.nodeID || null;
+          // Resolve node ID to hostname
+          if (currentNode) {
+            try {
+              const nodes = await orchestrator.listNodes();
+              const node = nodes.find((n: any) => (n.ID || n.id) === currentNode);
+              if (node) currentNode = (node as any).Description?.Hostname || (node as any).hostname || currentNode;
+            } catch { /* keep node ID */ }
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Get pinned node from platform settings
+    let pinnedNode: string | null = null;
+    try {
+      const val = await getSetting('platform:statefulNode');
+      if (val && typeof val === 'string') {
+        // Handle both raw and JSON-stringified formats
+        try { pinnedNode = JSON.parse(val); } catch { pinnedNode = val; }
+        if (typeof pinnedNode !== 'string') pinnedNode = val;
+      }
+    } catch { /* ignore */ }
+
+    // Get DB mode
+    let mode: 'local' | 'nfs' = 'local';
+    try {
+      const val = await getSetting('platform:dbMode');
+      if (val === 'nfs') mode = 'nfs';
+    } catch { /* ignore */ }
+
+    // Get active cluster ID
+    let activeClusterId: string | null = null;
+    try {
+      const val = await getSetting('platform:dbClusterId');
+      if (val && typeof val === 'string') activeClusterId = val;
+    } catch { /* ignore */ }
+
+    // List manager nodes
+    const managerNodes: { id: string; hostname: string; role: string }[] = [];
+    try {
+      const nodes = await orchestrator.listNodes();
+      for (const n of nodes) {
+        const role = (n as any).Spec?.Role || (n as any).role || 'worker';
+        if (role === 'manager') {
+          managerNodes.push({
+            id: (n as any).ID || (n as any).id || '',
+            hostname: (n as any).Description?.Hostname || (n as any).hostname || '',
+            role,
+          });
+        }
+      }
+    } catch { /* ignore */ }
+
+    // List available storage clusters
+    const storageClusters: { id: string; name: string; provider: string; status: string }[] = [];
+    try {
+      const { storageClusters: scTable } = await import('@fleet/db');
+      const clusters = await db.select().from(scTable);
+      for (const cl of clusters) {
+        storageClusters.push({
+          id: cl.id,
+          name: cl.name ?? '',
+          provider: (cl as any).provider ?? 'local',
+          status: (cl as any).status ?? 'unknown',
+        });
+      }
+    } catch { /* ignore */ }
+
+    const mismatch = mode === 'local' && !!pinnedNode && !!currentNode && pinnedNode !== currentNode;
+
+    return c.json({
+      mode,
+      currentNode,
+      pinnedNode,
+      mismatch,
+      managerNodes,
+      storageClusters,
+      activeClusterId,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({ level: 'error', message: `Database status check failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'database-status' } });
+    return c.json({ error: message }, 500);
+  }
+}) as any);
+
+// POST /settings/database-repin — move database to a different manager node
+const databaseRepinRoute = createRoute({
+  method: 'post',
+  path: '/database-repin',
+  tags: ['Settings'],
+  summary: 'Re-pin database to a different manager node',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      targetNode: z.string().min(1).describe('Hostname of the target manager node'),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      success: z.boolean(),
+      message: z.string(),
+      logs: z.array(z.string()),
+    }), 'Re-pin result'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(databaseRepinRoute, (async (c: any) => {
+  const user: AuthUser = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Super admin only' }, 403);
+
+  const { targetNode } = c.req.valid('json');
+  const logs: string[] = [];
+
+  try {
+    // Validate target is a manager node
+    logs.push(`Validating target node: ${targetNode}`);
+    const nodes = await orchestrator.listNodes();
+    const target = nodes.find((n: any) =>
+      ((n as any).Description?.Hostname || (n as any).hostname) === targetNode &&
+      ((n as any).Spec?.Role || (n as any).role) === 'manager'
+    );
+    if (!target) {
+      return c.json({ error: `Node "${targetNode}" is not a manager node or does not exist` }, 400);
+    }
+
+    // Check if target node has postgres data by running a quick test
+    logs.push(`Checking if ${targetNode} has postgres data...`);
+    let targetHasData = false;
+    try {
+      const result = await orchestrator.runOnLocalHost(
+        `docker node inspect $(docker node ls -q -f "name=${targetNode}") --format '{{.ID}}' 2>/dev/null && echo "OK"`,
+        { timeoutMs: 10_000 },
+      );
+      if (result.stdout.includes('OK')) {
+        // Target node exists, check volume
+        const volCheck = await orchestrator.runOnLocalHost(
+          `docker run --rm -v fleet_postgres_data:/data alpine ls /data/PG_VERSION 2>/dev/null && echo "HAS_DATA" || echo "NO_DATA"`,
+          { timeoutMs: 15_000 },
+        );
+        // Note: this checks the LOCAL volume — the constraint update will move the service
+        logs.push(`Volume check: ${volCheck.stdout.trim()}`);
+      }
+    } catch {
+      logs.push('Could not verify volume on target (will proceed anyway)');
+    }
+
+    // Get old pinned node before we overwrite anything
+    let oldPinnedNode: string | null = null;
+    try {
+      const val = await getSetting('platform:statefulNode');
+      if (val && typeof val === 'string') {
+        try { oldPinnedNode = JSON.parse(val); } catch { oldPinnedNode = val; }
+        if (typeof oldPinnedNode !== 'string') oldPinnedNode = val;
+      }
+    } catch { /* ignore */ }
+
+    // Update FLEET_STATEFUL_NODE in env file
+    logs.push(`Updating FLEET_STATEFUL_NODE to ${targetNode}...`);
+    await orchestrator.runOnLocalHost(
+      `grep -q '^FLEET_STATEFUL_NODE=' /opt/fleet/config/env && sed -i "s|^FLEET_STATEFUL_NODE=.*|FLEET_STATEFUL_NODE=${targetNode}|" /opt/fleet/config/env || echo "FLEET_STATEFUL_NODE=${targetNode}" >> /opt/fleet/config/env`,
+      { timeoutMs: 10_000 },
+    );
+
+    // Update constraint on postgres, valkey, and registry services
+    for (const svcName of ['fleet_postgres', 'fleet_valkey', 'fleet_registry']) {
+      logs.push(`Updating ${svcName} constraint to node.hostname==${targetNode}...`);
+      try {
+        // Remove old hostname constraint first, then add new one
+        const rmCmd = oldPinnedNode
+          ? `docker service update --constraint-rm "node.hostname==${oldPinnedNode}" ${svcName} 2>/dev/null || true`
+          : `true`;
+        await orchestrator.runOnLocalHost(
+          `${rmCmd} && docker service update --constraint-add "node.hostname==${targetNode}" ${svcName}`,
+          { timeoutMs: 60_000 },
+        );
+        logs.push(`${svcName} updated successfully`);
+      } catch (err) {
+        logs.push(`Warning: Could not update ${svcName}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Save to platform settings
+    await upsertSetting('platform:statefulNode', targetNode);
+    logs.push(`Saved platform:statefulNode = ${targetNode}`);
+
+    logs.push('Re-pin complete. Services will converge on the target node.');
+    return c.json({ success: true, message: `Database pinned to ${targetNode}`, logs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({ level: 'error', message: `Database repin failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'database-repin' } });
+    return c.json({ success: false, message, logs }, 500);
+  }
+}) as any);
+
+// POST /settings/database-migrate — migrate database between local and NFS storage
+const databaseMigrateRoute = createRoute({
+  method: 'post',
+  path: '/database-migrate',
+  tags: ['Settings'],
+  summary: 'Migrate database between local volume and NFS shared storage',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.discriminatedUnion('target', [
+      z.object({
+        target: z.literal('nfs'),
+        clusterId: z.string().uuid().describe('Storage cluster ID to migrate to'),
+      }),
+      z.object({
+        target: z.literal('local'),
+        targetNode: z.string().min(1).describe('Hostname of the manager node for local storage'),
+      }),
+    ])),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      success: z.boolean(),
+      message: z.string(),
+      logs: z.array(z.string()),
+    }), 'Migration result'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(databaseMigrateRoute, (async (c: any) => {
+  const user: AuthUser = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Super admin only' }, 403);
+
+  const body = c.req.valid('json');
+  const logs: string[] = [];
+  const MOUNT_BASE = '/mnt/fleet-volumes';
+  const PG_DATA_DIR = 'fleet-postgres-data';
+  const NFS_PG_PATH = `${MOUNT_BASE}/${PG_DATA_DIR}`;
+  const DUMP_FILE = '/tmp/fleet-db-migration.sql';
+
+  /** Helper to run a shell command with logging */
+  async function run(cmd: string, label: string, timeoutMs = 60_000): Promise<string> {
+    logs.push(`[step] ${label}...`);
+    try {
+      const result = await orchestrator.runOnLocalHost(cmd, { timeoutMs });
+      if (result.stdout?.trim()) logs.push(result.stdout.trim());
+      return result.stdout ?? '';
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logs.push(`[error] ${label}: ${msg}`);
+      throw new Error(`${label} failed: ${msg}`);
+    }
+  }
+
+  /** Wait for postgres to be running and accepting connections */
+  async function waitForPostgres(maxRetries = 30, delayMs = 3000): Promise<void> {
+    logs.push('[step] Waiting for postgres to become ready...');
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const result = await orchestrator.runOnLocalHost(
+          `docker exec $(docker ps -q -f "name=fleet_postgres." 2>/dev/null | head -1) pg_isready -U fleet 2>/dev/null && echo "READY"`,
+          { timeoutMs: 10_000 },
+        );
+        if (result.stdout?.includes('READY')) {
+          logs.push('Postgres is ready');
+          return;
+        }
+      } catch { /* retry */ }
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+    throw new Error('Postgres did not become ready in time');
+  }
+
+  try {
+    if (body.target === 'nfs') {
+      // ────────────────────────────────────────────────────────
+      // MIGRATE LOCAL → NFS
+      // ────────────────────────────────────────────────────────
+      const { clusterId } = body;
+
+      // 1. Validate cluster
+      logs.push('[step] Validating storage cluster...');
+      const cluster = await db.query.storageClusters.findFirst({
+        where: eq(storageClusters.id, clusterId),
+      });
+      if (!cluster) return c.json({ success: false, message: 'Storage cluster not found', logs }, 400);
+      if (cluster.provider === 'local') return c.json({ success: false, message: 'Cluster must use distributed storage (GlusterFS or Ceph), not local', logs }, 400);
+      logs.push(`Cluster: ${cluster.name} (${cluster.provider})`);
+
+      // 2. Ensure shared volume mount exists
+      logs.push('[step] Ensuring shared storage mount...');
+      const mountResult = await dockerService.ensureServiceVolumeMount();
+      logs.push(mountResult.message);
+
+      // 3. Verify mount is accessible
+      await run(
+        `mountpoint -q ${MOUNT_BASE} && echo "MOUNT_OK" || (echo "MOUNT_FAILED" && exit 1)`,
+        'Verifying NFS mount',
+      );
+
+      // 4. Create postgres data directory on shared storage
+      await run(`mkdir -p ${NFS_PG_PATH} && chmod 700 ${NFS_PG_PATH}`, 'Creating postgres data directory on NFS');
+
+      // 5. Read PG credentials from env
+      const pgUser = await run(
+        `grep -oP '^POSTGRES_USER=\\K.*' /opt/fleet/config/env 2>/dev/null || echo "fleet"`,
+        'Reading postgres credentials',
+      );
+      const pgUserTrimmed = pgUser.trim().split('\n').pop()?.trim() || 'fleet';
+
+      // 6. pg_dumpall from running postgres
+      await run(
+        `CONTAINER=$(docker ps -q -f "name=fleet_postgres." 2>/dev/null | head -1) && ` +
+        `[ -n "$CONTAINER" ] && docker exec "$CONTAINER" pg_dumpall -U ${pgUserTrimmed} > ${DUMP_FILE} && ` +
+        `DUMP_SIZE=$(stat -c%s ${DUMP_FILE} 2>/dev/null || stat -f%z ${DUMP_FILE} 2>/dev/null) && ` +
+        `echo "Dump completed: ${DUMP_FILE} ($DUMP_SIZE bytes)"`,
+        'Dumping database',
+        300_000, // 5 min timeout for large DBs
+      );
+
+      // 7. Scale postgres to 0
+      await run('docker service scale fleet_postgres=0 --detach=false', 'Scaling postgres down', 120_000);
+      // Brief pause for clean shutdown
+      await new Promise(r => setTimeout(r, 3000));
+
+      // 8. Start temp postgres on NFS mount, init + restore
+      const pgPassword = await run(
+        `grep -oP '^POSTGRES_PASSWORD=\\K.*' /opt/fleet/config/env 2>/dev/null || echo "fleet"`,
+        'Reading postgres password',
+      );
+      const pgPwd = pgPassword.trim().split('\n').pop()?.trim() || 'fleet';
+
+      await run(
+        `docker rm -f fleet-pg-migrate 2>/dev/null; ` +
+        `docker run -d --name fleet-pg-migrate ` +
+        `-v ${NFS_PG_PATH}:/var/lib/postgresql/data ` +
+        `-e POSTGRES_USER=${pgUserTrimmed} ` +
+        `-e "POSTGRES_PASSWORD=${pgPwd}" ` +
+        `-e POSTGRES_DB=fleet ` +
+        `postgres:17-alpine`,
+        'Starting temporary postgres on NFS',
+      );
+
+      // 9. Wait for temp postgres ready
+      logs.push('[step] Waiting for temp postgres to initialize...');
+      for (let i = 0; i < 30; i++) {
+        try {
+          const r = await orchestrator.runOnLocalHost(
+            `docker exec fleet-pg-migrate pg_isready -U ${pgUserTrimmed} 2>/dev/null && echo "READY"`,
+            { timeoutMs: 5_000 },
+          );
+          if (r.stdout?.includes('READY')) { logs.push('Temp postgres ready'); break; }
+        } catch { /* retry */ }
+        if (i === 29) throw new Error('Temp postgres did not start in time');
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // 10. Restore dump into NFS postgres
+      await run(
+        `docker exec -i fleet-pg-migrate psql -U ${pgUserTrimmed} -d fleet < ${DUMP_FILE}`,
+        'Restoring database to NFS',
+        300_000,
+      );
+
+      // 11. Verify data exists
+      await run(
+        `docker exec fleet-pg-migrate psql -U ${pgUserTrimmed} -d fleet -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" -t`,
+        'Verifying restored data',
+      );
+
+      // 12. Stop temp postgres
+      await run('docker stop fleet-pg-migrate && docker rm fleet-pg-migrate', 'Stopping temporary postgres');
+
+      // 13. Clean up dump
+      await run(`rm -f ${DUMP_FILE}`, 'Cleaning up dump file');
+
+      // 14. Get old pinned node for constraint removal
+      let oldPinnedNode: string | null = null;
+      try {
+        const val = await getSetting('platform:statefulNode');
+        if (val && typeof val === 'string') {
+          try { oldPinnedNode = JSON.parse(val); } catch { oldPinnedNode = val; }
+          if (typeof oldPinnedNode !== 'string') oldPinnedNode = val;
+        }
+      } catch { /* ignore */ }
+
+      // 15. Update fleet_postgres service: switch to NFS bind mount, remove hostname constraint
+      const rmConstraint = oldPinnedNode
+        ? `docker service update --constraint-rm "node.hostname==${oldPinnedNode}" fleet_postgres 2>/dev/null || true`
+        : 'true';
+      await run(
+        `${rmConstraint} && ` +
+        `docker service update ` +
+        `--mount-rm /var/lib/postgresql/data ` +
+        `--mount-add type=bind,source=${NFS_PG_PATH},target=/var/lib/postgresql/data ` +
+        `fleet_postgres`,
+        'Updating postgres service mounts',
+        120_000,
+      );
+
+      // 16. Scale back up
+      await run('docker service scale fleet_postgres=1 --detach=false', 'Scaling postgres back up', 120_000);
+
+      // 17. Wait for postgres healthy
+      await waitForPostgres();
+
+      // 18. Save settings (DB is back online now)
+      await upsertSetting('platform:dbMode', 'nfs');
+      await upsertSetting('platform:dbClusterId', clusterId);
+      logs.push('Saved database mode = nfs');
+
+      return c.json({ success: true, message: `Database migrated to NFS cluster "${cluster.name}"`, logs });
+
+    } else {
+      // ────────────────────────────────────────────────────────
+      // MIGRATE NFS → LOCAL
+      // ────────────────────────────────────────────────────────
+      const { targetNode } = body;
+
+      // 1. Validate target is a manager node
+      logs.push(`[step] Validating target node: ${targetNode}...`);
+      const nodes = await orchestrator.listNodes();
+      const target = nodes.find((n: any) =>
+        ((n as any).Description?.Hostname || (n as any).hostname) === targetNode &&
+        ((n as any).Spec?.Role || (n as any).role) === 'manager'
+      );
+      if (!target) return c.json({ success: false, message: `Node "${targetNode}" is not a manager node`, logs }, 400);
+      logs.push(`Target node validated: ${targetNode}`);
+
+      // 2. Read PG credentials
+      const pgUser = await run(
+        `grep -oP '^POSTGRES_USER=\\K.*' /opt/fleet/config/env 2>/dev/null || echo "fleet"`,
+        'Reading postgres credentials',
+      );
+      const pgUserTrimmed = pgUser.trim().split('\n').pop()?.trim() || 'fleet';
+
+      // 3. pg_dumpall from running postgres (on NFS)
+      await run(
+        `CONTAINER=$(docker ps -q -f "name=fleet_postgres." 2>/dev/null | head -1) && ` +
+        `[ -n "$CONTAINER" ] && docker exec "$CONTAINER" pg_dumpall -U ${pgUserTrimmed} > ${DUMP_FILE} && ` +
+        `DUMP_SIZE=$(stat -c%s ${DUMP_FILE} 2>/dev/null || stat -f%z ${DUMP_FILE} 2>/dev/null) && ` +
+        `echo "Dump completed: ${DUMP_FILE} ($DUMP_SIZE bytes)"`,
+        'Dumping database from NFS',
+        300_000,
+      );
+
+      // 4. Scale postgres to 0
+      await run('docker service scale fleet_postgres=0 --detach=false', 'Scaling postgres down', 120_000);
+      await new Promise(r => setTimeout(r, 3000));
+
+      // 5. Update fleet_postgres: switch back to named volume + hostname constraint
+      await run(
+        `docker service update ` +
+        `--mount-rm /var/lib/postgresql/data ` +
+        `--mount-add type=volume,source=fleet_postgres_data,target=/var/lib/postgresql/data ` +
+        `--constraint-add "node.hostname==${targetNode}" ` +
+        `fleet_postgres`,
+        'Switching postgres to local volume',
+        120_000,
+      );
+
+      // 6. Scale back up (fresh init on local volume)
+      await run('docker service scale fleet_postgres=1 --detach=false', 'Scaling postgres up (fresh init)', 120_000);
+
+      // 7. Wait for postgres healthy
+      await waitForPostgres();
+
+      // 8. Restore dump
+      await run(
+        `CONTAINER=$(docker ps -q -f "name=fleet_postgres." 2>/dev/null | head -1) && ` +
+        `[ -n "$CONTAINER" ] && docker exec -i "$CONTAINER" psql -U ${pgUserTrimmed} -d fleet < ${DUMP_FILE}`,
+        'Restoring database to local volume',
+        300_000,
+      );
+
+      // 9. Verify
+      await run(
+        `CONTAINER=$(docker ps -q -f "name=fleet_postgres." 2>/dev/null | head -1) && ` +
+        `docker exec "$CONTAINER" psql -U ${pgUserTrimmed} -d fleet -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" -t`,
+        'Verifying restored data',
+      );
+
+      // 10. Clean up dump
+      await run(`rm -f ${DUMP_FILE}`, 'Cleaning up dump file');
+
+      // 11. Update env file + re-pin valkey and registry
+      await run(
+        `grep -q '^FLEET_STATEFUL_NODE=' /opt/fleet/config/env && ` +
+        `sed -i "s|^FLEET_STATEFUL_NODE=.*|FLEET_STATEFUL_NODE=${targetNode}|" /opt/fleet/config/env || ` +
+        `echo "FLEET_STATEFUL_NODE=${targetNode}" >> /opt/fleet/config/env`,
+        'Updating FLEET_STATEFUL_NODE',
+      );
+
+      for (const svcName of ['fleet_valkey', 'fleet_registry']) {
+        try {
+          await run(
+            `docker service update --constraint-add "node.hostname==${targetNode}" ${svcName} 2>/dev/null || true`,
+            `Pinning ${svcName} to ${targetNode}`,
+            60_000,
+          );
+        } catch { /* non-fatal */ }
+      }
+
+      // 12. Save settings (DB is back online)
+      await upsertSetting('platform:dbMode', 'local');
+      await upsertSetting('platform:dbClusterId', null);
+      await upsertSetting('platform:statefulNode', targetNode);
+      logs.push(`Saved database mode = local, pinned to ${targetNode}`);
+
+      return c.json({ success: true, message: `Database migrated to local storage on ${targetNode}`, logs });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({
+      level: 'error',
+      message: `Database migration failed: ${message}`,
+      stack: err instanceof Error ? err.stack : null,
+      metadata: { context: 'settings', operation: 'database-migrate', logs },
+    });
+    // Attempt to scale postgres back up if it's at 0
+    try {
+      await orchestrator.runOnLocalHost('docker service scale fleet_postgres=1', { timeoutMs: 30_000 });
+      logs.push('[recovery] Scaled postgres back to 1 replica');
+    } catch { /* last resort */ }
+    return c.json({ success: false, message, logs }, 500);
+  }
+}) as any);
+
+// ────────────────────────────────────────────────────────────────────────────
+// Environment Variables Management
+// ────────────────────────────────────────────────────────────────────────────
+
+const ENV_FILE = '/opt/fleet/config/env';
+
+type EnvMeta = { category: string; description: string; secret: boolean; restartRequired: boolean; dangerous?: boolean };
+
+const ENV_REGISTRY: Record<string, EnvMeta> = {
+  // Platform
+  PLATFORM_DOMAIN: { category: 'platform', description: 'Main platform domain', secret: false, restartRequired: false },
+  APP_URL: { category: 'platform', description: 'Full application URL', secret: false, restartRequired: false },
+  CORS_ORIGIN: { category: 'platform', description: 'CORS allowed origin', secret: false, restartRequired: false },
+  FLEET_VERSION: { category: 'platform', description: 'Fleet version tag', secret: false, restartRequired: true },
+  FLEET_STATEFUL_NODE: { category: 'platform', description: 'Pinned node for stateful services', secret: false, restartRequired: false },
+  NODE_ENV: { category: 'platform', description: 'Environment mode', secret: false, restartRequired: true },
+  PORT: { category: 'platform', description: 'API server port', secret: false, restartRequired: true },
+  TRUST_PROXY: { category: 'platform', description: 'Trust proxy headers', secret: false, restartRequired: true },
+  // Database
+  DATABASE_URL: { category: 'database', description: 'PostgreSQL connection string', secret: true, restartRequired: true, dangerous: true },
+  DB_DIALECT: { category: 'database', description: 'Database dialect (pg/sqlite)', secret: false, restartRequired: true },
+  POSTGRES_USER: { category: 'database', description: 'PostgreSQL username', secret: false, restartRequired: true },
+  POSTGRES_PASSWORD: { category: 'database', description: 'PostgreSQL password', secret: true, restartRequired: true },
+  POSTGRES_DB: { category: 'database', description: 'PostgreSQL database name', secret: false, restartRequired: true },
+  // Cache
+  VALKEY_URL: { category: 'cache', description: 'Valkey/Redis connection string', secret: true, restartRequired: true, dangerous: true },
+  VALKEY_PASSWORD: { category: 'cache', description: 'Valkey/Redis password', secret: true, restartRequired: true },
+  // Security
+  JWT_SECRET: { category: 'security', description: 'JWT signing key (min 32 chars)', secret: true, restartRequired: true, dangerous: true },
+  ENCRYPTION_KEY: { category: 'security', description: 'AES-256-GCM master key (64 hex chars)', secret: true, restartRequired: true, dangerous: true },
+  NODE_AUTH_TOKEN: { category: 'security', description: 'Node agent auth token', secret: true, restartRequired: true },
+  ADMIN_EMAIL: { category: 'security', description: 'Initial admin email', secret: false, restartRequired: false },
+  ADMIN_PASSWORD: { category: 'security', description: 'Initial admin password', secret: true, restartRequired: false },
+  // Registry
+  REGISTRY_URL: { category: 'registry', description: 'Container registry URL', secret: false, restartRequired: false },
+  REGISTRY_USER: { category: 'registry', description: 'Registry username', secret: false, restartRequired: false },
+  REGISTRY_PASSWORD: { category: 'registry', description: 'Registry password', secret: true, restartRequired: true },
+  REGISTRY_HTTP_SECRET: { category: 'registry', description: 'Registry HTTP secret', secret: true, restartRequired: true },
+  GITHUB_TOKEN: { category: 'registry', description: 'GitHub token for image pulls', secret: true, restartRequired: false },
+  // Orchestration
+  API_URL: { category: 'orchestration', description: 'Internal API endpoint', secret: false, restartRequired: false },
+  ORCHESTRATOR: { category: 'orchestration', description: 'Default orchestrator (swarm/kubernetes)', secret: false, restartRequired: true },
+  K3S_TOKEN: { category: 'orchestration', description: 'k3s cluster join token', secret: true, restartRequired: false },
+  K3S_URL: { category: 'orchestration', description: 'k3s API server URL', secret: false, restartRequired: false },
+};
+
+const SECRET_PATTERN = /SECRET|PASSWORD|TOKEN|KEY|PASS/i;
+/** Keys that should never be deleted */
+const CRITICAL_KEYS = new Set(['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY', 'VALKEY_URL', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB', 'NODE_ENV']);
+
+function maskEnvValue(key: string, value: string): string {
+  const meta = ENV_REGISTRY[key];
+  const isSecret = meta?.secret ?? SECRET_PATTERN.test(key);
+  if (!isSecret) return value;
+  // For connection strings, mask the password portion
+  if (key === 'DATABASE_URL' || key === 'VALKEY_URL') {
+    return value.replace(/:([^@/:]+)@/, (_, pw) => `:${pw.slice(0, 3)}\u2022\u2022\u2022\u2022\u2022@`);
+  }
+  if (value.length <= 3) return '\u2022\u2022\u2022\u2022\u2022';
+  return value.slice(0, 3) + '\u2022\u2022\u2022\u2022\u2022';
+}
+
+function parseEnvFile(content: string): Array<{ key: string; value: string }> {
+  const vars: Array<{ key: string; value: string }> = [];
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx < 1) continue;
+    const key = trimmed.slice(0, eqIdx);
+    let value = trimmed.slice(eqIdx + 1);
+    // Remove surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    vars.push({ key, value });
+  }
+  return vars;
+}
+
+// GET /settings/environment
+const envGetRoute = createRoute({
+  method: 'get',
+  path: '/environment',
+  tags: ['Settings'],
+  summary: 'Get environment variables from config file',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      variables: z.array(z.object({
+        key: z.string(),
+        value: z.string(),
+        category: z.string(),
+        description: z.string(),
+        secret: z.boolean(),
+        restartRequired: z.boolean(),
+        dangerous: z.boolean(),
+      })),
+    }), 'Environment variables'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(envGetRoute, (async (c: any) => {
+  const user: AuthUser = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Super admin only' }, 403);
+
+  try {
+    let parsed: Array<{ key: string; value: string }> = [];
+
+    if (process.env['NODE_ENV'] === 'production') {
+      // Production: read from env file on host
+      const result = await orchestrator.runOnLocalHost(`cat ${ENV_FILE} 2>/dev/null || echo ""`, { timeoutMs: 10_000 });
+      parsed = parseEnvFile(result.stdout ?? '');
+    } else {
+      // Dev: read from process.env (no env file on disk)
+      for (const [key, value] of Object.entries(process.env)) {
+        if (key && value !== undefined) parsed.push({ key, value });
+      }
+    }
+
+    const variables = parsed.map(({ key, value }) => {
+      const meta = ENV_REGISTRY[key];
+      return {
+        key,
+        value: maskEnvValue(key, value),
+        category: meta?.category ?? 'other',
+        description: meta?.description ?? '',
+        secret: meta?.secret ?? SECRET_PATTERN.test(key),
+        restartRequired: meta?.restartRequired ?? false,
+        dangerous: meta?.dangerous ?? false,
+      };
+    });
+
+    return c.json({ variables });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({ level: 'error', message: `Failed to read env file: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'environment-get' } });
+    return c.json({ error: message }, 500);
+  }
+}) as any);
+
+// PUT /settings/environment
+const envUpdateRoute = createRoute({
+  method: 'put',
+  path: '/environment',
+  tags: ['Settings'],
+  summary: 'Update environment variables in config file',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      updates: z.array(z.object({
+        key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'Invalid variable name'),
+        value: z.string(),
+      })).max(50),
+      restartServices: z.boolean().default(false),
+      confirmDangerous: z.boolean().default(false),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      success: z.boolean(),
+      message: z.string(),
+      updated: z.array(z.string()),
+      restarted: z.array(z.string()),
+    }), 'Update result'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(envUpdateRoute, (async (c: any) => {
+  const user: AuthUser = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Super admin only' }, 403);
+
+  const { updates, restartServices, confirmDangerous } = c.req.valid('json');
+
+  try {
+    // Check for dangerous keys
+    const dangerousKeys = updates
+      .filter((u: any) => ENV_REGISTRY[u.key]?.dangerous)
+      .map((u: any) => u.key);
+    if (dangerousKeys.length > 0 && !confirmDangerous) {
+      return c.json({
+        error: `These variables are critical and changing them may break the platform: ${dangerousKeys.join(', ')}. Set confirmDangerous to proceed.`,
+      }, 400);
+    }
+
+    const updatedKeys: string[] = [];
+    if (process.env['NODE_ENV'] === 'production') {
+      for (const { key, value } of updates) {
+        // Escape special characters for sed
+        const escapedValue = value.replace(/[|&\\]/g, '\\$&');
+        await orchestrator.runOnLocalHost(
+          `grep -q '^${key}=' ${ENV_FILE} && sed -i "s|^${key}=.*|${key}=${escapedValue}|" ${ENV_FILE} || echo "${key}=${escapedValue}" >> ${ENV_FILE}`,
+          { timeoutMs: 10_000 },
+        );
+        updatedKeys.push(key);
+      }
+    } else {
+      // Dev: update process.env in-memory
+      for (const { key, value } of updates) {
+        process.env[key] = value;
+        updatedKeys.push(key);
+      }
+    }
+
+    // Restart services if requested (production only)
+    const restarted: string[] = [];
+    if (restartServices && process.env['NODE_ENV'] === 'production') {
+      for (const svc of ['fleet_api', 'fleet_ssh-gateway', 'fleet_agent']) {
+        try {
+          await orchestrator.runOnLocalHost(`docker service update --force ${svc}`, { timeoutMs: 60_000 });
+          restarted.push(svc);
+        } catch {
+          // Non-fatal — log but continue
+        }
+      }
+    }
+
+    logger.info({ updatedKeys, restarted }, 'Environment variables updated');
+    return c.json({
+      success: true,
+      message: `Updated ${updatedKeys.length} variable(s)${restarted.length > 0 ? `, restarted ${restarted.length} service(s)` : ''}`,
+      updated: updatedKeys,
+      restarted,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({ level: 'error', message: `Failed to update env: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'environment-update' } });
+    return c.json({ error: message }, 500);
+  }
+}) as any);
+
+// DELETE /settings/environment/:key
+const envDeleteRoute = createRoute({
+  method: 'delete',
+  path: '/environment/{key}',
+  tags: ['Settings'],
+  summary: 'Remove an environment variable from config file',
+  security: bearerSecurity,
+  request: {
+    params: z.object({ key: z.string() }),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Variable removed'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(envDeleteRoute, (async (c: any) => {
+  const user: AuthUser = c.get('user');
+  if (!user.isSuper) return c.json({ error: 'Super admin only' }, 403);
+
+  const { key } = c.req.valid('param');
+
+  if (CRITICAL_KEYS.has(key)) {
+    return c.json({ error: `Cannot delete critical variable: ${key}` }, 400);
+  }
+
+  try {
+    if (process.env['NODE_ENV'] === 'production') {
+      await orchestrator.runOnLocalHost(
+        `sed -i '/^${key}=/d' ${ENV_FILE}`,
+        { timeoutMs: 10_000 },
+      );
+    } else {
+      delete process.env[key];
+    }
+    logger.info({ key }, 'Environment variable deleted');
+    return c.json({ message: `Removed ${key}` });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logToErrorTable({ level: 'error', message: `Failed to delete env var: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'settings', operation: 'environment-delete' } });
+    return c.json({ error: message }, 500);
   }
 }) as any);
 

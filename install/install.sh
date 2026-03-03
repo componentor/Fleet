@@ -287,6 +287,7 @@ REGISTRY_URL=${PLATFORM_DOMAIN}
 REGISTRY_USER=fleet
 REGISTRY_PASSWORD=${REGISTRY_PASSWORD}
 REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
+FLEET_STATEFUL_NODE=$(hostname)
 EOF
 
   # Create registry htpasswd file (apache2-utils/httpd-tools installed in install_dependencies)
@@ -845,12 +846,19 @@ NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN}
 EOF
   fi
 
+  # Ensure stateful node is set (pin postgres/valkey/registry to this node)
+  if ! grep -q "^FLEET_STATEFUL_NODE=" "$FLEET_DIR/config/env"; then
+    echo "FLEET_STATEFUL_NODE=$(hostname)" >> "$FLEET_DIR/config/env"
+  fi
+  FLEET_STATEFUL_NODE=$(grep "^FLEET_STATEFUL_NODE=" "$FLEET_DIR/config/env" | cut -d= -f2)
+
   # Deploy the stack
   log "Deploying Docker Swarm stack..."
   cd "$STACK_DIR"
   env FLEET_VERSION="$FLEET_VERSION" \
       PLATFORM_DOMAIN="$PLATFORM_DOMAIN" \
       VALKEY_PASSWORD="$VALKEY_PASSWORD" \
+      FLEET_STATEFUL_NODE="$FLEET_STATEFUL_NODE" \
     docker stack deploy \
       -c docker-stack.yml \
       --with-registry-auth \
