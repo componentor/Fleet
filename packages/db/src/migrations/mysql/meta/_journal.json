@@ -239,6 +239,13 @@
       "when": 1774900000000,
       "tag": "0033_add_orchestrator",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1775000000000,
+      "tag": "0034_add_robots_config",
+      "breakpoints": true
     }
   ]
 }

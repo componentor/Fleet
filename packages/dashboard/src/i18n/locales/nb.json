@@ -1168,7 +1168,22 @@
     "webhookRegistered": "Registrert",
     "webhookNotRegistered": "Ikke registrert",
     "saveGithubSettings": "Lagre GitHub-innstillinger",
-    "saving": "Lagrer..."
+    "saving": "Lagrer...",
+    "robots": {
+      "title": "Robots.txt",
+      "desc": "Kontroller hvordan webcrawlere f\u00e5r tilgang til denne tjenesten. Vises kun for tjenester med domene.",
+      "useDefault": "Bruk plattformstandard",
+      "useDefaultDesc": "Server plattformens standard robots.txt konfigurert av administrator.",
+      "custom": "Egendefinert robots.txt",
+      "customDesc": "Oppgi en tilpasset robots.txt for denne tjenesten.",
+      "disabled": "Deaktivert (tjenesten h\u00e5ndterer selv)",
+      "disabledDesc": "Ikke fang opp /robots.txt \u2014 la tjenestens container svare direkte.",
+      "contentLabel": "Egendefinert robots.txt-innhold",
+      "placeholder": "User-agent: *\nDisallow: /private/",
+      "save": "Lagre Robots.txt",
+      "saved": "Robots.txt-innstillinger lagret",
+      "saveFailed": "Kunne ikke lagre robots.txt-innstillinger"
+    }
   },
   "billing": {
     "title": "Fakturering",
@@ -1769,9 +1784,20 @@
         "refresh": "Oppdater status",
         "loadError": "Kunne ikke laste databasestatus. Kontroller at API-et er tilgjengelig."
       },
+      "robots": {
+        "title": "Robots.txt",
+        "desc": "Konfigurer standard robots.txt som serveres for alle tjenester. Individuelle tjenester kan overstyre eller deaktivere dette.",
+        "enableLabel": "Aktiver plattformdekkende robots.txt",
+        "contentLabel": "Standard robots.txt-innhold",
+        "placeholder": "User-agent: *\nAllow: /",
+        "hint": "Dette innholdet serveres p\u00e5 /robots.txt for plattformdomenet og alle tjenester som bruker standardmodus.",
+        "save": "Lagre",
+        "saved": "Robots.txt-konfigurasjon lagret",
+        "saveFailed": "Kunne ikke lagre robots.txt-konfigurasjon"
+      },
       "env": {
-        "title": "Miljøvariabler",
-        "desc": "Vis og administrer miljøvariabler på serveren. Disse lagres i konfigurasjonsfilen og leses av alle plattformtjenester.",
+        "title": "Milj\u00f8variabler",
+        "desc": "Vis og administrer milj\u00f8variabler p\u00e5 serveren. Disse lagres i konfigurasjonsfilen og leses av alle plattformtjenester.",
         "addVariable": "Legg til variabel",
         "restartServices": "Start tjenester på nytt",
         "allCategories": "Alle",

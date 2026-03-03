@@ -19,6 +19,9 @@ providers:
   swarm:
     exposedByDefault: false
     network: fleet_fleet_public
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
 
 certificatesResolvers:
   letsencrypt:

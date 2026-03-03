@@ -194,7 +194,7 @@ export function useTerminal() {
         }
         connectionState.value = 'reconnecting'
         reconnectTimer = setTimeout(() => {
-          if (currentServiceId) doConnect(currentServiceId)
+          if (currentServiceId || customWsUrl) doConnect(currentServiceId ?? '')
         }, delay)
       } else {
         terminal?.writeln('\r\nFailed to connect to terminal. The service may not be running or the terminal server is unavailable.')
@@ -232,6 +232,10 @@ export function useTerminal() {
     dispose()
   })
 
+  function writeln(data: string) {
+    terminal?.writeln(data)
+  }
+
   return {
     terminalRef,
     connectionState,
@@ -240,5 +244,6 @@ export function useTerminal() {
     disconnect,
     dispose,
     refit,
+    writeln,
   }
 }

@@ -6,7 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createNodeWebSocket } from '@hono/node-ws';
 import { jwtVerify } from 'jose';
 import { Readable } from 'node:stream';
-import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, selfHealingJobs, users as usersTable } from '@fleet/db';
+import { db, services, deployments, eq, and, isNull, errorLog, userAccounts, supportTickets, selfHealingJobs, users as usersTable, platformSettings } from '@fleet/db';
 import { orchestrator } from './services/orchestrator.js';
 import { logger, logToErrorTable } from './services/logger.js';
 import { getValkey } from './services/valkey.service.js';
@@ -132,6 +132,112 @@ app.get('/health', (c) => {
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
   });
+});
+
+// ── robots.txt — BEFORE rate limiter for maximum throughput ────────────────
+// Served for all domains routed through Traefik (platform + user services).
+// In-memory cache with 60s TTL keeps DB queries near-zero under heavy load.
+const ROBOTS_CACHE_TTL = 60_000;
+const robotsCache = new Map<string, { content: string | null; ts: number }>();
+
+const DEFAULT_ROBOTS_CONTENT = `User-agent: *
+Allow: /
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+`;
+
+app.get('/robots.txt', async (c) => {
+  const host = (c.req.header('host') ?? '').replace(/:\d+$/, '').toLowerCase();
+
+  // Check cache first
+  const cached = robotsCache.get(host);
+  if (cached && Date.now() - cached.ts < ROBOTS_CACHE_TTL) {
+    if (cached.content === null) return c.notFound();
+    c.header('Content-Type', 'text/plain; charset=utf-8');
+    c.header('Cache-Control', 'public, max-age=3600');
+    return c.body(cached.content);
+  }
+
+  try {
+    // Resolve platform domain
+    const platformRow = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'platform:domain'),
+      columns: { value: true },
+    });
+    const platformDomain = (platformRow?.value as string | undefined)?.replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase() ?? '';
+
+    // Load platform robots config
+    const robotsRow = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'robots:config'),
+      columns: { value: true },
+    });
+    const platformConfig = robotsRow?.value as { enabled?: boolean; content?: string } | null;
+    const platformEnabled = platformConfig?.enabled !== false; // default true
+    const platformContent = platformConfig?.content || DEFAULT_ROBOTS_CONTENT;
+
+    // Platform domain → serve platform robots.txt
+    if (host === platformDomain) {
+      const content = platformEnabled ? platformContent : null;
+      robotsCache.set(host, { content, ts: Date.now() });
+      if (!content) return c.notFound();
+      c.header('Content-Type', 'text/plain; charset=utf-8');
+      c.header('Cache-Control', 'public, max-age=3600');
+      return c.body(content);
+    }
+
+    // User service domain → look up service by domain
+    const svc = await db.query.services.findFirst({
+      where: and(eq(services.domain, host), isNull(services.deletedAt)),
+      columns: { robotsConfig: true },
+    });
+
+    if (!svc) {
+      // Unknown domain — cache miss as 404
+      robotsCache.set(host, { content: null, ts: Date.now() });
+      return c.notFound();
+    }
+
+    const svcConfig = svc.robotsConfig as { mode?: string; content?: string } | null;
+    const mode = svcConfig?.mode ?? 'default';
+
+    let content: string | null;
+    if (mode === 'disabled') {
+      content = null; // should not be routed here, but safety net
+    } else if (mode === 'custom') {
+      content = svcConfig?.content || null;
+    } else {
+      // 'default' — use platform content (if platform robots enabled)
+      content = platformEnabled ? platformContent : null;
+    }
+
+    robotsCache.set(host, { content, ts: Date.now() });
+    if (!content) return c.notFound();
+    c.header('Content-Type', 'text/plain; charset=utf-8');
+    c.header('Cache-Control', 'public, max-age=3600');
+    return c.body(content);
+  } catch (err) {
+    logger.error({ err }, 'robots.txt lookup failed');
+    return c.notFound();
+  }
 });
 
 // Global rate limiter: 300 requests per minute per IP

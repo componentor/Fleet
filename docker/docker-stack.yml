@@ -120,6 +120,12 @@ services:
         - "traefik.http.routers.api.entrypoints=websecure"
         - "traefik.http.routers.api.tls.certresolver=letsencrypt"
         - "traefik.http.services.api.loadbalancer.server.port=3000"
+        # robots.txt — intercept before dashboard catch-all (priority=1)
+        - "traefik.http.routers.api-robots.rule=Host(`${PLATFORM_DOMAIN}`) && Path(`/robots.txt`)"
+        - "traefik.http.routers.api-robots.entrypoints=websecure"
+        - "traefik.http.routers.api-robots.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.api-robots.priority=10"
+        - "traefik.http.routers.api-robots.service=api"
 
   # ─── Dashboard (SPA) ────────────────────────────────────────────────
   dashboard:
@@ -180,6 +186,8 @@ services:
     configs:
       - source: traefik_config
         target: /etc/traefik/traefik.yml
+      - source: traefik_robots
+        target: /etc/traefik/dynamic/robots.yml
     networks:
       - fleet_public
     deploy:
@@ -338,3 +346,5 @@ volumes:
 configs:
   traefik_config:
     file: ./traefik/traefik.yml
+  traefik_robots:
+    file: ./traefik/dynamic/robots.yml

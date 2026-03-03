@@ -140,6 +140,11 @@ const configDomain = ref('')
 const configSslEnabled = ref(true)
 const domainLoading = ref(false)
 
+// Robots.txt settings
+const robotsMode = ref<'default' | 'custom' | 'disabled'>('default')
+const robotsContent = ref('')
+const robotsLoading = ref(false)
+
 // Volume settings
 const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
 const volumeLoading = ref(false)
@@ -966,6 +971,22 @@ async function saveDomain() {
   }
 }
 
+async function saveRobots() {
+  robotsLoading.value = true
+  try {
+    const config = robotsMode.value === 'custom'
+      ? { mode: robotsMode.value, content: robotsContent.value }
+      : { mode: robotsMode.value }
+    await api.patch(`/services/${serviceId}`, { robotsConfig: config })
+    await refreshService()
+    toast.success(t('service.robots.saved'))
+  } catch {
+    toast.error(t('service.robots.saveFailed'))
+  } finally {
+    robotsLoading.value = false
+  }
+}
+
 async function saveVolumes() {
   volumeLoading.value = true
   migrationFailures.value = []
@@ -1186,6 +1207,8 @@ async function onTabChange(tabId: string) {
     configRollbackOnFailure.value = service.value.rollbackOnFailure ?? true
     configDomain.value = service.value.domain ?? ''
     configSslEnabled.value = service.value.sslEnabled ?? true
+    robotsMode.value = (service.value.robotsConfig as any)?.mode ?? 'default'
+    robotsContent.value = (service.value.robotsConfig as any)?.content ?? ''
     configVolumes.value = ((service.value.volumes as any[]) ?? []).map((v: any) => ({
       source: v.source ?? '',
       target: v.target ?? '',
@@ -2694,6 +2717,54 @@ onUnmounted(() => {
             <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
               <button @click="saveDomain" :disabled="domainLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 {{ domainLoading ? 'Saving...' : 'Save Domain' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Robots.txt — only shown when service has a domain -->
+          <div v-if="service?.domain" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('service.robots.title') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $t('service.robots.desc') }}</p>
+            </div>
+            <div class="p-6 space-y-4">
+              <div class="space-y-3">
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input v-model="robotsMode" type="radio" value="default" name="robotsMode" class="text-primary-600 focus:ring-primary-500" />
+                  <div>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.robots.useDefault') }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('service.robots.useDefaultDesc') }}</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input v-model="robotsMode" type="radio" value="custom" name="robotsMode" class="text-primary-600 focus:ring-primary-500" />
+                  <div>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.robots.custom') }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('service.robots.customDesc') }}</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input v-model="robotsMode" type="radio" value="disabled" name="robotsMode" class="text-primary-600 focus:ring-primary-500" />
+                  <div>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.robots.disabled') }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('service.robots.disabledDesc') }}</p>
+                  </div>
+                </label>
+              </div>
+
+              <div v-if="robotsMode === 'custom'">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ $t('service.robots.contentLabel') }}</label>
+                <textarea
+                  v-model="robotsContent"
+                  rows="10"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  :placeholder="$t('service.robots.placeholder')"
+                />
+              </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+              <button @click="saveRobots" :disabled="robotsLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ robotsLoading ? $t('service.saving') : $t('service.robots.save') }}
               </button>
             </div>
           </div>

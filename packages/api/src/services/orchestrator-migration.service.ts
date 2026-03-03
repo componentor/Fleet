@@ -64,7 +64,7 @@ export async function migrateService(
     // 1. Build service options
     const svcPorts = (svc.ports as any[]) ?? [];
     const primaryTargetPort = svcPorts[0]?.target ?? 80;
-    const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort);
+    const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort, (svc.robotsConfig as any)?.mode ?? 'default');
 
     const networkName = `fleet-account-${accountId}`;
     const networkId = await target.ensureNetwork(networkName);

@@ -1166,8 +1166,23 @@
     "webhookStatus": "Webhook",
     "webhookRegistered": "已注册",
     "webhookNotRegistered": "未注册",
-    "saveGithubSettings": "保存 GitHub 设置",
-    "saving": "保存中..."
+    "saveGithubSettings": "\u4fdd\u5b58 GitHub \u8bbe\u7f6e",
+    "saving": "\u4fdd\u5b58\u4e2d...",
+    "robots": {
+      "title": "Robots.txt",
+      "desc": "\u63a7\u5236\u7f51\u7edc\u722c\u866b\u5982\u4f55\u8bbf\u95ee\u6b64\u670d\u52a1\u3002\u4ec5\u5bf9\u5177\u6709\u57df\u540d\u7684\u670d\u52a1\u663e\u793a\u3002",
+      "useDefault": "\u4f7f\u7528\u5e73\u53f0\u9ed8\u8ba4\u503c",
+      "useDefaultDesc": "\u63d0\u4f9b\u7ba1\u7406\u5458\u914d\u7f6e\u7684\u5e73\u53f0\u7ea7 robots.txt\u3002",
+      "custom": "\u81ea\u5b9a\u4e49 robots.txt",
+      "customDesc": "\u4e3a\u6b64\u670d\u52a1\u63d0\u4f9b\u81ea\u5b9a\u4e49\u7684 robots.txt\u3002",
+      "disabled": "\u7981\u7528\uff08\u670d\u52a1\u81ea\u884c\u5904\u7406\uff09",
+      "disabledDesc": "\u4e0d\u62e6\u622a /robots.txt \u2014 \u8ba9\u670d\u52a1\u5bb9\u5668\u76f4\u63a5\u54cd\u5e94\u3002",
+      "contentLabel": "\u81ea\u5b9a\u4e49 robots.txt \u5185\u5bb9",
+      "placeholder": "User-agent: *\nDisallow: /private/",
+      "save": "\u4fdd\u5b58 Robots.txt",
+      "saved": "Robots.txt \u8bbe\u7f6e\u5df2\u4fdd\u5b58",
+      "saveFailed": "\u4fdd\u5b58 robots.txt \u8bbe\u7f6e\u5931\u8d25"
+    }
   },
   "billing": {
     "title": "计费",
@@ -1769,10 +1784,21 @@
         "loadError": "无法加载数据库状态，请检查 API 是否可访问。"
       }
     },
+    "robots": {
+      "title": "Robots.txt",
+      "desc": "\u914d\u7f6e\u4e3a\u6240\u6709\u670d\u52a1\u63d0\u4f9b\u7684\u9ed8\u8ba4 robots.txt\u3002\u5404\u670d\u52a1\u53ef\u5355\u72ec\u8986\u76d6\u6216\u7981\u7528\u3002",
+      "enableLabel": "\u542f\u7528\u5e73\u53f0\u7ea7 robots.txt",
+      "contentLabel": "\u9ed8\u8ba4 robots.txt \u5185\u5bb9",
+      "placeholder": "User-agent: *\nAllow: /",
+      "hint": "\u6b64\u5185\u5bb9\u5c06\u5728\u5e73\u53f0\u57df\u540d\u548c\u6240\u6709\u4f7f\u7528\u9ed8\u8ba4\u6a21\u5f0f\u7684\u670d\u52a1\u7684 /robots.txt \u4e0a\u63d0\u4f9b\u3002",
+      "save": "\u4fdd\u5b58",
+      "saved": "Robots.txt \u914d\u7f6e\u5df2\u4fdd\u5b58",
+      "saveFailed": "\u65e0\u6cd5\u4fdd\u5b58 robots.txt \u914d\u7f6e"
+    },
     "env": {
-      "title": "环境",
-      "desc": "查看和管理服务器环境变量。这些变量存储在配置文件中，由所有平台服务读取。",
-      "addVariable": "添加变量",
+      "title": "\u73af\u5883",
+      "desc": "\u67e5\u770b\u548c\u7ba1\u7406\u670d\u52a1\u5668\u73af\u5883\u53d8\u91cf\u3002\u8fd9\u4e9b\u53d8\u91cf\u5b58\u50a8\u5728\u914d\u7f6e\u6587\u4ef6\u4e2d\uff0c\u7531\u6240\u6709\u5e73\u53f0\u670d\u52a1\u8bfb\u53d6\u3002",
+      "addVariable": "\u6dfb\u52a0\u53d8\u91cf",
       "restartServices": "重启服务",
       "allCategories": "全部",
       "keyPlaceholder": "VARIABLE_NAME",

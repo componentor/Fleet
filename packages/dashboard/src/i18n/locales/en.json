@@ -1171,7 +1171,22 @@
     "webhookRegistered": "Registered",
     "webhookNotRegistered": "Not registered",
     "saveGithubSettings": "Save GitHub Settings",
-    "saving": "Saving..."
+    "saving": "Saving...",
+    "robots": {
+      "title": "Robots.txt",
+      "desc": "Control how web crawlers access this service. Only shown for services with a domain.",
+      "useDefault": "Use platform default",
+      "useDefaultDesc": "Serve the platform-wide robots.txt configured by the admin.",
+      "custom": "Custom robots.txt",
+      "customDesc": "Provide a custom robots.txt for this service.",
+      "disabled": "Disabled (service handles its own)",
+      "disabledDesc": "Don't intercept /robots.txt — let the service container respond directly.",
+      "contentLabel": "Custom robots.txt content",
+      "placeholder": "User-agent: *\nDisallow: /private/",
+      "save": "Save Robots.txt",
+      "saved": "Robots.txt settings saved",
+      "saveFailed": "Failed to save robots.txt settings"
+    }
   },
   "billing": {
     "title": "Billing",
@@ -1771,6 +1786,17 @@
         "migrateToLocalDesc": "Move the database back to a local volume on a specific manager node. The database will be pinned to the selected node.",
         "refresh": "Refresh Status",
         "loadError": "Could not load database status. Check that the API is reachable."
+      },
+      "robots": {
+        "title": "Robots.txt",
+        "desc": "Configure the default robots.txt served for all services. Individual services can override or disable this.",
+        "enableLabel": "Enable platform-wide robots.txt",
+        "contentLabel": "Default robots.txt content",
+        "placeholder": "User-agent: *\nAllow: /",
+        "hint": "This content is served at /robots.txt for the platform domain and all services using the default mode.",
+        "save": "Save",
+        "saved": "Robots.txt configuration saved",
+        "saveFailed": "Failed to save robots.txt configuration"
       },
       "env": {
         "title": "Environment",

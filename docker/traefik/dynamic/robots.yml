@@ -1,0 +1,6 @@
+http:
+  services:
+    fleet-robots:
+      loadBalancer:
+        servers:
+          - url: "http://fleet_api:3000"

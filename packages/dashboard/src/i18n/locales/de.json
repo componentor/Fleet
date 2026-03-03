@@ -1167,7 +1167,22 @@
     "webhookRegistered": "Registriert",
     "webhookNotRegistered": "Nicht registriert",
     "saveGithubSettings": "GitHub-Einstellungen speichern",
-    "saving": "Wird gespeichert..."
+    "saving": "Wird gespeichert...",
+    "robots": {
+      "title": "Robots.txt",
+      "desc": "Steuern Sie, wie Webcrawler auf diesen Dienst zugreifen. Wird nur f\u00fcr Dienste mit Domain angezeigt.",
+      "useDefault": "Plattform-Standard verwenden",
+      "useDefaultDesc": "Die vom Administrator konfigurierte plattformweite robots.txt bereitstellen.",
+      "custom": "Benutzerdefinierte robots.txt",
+      "customDesc": "Eine benutzerdefinierte robots.txt f\u00fcr diesen Dienst bereitstellen.",
+      "disabled": "Deaktiviert (Dienst verwaltet selbst)",
+      "disabledDesc": "/robots.txt nicht abfangen \u2014 der Dienst-Container antwortet direkt.",
+      "contentLabel": "Benutzerdefinierter robots.txt-Inhalt",
+      "placeholder": "User-agent: *\nDisallow: /private/",
+      "save": "Robots.txt speichern",
+      "saved": "Robots.txt-Einstellungen gespeichert",
+      "saveFailed": "Robots.txt-Einstellungen konnten nicht gespeichert werden"
+    }
   },
   "billing": {
     "title": "Abrechnung",
@@ -1768,10 +1783,21 @@
         "refresh": "Status aktualisieren",
         "loadError": "Datenbankstatus konnte nicht geladen werden. Prüfen Sie, ob die API erreichbar ist."
       },
+      "robots": {
+        "title": "Robots.txt",
+        "desc": "Konfigurieren Sie die Standard-robots.txt f\u00fcr alle Dienste. Einzelne Dienste k\u00f6nnen dies \u00fcberschreiben oder deaktivieren.",
+        "enableLabel": "Plattformweite robots.txt aktivieren",
+        "contentLabel": "Standard robots.txt-Inhalt",
+        "placeholder": "User-agent: *\nAllow: /",
+        "hint": "Dieser Inhalt wird unter /robots.txt f\u00fcr die Plattform-Domain und alle Dienste im Standardmodus bereitgestellt.",
+        "save": "Speichern",
+        "saved": "Robots.txt-Konfiguration gespeichert",
+        "saveFailed": "Robots.txt-Konfiguration konnte nicht gespeichert werden"
+      },
       "env": {
         "title": "Umgebung",
         "desc": "Anzeigen und Verwalten von Server-Umgebungsvariablen. Diese werden in der Konfigurationsdatei gespeichert und von allen Plattformdiensten gelesen.",
-        "addVariable": "Variable hinzufügen",
+        "addVariable": "Variable hinzuf\u00fcgen",
         "restartServices": "Dienste neu starten",
         "allCategories": "Alle",
         "keyPlaceholder": "VARIABLE_NAME",

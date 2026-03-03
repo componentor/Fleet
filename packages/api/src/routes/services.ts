@@ -211,6 +211,10 @@ const updateServiceSchema = z.object({
   autoDeploy: z.boolean().optional(),
   githubBranch: z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-\/]*$/, 'Invalid branch name').optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
+  robotsConfig: z.object({
+    mode: z.enum(['default', 'custom', 'disabled']),
+    content: z.string().max(10_000).optional(),
+  }).nullable().optional(),
 }).openapi('UpdateServiceRequest');
 
 const dockerfileContentSchema = z.object({
@@ -1366,7 +1370,7 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
   }
 
   // Build DB update payload (exclude autoDeploy/githubBranch from Docker update)
-  const { autoDeploy: _ad, githubBranch: _gb, ...dockerFields } = data;
+  const { autoDeploy: _ad, githubBranch: _gb, robotsConfig: _rc, ...dockerFields } = data;
 
   // Track volume migration failures to report in the response
   const migrationFailures: Array<{ source: string; target: string; mountPath: string; error: string }> = [];
@@ -1377,11 +1381,13 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
       const effectiveDomain = dockerFields.domain !== undefined ? dockerFields.domain : (svc.domain ?? null);
       const effectivePorts = dockerFields.ports ?? (svc.ports as any[]) ?? [];
       const primaryTargetPort = effectivePorts[0]?.target ?? 80;
+      const effectiveRobotsMode = (data.robotsConfig as any)?.mode ?? (svc.robotsConfig as any)?.mode ?? 'default';
       const traefikLabels = buildTraefikLabels(
         dockerFields.name ?? svc.name,
         effectiveDomain,
         dockerFields.sslEnabled ?? svc.sslEnabled ?? true,
         primaryTargetPort,
+        effectiveRobotsMode,
       );
 
       // Port management: re-allocate if ports changed
@@ -1781,7 +1787,7 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
     const swarmServiceName = `fleet-${accountShort}-${svc!.name}`.toLowerCase();
     const svcPorts = (svc!.ports as any[]) ?? [];
     const primaryTargetPort = svcPorts[0]?.target ?? 80;
-    const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true, primaryTargetPort);
+    const traefikLabels = buildTraefikLabels(svc!.name, svc!.domain ?? null, svc!.sslEnabled ?? true, primaryTargetPort, (svc!.robotsConfig as any)?.mode ?? 'default');
     const constraints = [...((svc!.placementConstraints as string[]) ?? [])];
     if (svc!.nodeConstraint) {
       constraints.push(`node.id == ${svc!.nodeConstraint}`);
@@ -2049,7 +2055,7 @@ serviceRoutes.openapi(startServiceRoute, (async (c: any) => {
       const svcPorts = (svc.ports as any[]) ?? [];
       const primaryTargetPort = svcPorts[0]?.target ?? 80;
 
-      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort);
+      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort, (svc.robotsConfig as any)?.mode ?? 'default');
 
       const constraints = [...((svc.placementConstraints as string[]) ?? [])];
       if (svc.nodeConstraint) {
