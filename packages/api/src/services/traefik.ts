@@ -26,11 +26,16 @@ export function buildTraefikLabels(
 
   const routerName = serviceName.replace(/[^a-zA-Z0-9]/g, '-');
 
+  // Middleware: force CDN/proxy revalidation on every request to prevent stale content
+  const mw = `${routerName}-cache`;
+
   const labels: Record<string, string> = {
     'traefik.enable': 'true',
     [`traefik.http.routers.${routerName}.rule`]: `Host(\`${domain}\`)`,
     [`traefik.http.routers.${routerName}.entrypoints`]: 'websecure',
+    [`traefik.http.routers.${routerName}.middlewares`]: mw,
     [`traefik.http.services.${routerName}.loadbalancer.server.port`]: String(targetPort),
+    [`traefik.http.middlewares.${mw}.headers.customresponseheaders.Cache-Control`]: 'no-cache',
   };
 
   if (sslEnabled) {

@@ -728,6 +728,23 @@ export class KubernetesService implements OrchestratorService {
     return Buffer.from(allLogs.join('\n'));
   }
 
+  async getContainerLogs(
+    containerId: string,
+    opts?: { tail?: number; since?: number; follow?: boolean; timestamps?: boolean },
+  ): Promise<Buffer | NodeJS.ReadableStream> {
+    // In Kubernetes, "containerId" is used as a pod name
+    // Try to read logs from the pod directly
+    const namespace = 'default';
+    try {
+      const log = await this.coreApi.readNamespacedPodLog(
+        { name: containerId, namespace, tailLines: opts?.tail ?? 100, timestamps: opts?.timestamps ?? true },
+      );
+      return Buffer.from(typeof log === 'string' ? log : String(log));
+    } catch {
+      return Buffer.from('');
+    }
+  }
+
   // ══════════════════════════════════════════════════════════════════════
   //  Port Management
   // ══════════════════════════════════════════════════════════════════════

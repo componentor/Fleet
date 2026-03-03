@@ -1238,13 +1238,39 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
         return;
       }
 
-      // Fetch logs with a timeout so we never hang forever
-      const result = await Promise.race([
-        orchestrator.getServiceLogs(svc.ID, { tail, follow: false }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out fetching logs from Docker')), FETCH_TIMEOUT_MS),
-        ),
-      ]);
+      // Try container-level logs first (fast, no cross-node aggregation).
+      // Docker's service-level logs API aggregates across all replicas/nodes
+      // and can be extremely slow in multi-node Swarm clusters.
+      let result: Buffer | NodeJS.ReadableStream | null = null;
+      try {
+        const tasks = await Promise.race([
+          orchestrator.getServiceTasks(svc.ID),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timed out listing tasks')), FETCH_TIMEOUT_MS),
+          ),
+        ]);
+        const runningTask = tasks.find((t: any) => t.status === 'running' && t.containerStatus?.containerId);
+        if (runningTask?.containerStatus?.containerId) {
+          result = await Promise.race([
+            orchestrator.getContainerLogs(runningTask.containerStatus.containerId, { tail, follow: false, timestamps: true }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Timed out fetching container logs')), FETCH_TIMEOUT_MS),
+            ),
+          ]);
+        }
+      } catch {
+        // Container-level approach failed — fall back to service logs
+      }
+
+      // Fall back to service-level logs if container approach didn't work
+      if (!result) {
+        result = await Promise.race([
+          orchestrator.getServiceLogs(svc.ID, { tail, follow: false }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timed out fetching logs from Docker')), FETCH_TIMEOUT_MS),
+          ),
+        ]);
+      }
 
       if (Buffer.isBuffer(result)) {
         // Entire log returned as a buffer — demux and write at once
