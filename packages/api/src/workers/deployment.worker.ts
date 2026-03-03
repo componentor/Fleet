@@ -208,7 +208,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         } else {
           // No Dockerfile found — try runtime detection
           const { detectRuntime } = await import('../services/runtime.service.js');
-          const runtimeResult = await detectRuntime(detection.allFiles, null);
+          const runtimeResult = await detectRuntime(detection.allFiles, null, svc.nginxConfig);
           if (runtimeResult) {
             generatedDockerfile = runtimeResult.dockerfile;
             // Store the generated Dockerfile on the service record
@@ -356,7 +356,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       }
       const svcPorts = (svc.ports as any[]) ?? [];
       const primaryTargetPort = svcPorts[0]?.target ?? 80;
-      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort);
+      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort, (svc.robotsConfig as any)?.mode ?? 'default');
 
       const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
       await orchestrator.updateService(svc.dockerServiceId, {

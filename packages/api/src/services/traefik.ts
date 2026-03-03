@@ -20,6 +20,7 @@ export function buildTraefikLabels(
   domain: string | null,
   sslEnabled: boolean,
   targetPort: number = 80,
+  robotsMode: 'default' | 'custom' | 'disabled' = 'default',
 ): Record<string, string> {
   if (!domain || !isRoutableDomain(domain)) return { 'traefik.enable': 'false' };
 
@@ -35,6 +36,18 @@ export function buildTraefikLabels(
   if (sslEnabled) {
     labels[`traefik.http.routers.${routerName}.tls`] = 'true';
     labels[`traefik.http.routers.${routerName}.tls.certresolver`] = 'letsencrypt';
+  }
+
+  // Robots.txt interception — route /robots.txt to Fleet API via file provider
+  if (robotsMode !== 'disabled') {
+    const rr = `${routerName}-robots`;
+    labels[`traefik.http.routers.${rr}.rule`] = `Host(\`${domain}\`) && Path(\`/robots.txt\`)`;
+    labels[`traefik.http.routers.${rr}.entrypoints`] = 'websecure';
+    labels[`traefik.http.routers.${rr}.service`] = 'fleet-robots@file';
+    if (sslEnabled) {
+      labels[`traefik.http.routers.${rr}.tls`] = 'true';
+      labels[`traefik.http.routers.${rr}.tls.certresolver`] = 'letsencrypt';
+    }
   }
 
   return labels;

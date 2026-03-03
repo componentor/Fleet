@@ -181,6 +181,7 @@
     "roles": "Roller",
     "support": "Brukerstotte",
     "selfHealing": "Selvreparasjon",
+    "database": "Database",
     "logs": "Logger",
     "translations": "Oversettelser",
     "group": {
@@ -1168,7 +1169,22 @@
     "webhookRegistered": "Registrert",
     "webhookNotRegistered": "Ikke registrert",
     "saveGithubSettings": "Lagre GitHub-innstillinger",
-    "saving": "Lagrer..."
+    "saving": "Lagrer...",
+    "robots": {
+      "title": "Robots.txt",
+      "desc": "Kontroller hvordan webcrawlere f\u00e5r tilgang til denne tjenesten. Vises kun for tjenester med domene.",
+      "useDefault": "Bruk plattformstandard",
+      "useDefaultDesc": "Server plattformens standard robots.txt konfigurert av administrator.",
+      "custom": "Egendefinert robots.txt",
+      "customDesc": "Oppgi en tilpasset robots.txt for denne tjenesten.",
+      "disabled": "Deaktivert (tjenesten h\u00e5ndterer selv)",
+      "disabledDesc": "Ikke fang opp /robots.txt \u2014 la tjenestens container svare direkte.",
+      "contentLabel": "Egendefinert robots.txt-innhold",
+      "placeholder": "User-agent: *\nDisallow: /private/",
+      "save": "Lagre Robots.txt",
+      "saved": "Robots.txt-innstillinger lagret",
+      "saveFailed": "Kunne ikke lagre robots.txt-innstillinger"
+    }
   },
   "billing": {
     "title": "Fakturering",
@@ -1769,9 +1785,20 @@
         "refresh": "Oppdater status",
         "loadError": "Kunne ikke laste databasestatus. Kontroller at API-et er tilgjengelig."
       },
+      "robots": {
+        "title": "Robots.txt",
+        "desc": "Konfigurer standard robots.txt som serveres for alle tjenester. Individuelle tjenester kan overstyre eller deaktivere dette.",
+        "enableLabel": "Aktiver plattformdekkende robots.txt",
+        "contentLabel": "Standard robots.txt-innhold",
+        "placeholder": "User-agent: *\nAllow: /",
+        "hint": "Dette innholdet serveres p\u00e5 /robots.txt for plattformdomenet og alle tjenester som bruker standardmodus.",
+        "save": "Lagre",
+        "saved": "Robots.txt-konfigurasjon lagret",
+        "saveFailed": "Kunne ikke lagre robots.txt-konfigurasjon"
+      },
       "env": {
-        "title": "Miljøvariabler",
-        "desc": "Vis og administrer miljøvariabler på serveren. Disse lagres i konfigurasjonsfilen og leses av alle plattformtjenester.",
+        "title": "Milj\u00f8variabler",
+        "desc": "Vis og administrer milj\u00f8variabler p\u00e5 serveren. Disse lagres i konfigurasjonsfilen og leses av alle plattformtjenester.",
         "addVariable": "Legg til variabel",
         "restartServices": "Start tjenester på nytt",
         "allCategories": "Alle",
@@ -2128,6 +2155,57 @@
       "overwriteExisting": "Overskriv eksisterende oversettelser",
       "editingLocale": "Redigerer: {name}",
       "totalKeys": "{count} nøkler totalt"
+    },
+    "platformDb": {
+      "title": "Database",
+      "subtitle": "Utforsk og administrer plattformdatabasen direkte",
+      "tabs": {
+        "data": "Data",
+        "structure": "Struktur",
+        "query": "Spørring",
+        "connection": "Tilkobling",
+        "access": "Tilgang"
+      },
+      "tables": "Tabeller",
+      "selectTable": "Velg en tabell for å se dataene.",
+      "createTable": "Opprett tabell",
+      "dropTable": "Slett tabell",
+      "tableName": "Tabellnavn",
+      "columns": "Kolonner",
+      "addColumn": "Legg til kolonne",
+      "column": "Kolonne",
+      "type": "Type",
+      "nullable": "Nullable",
+      "default": "Standard",
+      "addRow": "Legg til rad",
+      "insertRow": "Sett inn rad",
+      "editHint": "Dobbeltklikk en celle for å redigere",
+      "noPrimaryKey": "Ingen primærnøkkel — redigering deaktivert",
+      "noData": "Ingen data.",
+      "cancel": "Avbryt",
+      "sqlQuery": "SQL-spørring",
+      "execute": "Kjør",
+      "queryHint": "Trykk Ctrl+Enter for å kjøre. Full lese-/skrivetilgang — vær forsiktig med destruktive spørringer.",
+      "connectionDetails": "Tilkoblingsdetaljer",
+      "host": "Vert",
+      "port": "Port",
+      "database": "Database",
+      "username": "Brukernavn",
+      "connString": "Tilkoblingsstreng",
+      "cliCommand": "CLI-kommando",
+      "sshTunnel": "SSH-tunnel",
+      "sshTunnelDesc": "Hvis databasen ikke er direkte tilgjengelig, bruk en SSH-tunnel for å videresende porten til din lokale maskin:",
+      "sshTunnelAfter": "Koble deretter til localhost med den videresendte porten med din foretrukne klient.",
+      "externalTools": "Eksterne verktøy",
+      "pgAdminDesc": "Bruk tilkoblingsdetaljene ovenfor for å legge til en ny server i pgAdmin.",
+      "dbeaverDesc": "Opprett en ny tilkobling med vert, port og legitimasjon ovenfor.",
+      "tablePlusDesc": "Opprett en ny tilkobling og lim inn tilkoblingsstrengen.",
+      "ipAllowlist": "IP-tilgangsliste for fjerntilgang",
+      "allowlistInfo": "Begrens eksterne databasetilkoblinger til bestemte IP-adresser. Dette påvirker ikke webgrensesnittet — kun direkte tilkoblinger via CLI eller eksterne verktøy. La stå tom for å tillate alle IP-er.",
+      "yourIp": "Din IP",
+      "addIp": "Legg til",
+      "removeIp": "Fjern",
+      "noAllowlistEntries": "Ingen IP-begrensninger — alle IP-er kan koble til databasen eksternt."
     }
   },
   "setup": {
@@ -3521,7 +3599,8 @@
       "noResults": "Ingen hendelser matcher søket",
       "prev": "Forrige",
       "next": "Neste",
-      "page": "Side {page} av {total}"
+      "page": "Side {page} av {total}",
+      "updated": "Oppdatert"
     },
     "icons": {
       "incident": "Hendelse",
@@ -3688,7 +3767,8 @@
       "settings": "Innstillinger",
       "updates": "Oppdateringer",
       "support": "Støtte",
-      "roles": "Roller"
+      "roles": "Roller",
+      "database": "Database"
     }
   }
 }

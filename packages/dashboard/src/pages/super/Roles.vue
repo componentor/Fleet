@@ -39,6 +39,7 @@ const SECTIONS = [
   'updates',
   'support',
   'roles',
+  'database',
 ] as const
 
 function sectionLabel(section: string): string {

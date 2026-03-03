@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Server, ArrowLeft, Cpu, MemoryStick, HardDrive, Container,
   SquareTerminal, Activity, RefreshCw, Loader2, MapPin,
-  Play, Pause, Trash2, Network, Crown, Shield
+  Play, Pause, Trash2, Network, Crown, Shield, X,
+  KeyRound, Copy, Check, Plus, ShieldCheck, Globe
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
@@ -23,6 +24,7 @@ const tabs = [
   { id: 'overview', label: 'Overview', icon: Activity },
   { id: 'containers', label: 'Containers', icon: Container },
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
+  { id: 'ssh', label: 'SSH Access', icon: KeyRound },
 ]
 
 // Node data
@@ -45,21 +47,18 @@ const {
   disconnect: nodeTerminalDisconnect,
   connectionState: nodeTerminalState,
   refit: nodeTerminalRefit,
+  writeln: nodeTerminalWriteln,
 } = useTerminal()
 const nodeTerminalEl = ref<HTMLElement | null>(null)
 const nodeTerminalCreated = ref(false)
 
-// Container terminal (inline on containers tab)
-const {
-  createTerminal: createContainerTerminal,
-  connect: containerTerminalConnect,
-  disconnect: containerTerminalDisconnect,
-  connectionState: containerTerminalState,
-  refit: containerTerminalRefit,
-} = useTerminal()
-const containerTerminalEl = ref<HTMLElement | null>(null)
-const containerTerminalCreated = ref(false)
-const selectedContainer = ref<any>(null)
+// Container terminal — single instance, dispose+recreate per container
+const containerTerminal = useTerminal()
+const selectedContainerId = ref<string | null>(null)
+
+const selectedContainer = computed(() =>
+  containers.value.find((c) => c.containerId === selectedContainerId.value) ?? null,
+)
 
 // Polling
 let containersInterval: ReturnType<typeof setInterval> | null = null
@@ -127,10 +126,14 @@ function onTabChange(tabId: string) {
   if (tabId === 'terminal') {
     nextTick(() => initNodeTerminal())
   }
+
+  if (tabId === 'ssh') {
+    fetchSshConfig()
+  }
 }
 
 // ── Node terminal ──
-function initNodeTerminal() {
+async function initNodeTerminal() {
   if (nodeTerminalCreated.value) {
     nodeTerminalRefit()
     return
@@ -140,60 +143,66 @@ function initNodeTerminal() {
   createNodeTerminal(nodeTerminalEl.value)
   nodeTerminalCreated.value = true
 
-  // Find agent container for this node
+  // Ensure containers are loaded so we can find the agent
+  if (containers.value.length === 0) {
+    await fetchContainers()
+  }
+
+  connectNodeTerminal()
+}
+
+function connectNodeTerminal() {
   const agentContainer = containers.value.find(
     (c) => c.dockerServiceName?.includes('agent') && c.state === 'running' && c.containerId,
   )
 
   if (agentContainer) {
     nodeTerminalConnect(
-      '',
+      'node-terminal',
       undefined,
-      undefined,
+      node.value?.hostname,
       `/api/v1/terminal/admin/${agentContainer.containerId}?nodeId=${agentContainer.nodeId}`,
     )
   } else {
-    // Fetch containers first if not yet loaded, then connect
-    fetchContainers().then(() => {
-      const agent = containers.value.find(
-        (c) => c.dockerServiceName?.includes('agent') && c.state === 'running' && c.containerId,
-      )
-      if (agent) {
-        nodeTerminalConnect(
-          '',
-          undefined,
-          undefined,
-          `/api/v1/terminal/admin/${agent.containerId}?nodeId=${agent.nodeId}`,
-        )
-      }
-    })
+    nodeTerminalWriteln('\x1b[33mNo Fleet agent container found on this node.\x1b[0m')
+    nodeTerminalWriteln('The agent must be running to access the node terminal.')
   }
 }
 
 // ── Container terminal ──
 function openContainerTerminal(container: any) {
-  if (selectedContainer.value?.containerId === container.containerId) {
-    // Toggle off
-    selectedContainer.value = null
-    containerTerminalDisconnect()
+  if (selectedContainerId.value === container.containerId) {
+    closeContainerTerminal()
     return
   }
 
-  selectedContainer.value = container
+  // Dispose any existing terminal instance (xterm attached to old DOM node)
+  containerTerminal.dispose()
 
+  selectedContainerId.value = container.containerId
+
+  // Wait for Vue DOM flush + browser paint so the v-if element is fully mounted.
+  // NOTE: We use document.getElementById instead of a template ref because
+  // refs inside v-for become arrays in Vue 3, which breaks xterm's .open().
   nextTick(() => {
-    if (!containerTerminalCreated.value && containerTerminalEl.value) {
-      createContainerTerminal(containerTerminalEl.value)
-      containerTerminalCreated.value = true
-    }
-
-    containerTerminalConnect(
-      '',
-      undefined,
-      undefined,
-      `/api/v1/terminal/admin/${container.containerId}?nodeId=${container.nodeId}`,
-    )
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`ct-${container.containerId}`)
+      if (el) {
+        containerTerminal.createTerminal(el)
+        containerTerminal.connect(
+          'container-terminal',
+          undefined,
+          container.dockerServiceName,
+          `/api/v1/terminal/admin/${container.containerId}?nodeId=${container.nodeId}`,
+        )
+      }
+    })
   })
+}
+
+function closeContainerTerminal() {
+  containerTerminal.dispose()
+  selectedContainerId.value = null
 }
 
 // ── Node actions ──
@@ -224,6 +233,77 @@ async function removeNode() {
   } catch (err: any) {
     error.value = err?.body?.error || 'Failed to remove node'
   }
+}
+
+// ── SSH Access ──
+const sshConfig = ref<any>(null)
+const sshLoading = ref(false)
+const sshSyncing = ref(false)
+const sshCopied = ref(false)
+const ipMode = ref<'global' | 'custom'>('global')
+const newIp = ref('')
+const customIps = ref<string[]>([])
+const savingIps = ref(false)
+
+async function fetchSshConfig() {
+  sshLoading.value = true
+  try {
+    sshConfig.value = await api.get<any>(`/nodes/${nodeId}/ssh`)
+    // Determine IP mode
+    if (sshConfig.value.sshAllowedIps !== null) {
+      ipMode.value = 'custom'
+      customIps.value = [...sshConfig.value.sshAllowedIps]
+    } else {
+      ipMode.value = 'global'
+      customIps.value = []
+    }
+  } catch { /* SSH config not available */ }
+  finally { sshLoading.value = false }
+}
+
+async function toggleKeyNodeAccess(key: any) {
+  try {
+    await api.patch(`/nodes/ssh-keys/${key.id}/node-access`, { nodeAccess: !key.nodeAccess })
+    key.nodeAccess = !key.nodeAccess
+  } catch { /* toggle failed */ }
+}
+
+async function copySshCommand() {
+  if (!sshConfig.value?.sshCommand) return
+  await navigator.clipboard.writeText(sshConfig.value.sshCommand)
+  sshCopied.value = true
+  setTimeout(() => { sshCopied.value = false }, 2000)
+}
+
+async function saveIpRestrictions() {
+  savingIps.value = true
+  try {
+    const allowedIps = ipMode.value === 'custom' ? customIps.value : null
+    await api.put(`/nodes/${nodeId}/ssh/allowed-ips`, { allowedIps })
+    await fetchSshConfig()
+  } catch { /* save failed */ }
+  finally { savingIps.value = false }
+}
+
+function addCustomIp() {
+  const ip = newIp.value.trim()
+  if (!ip || customIps.value.includes(ip)) return
+  // Basic IPv4/CIDR validation
+  if (!/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(ip)) return
+  customIps.value.push(ip)
+  newIp.value = ''
+}
+
+function removeCustomIp(index: number) {
+  customIps.value.splice(index, 1)
+}
+
+async function syncSsh() {
+  sshSyncing.value = true
+  try {
+    await api.post('/nodes/sync-ssh', {})
+  } catch { /* sync failed */ }
+  finally { sshSyncing.value = false }
 }
 
 // ── Computed ──
@@ -266,13 +346,6 @@ const nodeLabels = computed(() => {
   return spec?.Labels ?? {}
 })
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
-}
-
 function formatBytesShort(bytes: number): string {
   if (bytes === 0) return '0'
   const gb = bytes / (1024 * 1024 * 1024)
@@ -292,7 +365,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopContainersPolling()
   nodeTerminalDisconnect()
-  containerTerminalDisconnect()
+  containerTerminal.dispose()
 })
 </script>
 
@@ -591,117 +664,119 @@ onUnmounted(() => {
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                <tr
-                  v-for="container in containers"
-                  :key="container.taskId"
-                  class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-                >
-                  <td class="px-4 py-3 text-sm font-mono text-gray-700 dark:text-gray-300">
-                    {{ container.containerId?.slice(0, 12) || container.taskId }}
-                  </td>
-                  <td class="px-4 py-3 text-sm">
-                    <router-link
-                      v-if="container.fleetServiceId"
-                      :to="{ name: 'service-detail', params: { id: container.fleetServiceId } }"
-                      class="text-primary-600 dark:text-primary-400 hover:underline font-medium"
-                    >
-                      {{ container.fleetServiceName }}
-                    </router-link>
-                    <span v-else class="text-gray-700 dark:text-gray-300">{{ container.dockerServiceName }}</span>
-                  </td>
-                  <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 max-w-[200px] truncate" :title="container.image">
-                    {{ container.image?.split('/').pop() }}
-                  </td>
-                  <td class="px-4 py-3 text-sm">
-                    <span
-                      :class="[
-                        'inline-flex items-center gap-1',
-                        container.state === 'running' ? 'text-green-600 dark:text-green-400' :
-                        container.state === 'starting' || container.state === 'ready' ? 'text-yellow-600 dark:text-yellow-400' :
-                        'text-red-600 dark:text-red-400'
-                      ]"
-                    >
+                <template v-for="container in containers" :key="container.taskId">
+                  <tr class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                    <td class="px-4 py-3 text-sm font-mono text-gray-700 dark:text-gray-300">
+                      {{ container.containerId?.slice(0, 12) || container.taskId }}
+                    </td>
+                    <td class="px-4 py-3 text-sm">
+                      <a
+                        v-if="container.fleetServiceId"
+                        @click.prevent="router.push({ name: 'panel-service-detail', params: { id: container.fleetServiceId } })"
+                        href="#"
+                        class="text-primary-600 dark:text-primary-400 hover:underline font-medium cursor-pointer"
+                      >
+                        {{ container.fleetServiceName }}
+                      </a>
+                      <span v-else class="text-gray-700 dark:text-gray-300">{{ container.dockerServiceName }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 max-w-[200px] truncate" :title="container.image">
+                      {{ container.image?.split('/').pop() }}
+                    </td>
+                    <td class="px-4 py-3 text-sm">
                       <span
                         :class="[
-                          'w-1.5 h-1.5 rounded-full',
-                          container.state === 'running' ? 'bg-green-500' :
-                          container.state === 'starting' || container.state === 'ready' ? 'bg-yellow-500' :
-                          'bg-red-500'
+                          'inline-flex items-center gap-1',
+                          container.state === 'running' ? 'text-green-600 dark:text-green-400' :
+                          container.state === 'starting' || container.state === 'ready' ? 'text-yellow-600 dark:text-yellow-400' :
+                          'text-red-600 dark:text-red-400'
                         ]"
-                      ></span>
-                      {{ container.state }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300">
-                    {{ container.stats?.cpuPercent != null ? `${container.stats.cpuPercent.toFixed(1)}%` : '--' }}
-                  </td>
-                  <td class="px-4 py-3 text-sm text-right">
-                    <template v-if="container.stats?.memoryUsageBytes != null">
-                      <span class="font-mono text-gray-700 dark:text-gray-300">{{ formatBytesShort(container.stats.memoryUsageBytes) }}</span>
-                      <span v-if="container.stats.memoryLimitBytes" class="text-gray-400 dark:text-gray-500 text-xs"> / {{ formatBytesShort(container.stats.memoryLimitBytes) }}</span>
-                    </template>
-                    <span v-else class="text-gray-400">--</span>
-                  </td>
-                  <td class="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-400 font-mono text-xs">
-                    <template v-if="container.stats?.networkRxBytes != null">
-                      {{ formatBytesShort(container.stats.networkRxBytes) }} / {{ formatBytesShort(container.stats.networkTxBytes) }}
-                    </template>
-                    <span v-else>--</span>
-                  </td>
-                  <td class="px-4 py-3 text-right">
-                    <button
-                      v-if="container.state === 'running' && container.containerId"
-                      @click="openContainerTerminal(container)"
-                      :class="[
-                        'p-1.5 rounded-lg transition-colors',
-                        selectedContainer?.containerId === container.containerId
-                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                          : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                      ]"
-                      title="Open terminal"
-                    >
-                      <SquareTerminal class="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
+                      >
+                        <span
+                          :class="[
+                            'w-1.5 h-1.5 rounded-full',
+                            container.state === 'running' ? 'bg-green-500' :
+                            container.state === 'starting' || container.state === 'ready' ? 'bg-yellow-500' :
+                            'bg-red-500'
+                          ]"
+                        ></span>
+                        {{ container.state }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300">
+                      {{ container.stats?.cpuPercent != null ? `${container.stats.cpuPercent.toFixed(1)}%` : '--' }}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-right">
+                      <template v-if="container.stats?.memoryUsageBytes != null">
+                        <span class="font-mono text-gray-700 dark:text-gray-300">{{ formatBytesShort(container.stats.memoryUsageBytes) }}</span>
+                        <span v-if="container.stats.memoryLimitBytes" class="text-gray-400 dark:text-gray-500 text-xs"> / {{ formatBytesShort(container.stats.memoryLimitBytes) }}</span>
+                      </template>
+                      <span v-else class="text-gray-400">--</span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-400 font-mono text-xs">
+                      <template v-if="container.stats?.networkRxBytes != null">
+                        {{ formatBytesShort(container.stats.networkRxBytes) }} / {{ formatBytesShort(container.stats.networkTxBytes) }}
+                      </template>
+                      <span v-else>--</span>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                      <button
+                        v-if="container.state === 'running' && container.containerId"
+                        @click="openContainerTerminal(container)"
+                        :class="[
+                          'p-1.5 rounded-lg transition-colors',
+                          selectedContainerId === container.containerId
+                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
+                            : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        ]"
+                        title="Open terminal"
+                      >
+                        <SquareTerminal class="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                  <!-- Inline terminal row (expands below the selected container) -->
+                  <tr v-if="selectedContainerId === container.containerId">
+                    <td colspan="8" class="p-0">
+                      <div class="bg-[#1a1b26] border-t border-gray-700">
+                        <div class="px-4 py-2 flex items-center justify-between border-b border-gray-700/50">
+                          <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                            <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+                            <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+                            <span class="ml-2 text-xs text-gray-400">{{ container.dockerServiceName }} ({{ container.containerId?.slice(0, 12) }})</span>
+                          </div>
+                          <div class="flex items-center gap-3">
+                            <span
+                              :class="[
+                                'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium',
+                                containerTerminal.connectionState.value === 'connected'
+                                  ? 'bg-green-900/40 text-green-400'
+                                  : containerTerminal.connectionState.value === 'connecting' || containerTerminal.connectionState.value === 'reconnecting'
+                                    ? 'bg-yellow-900/40 text-yellow-400'
+                                    : 'bg-gray-700 text-gray-400'
+                              ]"
+                            >
+                              <span :class="['w-1.5 h-1.5 rounded-full', containerTerminal.connectionState.value === 'connected' ? 'bg-green-400' : containerTerminal.connectionState.value === 'connecting' || containerTerminal.connectionState.value === 'reconnecting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-500']"></span>
+                              {{ containerTerminal.connectionState.value === 'connected' ? 'Connected' : containerTerminal.connectionState.value === 'connecting' ? 'Connecting...' : containerTerminal.connectionState.value === 'reconnecting' ? 'Reconnecting...' : 'Disconnected' }}
+                            </span>
+                            <button
+                              @click="closeContainerTerminal()"
+                              class="text-gray-500 hover:text-gray-300 transition-colors p-0.5"
+                            >
+                              <X class="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <div class="h-[300px] pt-1 px-2 pb-2 bg-[#1a1b26]">
+                          <div :id="`ct-${container.containerId}`" class="h-full"></div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
               </tbody>
             </table>
-          </div>
-        </div>
-
-        <!-- Inline container terminal -->
-        <div v-if="selectedContainer" class="bg-[#1a1b26] rounded-xl border border-gray-700 shadow-sm overflow-hidden">
-          <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded-full bg-red-500"></span>
-              <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
-              <span class="w-3 h-3 rounded-full bg-green-500"></span>
-              <span class="ml-2 text-xs text-gray-400">Terminal - {{ selectedContainer.dockerServiceName }} ({{ selectedContainer.containerId?.slice(0, 12) }})</span>
-            </div>
-            <div class="flex items-center gap-3">
-              <span
-                :class="[
-                  'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium',
-                  containerTerminalState === 'connected'
-                    ? 'bg-green-900/40 text-green-400'
-                    : containerTerminalState === 'connecting' || containerTerminalState === 'reconnecting'
-                      ? 'bg-yellow-900/40 text-yellow-400'
-                      : 'bg-gray-700 text-gray-400'
-                ]"
-              >
-                <span :class="['w-1.5 h-1.5 rounded-full', containerTerminalState === 'connected' ? 'bg-green-400' : containerTerminalState === 'connecting' || containerTerminalState === 'reconnecting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-500']"></span>
-                {{ containerTerminalState === 'connected' ? 'Connected' : containerTerminalState === 'connecting' ? 'Connecting...' : containerTerminalState === 'reconnecting' ? 'Reconnecting...' : 'Disconnected' }}
-              </span>
-              <button
-                @click="selectedContainer = null; containerTerminalDisconnect()"
-                class="text-gray-500 hover:text-gray-300 transition-colors"
-              >
-                &times;
-              </button>
-            </div>
-          </div>
-          <div class="h-[350px] pt-2 px-2 pb-4 bg-[#1a1b26]">
-            <div ref="containerTerminalEl" class="h-full"></div>
           </div>
         </div>
       </div>
@@ -734,6 +809,210 @@ onUnmounted(() => {
             <div ref="nodeTerminalEl" class="h-full"></div>
           </div>
         </div>
+      </div>
+
+      <!-- SSH Access Tab -->
+      <div v-if="activeTab === 'ssh'" class="space-y-6">
+        <!-- Loading -->
+        <div v-if="sshLoading" class="flex items-center justify-center py-12">
+          <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+        </div>
+
+        <template v-else-if="sshConfig">
+          <!-- Connection Guide -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+            <div class="flex items-center gap-2 mb-4">
+              <SquareTerminal class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Connection Guide</h3>
+            </div>
+
+            <div class="space-y-3">
+              <p class="text-sm text-gray-600 dark:text-gray-400">
+                Connect to this node via SSH using the following command:
+              </p>
+              <div class="flex items-center gap-2">
+                <code class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-mono text-gray-900 dark:text-gray-100">
+                  {{ sshConfig.sshCommand }}
+                </code>
+                <button
+                  @click="copySshCommand"
+                  class="flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"
+                >
+                  <Check v-if="sshCopied" class="w-4 h-4 text-green-500" />
+                  <Copy v-else class="w-4 h-4" />
+                </button>
+              </div>
+              <div class="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                <p>Make sure your SSH key has <strong>Node Access</strong> enabled in the table below.</p>
+                <p>After enabling, click <strong>Sync to Nodes</strong> to push your keys to the server.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Authorized Keys -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <KeyRound class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Authorized Keys</h3>
+              </div>
+              <button
+                @click="syncSsh"
+                :disabled="sshSyncing"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                <RefreshCw :class="['w-3.5 h-3.5', sshSyncing && 'animate-spin']" />
+                Sync to Nodes
+              </button>
+            </div>
+
+            <div v-if="sshConfig.authorizedKeys.length === 0" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+              No SSH keys found. Users can add keys in their profile settings.
+            </div>
+            <div v-else class="overflow-x-auto">
+              <table class="w-full">
+                <thead>
+                  <tr class="border-b border-gray-200 dark:border-gray-700">
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Key Name</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">User</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fingerprint</th>
+                    <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Node Access</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                  <tr v-for="key in sshConfig.authorizedKeys" :key="key.id" class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                    <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{{ key.name }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{{ key.userName || key.userEmail || 'Unknown' }}</td>
+                    <td class="px-4 py-3 text-sm font-mono text-gray-500 dark:text-gray-400 max-w-[200px] truncate" :title="key.fingerprint">{{ key.fingerprint }}</td>
+                    <td class="px-4 py-3 text-center">
+                      <button
+                        @click="toggleKeyNodeAccess(key)"
+                        :class="[
+                          'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                          key.nodeAccess ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
+                        ]"
+                      >
+                        <span
+                          :class="[
+                            'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                            key.nodeAccess ? 'translate-x-4' : 'translate-x-0'
+                          ]"
+                        />
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- IP Restrictions -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
+            <div class="flex items-center gap-2 mb-4">
+              <ShieldCheck class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">SSH IP Restrictions</h3>
+            </div>
+
+            <!-- Mode selector -->
+            <div class="flex gap-3 mb-4">
+              <button
+                @click="ipMode = 'global'"
+                :class="[
+                  'flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
+                  ipMode === 'global'
+                    ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                    : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                ]"
+              >
+                <Globe class="w-4 h-4" />
+                Use Global Defaults
+              </button>
+              <button
+                @click="ipMode = 'custom'; customIps = sshConfig.sshAllowedIps ? [...sshConfig.sshAllowedIps] : []"
+                :class="[
+                  'flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
+                  ipMode === 'custom'
+                    ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                    : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                ]"
+              >
+                <Shield class="w-4 h-4" />
+                Custom for this Node
+              </button>
+            </div>
+
+            <!-- Global mode info -->
+            <div v-if="ipMode === 'global'" class="space-y-3">
+              <p class="text-sm text-gray-600 dark:text-gray-400">
+                This node uses the platform-wide global IP allowlist.
+                <template v-if="sshConfig.globalAllowedIps.length === 0">
+                  No global restrictions are set — SSH is open to all IPs.
+                </template>
+              </p>
+              <div v-if="sshConfig.globalAllowedIps.length > 0" class="flex flex-wrap gap-2">
+                <span
+                  v-for="ip in sshConfig.globalAllowedIps"
+                  :key="ip"
+                  class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                >
+                  {{ ip }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Custom mode -->
+            <div v-if="ipMode === 'custom'" class="space-y-3">
+              <p class="text-sm text-gray-600 dark:text-gray-400">
+                Only these IP addresses/CIDRs will be allowed to SSH into this node.
+                Leave empty to block all SSH access.
+              </p>
+
+              <!-- IP list -->
+              <div v-if="customIps.length > 0" class="flex flex-wrap gap-2">
+                <span
+                  v-for="(ip, idx) in customIps"
+                  :key="ip"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                >
+                  {{ ip }}
+                  <button @click="removeCustomIp(idx)" class="text-gray-400 hover:text-red-500 transition-colors ml-1">
+                    <X class="w-3 h-3" />
+                  </button>
+                </span>
+              </div>
+
+              <!-- Add IP form -->
+              <div class="flex gap-2">
+                <input
+                  v-model="newIp"
+                  @keyup.enter="addCustomIp"
+                  type="text"
+                  placeholder="e.g. 192.168.1.0/24 or 10.0.0.1"
+                  class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <button
+                  @click="addCustomIp"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"
+                >
+                  <Plus class="w-4 h-4" />
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <!-- Save button -->
+            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <button
+                @click="saveIpRestrictions"
+                :disabled="savingIps"
+                class="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                <Loader2 v-if="savingIps" class="w-4 h-4 animate-spin" />
+                Save IP Restrictions
+              </button>
+            </div>
+          </div>
+        </template>
       </div>
     </template>
 

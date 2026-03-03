@@ -54,6 +54,8 @@ export const services = mysqlTable('services', {
   registryWebhookSecret: varchar('registry_webhook_secret', { length: 255 }),
   tags: json('tags').$default(() => ([])),
   orchestrator: varchar('orchestrator', { length: 20 }),
+  robotsConfig: json('robots_config'),
+  nginxConfig: text('nginx_config'),
   stackId: varchar('stack_id', { length: 36 }),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),

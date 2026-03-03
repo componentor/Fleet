@@ -17,6 +17,7 @@ export const nodes = sqliteTable('nodes', {
   labels: text('labels', { mode: 'json' }).$default(() => ({})),
   location: text('location'),
   nfsServer: integer('nfs_server', { mode: 'boolean' }).default(false),
+  sshAllowedIps: text('ssh_allowed_ips', { mode: 'json' }),
   lastHeartbeat: integer('last_heartbeat', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

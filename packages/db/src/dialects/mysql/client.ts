@@ -13,4 +13,6 @@ const pool = mysql.createPool({
 
 export const db = drizzle(pool, { schema, mode: 'default' });
 
+export const rawClient = pool;
+
 export * from './schema/index';

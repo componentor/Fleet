@@ -34,6 +34,7 @@ const sections = [
   { id: 'orchestrator', label: () => t('super.settings.orchestrator.title') },
   { id: 'database', label: () => t('super.settings.database.title') },
   { id: 'environment', label: () => t('super.settings.env.title') },
+  { id: 'robots', label: () => t('super.settings.robots.title') },
 ]
 
 // General settings
@@ -178,6 +179,11 @@ const shDefaultBranch = ref('main')
 const savingSelfHealing = ref(false)
 const testingSelfHealing = ref(false)
 const shTestResult = ref<{ success: boolean; message: string } | null>(null)
+
+// Robots.txt
+const robotsEnabled = ref(true)
+const robotsContent = ref('')
+const savingRobots = ref(false)
 
 // Orchestrator
 const orchDefault = ref<'swarm' | 'kubernetes'>('swarm')
@@ -1228,6 +1234,33 @@ async function installDockerAgents() {
   }
 }
 
+// ── Robots.txt ──
+async function fetchRobotsConfig() {
+  try {
+    const data = await api.get<{ enabled: boolean; content: string }>('/settings/robots')
+    robotsEnabled.value = data.enabled
+    robotsContent.value = data.content
+  } catch {}
+}
+
+async function saveRobotsConfig() {
+  savingRobots.value = true
+  try {
+    const data = await api.patch<{ enabled: boolean; content: string }>('/settings/robots', {
+      enabled: robotsEnabled.value,
+      content: robotsContent.value,
+    })
+    robotsEnabled.value = data.enabled
+    robotsContent.value = data.content
+    success.value = t('super.settings.robots.saved')
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch {
+    error.value = t('super.settings.robots.saveFailed')
+  } finally {
+    savingRobots.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -1246,6 +1279,7 @@ onMounted(() => {
   fetchOrchestrator()
   fetchDatabaseStatus()
   fetchEnvironment()
+  fetchRobotsConfig()
 })
 </script>
 
@@ -3182,6 +3216,49 @@ onMounted(() => {
             </div>
           </div>
         </div>
+        <!-- Robots.txt -->
+        <div v-if="activeSection === 'robots'" class="space-y-4">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div class="flex items-center gap-2">
+                <Bot class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.robots.title') }}</h2>
+              </div>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.robots.desc') }}</p>
+            </div>
+
+            <div class="p-6 space-y-4">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input v-model="robotsEnabled" type="checkbox" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('super.settings.robots.enableLabel') }}</span>
+              </label>
+
+              <div v-if="robotsEnabled">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('super.settings.robots.contentLabel') }}</label>
+                <textarea
+                  v-model="robotsContent"
+                  rows="14"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  :placeholder="t('super.settings.robots.placeholder')"
+                />
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ t('super.settings.robots.hint') }}</p>
+              </div>
+
+              <div class="flex justify-end">
+                <button
+                  @click="saveRobotsConfig"
+                  :disabled="savingRobots"
+                  class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="savingRobots" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                  {{ t('super.settings.robots.save') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>

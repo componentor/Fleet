@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { timingSafeEqual } from 'node:crypto';
 import net from 'node:net';
-import { db, nodes, nodeMetrics, services, insertReturning, updateReturning, eq, and, gte, desc, isNull, isNotNull } from '@fleet/db';
+import { db, nodes, nodeMetrics, services, sshKeys, platformSettings, users as usersTable, insertReturning, updateReturning, eq, and, gte, desc, isNull, isNotNull } from '@fleet/db';
 import { dockerService } from '../services/docker.service.js';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { orchestrator } from '../services/orchestrator.js';
@@ -10,6 +10,7 @@ import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { getValkey } from '../services/valkey.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
+import { loadAdminPermissions, requireAdminPermission } from '../middleware/admin-permission.js';
 
 // Heartbeat rate limit: keyed by node ID (not IP) since agents share Docker overlay IPs
 const heartbeatRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'heartbeat', keyFn: (c) => c.req.param('id') ?? 'unknown' });
@@ -192,11 +193,13 @@ adminNodeRoutes.use('*', authMiddleware);
 
 adminNodeRoutes.use('*', async (c, next) => {
   const user = c.get('user');
-  if (!user.isSuper) {
-    return c.json({ error: 'Only super users can manage nodes' }, 403);
+  if (!user.isSuper && !user.adminRoleId) {
+    return c.json({ error: 'Admin access required' }, 403);
   }
   await next();
 });
+
+adminNodeRoutes.use('*', loadAdminPermissions);
 
 // ── Schemas ──
 
@@ -237,6 +240,7 @@ const listNodesRoute = createRoute({
   tags: ['Nodes'],
   summary: 'List swarm nodes',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'read')] as const,
   responses: {
     200: jsonContent(z.any(), 'List of nodes with Docker info'),
     ...standardErrors,
@@ -249,6 +253,7 @@ const registerNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Register a new node',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'write')] as const,
   request: {
     body: jsonBody(registerNodeSchema),
   },
@@ -266,6 +271,7 @@ const getNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Get node details',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'read')] as const,
   request: {
     params: nodeIdParamSchema,
   },
@@ -282,6 +288,7 @@ const updateNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Update node labels/role',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'write')] as const,
   request: {
     params: nodeIdParamSchema,
     body: jsonBody(updateNodeSchema),
@@ -300,6 +307,7 @@ const deleteNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Drain and remove node',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'write')] as const,
   request: {
     params: nodeIdParamSchema,
   },
@@ -316,6 +324,7 @@ const drainNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Drain node',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'write')] as const,
   request: {
     params: nodeIdParamSchema,
   },
@@ -333,6 +342,7 @@ const activateNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Reactivate a drained node',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'write')] as const,
   request: {
     params: nodeIdParamSchema,
   },
@@ -350,6 +360,7 @@ const getNodeMetricsRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Query node metrics',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'read')] as const,
   request: {
     params: nodeIdParamSchema,
     query: z.object({
@@ -368,7 +379,7 @@ const probeNodeRoute = createRoute({
   tags: ['Nodes'],
   summary: 'Run diagnostics on a node',
   security: bearerSecurity,
-  middleware: [probeRateLimit] as const,
+  middleware: [probeRateLimit, requireAdminPermission('nodes', 'write')] as const,
   request: {
     params: nodeIdParamSchema,
     body: jsonBody(probeSchema),
@@ -773,6 +784,7 @@ const getNodeContainersRoute = createRoute({
   tags: ['Nodes'],
   summary: 'List containers running on a node with optional stats',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'read')] as const,
   request: {
     params: nodeIdParamSchema,
     query: z.object({
@@ -887,6 +899,289 @@ adminNodeRoutes.openapi(getNodeContainersRoute, (async (c: any) => {
     logger.error({ err }, 'Failed to list node containers');
     return c.json({ containers: [], summary: { total: 0, running: 0, stopped: 0 } });
   }
+}) as any);
+
+// ── SSH Management Schemas ──
+
+const sshAllowedIpsSchema = z.object({
+  allowedIps: z.array(z.string().regex(/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/, 'Must be a valid IPv4 address or CIDR')).nullable(),
+});
+
+const globalSshAllowedIpsSchema = z.object({
+  allowedIps: z.array(z.string().regex(/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/, 'Must be a valid IPv4 address or CIDR')),
+});
+
+const nodeAccessToggleSchema = z.object({
+  nodeAccess: z.boolean(),
+});
+
+// ── SSH Sync Logic ──
+
+async function getSetting(key: string): Promise<unknown> {
+  const row = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, key),
+  });
+  return row?.value ?? null;
+}
+
+async function upsertSetting(key: string, value: unknown): Promise<void> {
+  const existing = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, key),
+  });
+  if (existing) {
+    await db.update(platformSettings).set({ value, updatedAt: new Date() }).where(eq(platformSettings.id, existing.id));
+  } else {
+    await db.insert(platformSettings).values({ key, value });
+  }
+}
+
+async function syncSshToNodes(): Promise<{ success: boolean; results?: any[] }> {
+  // 1. Fetch all SSH keys with node access enabled
+  const keys = await db.query.sshKeys.findMany({
+    where: eq(sshKeys.nodeAccess, true),
+    with: { user: { columns: { id: true, name: true, email: true } } },
+  });
+
+  // 2. Build authorized_keys content
+  const authorizedKeysLines = keys
+    .map((k: any) => `${k.publicKey} # ${k.user?.name || k.user?.email || 'unknown'} (${k.name})`);
+
+  // 3. Fetch all nodes + global allowed IPs
+  const allNodes = await db.query.nodes.findMany();
+  const globalIps = ((await getSetting('ssh:global_allowed_ips')) as string[] | null) ?? [];
+
+  // 4. Build a self-detecting script that runs on ALL nodes via runOnAllNodesPrivileged.
+  //    Each node detects its own IP and applies the correct iptables rules.
+  //    The authorized_keys file is the same for all nodes.
+  const escapedKeys = authorizedKeysLines.join('\n').replace(/'/g, "'\\''");
+
+  // Build per-node IP rule map: MY_IP -> "ip1 ip2 ip3" or empty for "use global"
+  const nodeIpMap = allNodes
+    .filter((n: any) => n.sshAllowedIps && (n.sshAllowedIps as string[]).length > 0)
+    .map((n: any) => `${n.ipAddress}|${(n.sshAllowedIps as string[]).join(',')}`)
+    .join('\n');
+
+  const globalIpList = globalIps.join(',');
+
+  const script = `
+# Write authorized_keys
+mkdir -p /root/.ssh && chmod 700 /root/.ssh
+printf '%s\\n' '${escapedKeys}' > /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+
+# Detect this node's IP
+MY_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+# Per-node IP overrides (format: nodeIp|ip1,ip2,ip3)
+NODE_IP_MAP='${nodeIpMap}'
+GLOBAL_IPS='${globalIpList}'
+
+# Find effective IPs for this node
+EFFECTIVE_IPS="$GLOBAL_IPS"
+if [ -n "$NODE_IP_MAP" ]; then
+  OVERRIDE=$(echo "$NODE_IP_MAP" | grep "^$MY_IP|" | head -1 | cut -d'|' -f2)
+  if [ -n "$OVERRIDE" ]; then
+    EFFECTIVE_IPS="$OVERRIDE"
+  fi
+fi
+
+# Apply iptables rules
+if [ -n "$EFFECTIVE_IPS" ]; then
+  iptables -N FLEET_SSH 2>/dev/null || iptables -F FLEET_SSH
+  iptables -D INPUT -p tcp --dport 22 -j FLEET_SSH 2>/dev/null
+  iptables -I INPUT -p tcp --dport 22 -j FLEET_SSH
+  IFS=',' ; for ip in $EFFECTIVE_IPS; do
+    iptables -A FLEET_SSH -s "$ip" -p tcp --dport 22 -j ACCEPT
+  done ; unset IFS
+  iptables -A FLEET_SSH -p tcp --dport 22 -j DROP
+else
+  # No restrictions — clean up any existing FLEET_SSH chain
+  iptables -D INPUT -p tcp --dport 22 -j FLEET_SSH 2>/dev/null
+  iptables -F FLEET_SSH 2>/dev/null
+  iptables -X FLEET_SSH 2>/dev/null
+  true
+fi
+`;
+
+  const result = await dockerService.runOnAllNodesPrivileged(script);
+  return { success: result.success, results: result.results };
+}
+
+// ── SSH Management Routes ──
+
+// GET /nodes/:id/ssh — Get SSH config for a node
+const getNodeSshRoute = createRoute({
+  method: 'get',
+  path: '/{id}/ssh',
+  tags: ['Nodes'],
+  security: bearerSecurity,
+  request: { params: z.object({ id: z.string().uuid() }) },
+  middleware: [requireAdminPermission('nodes', 'read')],
+  responses: {
+    200: jsonContent(z.object({
+      sshAllowedIps: z.array(z.string()).nullable(),
+      globalAllowedIps: z.array(z.string()),
+      authorizedKeys: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        fingerprint: z.string(),
+        userName: z.string().nullable(),
+        userEmail: z.string().nullable(),
+        nodeAccess: z.boolean(),
+      })),
+      sshCommand: z.string(),
+    }), 'SSH configuration for the node'),
+    404: jsonContent(errorResponseSchema, 'Node not found'),
+  },
+});
+
+adminNodeRoutes.openapi(getNodeSshRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+
+  const node = await db.query.nodes.findFirst({ where: eq(nodes.id, id) });
+  if (!node) return c.json({ error: 'Node not found' }, 404);
+
+  const globalIps = ((await getSetting('ssh:global_allowed_ips')) as string[] | null) ?? [];
+
+  const allKeys = await db.query.sshKeys.findMany({
+    with: { user: { columns: { id: true, name: true, email: true } } },
+  });
+
+  const authorizedKeys = allKeys.map((k: any) => ({
+    id: k.id,
+    name: k.name,
+    fingerprint: k.fingerprint,
+    userName: k.user?.name ?? null,
+    userEmail: k.user?.email ?? null,
+    nodeAccess: k.nodeAccess ?? false,
+  }));
+
+  return c.json({
+    sshAllowedIps: node.sshAllowedIps as string[] | null,
+    globalAllowedIps: globalIps,
+    authorizedKeys,
+    sshCommand: `ssh root@${node.ipAddress}`,
+  });
+}) as any);
+
+// PUT /nodes/:id/ssh/allowed-ips — Set per-node IP allowlist
+const setNodeSshAllowedIpsRoute = createRoute({
+  method: 'put',
+  path: '/{id}/ssh/allowed-ips',
+  tags: ['Nodes'],
+  security: bearerSecurity,
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+    body: jsonBody(sshAllowedIpsSchema),
+  },
+  middleware: [requireAdminPermission('nodes', 'write')],
+  responses: {
+    200: jsonContent(messageResponseSchema, 'IP allowlist updated'),
+    404: jsonContent(errorResponseSchema, 'Node not found'),
+  },
+});
+
+adminNodeRoutes.openapi(setNodeSshAllowedIpsRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  const { allowedIps } = c.req.valid('json');
+
+  const [updated] = await updateReturning(nodes, { sshAllowedIps: allowedIps }, eq(nodes.id, id));
+  if (!updated) return c.json({ error: 'Node not found' }, 404);
+
+  // Trigger SSH sync
+  try {
+    await syncSshToNodes();
+  } catch (err) {
+    logger.error({ err }, 'Failed to sync SSH after IP allowlist update');
+  }
+
+  return c.json({ message: 'SSH IP allowlist updated' });
+}) as any);
+
+// PUT /nodes/ssh/global-allowed-ips — Set global SSH IP allowlist
+const setGlobalSshAllowedIpsRoute = createRoute({
+  method: 'put',
+  path: '/ssh/global-allowed-ips',
+  tags: ['Nodes'],
+  security: bearerSecurity,
+  request: { body: jsonBody(globalSshAllowedIpsSchema) },
+  middleware: [requireAdminPermission('nodes', 'write')],
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Global IP allowlist updated'),
+  },
+});
+
+adminNodeRoutes.openapi(setGlobalSshAllowedIpsRoute, (async (c: any) => {
+  const { allowedIps } = c.req.valid('json');
+
+  await upsertSetting('ssh:global_allowed_ips', allowedIps);
+
+  // Trigger SSH sync
+  try {
+    await syncSshToNodes();
+  } catch (err) {
+    logger.error({ err }, 'Failed to sync SSH after global IP allowlist update');
+  }
+
+  return c.json({ message: 'Global SSH IP allowlist updated' });
+}) as any);
+
+// PATCH /nodes/ssh-keys/:keyId/node-access — Toggle node access for an SSH key
+const toggleSshKeyNodeAccessRoute = createRoute({
+  method: 'patch',
+  path: '/ssh-keys/{keyId}/node-access',
+  tags: ['Nodes'],
+  security: bearerSecurity,
+  request: {
+    params: z.object({ keyId: z.string().uuid() }),
+    body: jsonBody(nodeAccessToggleSchema),
+  },
+  middleware: [requireAdminPermission('nodes', 'write')],
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Node access updated'),
+    404: jsonContent(errorResponseSchema, 'SSH key not found'),
+  },
+});
+
+adminNodeRoutes.openapi(toggleSshKeyNodeAccessRoute, (async (c: any) => {
+  const { keyId } = c.req.valid('param');
+  const { nodeAccess } = c.req.valid('json');
+
+  const [updated] = await updateReturning(sshKeys, { nodeAccess }, eq(sshKeys.id, keyId));
+  if (!updated) return c.json({ error: 'SSH key not found' }, 404);
+
+  // Trigger SSH sync
+  try {
+    await syncSshToNodes();
+  } catch (err) {
+    logger.error({ err }, 'Failed to sync SSH after key node-access toggle');
+  }
+
+  return c.json({ message: `Node access ${nodeAccess ? 'enabled' : 'disabled'}` });
+}) as any);
+
+// POST /nodes/sync-ssh — Manually trigger SSH sync
+const syncSshRoute = createRoute({
+  method: 'post',
+  path: '/sync-ssh',
+  tags: ['Nodes'],
+  security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'write')],
+  responses: {
+    200: jsonContent(z.object({
+      success: z.boolean(),
+      results: z.array(z.object({
+        nodeId: z.string(),
+        status: z.string(),
+        error: z.string().optional(),
+      })).optional(),
+    }), 'SSH sync result'),
+  },
+});
+
+adminNodeRoutes.openapi(syncSshRoute, (async (c: any) => {
+  const result = await syncSshToNodes();
+  return c.json(result);
 }) as any);
 
 nodeRoutes.route('/', adminNodeRoutes);

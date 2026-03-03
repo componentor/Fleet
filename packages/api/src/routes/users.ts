@@ -55,6 +55,7 @@ function userProfileResponse(user: any) {
     avatarUrl: user.avatarUrl,
     isSuper: user.isSuper,
     hasPassword: !!user.passwordHash,
+    disabledLoginMethods: user.disabledLoginMethods ?? [],
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -72,6 +73,7 @@ const userProfileSchema = z.object({
   avatarUrl: z.string().nullable(),
   isSuper: z.boolean().nullable(),
   hasPassword: z.boolean().optional(),
+  disabledLoginMethods: z.array(z.string()).optional(),
   createdAt: z.any(),
   updatedAt: z.any(),
 }).openapi('UserProfile');
@@ -304,6 +306,77 @@ const getAvatarRoute = createRoute({
   },
 });
 
+const loginMethodSchema = z.object({
+  method: z.string(),
+  available: z.boolean(),
+  enabled: z.boolean(),
+}).openapi('LoginMethod');
+
+const getLoginMethodsRoute = createRoute({
+  method: 'get',
+  path: '/me/login-methods',
+  tags: ['Users'],
+  summary: 'Get login method status for current user',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ methods: z.array(loginMethodSchema) }), 'Login methods status'),
+    ...standardErrors,
+  },
+});
+
+const updateLoginMethodsRoute = createRoute({
+  method: 'patch',
+  path: '/me/login-methods',
+  tags: ['Users'],
+  summary: 'Update disabled login methods',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      disabledMethods: z.array(z.enum(['password', 'github', 'google'])),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({ methods: z.array(loginMethodSchema), reEnabled: z.array(z.string()).optional() }), 'Updated login methods'),
+    ...standardErrors,
+  },
+});
+
+// ── Helpers for login methods ──
+
+async function getLoginMethodsStatus(userId: string) {
+  const user = await db.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+  });
+  if (!user) return null;
+
+  const providers = await db.query.oauthProviders.findMany({
+    where: eq(oauthProviders.userId, userId),
+  });
+
+  const disabled: string[] = (user as any).disabledLoginMethods ?? [];
+  const connectedProviders = providers.map((p: any) => p.provider);
+
+  const methods = [
+    {
+      method: 'password',
+      available: !!user.passwordHash,
+      enabled: !!user.passwordHash && !disabled.includes('password'),
+    },
+    {
+      method: 'github',
+      available: connectedProviders.includes('github'),
+      enabled: connectedProviders.includes('github') && !disabled.includes('github'),
+    },
+    {
+      method: 'google',
+      available: connectedProviders.includes('google'),
+      enabled: connectedProviders.includes('google') && !disabled.includes('google'),
+    },
+  ];
+
+  return methods;
+}
+
 // ── Route handlers ──
 
 // GET /me — get current user profile
@@ -512,7 +585,57 @@ userRoutes.openapi(disconnectOAuthRoute, (async (c: any) => {
 
   await db.delete(oauthProviders).where(eq(oauthProviders.id, target.id));
 
-  return c.json({ message: `${provider} disconnected` });
+  // Fallback safety: re-enable disabled methods if disconnecting would leave no enabled methods
+  const disabled: string[] = (user as any).disabledLoginMethods ?? [];
+  const reEnabled: string[] = [];
+
+  if (disabled.length > 0) {
+    // After disconnect: remaining available methods
+    const remainingProviders = otherProviders.map((p: any) => p.provider);
+    const remainingAvailable: string[] = [];
+    if (hasPassword) remainingAvailable.push('password');
+    remainingAvailable.push(...remainingProviders);
+
+    // Count how many remaining methods are still enabled
+    const remainingEnabled = remainingAvailable.filter((m) => !disabled.includes(m));
+
+    if (remainingEnabled.length === 0 && remainingAvailable.length > 0) {
+      // Need to re-enable methods — prefer other OAuth first, then password
+      const newDisabled = [...disabled];
+      for (const m of [...remainingProviders, ...(hasPassword ? ['password'] : [])]) {
+        const idx = newDisabled.indexOf(m);
+        if (idx !== -1) {
+          newDisabled.splice(idx, 1);
+          reEnabled.push(m);
+          // Check if we now have at least one enabled method
+          const nowEnabled = remainingAvailable.filter((a) => !newDisabled.includes(a));
+          if (nowEnabled.length >= 1) break;
+        }
+      }
+
+      await db.update(users).set({
+        disabledLoginMethods: newDisabled.length > 0 ? newDisabled : null,
+        updatedAt: new Date(),
+      }).where(eq(users.id, authUser.userId));
+    }
+
+    // Also remove the disconnected provider from disabled list (it's no longer relevant)
+    if (disabled.includes(provider)) {
+      const cleaned = disabled.filter((m) => m !== provider);
+      // Only update if not already updated above
+      if (reEnabled.length === 0) {
+        await db.update(users).set({
+          disabledLoginMethods: cleaned.length > 0 ? cleaned : null,
+          updatedAt: new Date(),
+        }).where(eq(users.id, authUser.userId));
+      }
+    }
+  }
+
+  return c.json({
+    message: `${provider} disconnected`,
+    ...(reEnabled.length > 0 ? { reEnabled } : {}),
+  });
 }) as any);
 
 // POST /me/delete-code — send deletion verification code
@@ -930,6 +1053,60 @@ userPublicRoutes.openapi(getAvatarRoute, (async (c: any) => {
   }
 
   return c.json({ error: 'Avatar not found' }, 404);
+}) as any);
+
+// GET /me/login-methods — get login method status
+userRoutes.openapi(getLoginMethodsRoute, (async (c: any) => {
+  const authUser = c.get('user');
+  const methods = await getLoginMethodsStatus(authUser.userId);
+  if (!methods) return c.json({ error: 'User not found' }, 404);
+  return c.json({ methods });
+}) as any);
+
+// PATCH /me/login-methods — update disabled login methods
+userRoutes.openapi(updateLoginMethodsRoute, (async (c: any) => {
+  const authUser = c.get('user');
+  const { disabledMethods } = c.req.valid('json');
+
+  const user = await db.query.users.findFirst({
+    where: and(eq(users.id, authUser.userId), isNull(users.deletedAt)),
+  });
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  const providers = await db.query.oauthProviders.findMany({
+    where: eq(oauthProviders.userId, authUser.userId),
+  });
+  const connectedProviders = providers.map((p: any) => p.provider);
+
+  // Build available methods
+  const available: string[] = [];
+  if (user.passwordHash) available.push('password');
+  if (connectedProviders.includes('github')) available.push('github');
+  if (connectedProviders.includes('google')) available.push('google');
+
+  // Only allow disabling methods that are actually available
+  const validDisabled = disabledMethods.filter((m: string) => available.includes(m));
+
+  // Ensure at least one method remains enabled
+  const enabledCount = available.filter((m) => !validDisabled.includes(m)).length;
+  if (enabledCount < 1) {
+    return c.json({ error: 'At least one login method must remain enabled' }, 400);
+  }
+
+  await db.update(users).set({
+    disabledLoginMethods: validDisabled.length > 0 ? validDisabled : null,
+    updatedAt: new Date(),
+  }).where(eq(users.id, authUser.userId));
+
+  // Return updated status
+  const disabled = validDisabled;
+  const methods = [
+    { method: 'password', available: !!user.passwordHash, enabled: !!user.passwordHash && !disabled.includes('password') },
+    { method: 'github', available: connectedProviders.includes('github'), enabled: connectedProviders.includes('github') && !disabled.includes('github') },
+    { method: 'google', available: connectedProviders.includes('google'), enabled: connectedProviders.includes('google') && !disabled.includes('google') },
+  ];
+
+  return c.json({ methods });
 }) as any);
 
 export default userRoutes;

@@ -3055,4 +3055,86 @@ settings.openapi(envDeleteRoute, (async (c: any) => {
   }
 }) as any);
 
+// ────────────────────────────────────────────────────────────────────────────
+// Robots.txt platform defaults
+// ────────────────────────────────────────────────────────────────────────────
+
+const getRobotsRoute = createRoute({
+  method: 'get',
+  path: '/robots',
+  tags: ['Settings'],
+  security: bearerSecurity,
+  description: 'Get platform robots.txt configuration',
+  responses: {
+    200: jsonContent(z.object({
+      enabled: z.boolean(),
+      content: z.string(),
+    }), 'Platform robots.txt config'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(getRobotsRoute, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user?.isSuper) return c.json({ error: 'Forbidden' }, 403);
+
+  const row = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'robots:config'),
+  });
+  const config = row?.value as { enabled?: boolean; content?: string } | null;
+
+  return c.json({
+    enabled: config?.enabled !== false,
+    content: config?.content ?? '',
+  });
+}) as any);
+
+const updateRobotsRoute = createRoute({
+  method: 'patch',
+  path: '/robots',
+  tags: ['Settings'],
+  security: bearerSecurity,
+  description: 'Update platform robots.txt configuration',
+  request: {
+    body: jsonBody(z.object({
+      enabled: z.boolean().optional(),
+      content: z.string().max(10_000).optional(),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      enabled: z.boolean(),
+      content: z.string(),
+    }), 'Updated robots.txt config'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(updateRobotsRoute, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user?.isSuper) return c.json({ error: 'Forbidden' }, 403);
+
+  const data = c.req.valid('json');
+  const row = await db.query.platformSettings.findFirst({
+    where: eq(platformSettings.key, 'robots:config'),
+  });
+  const existing = (row?.value as { enabled?: boolean; content?: string }) ?? {};
+
+  const updated = {
+    enabled: data.enabled ?? existing.enabled ?? true,
+    content: data.content ?? existing.content ?? '',
+  };
+
+  await db.insert(platformSettings)
+    .values({ id: crypto.randomUUID(), key: 'robots:config', value: JSON.stringify(updated) })
+    .onConflictDoUpdate({
+      target: platformSettings.key,
+      set: { value: JSON.stringify(updated) },
+    });
+
+  await invalidateCache('GET:/settings/*');
+
+  return c.json(updated);
+}) as any);
+
 export default settings;

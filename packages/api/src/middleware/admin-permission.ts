@@ -22,7 +22,8 @@ export type AdminSection =
   | 'settings'
   | 'updates'
   | 'support'
-  | 'roles';
+  | 'roles'
+  | 'database';
 
 export type AdminPermissionLevel = 'read' | 'write' | 'impersonate';
 

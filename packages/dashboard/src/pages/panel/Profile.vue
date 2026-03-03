@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { User, Save, Lock, Loader2, Mail, Github, Link2, Unlink, Download, Trash2, AlertTriangle, Send, Upload, X } from 'lucide-vue-next'
+import { User, Save, Lock, Loader2, Mail, Github, Link2, Unlink, Download, Trash2, AlertTriangle, Send, Upload, X, Shield, ToggleLeft, ToggleRight, KeyRound, Plus, Copy, Check } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/composables/useAuth'
@@ -44,6 +44,35 @@ const passwordError = ref('')
 const oauthProviders = ref<Array<{ provider: string; providerUserId: string; createdAt: string }>>([])
 const loadingOAuth = ref(false)
 const disconnecting = ref('')
+
+// Login methods
+interface LoginMethod {
+  method: string
+  available: boolean
+  enabled: boolean
+}
+const loginMethods = ref<LoginMethod[]>([])
+const loadingLoginMethods = ref(false)
+const togglingMethod = ref('')
+
+// SSH keys
+interface SshKey {
+  id: string
+  name: string
+  fingerprint: string
+  publicKey: string
+  nodeAccess: boolean
+  createdAt: string
+}
+const sshKeys = ref<SshKey[]>([])
+const loadingSshKeys = ref(false)
+const showAddKey = ref(false)
+const newKeyName = ref('')
+const newKeyPublicKey = ref('')
+const addingKey = ref(false)
+const addKeyError = ref('')
+const deletingKeyId = ref('')
+const copiedFingerprint = ref('')
 
 // Data export
 const exporting = ref(false)
@@ -219,6 +248,121 @@ async function changePassword() {
   }
 }
 
+async function fetchLoginMethods() {
+  loadingLoginMethods.value = true
+  try {
+    const res = await api.get<{ methods: LoginMethod[] }>('/users/me/login-methods')
+    loginMethods.value = res.methods
+  } catch {
+    // silent
+  } finally {
+    loadingLoginMethods.value = false
+  }
+}
+
+async function toggleLoginMethod(method: string) {
+  const current = loginMethods.value.find((m) => m.method === method)
+  if (!current) return
+
+  togglingMethod.value = method
+  try {
+    // Build the new disabled list
+    const currentDisabled = loginMethods.value
+      .filter((m) => m.available && !m.enabled)
+      .map((m) => m.method)
+
+    let newDisabled: string[]
+    if (current.enabled) {
+      // Disabling this method
+      newDisabled = [...currentDisabled, method]
+    } else {
+      // Re-enabling this method
+      newDisabled = currentDisabled.filter((m) => m !== method)
+    }
+
+    const res = await api.patch<{ methods: LoginMethod[]; reEnabled?: string[] }>('/users/me/login-methods', {
+      disabledMethods: newDisabled,
+    })
+    loginMethods.value = res.methods
+    toast.success(current.enabled
+      ? t('profile.loginMethodDisabled', { method })
+      : t('profile.loginMethodEnabled', { method }),
+    )
+  } catch (err: any) {
+    toast.error(err?.body?.error || t('profile.loginMethodUpdateFailed'))
+  } finally {
+    togglingMethod.value = ''
+  }
+}
+
+function canToggleMethod(method: LoginMethod): boolean {
+  if (!method.available) return false
+  if (method.enabled) {
+    // Can only disable if at least one other method will remain enabled
+    const otherEnabled = loginMethods.value.filter((m) => m.method !== method.method && m.available && m.enabled)
+    return otherEnabled.length > 0
+  }
+  // Can always re-enable
+  return true
+}
+
+async function fetchSshKeys() {
+  loadingSshKeys.value = true
+  try {
+    sshKeys.value = await api.get<SshKey[]>('/ssh/keys')
+  } catch {
+    // silent
+  } finally {
+    loadingSshKeys.value = false
+  }
+}
+
+async function addSshKey() {
+  addKeyError.value = ''
+  if (!newKeyName.value.trim() || !newKeyPublicKey.value.trim()) {
+    addKeyError.value = 'Name and public key are required'
+    return
+  }
+
+  addingKey.value = true
+  try {
+    await api.post('/ssh/keys', {
+      name: newKeyName.value.trim(),
+      publicKey: newKeyPublicKey.value.trim(),
+    })
+    newKeyName.value = ''
+    newKeyPublicKey.value = ''
+    showAddKey.value = false
+    toast.success('SSH key added')
+    await fetchSshKeys()
+  } catch (err: any) {
+    addKeyError.value = err?.body?.error || 'Failed to add SSH key'
+  } finally {
+    addingKey.value = false
+  }
+}
+
+async function deleteSshKey(id: string) {
+  if (!confirm('Are you sure you want to delete this SSH key?')) return
+
+  deletingKeyId.value = id
+  try {
+    await api.del(`/ssh/keys/${id}`)
+    toast.success('SSH key deleted')
+    await fetchSshKeys()
+  } catch {
+    toast.error('Failed to delete SSH key')
+  } finally {
+    deletingKeyId.value = ''
+  }
+}
+
+function copyFingerprint(fingerprint: string) {
+  navigator.clipboard.writeText(fingerprint)
+  copiedFingerprint.value = fingerprint
+  setTimeout(() => { copiedFingerprint.value = '' }, 2000)
+}
+
 function connectProvider(provider: string) {
   window.location.href = `/api/v1/auth/${provider}?returnTo=/panel/profile`
 }
@@ -228,9 +372,12 @@ async function disconnectProvider(provider: string) {
 
   disconnecting.value = provider
   try {
-    await api.del(`/users/me/oauth/${provider}`)
+    const res = await api.del<{ message: string; reEnabled?: string[] }>(`/users/me/oauth/${provider}`)
     toast.success(t('profile.providerDisconnected', { provider }))
-    await fetchOAuth()
+    if (res.reEnabled?.length) {
+      toast.success(t('profile.methodsReEnabled', { methods: res.reEnabled.join(', ') }))
+    }
+    await Promise.all([fetchOAuth(), fetchLoginMethods()])
   } catch (err: any) {
     toast.error(err?.body?.error || t('profile.disconnectFailed'))
   } finally {
@@ -300,6 +447,8 @@ async function confirmDelete() {
 onMounted(() => {
   fetchProfile()
   fetchOAuth()
+  fetchLoginMethods()
+  fetchSshKeys()
 
   // Check for OAuth connection result in URL fragment
   const hash = window.location.hash
@@ -595,6 +744,180 @@ onMounted(() => {
               >
                 <Link2 class="w-3.5 h-3.5" />
                 {{ $t('profile.connect') }}
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Login methods -->
+      <div v-if="loginMethods.some((m) => m.available)" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Shield class="w-5 h-5 text-gray-500 dark:text-gray-400" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('profile.loginMethods') }}</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('profile.loginMethodsDesc') }}</p>
+        </div>
+        <div class="p-6 space-y-3">
+          <div v-if="loadingLoginMethods" class="flex items-center justify-center py-4">
+            <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+          </div>
+          <template v-else>
+            <div
+              v-for="method in loginMethods.filter((m) => m.available)"
+              :key="method.method"
+              class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
+            >
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center" :class="method.method === 'github' ? 'bg-gray-900 dark:bg-white' : method.method === 'google' ? 'bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500' : 'bg-primary-100 dark:bg-primary-900/30'">
+                  <Github v-if="method.method === 'github'" class="w-5 h-5 text-white dark:text-gray-900" />
+                  <svg v-else-if="method.method === 'google'" class="w-5 h-5" viewBox="0 0 24 24">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                  <Lock v-else class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">
+                    {{ method.method === 'password' ? $t('profile.passwordLogin') : method.method === 'github' ? 'GitHub' : 'Google' }}
+                  </p>
+                  <p class="text-xs" :class="method.enabled ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'">
+                    {{ method.enabled ? $t('profile.loginEnabled') : $t('profile.loginDisabled') }}
+                  </p>
+                </div>
+              </div>
+              <button
+                @click="toggleLoginMethod(method.method)"
+                :disabled="!canToggleMethod(method) || togglingMethod === method.method"
+                :title="!canToggleMethod(method) && method.enabled ? $t('profile.cantDisableLast') : ''"
+                class="p-1 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                :class="method.enabled ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20' : 'text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-600'"
+              >
+                <Loader2 v-if="togglingMethod === method.method" class="w-7 h-7 animate-spin" />
+                <ToggleRight v-else-if="method.enabled" class="w-7 h-7" />
+                <ToggleLeft v-else class="w-7 h-7" />
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- SSH Keys -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-2">
+                <KeyRound class="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">SSH Keys</h2>
+              </div>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage SSH keys for accessing your services and nodes</p>
+            </div>
+            <button
+              @click="showAddKey = !showAddKey"
+              class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+            >
+              <Plus class="w-4 h-4" />
+              Add Key
+            </button>
+          </div>
+        </div>
+        <div class="p-6 space-y-4">
+          <!-- Add key form -->
+          <div v-if="showAddKey" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600 space-y-3">
+            <div v-if="addKeyError" class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p class="text-sm text-red-700 dark:text-red-300">{{ addKeyError }}</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Name</label>
+              <input
+                v-model="newKeyName"
+                type="text"
+                placeholder="e.g. My Laptop"
+                class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Public Key</label>
+              <textarea
+                v-model="newKeyPublicKey"
+                rows="3"
+                placeholder="ssh-ed25519 AAAA... or ssh-rsa AAAA..."
+                class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+              />
+            </div>
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                @click="showAddKey = false; addKeyError = ''"
+                class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                @click="addSshKey"
+                :disabled="addingKey || !newKeyName.trim() || !newKeyPublicKey.trim()"
+                class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              >
+                <Loader2 v-if="addingKey" class="w-3.5 h-3.5 animate-spin" />
+                <Plus v-else class="w-3.5 h-3.5" />
+                Add Key
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading -->
+          <div v-if="loadingSshKeys" class="flex items-center justify-center py-4">
+            <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+          </div>
+
+          <!-- Keys list -->
+          <template v-else>
+            <div v-if="sshKeys.length === 0" class="text-center py-8">
+              <KeyRound class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+              <p class="text-sm text-gray-500 dark:text-gray-400">No SSH keys added yet</p>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Add a key to enable SSH access to your services</p>
+            </div>
+
+            <div
+              v-for="key in sshKeys"
+              :key="key.id"
+              class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
+            >
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ key.name }}</p>
+                  <span v-if="key.nodeAccess" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                    Node Access
+                  </span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-1">
+                  <code class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{{ key.fingerprint }}</code>
+                  <button
+                    @click="copyFingerprint(key.fingerprint)"
+                    class="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    title="Copy fingerprint"
+                  >
+                    <Check v-if="copiedFingerprint === key.fingerprint" class="w-3 h-3 text-green-500" />
+                    <Copy v-else class="w-3 h-3" />
+                  </button>
+                </div>
+                <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                  Added {{ new Date(key.createdAt).toLocaleDateString() }}
+                </p>
+              </div>
+              <button
+                @click="deleteSshKey(key.id)"
+                :disabled="deletingKeyId === key.id"
+                class="shrink-0 ml-4 p-2 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                title="Delete key"
+              >
+                <Loader2 v-if="deletingKeyId === key.id" class="w-4 h-4 animate-spin" />
+                <Trash2 v-else class="w-4 h-4" />
               </button>
             </div>
           </template>

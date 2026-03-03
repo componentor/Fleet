@@ -634,7 +634,7 @@ async function assignDomainToService(serviceId: string, accountId: string, domai
 
     // Update Docker Traefik labels and attach public network if service is deployed
     if (svc.dockerServiceId) {
-      const labels = buildTraefikLabels(svc.name, domain, true);
+      const labels = buildTraefikLabels(svc.name, domain, true, 80, (svc.robotsConfig as any)?.mode ?? 'default');
 
       // Attach to Traefik's public network so it can route traffic to this service
       const accountNetId = await orchestrator.ensureNetwork(`fleet-account-${accountId}`);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive } from 'lucide-vue-next'
+import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive, FileCode, RotateCcw } from 'lucide-vue-next'
 import ConfirmDeleteModal from '../../components/ConfirmDeleteModal.vue'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
@@ -43,6 +43,9 @@ const tabs = computed(() => {
   }
   if (service.value?.sourceType === 'upload' || service.value?.sourceType === 'github') {
     base.push({ id: 'docker', label: 'Docker' })
+  }
+  if (isNginxBased(service.value)) {
+    base.push({ id: 'nginx', label: 'Nginx' })
   }
   base.push(
     { id: 'logs', label: 'Logs' },
@@ -139,6 +142,11 @@ const configLoading = ref(false)
 const configDomain = ref('')
 const configSslEnabled = ref(true)
 const domainLoading = ref(false)
+
+// Robots.txt settings
+const robotsMode = ref<'default' | 'custom' | 'disabled'>('default')
+const robotsContent = ref('')
+const robotsLoading = ref(false)
 
 // Volume settings
 const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
@@ -438,6 +446,67 @@ function insertDockerfileTemplate() {
   dockerfileContent.value = 'FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install\nEXPOSE 3000\nCMD ["npm", "start"]\n'
 }
 
+// Nginx config tab
+const nginxConfig = ref('')
+const nginxDefaultConfig = ref('')
+const nginxIsCustom = ref(false)
+const nginxLoading = ref(false)
+const nginxSaving = ref(false)
+const nginxError = ref('')
+
+async function fetchNginxConfig() {
+  nginxLoading.value = true
+  nginxError.value = ''
+  try {
+    const data = await api.get<{ config: string; isCustom: boolean; defaultConfig: string }>(`/services/${serviceId}/nginx-config`)
+    nginxConfig.value = data.config
+    nginxDefaultConfig.value = data.defaultConfig
+    nginxIsCustom.value = data.isCustom
+  } catch (err: any) {
+    nginxError.value = err?.body?.error || 'Failed to load nginx config'
+  } finally {
+    nginxLoading.value = false
+  }
+}
+
+async function saveNginxConfig(applyNow: boolean = false) {
+  nginxSaving.value = true
+  nginxError.value = ''
+  try {
+    const result = await api.put<{ message: string; applied: boolean; validationError?: string }>(`/services/${serviceId}/nginx-config`, {
+      config: nginxConfig.value,
+      applyNow,
+    })
+    nginxIsCustom.value = true
+    if (result.validationError) {
+      nginxError.value = `Config saved but could not apply: ${result.validationError}`
+      toast.error('Config saved but live reload failed')
+    } else {
+      toast.success(result.applied ? 'Nginx config saved and applied' : 'Nginx config saved')
+    }
+  } catch (err: any) {
+    nginxError.value = err?.body?.error || 'Failed to save nginx config'
+  } finally {
+    nginxSaving.value = false
+  }
+}
+
+async function resetNginxConfig() {
+  if (!confirm('Reset to the default nginx config?')) return
+  nginxSaving.value = true
+  nginxError.value = ''
+  try {
+    await api.post(`/services/${serviceId}/nginx-config/reset`, {})
+    nginxConfig.value = nginxDefaultConfig.value
+    nginxIsCustom.value = false
+    toast.success('Nginx config reset to default')
+  } catch (err: any) {
+    nginxError.value = err?.body?.error || 'Failed to reset config'
+  } finally {
+    nginxSaving.value = false
+  }
+}
+
 async function rebuildService() {
   if (!confirm('Rebuild the service with the current Dockerfile?')) return
 
@@ -603,6 +672,13 @@ function formatSize(bytes: any) {
 
 function isDatabaseImage(image: string): boolean {
   return /^(postgres|mysql|mariadb|mongo|bitnami\/(postgresql|mysql|mariadb|mongodb))/i.test(image)
+}
+
+function isNginxBased(svc: any): boolean {
+  if (!svc) return false
+  if (/^nginx(:|$)/i.test(svc.image)) return true
+  if (svc.dockerfile && /^FROM\s+nginx/mi.test(svc.dockerfile)) return true
+  return false
 }
 
 const isDeployStreaming = computed(() => liveMode.value && deployStream.state.value !== 'disconnected')
@@ -966,6 +1042,22 @@ async function saveDomain() {
   }
 }
 
+async function saveRobots() {
+  robotsLoading.value = true
+  try {
+    const config = robotsMode.value === 'custom'
+      ? { mode: robotsMode.value, content: robotsContent.value }
+      : { mode: robotsMode.value }
+    await api.patch(`/services/${serviceId}`, { robotsConfig: config })
+    await refreshService()
+    toast.success(t('service.robots.saved'))
+  } catch {
+    toast.error(t('service.robots.saveFailed'))
+  } finally {
+    robotsLoading.value = false
+  }
+}
+
 async function saveVolumes() {
   volumeLoading.value = true
   migrationFailures.value = []
@@ -1166,6 +1258,7 @@ async function onTabChange(tabId: string) {
     }
   }
   if (tabId === 'docker') fetchDockerfile()
+  if (tabId === 'nginx') fetchNginxConfig()
   if (tabId === 'deployments') fetchDeployments()
   if (tabId === 'settings' && service.value) {
     const env = service.value.env ?? {}
@@ -1186,6 +1279,8 @@ async function onTabChange(tabId: string) {
     configRollbackOnFailure.value = service.value.rollbackOnFailure ?? true
     configDomain.value = service.value.domain ?? ''
     configSslEnabled.value = service.value.sslEnabled ?? true
+    robotsMode.value = (service.value.robotsConfig as any)?.mode ?? 'default'
+    robotsContent.value = (service.value.robotsConfig as any)?.content ?? ''
     configVolumes.value = ((service.value.volumes as any[]) ?? []).map((v: any) => ({
       source: v.source ?? '',
       target: v.target ?? '',
@@ -1880,6 +1975,68 @@ onUnmounted(() => {
             </div>
             <div v-if="dockerfileError" class="px-6 py-3 border-t border-gray-200 dark:border-gray-700">
               <p class="text-sm text-red-600 dark:text-red-400">{{ dockerfileError }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nginx Config -->
+        <div v-if="activeTab === 'nginx'">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Nginx Configuration</h3>
+                <p class="text-xs mt-0.5" :class="nginxIsCustom ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400'">
+                  {{ nginxIsCustom ? 'Custom configuration' : 'Default configuration — edit to customize' }}
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="nginxIsCustom"
+                  @click="resetNginxConfig"
+                  :disabled="nginxSaving"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw class="w-3.5 h-3.5" />
+                  Reset
+                </button>
+                <button
+                  @click="saveNginxConfig(false)"
+                  :disabled="nginxSaving || !nginxConfig.trim()"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="nginxSaving" class="w-3.5 h-3.5 animate-spin" />
+                  Save
+                </button>
+                <button
+                  v-if="service?.status === 'running'"
+                  @click="saveNginxConfig(true)"
+                  :disabled="nginxSaving || !nginxConfig.trim()"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="nginxSaving" class="w-3.5 h-3.5 animate-spin" />
+                  Save & Apply
+                </button>
+              </div>
+            </div>
+            <div v-if="nginxLoading" class="p-12 flex items-center justify-center">
+              <Loader2 class="w-6 h-6 text-primary-500 animate-spin" />
+            </div>
+            <div v-else>
+              <textarea
+                v-model="nginxConfig"
+                spellcheck="false"
+                class="w-full min-h-[500px] p-4 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono text-sm leading-relaxed resize-y border-0 focus:outline-none focus:ring-0"
+                placeholder="server { ... }"
+              />
+            </div>
+            <div v-if="nginxError" class="px-6 py-3 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/10">
+              <p class="text-sm text-red-600 dark:text-red-400">{{ nginxError }}</p>
+            </div>
+            <div class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                This config is written to <code class="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">/etc/nginx/conf.d/default.conf</code> inside the container.
+                <strong>Save</strong> persists for the next deploy. <strong>Save &amp; Apply</strong> also reloads the running container immediately.
+              </p>
             </div>
           </div>
         </div>
@@ -2694,6 +2851,54 @@ onUnmounted(() => {
             <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
               <button @click="saveDomain" :disabled="domainLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 {{ domainLoading ? 'Saving...' : 'Save Domain' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Robots.txt — only shown when service has a domain -->
+          <div v-if="service?.domain" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('service.robots.title') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $t('service.robots.desc') }}</p>
+            </div>
+            <div class="p-6 space-y-4">
+              <div class="space-y-3">
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input v-model="robotsMode" type="radio" value="default" name="robotsMode" class="text-primary-600 focus:ring-primary-500" />
+                  <div>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.robots.useDefault') }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('service.robots.useDefaultDesc') }}</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input v-model="robotsMode" type="radio" value="custom" name="robotsMode" class="text-primary-600 focus:ring-primary-500" />
+                  <div>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.robots.custom') }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('service.robots.customDesc') }}</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input v-model="robotsMode" type="radio" value="disabled" name="robotsMode" class="text-primary-600 focus:ring-primary-500" />
+                  <div>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('service.robots.disabled') }}</span>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('service.robots.disabledDesc') }}</p>
+                  </div>
+                </label>
+              </div>
+
+              <div v-if="robotsMode === 'custom'">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ $t('service.robots.contentLabel') }}</label>
+                <textarea
+                  v-model="robotsContent"
+                  rows="10"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  :placeholder="$t('service.robots.placeholder')"
+                />
+              </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+              <button @click="saveRobots" :disabled="robotsLoading" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                {{ robotsLoading ? $t('service.saving') : $t('service.robots.save') }}
               </button>
             </div>
           </div>

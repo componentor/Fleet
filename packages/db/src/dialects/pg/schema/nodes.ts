@@ -19,6 +19,7 @@ export const nodes = pgTable('nodes', {
   labels: jsonb('labels').default({}),
   location: varchar('location'),
   nfsServer: boolean('nfs_server').default(false),
+  sshAllowedIps: jsonb('ssh_allowed_ips'),
   lastHeartbeat: timestamp('last_heartbeat'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

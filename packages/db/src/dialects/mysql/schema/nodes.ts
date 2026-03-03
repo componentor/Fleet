@@ -19,6 +19,7 @@ export const nodes = mysqlTable('nodes', {
   labels: json('labels').$default(() => ({})),
   location: varchar('location', { length: 255 }),
   nfsServer: boolean('nfs_server').default(false),
+  sshAllowedIps: json('ssh_allowed_ips'),
   lastHeartbeat: timestamp('last_heartbeat'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
