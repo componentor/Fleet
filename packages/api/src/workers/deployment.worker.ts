@@ -3,6 +3,7 @@ import { db, services, deployments, oauthProviders, userAccounts, users, eq, and
 import { buildService, scrubSecrets } from '../services/build.service.js';
 import { orchestrator } from '../services/orchestrator.js';
 import { getRegistryAuthForImage } from '../services/docker.service.js';
+import { buildTraefikLabels } from '../services/traefik.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
@@ -344,10 +345,29 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to prune old containers before deploy');
       }
 
+      // Ensure correct networks and Traefik labels on every redeploy.
+      // Older services may have been created before the public network fix.
+      const networkName = `fleet-account-${accountId}`;
+      const networkId = await orchestrator.ensureNetwork(networkName);
+      const networkIds = [networkId];
+      if (svc.domain) {
+        const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
+        networkIds.push(publicNetId);
+      }
+      const svcPorts = (svc.ports as any[]) ?? [];
+      const primaryTargetPort = svcPorts[0]?.target ?? 80;
+      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort);
+
       const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
       await orchestrator.updateService(svc.dockerServiceId, {
         image: fullImageTag,
         replicas: svc.replicas ?? 1,
+        networkIds,
+        labels: {
+          ...traefikLabels,
+          'fleet.account-id': accountId,
+          'fleet.service-id': svc.id,
+        },
       }, deployRegistryAuth);
     } else {
       logger.warn({ serviceId: svc.id }, 'No dockerServiceId — image built but cannot deploy to Docker');

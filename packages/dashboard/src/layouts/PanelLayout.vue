@@ -342,7 +342,7 @@ function changeLocale(newLocale: string) {
         </button>
 
         <!-- Account switcher -->
-        <div class="relative">
+        <div class="relative lg:ml-2">
           <button
             @click="accountMenuOpen = !accountMenuOpen"
             class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors max-w-[120px] sm:max-w-[240px]"
@@ -381,7 +381,7 @@ function changeLocale(newLocale: string) {
           </div>
         </div>
 
-        <div class="flex items-center gap-2 ml-auto">
+        <div class="flex items-center gap-2 ml-auto mr-2">
           <!-- Language selector -->
           <select
             :value="locale"
@@ -423,12 +423,12 @@ function changeLocale(newLocale: string) {
             <button
               @click="userMenuOpen = !userMenuOpen"
               class="flex items-center gap-2 p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              :title="user?.name ?? user?.email ?? ''"
             >
               <div class="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center text-primary-700 dark:text-primary-300 text-sm font-semibold overflow-hidden">
                 <img v-if="user?.avatarUrl" :src="user.avatarUrl" :alt="user.name || 'Avatar'" class="w-full h-full object-cover" />
                 <span v-else>{{ user?.name?.charAt(0)?.toUpperCase() ?? '?' }}</span>
               </div>
-              <ChevronDown class="w-4 h-4" />
             </button>
 
             <!-- Click-outside overlay -->
@@ -496,7 +496,7 @@ function changeLocale(newLocale: string) {
       <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">
-            <div v-if="Component" :key="$route.path" class="flex-1 min-h-0 overflow-y-auto p-6">
+            <div v-if="Component" :key="$route.path" class="flex-1 min-h-0 overflow-y-auto p-6" style="scrollbar-gutter: stable">
               <component :is="Component" />
             </div>
           </Transition>

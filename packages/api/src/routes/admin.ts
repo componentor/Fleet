@@ -1186,52 +1186,64 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
     return c.json({ error: `Invalid service. Allowed: ${ALLOWED_FLEET_SERVICES.join(', ')}` }, 400);
   }
 
-  try {
-    // Find the Docker service by name
-    const allServices = await orchestrator.listServices({ name: [serviceName] });
-    const svc = allServices.find((s: any) => s.Spec?.Name === serviceName);
+  // Stream the response immediately so the client never stays PENDING.
+  // All Docker calls happen inside the stream callback.
+  c.header('Content-Type', 'text/plain; charset=utf-8');
+  c.header('X-Fleet-Available-Services', ALLOWED_FLEET_SERVICES.join(','));
 
-    if (!svc) {
-      return c.json({ logs: '', service: serviceName, warning: `Service "${serviceName}" not found in Docker Swarm.`, availableServices: ALLOWED_FLEET_SERVICES });
-    }
+  return c.stream(async (stream: any) => {
+    const STREAM_TIMEOUT_MS = 30_000;
+    const FETCH_TIMEOUT_MS = 15_000;
 
-    const result = await orchestrator.getServiceLogs(svc.ID, { tail, follow: false });
+    /** Demux Docker multiplexed log frames, return leftover */
+    const demux = (buf: Buffer): { text: string; rest: Buffer } => {
+      let text = '';
+      let offset = 0;
+      while (offset + 8 <= buf.length) {
+        const size = buf.readUInt32BE(offset + 4);
+        if (offset + 8 + size > buf.length) break;
+        text += buf.subarray(offset + 8, offset + 8 + size).toString('utf-8');
+        offset += 8 + size;
+      }
+      return { text, rest: buf.subarray(offset) };
+    };
 
-    // Stream the response — demux Docker's multiplexed log frames and write
-    // text as it arrives so the client sees output in real time.
-    c.header('Content-Type', 'text/plain; charset=utf-8');
-    c.header('X-Fleet-Service', serviceName);
-    c.header('X-Fleet-Available-Services', ALLOWED_FLEET_SERVICES.join(','));
+    /** Apply server-side search filter (line-by-line) */
+    const filterAndWrite = async (text: string) => {
+      if (!text) return;
+      if (!search) {
+        await stream.write(text);
+        return;
+      }
+      const filtered = text
+        .split('\n')
+        .filter((line) => line.toLowerCase().includes(search))
+        .join('\n');
+      if (filtered) await stream.write(filtered.endsWith('\n') ? filtered : filtered + '\n');
+    };
 
-    return c.stream(async (stream: any) => {
-      const TIMEOUT_MS = 30_000;
+    try {
+      // Find the Docker service by name
+      const allServices = await Promise.race([
+        orchestrator.listServices({ name: [serviceName] }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out listing Docker services')), FETCH_TIMEOUT_MS),
+        ),
+      ]);
+      const svc = allServices.find((s: any) => s.Spec?.Name === serviceName);
 
-      /** Demux complete frames from a buffer, return leftover */
-      const demux = (buf: Buffer): { text: string; rest: Buffer } => {
-        let text = '';
-        let offset = 0;
-        while (offset + 8 <= buf.length) {
-          const size = buf.readUInt32BE(offset + 4);
-          if (offset + 8 + size > buf.length) break;
-          text += buf.subarray(offset + 8, offset + 8 + size).toString('utf-8');
-          offset += 8 + size;
-        }
-        return { text, rest: buf.subarray(offset) };
-      };
+      if (!svc) {
+        await stream.write(`Service "${serviceName}" not found in Docker Swarm.\n`);
+        return;
+      }
 
-      /** Apply server-side search filter (line-by-line) */
-      const filterAndWrite = async (text: string) => {
-        if (!text) return;
-        if (!search) {
-          await stream.write(text);
-          return;
-        }
-        const filtered = text
-          .split('\n')
-          .filter((line) => line.toLowerCase().includes(search))
-          .join('\n');
-        if (filtered) await stream.write(filtered.endsWith('\n') ? filtered : filtered + '\n');
-      };
+      // Fetch logs with a timeout so we never hang forever
+      const result = await Promise.race([
+        orchestrator.getServiceLogs(svc.ID, { tail, follow: false }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out fetching logs from Docker')), FETCH_TIMEOUT_MS),
+        ),
+      ]);
 
       if (Buffer.isBuffer(result)) {
         // Entire log returned as a buffer — demux and write at once
@@ -1260,7 +1272,6 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
           });
 
           dockerStream.on('end', async () => {
-            // Flush any remaining partial data
             if (pending.length > 0) {
               await filterAndWrite(pending.toString('utf-8')).catch(() => {});
             }
@@ -1268,18 +1279,17 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
           });
 
           dockerStream.on('error', finish);
-          // Safety: close stream if Docker never ends
-          setTimeout(finish, TIMEOUT_MS);
+          setTimeout(finish, STREAM_TIMEOUT_MS);
         });
       }
-    });
-  } catch (err: any) {
-    if (err?.statusCode === 404 || err?.reason === 'no such service') {
-      return c.json({ logs: '', service: serviceName, warning: `Docker service "${serviceName}" not found.`, availableServices: ALLOWED_FLEET_SERVICES });
+    } catch (err: any) {
+      const msg = err?.statusCode === 404 || err?.reason === 'no such service'
+        ? `Docker service "${serviceName}" not found.`
+        : `Failed to fetch logs: ${err.message || 'unknown error'}`;
+      logger.error({ err, serviceName }, 'Platform log fetch failed');
+      await stream.write(`[Error] ${msg}\n`).catch(() => {});
     }
-    logger.error({ err }, 'Platform log fetch failed');
-    return c.json({ error: 'Failed to fetch platform logs' }, 500);
-  }
+  });
 }) as any);
 
 export default adminRoutes;

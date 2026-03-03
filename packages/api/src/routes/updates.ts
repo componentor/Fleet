@@ -375,16 +375,26 @@ updateRoutes.openapi(getSettingsRoute, (async (c: any) => {
 
 // GET /status — current update/rollback state
 // With multiple API replicas, the update runs on only one instance.
-// If this replica's local state is idle, check the DB-persisted state
-// in case another replica is actively running an update.
+// Priority: 1) local in-memory (if active), 2) Valkey broadcast (real-time,
+// written by the active replica), 3) DB-persisted state (checkpoint-based).
 updateRoutes.openapi(statusRoute, (async (c: any) => {
   const localState = updateService.getState();
 
+  // If this replica is actively running an update, return its real-time state
   if (localState.status !== 'idle') {
     return c.json(localState);
   }
 
-  // Check if another replica is running an update (persisted state in DB)
+  // Try Valkey broadcast first — updated in real-time by the active replica
+  try {
+    const { UpdateService } = await import('../services/update.service.js');
+    const broadcast = await UpdateService.loadBroadcastState();
+    if (broadcast && broadcast.status !== 'idle') {
+      return c.json(broadcast);
+    }
+  } catch { /* Valkey unavailable — fall through to DB */ }
+
+  // Fall back to DB-persisted state (checkpoint-based, less frequent)
   try {
     const { UpdateService } = await import('../services/update.service.js');
     const persisted = await UpdateService.loadPersistedState();
