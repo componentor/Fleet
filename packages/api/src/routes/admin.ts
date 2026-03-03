@@ -1,3 +1,4 @@
+import { stream } from 'hono/streaming';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
@@ -1191,7 +1192,7 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
   c.header('Content-Type', 'text/plain; charset=utf-8');
   c.header('X-Fleet-Available-Services', ALLOWED_FLEET_SERVICES.join(','));
 
-  return c.stream(async (stream: any) => {
+  return stream(c, async (stream) => {
     const STREAM_TIMEOUT_MS = 30_000;
     const FETCH_TIMEOUT_MS = 15_000;
 
@@ -1254,18 +1255,18 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
         // Use event listeners (not `for await`) to avoid hanging on streams
         // that never signal completion.
         await new Promise<void>((resolve) => {
-          let pending = Buffer.alloc(0);
-          const dockerStream = result as NodeJS.ReadableStream;
+          let pending: Buffer = Buffer.alloc(0);
+          const dockerStream = result as NodeJS.ReadableStream & { destroy?: () => void };
 
           const finish = () => {
             dockerStream.removeAllListeners();
-            dockerStream.destroy();
+            dockerStream.destroy?.();
             resolve();
           };
 
           dockerStream.on('data', (chunk: Buffer | string) => {
             const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            pending = Buffer.concat([pending, buf]);
+            pending = Buffer.concat([pending, buf]) as Buffer;
             const { text, rest } = demux(pending);
             pending = rest;
             if (text) filterAndWrite(text).catch(() => {});

@@ -3,10 +3,28 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal, XCircle, X, ChevronDown, ChevronUp, Settings } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
-import { updateVersion } from '@/composables/useVersionInfo'
+import { updateVersion, versionInfo } from '@/composables/useVersionInfo'
 
 const { t } = useI18n()
 const api = useApi()
+
+/** Compare two semver strings. Returns true if a >= b (ignoring prerelease suffixes). */
+function isNewerOrEqual(a: string, b: string): boolean {
+  const pa = a.replace(/^v/, '').replace(/-.*$/, '').split('.').map(Number)
+  const pb = b.replace(/^v/, '').replace(/-.*$/, '').split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false
+  }
+  return true
+}
+
+/** Set currentVersion only if it's >= the current value (never downgrade during rolling restart). */
+function setCurrentVersion(v: string) {
+  if (!v) return
+  if (currentVersion.value && !isNewerOrEqual(v, currentVersion.value)) return
+  currentVersion.value = v
+}
 const logContainer = ref<HTMLElement | null>(null)
 
 const loading = ref(true)
@@ -143,10 +161,13 @@ async function fetchAll() {
     updateAvailable.value = notif.available ?? false
     latestVersion.value = notif.latest?.tag ?? ''
     dbStatus.value = dbResult
-    // Use the most recent version source: status response (persisted in DB) or notification cache
+    // Use the most recent version source: status response (persisted in DB) or notification cache.
+    // Also consider the sidebar's version — it has a "never downgrade" guard and may be more
+    // up-to-date than a stale API response during rolling restart.
     const statusVersion = statusData?.currentVersion?.replace(/^v/, '') ?? ''
     const notifVersion = notif.current?.replace(/^v/, '') ?? ''
-    currentVersion.value = statusVersion || notifVersion || currentVersion.value
+    const sidebarVersion = versionInfo.value?.current?.replace(/^v/, '') ?? ''
+    setCurrentVersion(statusVersion || notifVersion || sidebarVersion || currentVersion.value)
     // Final guard: never show "update available" if current version matches latest
     // This catches any stale cache, multi-replica inconsistency, or race condition.
     if (updateAvailable.value && latestVersion.value && currentVersion.value) {
@@ -173,7 +194,7 @@ async function checkForUpdates() {
   try {
     const result = await api.get<any>('/updates/check')
     updateAvailable.value = result.available ?? false
-    currentVersion.value = result.current ?? currentVersion.value
+    setCurrentVersion(result.current ?? '')
     latestVersion.value = result.latest?.tag ?? latestVersion.value
     changelog.value = result.latest?.body ?? ''
     updateVersion(currentVersion.value, latestVersion.value, updateAvailable.value)
@@ -343,40 +364,47 @@ function startPolling() {
       }
       if (state.status === 'completed' || state.status === 'failed') {
         stopPolling()
-        // Use version from the completed status directly (more reliable than notification during API restart)
-        if (state.status === 'completed' && state.currentVersion) {
-          const ver = state.currentVersion.replace(/^v/, '')
-          currentVersion.value = ver
-          // Also update latestVersion so rollback target doesn't match current
-          if (latestVersion.value && latestVersion.value.replace(/^v/, '') === ver) {
-            updateAvailable.value = false
-          }
-          // Push to shared store so SuperLayout sidebar updates immediately
-          updateVersion(ver, latestVersion.value, false)
+        // Use the target version as the definitive "current" after a successful update.
+        // This is more reliable than state.currentVersion which might come from an old replica.
+        const completedVersion = state.status === 'completed'
+          ? (state.targetVersion ?? state.currentVersion ?? '').replace(/^v/, '')
+          : ''
+        if (completedVersion) {
+          setCurrentVersion(completedVersion)
+          updateAvailable.value = false
+          updateVersion(completedVersion, latestVersion.value, false)
         }
-        // On success: show "restarting" state and ping until the API comes back
+        // On success: show "restarting" state and ping until the NEW API comes back
         if (state.status === 'completed') {
           waitingForRestart.value = true
           restartPingCount.value = 0
+          const expectedVersion = completedVersion
           // Wait a moment for containers to begin restarting, then start pinging
           await new Promise(r => setTimeout(r, 3000))
           const pingInterval = setInterval(async () => {
             restartPingCount.value++
             try {
-              await api.get<any>('/updates/status')
-              // API is back up — refresh data and stop pinging
+              const pingStatus = await api.get<any>('/updates/status')
+              // Verify this is the NEW container, not the old one still alive during
+              // Docker Swarm's rolling update. Check the notification endpoint which
+              // reflects the container's actual FLEET_VERSION.
+              if (expectedVersion) {
+                const notif = await api.get<any>('/updates/notification').catch(() => null)
+                const reportedVersion = (notif?.current ?? '').replace(/^v/, '')
+                if (reportedVersion && !isNewerOrEqual(reportedVersion, expectedVersion)) {
+                  // Old container still responding — keep pinging
+                  return
+                }
+              }
+              // API is back up with the new version — refresh data
               clearInterval(pingInterval)
               const savedState = { ...updateState.value }
               await fetchAll()
-              // Force a fresh check — the cached /notification on a newly restarted
-              // API may still have stale "available: true" from before the update.
-              try {
-                const freshCheck = await api.get<any>('/updates/check')
-                updateAvailable.value = freshCheck.available ?? false
-                currentVersion.value = freshCheck.current?.replace(/^v/, '') ?? currentVersion.value
-                latestVersion.value = freshCheck.latest?.tag ?? latestVersion.value
-                updateVersion(currentVersion.value, latestVersion.value, updateAvailable.value)
-              } catch { /* non-critical — fetchAll already ran */ }
+              // After fetchAll, force updateAvailable=false since we just completed
+              updateAvailable.value = false
+              if (currentVersion.value) {
+                updateVersion(currentVersion.value, latestVersion.value, false)
+              }
               updateState.value = savedState
               waitingForRestart.value = false
             } catch {
@@ -398,6 +426,18 @@ function stopPolling() {
     clearInterval(statusPollInterval)
     statusPollInterval = null
   }
+}
+
+/** Dismiss the completed/failed banner and refresh all data to clear stale state. */
+async function dismissState() {
+  // If this was a successful update, lock in the target version before clearing
+  if (updateState.value?.status === 'completed' && updateState.value.targetVersion) {
+    setCurrentVersion(updateState.value.targetVersion.replace(/^v/, ''))
+  }
+  updateState.value = { status: 'idle' }
+  updateAvailable.value = false
+  // Re-fetch to get fresh data from the (hopefully) new API
+  await fetchAll()
 }
 
 onMounted(() => {
@@ -501,7 +541,7 @@ onUnmounted(() => {
           <div class="flex items-center gap-2 shrink-0">
             <button
               v-if="updateState.status === 'completed' || updateState.status === 'failed'"
-              @click="updateState = { status: 'idle' }"
+              @click="dismissState"
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
               :class="updateState.status === 'failed'
                 ? 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30'
