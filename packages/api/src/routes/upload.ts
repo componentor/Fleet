@@ -174,6 +174,13 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
       const networkName = `fleet-account-${accountId}`;
       const networkId = await orchestrator.ensureNetwork(networkName);
 
+      // Domain services need the Traefik public network for routing
+      const networkIds = [networkId];
+      if (domain) {
+        const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
+        networkIds.push(publicNetId);
+      }
+
       const accountShort = accountId.replace(/-/g, '').substring(0, 12);
       const swarmServiceName = `fleet-${accountShort}-${name}`.toLowerCase();
       const result = await orchestrator.createService({
@@ -200,7 +207,7 @@ uploadRoutes.openapi(deployRoute, (async (c: any) => {
         updateParallelism: 1,
         updateDelay: '10s',
         rollbackOnFailure: true,
-        networkId,
+        networkIds,
       });
 
       await ensureIngressRoute(`fleet-account-${accountId}`, swarmServiceName, domain, sslEnabled, primaryTargetPort).catch(() => {});

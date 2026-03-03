@@ -928,6 +928,45 @@ export class DockerService implements OrchestratorService {
     }
   }
 
+  /**
+   * Get container stats with node-aware routing.
+   * Tries local Docker API first; if the container isn't on this node,
+   * routes through the Fleet agent's /stats endpoint on the container's node.
+   */
+  async nodeAwareGetContainerStats(containerId: string, nodeId: string): Promise<ContainerStats | null> {
+    const localNodeId = await this.getLocalNodeId();
+
+    // If container is on this node, use direct Docker API (fastest)
+    if (nodeId === localNodeId) {
+      return this.getContainerStats(containerId);
+    }
+
+    // Container is on a remote node — route through the Fleet agent's /stats endpoint
+    try {
+      const agentUrl = await this.getAgentAddress(nodeId);
+      if (!agentUrl) return null;
+
+      const resp = await fetch(`${agentUrl}/stats`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(process.env['NODE_AUTH_TOKEN'] ? { Authorization: `Bearer ${process.env['NODE_AUTH_TOKEN']}` } : {}),
+        },
+        body: JSON.stringify({ containerIds: [containerId] }),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json() as any;
+        if (data.stats?.[containerId]) return data.stats[containerId];
+      }
+    } catch {
+      // Agent not available — stats unavailable for this container
+    }
+
+    return null;
+  }
+
   // Node management
   async listNodes() {
     return docker.listNodes();
