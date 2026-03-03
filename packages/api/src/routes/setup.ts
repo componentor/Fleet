@@ -320,7 +320,27 @@ setup.openapi(performSetupRoute, async (c) => {
       );
     }
 
-    // 5. Auto-generate JWT secret if not set via env
+    // 5. Pin stateful services to the current node
+    try {
+      const hostname = (await orchestrator.runOnLocalHost('hostname', { timeoutMs: 10_000 })).stdout.trim();
+      if (hostname) {
+        await upsert(
+          platformSettings,
+          { id: crypto.randomUUID(), key: 'platform:statefulNode', value: hostname },
+          platformSettings.key,
+          { value: hostname },
+        );
+        // Also write to env file if not already present
+        await orchestrator.runOnLocalHost(
+          `grep -q '^FLEET_STATEFUL_NODE=' /opt/fleet/config/env 2>/dev/null || echo "FLEET_STATEFUL_NODE=${hostname}" >> /opt/fleet/config/env`,
+          { timeoutMs: 10_000 },
+        );
+      }
+    } catch {
+      // Non-fatal — will be auto-detected on next stack deploy
+    }
+
+    // 6. Auto-generate JWT secret if not set via env
     let jwtSecret = process.env['JWT_SECRET'];
     if (!jwtSecret) {
       jwtSecret = randomBytes(32).toString('hex');
@@ -335,7 +355,7 @@ setup.openapi(performSetupRoute, async (c) => {
       );
     }
 
-    // 6. Generate tokens
+    // 7. Generate tokens
     const secret = new TextEncoder().encode(jwtSecret);
 
     const accessToken = await new SignJWT({

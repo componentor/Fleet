@@ -22,16 +22,8 @@ export async function detectRuntime(
 ): Promise<RuntimeDetection | null> {
   const fileSet = new Set(files);
 
-  // 1. Static site — index.html at root
-  if (fileSet.has('index.html')) {
-    return {
-      runtime: 'static',
-      dockerfile: generateStaticDockerfile(),
-      port: 80,
-    };
-  }
-
-  // 2. PHP — index.php or composer.json
+  // 1. PHP — index.php or composer.json (checked before static so index.html
+  //    in a PHP project doesn't get mis-detected as a static site)
   if (fileSet.has('index.php') || fileSet.has('composer.json')) {
     return {
       runtime: 'php',
@@ -40,7 +32,8 @@ export async function detectRuntime(
     };
   }
 
-  // 3. Node.js — package.json
+  // 2. Node.js — package.json (checked before static because a project with
+  //    package.json + index.html likely needs a build step)
   if (fileSet.has('package.json')) {
     let packageJson: PackageJsonInfo | null = null;
     if (readFile) {
@@ -53,10 +46,30 @@ export async function detectRuntime(
         // Ignore read errors, fall back to defaults
       }
     }
+
+    // Build-only projects (Vite/React/Vue with a build script but no start
+    // script): install deps, run build, serve output with nginx.
+    if (packageJson && !packageJson.hasStartScript && packageJson.hasBuildScript) {
+      return {
+        runtime: 'static',
+        dockerfile: generateNodeBuildDockerfile(fileSet, packageJson),
+        port: 80,
+      };
+    }
+
     return {
       runtime: 'node',
       dockerfile: generateNodeDockerfile(fileSet, packageJson),
       port: packageJson?.port ?? 3000,
+    };
+  }
+
+  // 3. Static site — index.html at root (no package.json or PHP)
+  if (fileSet.has('index.html')) {
+    return {
+      runtime: 'static',
+      dockerfile: generateStaticDockerfile(),
+      port: 80,
     };
   }
 
@@ -107,8 +120,18 @@ COPY . /usr/share/nginx/html
 RUN <<'EOF' cat > /etc/nginx/conf.d/default.conf
 server {
   listen 80;
+  include /etc/nginx/mime.types;
   root /usr/share/nginx/html;
   index index.html;
+
+  # Hashed assets (JS/CSS) — immutable caching
+  location ~* \\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif)$ {
+    try_files $uri =404;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  # SPA fallback — only for HTML navigation requests
   location / {
     try_files $uri $uri/ /index.html;
   }
@@ -147,6 +170,7 @@ function generatePhpDockerfile(hasComposer: boolean): string {
 interface PackageJsonInfo {
   nodeVersion: string | null;
   hasStartScript: boolean;
+  hasBuildScript: boolean;
   startCommand: string | null;
   port: number | null;
   packageManager: 'npm' | 'yarn' | 'pnpm';
@@ -173,6 +197,7 @@ function parsePackageJson(content: string): PackageJsonInfo | null {
     return {
       nodeVersion,
       hasStartScript: !!scripts?.['start'],
+      hasBuildScript: !!scripts?.['build'],
       startCommand: scripts?.['start'] ?? null,
       port: null,
       packageManager: pm,
@@ -216,6 +241,73 @@ function generateNodeDockerfile(fileSet: Set<string>, pkg: PackageJsonInfo | nul
   lines.push('COPY . .');
   lines.push('EXPOSE 3000');
   lines.push('CMD ["npm", "start"]');
+
+  return lines.join('\n') + '\n';
+}
+
+// ── Node.js build-only (Vite / React / Vue → nginx) ─────────────────────────
+
+function generateNodeBuildDockerfile(fileSet: Set<string>, pkg: PackageJsonInfo): string {
+  const nodeVersion = pkg.nodeVersion ?? '20';
+
+  let pm: 'npm' | 'yarn' | 'pnpm' = pkg.packageManager ?? 'npm';
+  if (fileSet.has('pnpm-lock.yaml')) pm = 'pnpm';
+  else if (fileSet.has('yarn.lock')) pm = 'yarn';
+
+  const lines = [
+    `FROM node:${nodeVersion}-alpine AS builder`,
+    'WORKDIR /app',
+  ];
+
+  if (pm === 'pnpm') {
+    lines.push('RUN corepack enable && corepack prepare pnpm@latest --activate');
+  }
+
+  // Install ALL deps (including devDependencies for the bundler)
+  switch (pm) {
+    case 'pnpm':
+      lines.push('COPY package.json pnpm-lock.yaml* ./');
+      lines.push('RUN pnpm install --frozen-lockfile');
+      break;
+    case 'yarn':
+      lines.push('COPY package.json yarn.lock* ./');
+      lines.push('RUN yarn install --frozen-lockfile');
+      break;
+    default:
+      lines.push('COPY package*.json ./');
+      lines.push('RUN npm ci');
+      break;
+  }
+
+  lines.push('COPY . .');
+
+  const buildCmd = pm === 'pnpm' ? 'pnpm run build' : pm === 'yarn' ? 'yarn build' : 'npm run build';
+  lines.push(`RUN ${buildCmd}`);
+
+  // Serve the built output with nginx
+  lines.push('');
+  lines.push('FROM nginx:alpine');
+  lines.push(`COPY --from=builder /app/dist /usr/share/nginx/html`);
+  lines.push(`RUN <<'NGINXEOF' cat > /etc/nginx/conf.d/default.conf`);
+  lines.push('server {');
+  lines.push('  listen 80;');
+  lines.push('  include /etc/nginx/mime.types;');
+  lines.push('  root /usr/share/nginx/html;');
+  lines.push('  index index.html;');
+  lines.push('');
+  lines.push('  location ~* \\\\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp|avif)$ {');
+  lines.push('    try_files $uri =404;');
+  lines.push('    expires 1y;');
+  lines.push('    add_header Cache-Control "public, immutable";');
+  lines.push('  }');
+  lines.push('');
+  lines.push('  location / {');
+  lines.push('    try_files $uri $uri/ /index.html;');
+  lines.push('  }');
+  lines.push('}');
+  lines.push('NGINXEOF');
+  lines.push('EXPOSE 80');
+  lines.push('CMD ["nginx", "-g", "daemon off;"]');
 
   return lines.join('\n') + '\n';
 }

@@ -1715,6 +1715,14 @@ set +a
 VALKEY_PASSWORD=\$(echo "\${VALKEY_URL}" | sed -n 's|redis://:\\([^@]*\\)@.*|\\1|p')
 export VALKEY_PASSWORD
 
+# Auto-detect stateful node if not set (existing installs upgrading to pinned stack)
+if [ -z "\${FLEET_STATEFUL_NODE:-}" ]; then
+  FLEET_STATEFUL_NODE=\$(hostname)
+  echo "FLEET_STATEFUL_NODE=\${FLEET_STATEFUL_NODE}" >> "\${ENV_FILE}"
+  echo "Auto-detected FLEET_STATEFUL_NODE=\${FLEET_STATEFUL_NODE}"
+fi
+export FLEET_STATEFUL_NODE
+
 cd "\${FLEET_DIR}"
 
 # Ensure required bind-mount directories exist on ALL Swarm nodes before deploying

@@ -248,7 +248,10 @@ function changeLocale(newLocale: string) {
       <!-- Account banner -->
       <div :class="['py-2 text-white shrink-0 sidebar-banner-shimmer', collapsed ? 'px-2' : 'px-[30px]']">
         <div :class="['flex items-center gap-1.5', collapsed && 'justify-center']" style="text-shadow: 0 1px 3px rgba(0,0,0,0.35);">
-          <Users class="w-3.5 h-3.5 shrink-0" />
+          <Users
+            :class="['w-3.5 h-3.5 shrink-0', collapsed && 'cursor-pointer hover:text-white/80']"
+            @click="collapsed && toggleCollapse()"
+          />
           <span v-if="!collapsed" class="text-xs font-semibold tracking-wide uppercase truncate">{{ currentAccount?.name || 'Account' }}</span>
           <button
             v-if="!collapsed"

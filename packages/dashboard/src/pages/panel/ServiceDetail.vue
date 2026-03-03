@@ -455,7 +455,9 @@ async function rebuildService() {
       result = await api.post('/deployments/trigger', { serviceId })
     }
     toast.success('Rebuild triggered')
-    await refreshService()
+    // Don't refreshService() here — it races with the inline build and can
+    // overwrite the deploying status before the progress UI is visible.
+    // The deployment poller will track state transitions.
     const newDeploymentId = result?.deploymentId
     if (newDeploymentId) {
       latestDeployment.value = { id: newDeploymentId, status: 'building', log: '', progressStep: 'queued' }
@@ -828,7 +830,12 @@ async function redeployService() {
 
   try {
     const result: any = await api.post(`/services/${serviceId}/redeploy`, {})
-    await refreshService()
+    // For build-source redeploys, don't refreshService() — it can race with the
+    // inline build and overwrite the deploying status before the UI has a chance
+    // to show progress. The deployment poller will track state transitions.
+    if (!hasBuildSource) {
+      await refreshService()
+    }
     // For image-only redeploys, the deployment completes immediately (no build step).
     // Only start deploy stream for services with a build source (github/upload).
     if (hasBuildSource) {
@@ -839,8 +846,11 @@ async function redeployService() {
       }
       startDeploymentPolling()
     }
-    // Always start status polling to track Docker task state transitions
-    if (service.value?.status === 'deploying') {
+    // For image-only redeploys, use status polling to track Docker convergence.
+    // Don't start both pollers — deploymentPolling already handles the lifecycle
+    // for build-source services and statusPolling would race with it, clearing
+    // the deploying state before the deployment record transitions to succeeded.
+    if (!hasBuildSource && service.value?.status === 'deploying') {
       startStatusPolling()
     }
   } catch {

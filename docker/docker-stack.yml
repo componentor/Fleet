@@ -25,6 +25,7 @@ services:
       placement:
         constraints:
           - node.role == manager
+          - node.hostname == ${FLEET_STATEFUL_NODE}
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -62,6 +63,7 @@ services:
       placement:
         constraints:
           - node.role == manager
+          - node.hostname == ${FLEET_STATEFUL_NODE}
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -289,6 +291,7 @@ services:
       placement:
         constraints:
           - node.role == manager
+          - node.hostname == ${FLEET_STATEFUL_NODE}
       restart_policy:
         condition: on-failure
         delay: 5s

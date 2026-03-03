@@ -474,6 +474,22 @@ router.beforeEach(async (to) => {
     }
   }
 
+  // Redirect away from /setup if setup is already done
+  if (to.path.startsWith('/setup')) {
+    try {
+      const res = await fetch('/api/v1/setup/status')
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.needsSetup !== true) {
+          localStorage.setItem('fleet_setup_done', 'true')
+          return { path: isAuthenticated ? '/panel' : '/login' }
+        }
+      }
+    } catch {
+      // API not available — let them through, the page itself will handle it
+    }
+  }
+
   // Allow public routes
   if (to.meta.public) {
     if (isAuthenticated && to.name === 'login') {

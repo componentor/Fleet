@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft, Wrench } from 'lucide-vue-next'
+import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft, Wrench, Database, AlertTriangle, HardDrive, Variable, Eye, EyeOff, Pencil, RotateCw } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -32,6 +32,8 @@ const sections = [
   { id: 'translation', label: () => t('super.settings.translationConfig') },
   { id: 'self-healing', label: () => t('super.settings.selfHealing.title') },
   { id: 'orchestrator', label: () => t('super.settings.orchestrator.title') },
+  { id: 'database', label: () => t('super.settings.database.title') },
+  { id: 'environment', label: () => t('super.settings.env.title') },
 ]
 
 // General settings
@@ -197,6 +199,264 @@ const orchInstallingDocker = ref(false)
 const orchInstallingDockerAgents = ref(false)
 const orchInstallLogs = ref<string[]>([])
 const orchInstallResult = ref<{ success: boolean; message: string } | null>(null)
+
+// k3s status
+const k3sStatus = ref<{ installed: boolean; running: boolean; joinToken: string | null; serverUrl: string | null; nodeCount: number; readyNodes: number } | null>(null)
+const k3sStatusLoading = ref(false)
+
+// Database
+const dbStatus = ref<{
+  mode: 'local' | 'nfs'
+  currentNode: string | null
+  pinnedNode: string | null
+  mismatch: boolean
+  managerNodes: { id: string; hostname: string; role: string }[]
+  storageClusters: { id: string; name: string; provider: string; status: string }[]
+  activeClusterId: string | null
+} | null>(null)
+const dbLoading = ref(false)
+const dbRepinning = ref(false)
+const dbRepinTarget = ref('')
+const dbRepinResult = ref<{ success: boolean; message: string; logs?: string[] } | null>(null)
+const dbRepinLogs = ref<string[]>([])
+
+async function fetchDatabaseStatus() {
+  dbLoading.value = true
+  try {
+    const data = await api.get<any>('/settings/database-status')
+    dbStatus.value = data
+    if (data.managerNodes?.length > 0 && !dbRepinTarget.value) {
+      dbRepinTarget.value = data.managerNodes[0].hostname
+    }
+  } catch (err: any) {
+    dbStatus.value = null
+  } finally {
+    dbLoading.value = false
+  }
+}
+
+async function repinDatabase() {
+  if (!dbRepinTarget.value) return
+  dbRepinning.value = true
+  dbRepinResult.value = null
+  dbRepinLogs.value = []
+  try {
+    const data = await api.post<{ success: boolean; message: string; logs: string[] }>('/settings/database-repin', { targetNode: dbRepinTarget.value })
+    dbRepinResult.value = { success: data.success, message: data.message }
+    dbRepinLogs.value = data.logs || []
+    if (data.success) {
+      await fetchDatabaseStatus()
+    }
+  } catch (err: any) {
+    dbRepinResult.value = { success: false, message: err?.message || String(err) }
+  } finally {
+    dbRepinning.value = false
+  }
+}
+
+// Database migration
+const dbMigrating = ref(false)
+const dbMigrateCluster = ref('')
+const dbMigrateLocalNode = ref('')
+const dbMigrateLogs = ref<string[]>([])
+const dbMigrateResult = ref<{ success: boolean; message: string } | null>(null)
+const dbMigrateConfirm = ref(false)
+
+async function migrateToNfs() {
+  if (!dbMigrateCluster.value || !dbMigrateConfirm.value) return
+  dbMigrating.value = true
+  dbMigrateResult.value = null
+  dbMigrateLogs.value = []
+  try {
+    const data = await api.post<{ success: boolean; message: string; logs: string[] }>('/settings/database-migrate', {
+      target: 'nfs',
+      clusterId: dbMigrateCluster.value,
+    })
+    dbMigrateResult.value = { success: data.success, message: data.message }
+    dbMigrateLogs.value = data.logs || []
+    if (data.success) {
+      dbMigrateConfirm.value = false
+      await fetchDatabaseStatus()
+    }
+  } catch (err: any) {
+    dbMigrateResult.value = { success: false, message: err?.message || String(err) }
+  } finally {
+    dbMigrating.value = false
+  }
+}
+
+async function migrateToLocal() {
+  if (!dbMigrateLocalNode.value || !dbMigrateConfirm.value) return
+  dbMigrating.value = true
+  dbMigrateResult.value = null
+  dbMigrateLogs.value = []
+  try {
+    const data = await api.post<{ success: boolean; message: string; logs: string[] }>('/settings/database-migrate', {
+      target: 'local',
+      targetNode: dbMigrateLocalNode.value,
+    })
+    dbMigrateResult.value = { success: data.success, message: data.message }
+    dbMigrateLogs.value = data.logs || []
+    if (data.success) {
+      dbMigrateConfirm.value = false
+      await fetchDatabaseStatus()
+    }
+  } catch (err: any) {
+    dbMigrateResult.value = { success: false, message: err?.message || String(err) }
+  } finally {
+    dbMigrating.value = false
+  }
+}
+
+// Environment variables
+interface EnvVar {
+  key: string
+  value: string
+  category: string
+  description: string
+  secret: boolean
+  restartRequired: boolean
+  dangerous: boolean
+}
+const envVars = ref<EnvVar[]>([])
+const envLoading = ref(false)
+const envSaving = ref(false)
+const envRestarting = ref(false)
+const envEditKey = ref<string | null>(null)
+const envEditValue = ref('')
+const envShowSecrets = ref<Set<string>>(new Set())
+const envAddMode = ref(false)
+const envNewKey = ref('')
+const envNewValue = ref('')
+const envError = ref('')
+const envSuccess = ref('')
+const envConfirmDangerous = ref(false)
+const envActiveCategory = ref('all')
+
+const envCategories = computed(() => {
+  const cats = new Set(envVars.value.map(v => v.category))
+  return ['all', ...Array.from(cats)]
+})
+
+const filteredEnvVars = computed(() => {
+  if (envActiveCategory.value === 'all') return envVars.value
+  return envVars.value.filter(v => v.category === envActiveCategory.value)
+})
+
+async function fetchEnvironment() {
+  envLoading.value = true
+  try {
+    const data = await api.get<{ variables: EnvVar[] }>('/settings/environment')
+    envVars.value = data.variables || []
+  } catch (err: any) {
+    envVars.value = []
+  } finally {
+    envLoading.value = false
+  }
+}
+
+function startEdit(v: EnvVar) {
+  envEditKey.value = v.key
+  envEditValue.value = v.secret ? '' : v.value
+  envError.value = ''
+  envSuccess.value = ''
+}
+
+function cancelEdit() {
+  envEditKey.value = null
+  envEditValue.value = ''
+  envConfirmDangerous.value = false
+}
+
+async function saveEnvVar() {
+  if (!envEditKey.value) return
+  const v = envVars.value.find(e => e.key === envEditKey.value)
+  if (!v) return
+
+  envSaving.value = true
+  envError.value = ''
+  envSuccess.value = ''
+  try {
+    await api.put<any>('/settings/environment', {
+      updates: [{ key: envEditKey.value, value: envEditValue.value }],
+      restartServices: false,
+      confirmDangerous: v.dangerous ? envConfirmDangerous.value : false,
+    })
+    envSuccess.value = `${envEditKey.value} updated`
+    envEditKey.value = null
+    envEditValue.value = ''
+    envConfirmDangerous.value = false
+    await fetchEnvironment()
+  } catch (err: any) {
+    envError.value = err?.message || String(err)
+  } finally {
+    envSaving.value = false
+  }
+}
+
+async function addEnvVar() {
+  if (!envNewKey.value || !envNewValue.value) return
+  envSaving.value = true
+  envError.value = ''
+  envSuccess.value = ''
+  try {
+    await api.put<any>('/settings/environment', {
+      updates: [{ key: envNewKey.value, value: envNewValue.value }],
+      restartServices: false,
+      confirmDangerous: false,
+    })
+    envSuccess.value = `${envNewKey.value} added`
+    envNewKey.value = ''
+    envNewValue.value = ''
+    envAddMode.value = false
+    await fetchEnvironment()
+  } catch (err: any) {
+    envError.value = err?.message || String(err)
+  } finally {
+    envSaving.value = false
+  }
+}
+
+async function deleteEnvVar(key: string) {
+  envSaving.value = true
+  envError.value = ''
+  envSuccess.value = ''
+  try {
+    await api.del<any>(`/settings/environment/${key}`)
+    envSuccess.value = `${key} removed`
+    await fetchEnvironment()
+  } catch (err: any) {
+    envError.value = err?.message || String(err)
+  } finally {
+    envSaving.value = false
+  }
+}
+
+async function restartServices() {
+  envRestarting.value = true
+  envError.value = ''
+  envSuccess.value = ''
+  try {
+    const data = await api.put<any>('/settings/environment', {
+      updates: [],
+      restartServices: true,
+      confirmDangerous: false,
+    })
+    envSuccess.value = data.message || 'Services restarted'
+  } catch (err: any) {
+    envError.value = err?.message || String(err)
+  } finally {
+    envRestarting.value = false
+  }
+}
+
+function toggleSecretVisibility(key: string) {
+  if (envShowSecrets.value.has(key)) {
+    envShowSecrets.value.delete(key)
+  } else {
+    envShowSecrets.value.add(key)
+  }
+}
 
 async function fetchSettings() {
   loading.value = true
@@ -834,6 +1094,19 @@ async function fetchOrchestrator() {
   } finally {
     orchLoading.value = false
   }
+  // Also fetch k3s status in background
+  fetchK3sStatus()
+}
+
+async function fetchK3sStatus() {
+  k3sStatusLoading.value = true
+  try {
+    k3sStatus.value = await api.get<any>('/settings/orchestrator/k3s-status')
+  } catch {
+    k3sStatus.value = null
+  } finally {
+    k3sStatusLoading.value = false
+  }
 }
 
 async function saveOrchestratorDefault(type: 'swarm' | 'kubernetes') {
@@ -971,6 +1244,8 @@ onMounted(() => {
   fetchTranslation()
   fetchSelfHealing()
   fetchOrchestrator()
+  fetchDatabaseStatus()
+  fetchEnvironment()
 })
 </script>
 
@@ -2420,10 +2695,46 @@ onMounted(() => {
             <!-- Install on new nodes (when both are available) -->
             <div v-if="orchK8sAvailable && orchSwarmAvailable" class="pt-4 border-t border-gray-200 dark:border-gray-700">
               <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.orchestrator.installOnNewNodes') }}</h3>
+
+              <!-- k3s server status -->
+              <div v-if="k3sStatus" class="mb-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">k3s Server</p>
+                    <div class="flex items-center gap-2">
+                      <span class="w-2 h-2 rounded-full" :class="k3sStatus.running ? 'bg-green-500' : k3sStatus.installed ? 'bg-yellow-500' : 'bg-red-500'"></span>
+                      <span class="text-sm font-medium text-gray-900 dark:text-white">
+                        {{ k3sStatus.running ? 'Running' : k3sStatus.installed ? 'Installed (not running)' : 'Not installed' }}
+                      </span>
+                      <span v-if="k3sStatus.readyNodes > 0" class="text-xs text-gray-500 dark:text-gray-400">
+                        {{ k3sStatus.readyNodes }}/{{ k3sStatus.nodeCount }} nodes ready
+                      </span>
+                    </div>
+                    <p v-if="!k3sStatus.joinToken" class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                      No join token available — install k3s server first to enable agent installs.
+                    </p>
+                  </div>
+                  <button
+                    v-if="!k3sStatus.joinToken"
+                    @click="installK3sServer"
+                    :disabled="orchInstallingK3s"
+                    class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
+                  >
+                    <Loader2 v-if="orchInstallingK3s" class="w-4 h-4 animate-spin" />
+                    <Server v-else class="w-4 h-4" />
+                    Install k3s Server
+                  </button>
+                </div>
+              </div>
+              <div v-else-if="k3sStatusLoading" class="mb-3 flex items-center gap-2 text-xs text-gray-400">
+                <Loader2 class="w-3 h-3 animate-spin" />
+                Checking k3s status...
+              </div>
+
               <div class="flex items-center gap-3">
                 <button
                   @click="installK3sAgents"
-                  :disabled="orchInstallingK3sAgents"
+                  :disabled="orchInstallingK3sAgents || (!k3sStatus?.joinToken && !k3sStatusLoading)"
                   class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                 >
                   <Loader2 v-if="orchInstallingK3sAgents" class="w-4 h-4 animate-spin" />
@@ -2451,6 +2762,423 @@ onMounted(() => {
               <p class="text-sm" :class="orchInstallResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
                 {{ orchInstallResult.message }}
               </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Database -->
+        <div v-if="activeSection === 'database'" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <Database class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.database.title') }}</h2>
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.database.desc') }}</p>
+          </div>
+
+          <div v-if="dbLoading" class="p-6 flex justify-center">
+            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          </div>
+
+          <div v-else-if="dbStatus" class="p-6 space-y-6">
+            <!-- Mismatch warning -->
+            <div v-if="dbStatus.mismatch" class="p-4 rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20">
+              <div class="flex items-start gap-3">
+                <AlertTriangle class="w-5 h-5 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p class="text-sm font-medium text-red-700 dark:text-red-300">{{ t('super.settings.database.mismatchWarning') }}</p>
+                  <p class="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {{ t('super.settings.database.mismatchDetail', { current: dbStatus.currentNode, pinned: dbStatus.pinnedNode }) }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Current status -->
+            <div>
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{{ t('super.settings.database.status') }}</h3>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('super.settings.database.storageMode') }}</p>
+                  <div class="flex items-center gap-1.5">
+                    <HardDrive class="w-3.5 h-3.5 text-gray-400" />
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">
+                      {{ dbStatus.mode === 'nfs' ? t('super.settings.database.modeNfs') : t('super.settings.database.modeLocal') }}
+                    </p>
+                  </div>
+                </div>
+                <div class="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('super.settings.database.currentNode') }}</p>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ dbStatus.currentNode || '—' }}</p>
+                </div>
+                <div class="p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('super.settings.database.pinnedNode') }}</p>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ dbStatus.pinnedNode || '—' }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Re-pin to different node -->
+            <div v-if="dbStatus.mode === 'local'" class="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.database.repinTitle') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.database.repinDesc') }}</p>
+              <div class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+                <div class="w-full sm:w-auto sm:flex-1 max-w-sm">
+                  <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.settings.database.selectNode') }}</label>
+                  <select
+                    v-model="dbRepinTarget"
+                    class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <option v-for="node in dbStatus.managerNodes" :key="node.id" :value="node.hostname">
+                      {{ node.hostname }}{{ node.hostname === dbStatus.pinnedNode ? ` (${t('super.settings.database.current')})` : '' }}
+                    </option>
+                  </select>
+                </div>
+                <button
+                  @click="repinDatabase"
+                  :disabled="dbRepinning || !dbRepinTarget || dbRepinTarget === dbStatus.pinnedNode"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="dbRepinning" class="w-4 h-4 animate-spin" />
+                  <ArrowRightLeft v-else class="w-4 h-4" />
+                  {{ t('super.settings.database.repinAction') }}
+                </button>
+              </div>
+
+              <!-- Repin logs -->
+              <div v-if="dbRepinLogs.length > 0" class="mt-3 bg-gray-900 rounded-lg p-4 max-h-48 overflow-y-auto font-mono text-xs text-gray-300">
+                <div v-for="(log, i) in dbRepinLogs" :key="i" class="py-0.5">{{ log }}</div>
+              </div>
+
+              <!-- Repin result -->
+              <div v-if="dbRepinResult" class="mt-3 p-3 rounded-lg border" :class="dbRepinResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+                <p class="text-sm" :class="dbRepinResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                  {{ dbRepinResult.message }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Migrate to NFS (when local and clusters exist) -->
+            <div v-if="dbStatus.mode === 'local' && dbStatus.storageClusters.length > 0" class="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.database.migrateToNfs') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.database.migrateToNfsDesc') }}</p>
+
+              <div class="space-y-3">
+                <div class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+                  <div class="w-full sm:w-auto sm:flex-1 max-w-sm">
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.settings.database.selectCluster') }}</label>
+                    <select
+                      v-model="dbMigrateCluster"
+                      :disabled="dbMigrating"
+                      class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
+                    >
+                      <option value="" disabled>{{ t('super.settings.database.selectCluster') }}...</option>
+                      <option v-for="cl in dbStatus.storageClusters" :key="cl.id" :value="cl.id">
+                        {{ cl.name }} ({{ cl.provider }})
+                      </option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Downtime warning + confirmation -->
+                <div v-if="dbMigrateCluster" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                  <div class="flex items-start gap-2">
+                    <AlertTriangle class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div class="text-xs text-amber-700 dark:text-amber-300 space-y-1">
+                      <p class="font-medium">{{ t('super.settings.database.migrateWarning') }}</p>
+                      <p>{{ t('super.settings.database.migrateWarningDesc') }}</p>
+                    </div>
+                  </div>
+                  <label class="flex items-center gap-2 mt-3 cursor-pointer">
+                    <input v-model="dbMigrateConfirm" type="checkbox" :disabled="dbMigrating" class="rounded border-gray-300 dark:border-gray-600" />
+                    <span class="text-xs text-amber-700 dark:text-amber-300">{{ t('super.settings.database.migrateConfirm') }}</span>
+                  </label>
+                </div>
+
+                <button
+                  @click="migrateToNfs"
+                  :disabled="dbMigrating || !dbMigrateCluster || !dbMigrateConfirm"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="dbMigrating" class="w-4 h-4 animate-spin" />
+                  <ArrowRightLeft v-else class="w-4 h-4" />
+                  {{ dbMigrating ? t('super.settings.database.migrating') : t('super.settings.database.migrateToNfs') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Migrate to local (when NFS) -->
+            <div v-if="dbStatus.mode === 'nfs'" class="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.database.migrateToLocal') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ t('super.settings.database.migrateToLocalDesc') }}</p>
+
+              <div class="space-y-3">
+                <div class="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+                  <div class="w-full sm:w-auto sm:flex-1 max-w-sm">
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.settings.database.selectNode') }}</label>
+                    <select
+                      v-model="dbMigrateLocalNode"
+                      :disabled="dbMigrating"
+                      class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
+                    >
+                      <option value="" disabled>{{ t('super.settings.database.selectNode') }}...</option>
+                      <option v-for="node in dbStatus.managerNodes" :key="node.id" :value="node.hostname">
+                        {{ node.hostname }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Downtime warning + confirmation -->
+                <div v-if="dbMigrateLocalNode" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                  <div class="flex items-start gap-2">
+                    <AlertTriangle class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div class="text-xs text-amber-700 dark:text-amber-300 space-y-1">
+                      <p class="font-medium">{{ t('super.settings.database.migrateWarning') }}</p>
+                      <p>{{ t('super.settings.database.migrateWarningDesc') }}</p>
+                    </div>
+                  </div>
+                  <label class="flex items-center gap-2 mt-3 cursor-pointer">
+                    <input v-model="dbMigrateConfirm" type="checkbox" :disabled="dbMigrating" class="rounded border-gray-300 dark:border-gray-600" />
+                    <span class="text-xs text-amber-700 dark:text-amber-300">{{ t('super.settings.database.migrateConfirm') }}</span>
+                  </label>
+                </div>
+
+                <button
+                  @click="migrateToLocal"
+                  :disabled="dbMigrating || !dbMigrateLocalNode || !dbMigrateConfirm"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <Loader2 v-if="dbMigrating" class="w-4 h-4 animate-spin" />
+                  <ArrowRightLeft v-else class="w-4 h-4" />
+                  {{ dbMigrating ? t('super.settings.database.migrating') : t('super.settings.database.migrateToLocal') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Migration logs -->
+            <div v-if="dbMigrateLogs.length > 0" class="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.database.migrationLog') }}</h3>
+              <div class="bg-gray-900 rounded-lg p-4 max-h-64 overflow-y-auto font-mono text-xs text-gray-300">
+                <div v-for="(log, i) in dbMigrateLogs" :key="i" class="py-0.5" :class="{ 'text-red-400': log.startsWith('[error]'), 'text-green-400': log.startsWith('[recovery]'), 'text-blue-400': log.startsWith('[step]') }">{{ log }}</div>
+              </div>
+            </div>
+
+            <!-- Migration result -->
+            <div v-if="dbMigrateResult" class="mt-3 p-3 rounded-lg border" :class="dbMigrateResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+              <p class="text-sm" :class="dbMigrateResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
+                {{ dbMigrateResult.message }}
+              </p>
+            </div>
+
+            <!-- Refresh -->
+            <div class="pt-2 border-t border-gray-200 dark:border-gray-700">
+              <button
+                @click="fetchDatabaseStatus"
+                :disabled="dbLoading"
+                class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': dbLoading }" />
+                {{ t('super.settings.database.refresh') }}
+              </button>
+            </div>
+          </div>
+
+          <div v-else class="p-6">
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('super.settings.database.loadError') }}</p>
+          </div>
+        </div>
+
+        <!-- Environment Variables -->
+        <div v-if="activeSection === 'environment'" class="space-y-4">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <Variable class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.env.title') }}</h2>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    @click="envAddMode = !envAddMode; envError = ''; envSuccess = ''"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                  >
+                    <Plus class="w-3.5 h-3.5" />
+                    {{ t('super.settings.env.addVariable') }}
+                  </button>
+                  <button
+                    @click="restartServices"
+                    :disabled="envRestarting"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    <Loader2 v-if="envRestarting" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCw v-else class="w-3.5 h-3.5" />
+                    {{ t('super.settings.env.restartServices') }}
+                  </button>
+                </div>
+              </div>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.env.desc') }}</p>
+            </div>
+
+            <!-- Status messages -->
+            <div v-if="envError" class="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p class="text-sm text-red-700 dark:text-red-300">{{ envError }}</p>
+            </div>
+            <div v-if="envSuccess" class="mx-6 mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <p class="text-sm text-green-700 dark:text-green-300">{{ envSuccess }}</p>
+            </div>
+
+            <!-- Add new variable form -->
+            <div v-if="envAddMode" class="mx-6 mt-4 p-4 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg">
+              <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{{ t('super.settings.env.addVariable') }}</h3>
+              <div class="flex flex-col sm:flex-row gap-3">
+                <input
+                  v-model="envNewKey"
+                  type="text"
+                  :placeholder="t('super.settings.env.keyPlaceholder')"
+                  class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-48"
+                />
+                <input
+                  v-model="envNewValue"
+                  type="text"
+                  :placeholder="t('super.settings.env.valuePlaceholder')"
+                  class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <div class="flex gap-2">
+                  <button
+                    @click="addEnvVar"
+                    :disabled="envSaving || !envNewKey || !envNewValue"
+                    class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    <Loader2 v-if="envSaving" class="w-3.5 h-3.5 animate-spin" />
+                    <Save v-else class="w-3.5 h-3.5" />
+                    {{ t('super.settings.env.save') }}
+                  </button>
+                  <button
+                    @click="envAddMode = false; envNewKey = ''; envNewValue = ''"
+                    class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-gray-600 dark:text-gray-400 transition-colors"
+                  >
+                    {{ t('super.settings.env.cancel') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="envLoading" class="p-6 flex justify-center">
+              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            </div>
+
+            <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
+              <!-- Category tabs -->
+              <div class="px-6 py-3 flex flex-wrap gap-1.5">
+                <button
+                  v-for="cat in envCategories"
+                  :key="cat"
+                  @click="envActiveCategory = cat"
+                  :class="[
+                    'px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize',
+                    envActiveCategory === cat
+                      ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  ]"
+                >
+                  {{ cat === 'all' ? t('super.settings.env.allCategories') : cat }}
+                </button>
+              </div>
+
+              <!-- Variable list -->
+              <div v-for="v in filteredEnvVars" :key="v.key" class="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors">
+                <!-- View mode -->
+                <div v-if="envEditKey !== v.key" class="flex items-start gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-mono font-medium text-gray-900 dark:text-white">{{ v.key }}</span>
+                      <span v-if="v.restartRequired" class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">{{ t('super.settings.env.restart') }}</span>
+                      <span v-if="v.dangerous" class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">{{ t('super.settings.env.dangerous') }}</span>
+                      <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 capitalize">{{ v.category }}</span>
+                    </div>
+                    <p v-if="v.description" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ v.description }}</p>
+                    <div class="mt-1 flex items-center gap-1.5">
+                      <code class="text-xs font-mono text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded break-all">{{ v.value }}</code>
+                      <button v-if="v.secret" @click="toggleSecretVisibility(v.key)" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                        <EyeOff v-if="!envShowSecrets.has(v.key)" class="w-3.5 h-3.5" />
+                        <Eye v-else class="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      @click="startEdit(v)"
+                      class="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      :title="t('super.settings.env.edit')"
+                    >
+                      <Pencil class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      v-if="!v.dangerous"
+                      @click="deleteEnvVar(v.key)"
+                      :disabled="envSaving"
+                      class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      :title="t('super.settings.env.delete')"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Edit mode -->
+                <div v-else class="space-y-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-mono font-medium text-gray-900 dark:text-white">{{ v.key }}</span>
+                    <span v-if="v.dangerous" class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">{{ t('super.settings.env.dangerous') }}</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <input
+                      v-model="envEditValue"
+                      :type="v.secret ? 'password' : 'text'"
+                      :placeholder="v.secret ? t('super.settings.env.enterNewValue') : v.value"
+                      class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      @keyup.enter="saveEnvVar"
+                      @keyup.escape="cancelEdit"
+                    />
+                    <button
+                      @click="saveEnvVar"
+                      :disabled="envSaving || !envEditValue"
+                      class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                    >
+                      <Loader2 v-if="envSaving" class="w-3.5 h-3.5 animate-spin" />
+                      <Save v-else class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      @click="cancelEdit"
+                      class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-gray-600 dark:text-gray-400 transition-colors"
+                    >
+                      <X class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <label v-if="v.dangerous" class="flex items-center gap-2 cursor-pointer">
+                    <input v-model="envConfirmDangerous" type="checkbox" class="rounded border-gray-300 dark:border-gray-600" />
+                    <span class="text-xs text-red-600 dark:text-red-400">{{ t('super.settings.env.confirmDangerous') }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div v-if="filteredEnvVars.length === 0" class="px-6 py-8 text-center">
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('super.settings.env.noVars') }}</p>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <button
+                @click="fetchEnvironment"
+                :disabled="envLoading"
+                class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': envLoading }" />
+                {{ t('super.settings.env.refresh') }}
+              </button>
+              <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('super.settings.env.filePath') }}</p>
             </div>
           </div>
         </div>
