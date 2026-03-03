@@ -137,7 +137,16 @@ function formatDuration(ms: number | null | undefined) {
 async function fetchQueues() {
   try {
     const data = await api.get<any>('/admin/jobs/queues')
-    const incoming = data?.queues ?? data ?? []
+    const raw = data?.data ?? data?.queues ?? (Array.isArray(data) ? data : [])
+    // Flatten nested counts to top-level so the template can use queue.waiting, queue.active, etc.
+    const incoming = raw.map((q: any) => ({
+      ...q,
+      waiting: q.counts?.waiting ?? q.waiting ?? 0,
+      active: q.counts?.active ?? q.active ?? 0,
+      completed: q.counts?.completed ?? q.completed ?? 0,
+      failed: q.counts?.failed ?? q.failed ?? 0,
+      delayed: q.counts?.delayed ?? q.delayed ?? 0,
+    }))
     // Merge: update existing queue cards in-place, avoiding full re-render
     if (queues.value.length === 0) {
       queues.value = incoming

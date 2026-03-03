@@ -430,15 +430,19 @@ export class UpdateService {
   // ── Check for new releases ────────────────────────────────────
 
   async checkForUpdates(includePrerelease = false): Promise<UpdateNotification> {
-    this.state.status = 'checking';
-    this.appendLog('Checking for updates...');
+    // Don't overwrite completed/failed status — those need to stay until the user dismisses them.
+    // Only set 'checking' when we're in a neutral state.
+    const statusBefore = this.state.status;
+    if (statusBefore === 'idle') {
+      this.state.status = 'checking';
+    }
 
     try {
       const releases = await this.fetchGitHubReleases();
       const candidates = includePrerelease ? releases : releases.filter((r) => !r.prerelease);
 
       if (candidates.length === 0) {
-        this.state.status = 'idle';
+        if (statusBefore === 'idle') this.state.status = 'idle';
         this.cachedNotification = {
           available: false,
           current: this.state.currentVersion,
@@ -451,8 +455,7 @@ export class UpdateService {
       const latest = candidates[0]!;
       const isNewer = this.isNewerVersion(latest.tag, this.state.currentVersion);
 
-      this.state.status = 'idle';
-      this.appendLog(`Current: ${this.state.currentVersion}, Latest: ${latest.tag}, Update available: ${isNewer}`);
+      if (statusBefore === 'idle') this.state.status = 'idle';
 
       this.cachedNotification = {
         available: isNewer,
@@ -463,8 +466,7 @@ export class UpdateService {
 
       return this.cachedNotification;
     } catch (err) {
-      this.state.status = 'idle';
-      this.appendLog(`Failed to check for updates: ${errorToString(err)}`);
+      if (statusBefore === 'idle') this.state.status = 'idle';
       throw err;
     }
   }

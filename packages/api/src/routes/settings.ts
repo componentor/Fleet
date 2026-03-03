@@ -1621,12 +1621,11 @@ settings.get('/orchestrator/k3s-status', authMiddleware, requireAdmin as any, (a
 
 // POST /settings/orchestrator/install-k3s — install k3s server on the local node
 settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, (async (c: any) => {
-  const user = c.get('user') as AuthUser;
-  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
-
   const logs: string[] = [];
-
   try {
+    const user = c.get('user') as AuthUser;
+    if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
     // Step 1: Install k3s server
     logs.push('Installing k3s server...');
     const installResult = await orchestrator.runOnLocalHost(
@@ -1705,75 +1704,77 @@ settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, 
     return c.json({ success: true, logs, joinToken: joinToken || null, serverUrl: serverUrl || null });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : null;
     logs.push(`Error: ${message}`);
-    logToErrorTable({ level: 'error', message: `k3s install failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'orchestrator', operation: 'install-k3s' } });
+    logger.error({ err, logs }, 'k3s install failed');
+    logToErrorTable({ level: 'error', message: `k3s install failed: ${message}`, stack: stack ?? null, metadata: { context: 'orchestrator', operation: 'install-k3s', logs } });
     return c.json({ success: false, logs, error: message }, 500);
   }
 }) as any);
 
 // POST /settings/orchestrator/install-k3s-agents — install k3s agent on all worker nodes
 settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin as any, (async (c: any) => {
-  const user = c.get('user') as AuthUser;
-  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+  try {
+    const user = c.get('user') as AuthUser;
+    if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  // Read join token and server URL — try DB first, then env vars, then host file
-  let joinToken = '';
-  let serverUrl = '';
+    // Read join token and server URL — try DB first, then env vars, then host file
+    let joinToken = '';
+    let serverUrl = '';
 
-  const tokenRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:joinToken') });
-  if (tokenRow?.value) {
-    try { joinToken = decrypt(tokenRow.value as string); } catch { joinToken = tokenRow.value as string; }
-  }
-  const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
-  if (urlRow?.value) serverUrl = urlRow.value as string;
+    const tokenRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:joinToken') });
+    if (tokenRow?.value) {
+      try { joinToken = decrypt(tokenRow.value as string); } catch { joinToken = tokenRow.value as string; }
+    }
+    const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
+    if (urlRow?.value) serverUrl = urlRow.value as string;
 
-  // Fallback: check env vars (set by install.sh via env_file)
-  if (!joinToken && process.env['K3S_TOKEN']) joinToken = process.env['K3S_TOKEN'];
-  if (!serverUrl && process.env['K3S_URL']) serverUrl = process.env['K3S_URL'];
+    // Fallback: check env vars (set by install.sh via env_file)
+    if (!joinToken && process.env['K3S_TOKEN']) joinToken = process.env['K3S_TOKEN'];
+    if (!serverUrl && process.env['K3S_URL']) serverUrl = process.env['K3S_URL'];
 
-  // Fallback: try reading from host file via each available orchestrator backend
-  if (!joinToken || !serverUrl) {
-    const backends: OrchestratorType[] = ['swarm', 'kubernetes'];
-    for (const backend of backends) {
-      if (joinToken && serverUrl) break;
-      try {
-        const orch = getOrchestrator(backend);
-        if (!orch) continue;
+    // Fallback: try reading from host file via each available orchestrator backend
+    if (!joinToken || !serverUrl) {
+      const backends: OrchestratorType[] = ['swarm', 'kubernetes'];
+      for (const backend of backends) {
+        if (joinToken && serverUrl) break;
+        try {
+          const orch = getOrchestrator(backend);
+          if (!orch) continue;
 
-        if (!joinToken) {
-          const tokenResult = await orch.runOnLocalHost('cat /var/lib/rancher/k3s/server/node-token 2>/dev/null', { timeoutMs: 10000 });
-          const t = (tokenResult.stdout ?? '').trim();
-          if (t) joinToken = t;
+          if (!joinToken) {
+            const tokenResult = await orch.runOnLocalHost('cat /var/lib/rancher/k3s/server/node-token 2>/dev/null', { timeoutMs: 10000 });
+            const t = (tokenResult.stdout ?? '').trim();
+            if (t) joinToken = t;
+          }
+
+          if (!serverUrl) {
+            const ipResult = await orch.runOnLocalHost("ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'", { timeoutMs: 10000 });
+            const ip = (ipResult.stdout ?? '').trim();
+            if (ip) serverUrl = `https://${ip}:6443`;
+          }
+        } catch {
+          // This backend can't run host commands — try the next one
         }
-
-        if (!serverUrl) {
-          const ipResult = await orch.runOnLocalHost("ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'", { timeoutMs: 10000 });
-          const ip = (ipResult.stdout ?? '').trim();
-          if (ip) serverUrl = `https://${ip}:6443`;
-        }
-      } catch {
-        // This backend can't run host commands — try the next one
       }
     }
-  }
 
-  // Persist discovered token/URL to DB for future requests
-  if (joinToken && !tokenRow?.value) {
-    await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
-      .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
-      .catch(() => {});
-  }
-  if (serverUrl && !urlRow?.value) {
-    await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
-      .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
-      .catch(() => {});
-  }
+    // Persist discovered token/URL to DB for future requests
+    if (joinToken && !tokenRow?.value) {
+      await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+        .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
+        .catch(() => {});
+    }
+    if (serverUrl && !urlRow?.value) {
+      await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+        .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
+        .catch(() => {});
+    }
 
-  if (!joinToken || !serverUrl) {
-    return c.json({ error: 'k3s join token or server URL not available. Install k3s server first.' }, 400);
-  }
+    if (!joinToken || !serverUrl) {
+      return c.json({ error: 'k3s join token or server URL not available. Install k3s server first.' }, 400);
+    }
 
-  try {
     const escapedToken = joinToken.replace(/'/g, "'\\''");
     const escapedUrl = serverUrl.replace(/'/g, "'\\''");
 
@@ -1786,6 +1787,7 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err }, 'k3s agent install failed');
     logToErrorTable({ level: 'error', message: `k3s agent install failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'orchestrator', operation: 'install-k3s-agents' } });
     return c.json({ success: false, error: message }, 500);
   }
@@ -2928,7 +2930,7 @@ const envUpdateRoute = createRoute({
   request: {
     body: jsonBody(z.object({
       updates: z.array(z.object({
-        key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'Invalid variable name'),
+        key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]*$/, 'Invalid variable name'),
         value: z.string(),
       })).max(50),
       restartServices: z.boolean().default(false),
