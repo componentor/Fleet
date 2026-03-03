@@ -342,7 +342,7 @@ function changeLocale(newLocale: string) {
         </button>
 
         <!-- Account switcher -->
-        <div class="relative">
+        <div class="relative lg:ml-2">
           <button
             @click="accountMenuOpen = !accountMenuOpen"
             class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 transition-colors max-w-[120px] sm:max-w-[240px]"

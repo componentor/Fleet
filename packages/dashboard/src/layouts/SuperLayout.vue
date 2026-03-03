@@ -278,7 +278,7 @@ function changeLocale(newLocale: string) {
 
       <!-- Version badge -->
       <div v-if="versionInfo" :class="['border-t border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'px-1.5 py-2' : 'px-4 py-2']">
-        <SidebarTooltip :label="versionInfo.updateAvailable ? `v${versionInfo.latest} available` : `v${versionInfo.current}`" :show="collapsed">
+        <SidebarTooltip :label="versionInfo.updateAvailable ? `${versionInfo.latest} available` : versionInfo.current" :show="collapsed">
           <RouterLink
             to="/admin/updates"
             :class="[
@@ -290,9 +290,11 @@ function changeLocale(newLocale: string) {
             ]"
           >
             <ArrowUpCircle v-if="versionInfo.updateAvailable" class="w-3.5 h-3.5 shrink-0" />
-            <span v-if="collapsed" class="font-mono text-[10px] leading-tight truncate">{{ versionInfo.current }}</span>
+            <template v-if="collapsed">
+              <span v-if="!versionInfo.updateAvailable" class="font-mono text-[10px] leading-tight truncate">{{ versionInfo.current }}</span>
+            </template>
             <template v-else>
-              <span class="font-mono">v{{ versionInfo.current }}</span>
+              <span class="font-mono">{{ versionInfo.current }}</span>
               <span v-if="versionInfo.updateAvailable" class="font-medium ml-auto">{{ versionInfo.latest }} available</span>
             </template>
           </RouterLink>

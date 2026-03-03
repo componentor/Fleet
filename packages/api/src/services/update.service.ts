@@ -176,6 +176,7 @@ export class UpdateService {
     this.fencingToken = 0;
 
     this.events.emit('update', this.state);
+    await this.clearBroadcast();
     logger.warn({ previousStatus }, 'Update state force-reset by admin');
 
     return { previousStatus };
@@ -185,6 +186,8 @@ export class UpdateService {
   private events = new EventEmitter();
   private checkTimer: ReturnType<typeof setInterval> | null = null;
   private updateAbort: AbortController | null = null;
+  private broadcastTimer: ReturnType<typeof setTimeout> | null = null;
+  static readonly VALKEY_STATE_KEY = 'fleet:update-state';
 
   /** Cached notification for the dashboard to poll without hitting GitHub */
   private cachedNotification: UpdateNotification = {
@@ -329,6 +332,8 @@ export class UpdateService {
       this.state.preUpdateBackupId = persisted.preUpdateBackupId;
       // Restore previous image tags so rollback button works after container restart
       this.state.previousImageTags = new Map(Object.entries(persisted.previousImageTags ?? {}));
+      // Restore fencing token so releaseUpdateLock() can match it
+      this.fencingToken = persisted.fencingToken ?? 0;
       // Set notification to definitive "not available" — we just completed or failed an update.
       // This prevents stale Valkey caches from making us show "update available" for the
       // version we just installed.
@@ -385,6 +390,7 @@ export class UpdateService {
         'Manual inspection required. If the database is corrupted, restore from backup: ' +
         (persisted.preUpdateBackupId ?? 'no backup available'),
       );
+      this.fencingToken = persisted.fencingToken ?? 0;
       await this.clearPersistedState();
       await this.releaseUpdateLock();
       return;
@@ -1036,6 +1042,8 @@ export class UpdateService {
         platformSettings.key,
         { value: persisted, updatedAt: new Date() },
       );
+      // Immediately broadcast to Valkey so all replicas see the latest state
+      await this.flushBroadcast();
     } catch (err) {
       logger.error({ err }, 'Failed to persist update state');
     }
@@ -1050,6 +1058,7 @@ export class UpdateService {
         platformSettings.key,
         { value: {}, updatedAt: new Date() },
       );
+      await this.clearBroadcast();
     } catch (err) {
       logger.error({ err }, 'Failed to clear persisted update state');
     }
@@ -1106,6 +1115,72 @@ export class UpdateService {
     const ts = new Date().toISOString();
     this.state.log += `[${ts}] ${msg}\n`;
     this.events.emit('update', this.state);
+    this.scheduleBroadcast();
+  }
+
+  /**
+   * Broadcast current state to Valkey so all API replicas can serve consistent
+   * real-time update status. Debounced to max once per 500ms during rapid log
+   * appends; called immediately (flush) on status transitions and persistState.
+   */
+  private scheduleBroadcast(): void {
+    if (this.broadcastTimer) return; // already scheduled
+    this.broadcastTimer = setTimeout(() => {
+      this.broadcastTimer = null;
+      void this.broadcastStateToValkey();
+    }, 500);
+  }
+
+  private async broadcastStateToValkey(): Promise<void> {
+    try {
+      const valkey = await getValkey();
+      if (!valkey) return;
+
+      const snapshot = this.getState();
+      // TTL 120s — auto-expires if the update process crashes without cleanup
+      await valkey.set(
+        UpdateService.VALKEY_STATE_KEY,
+        JSON.stringify(snapshot),
+        'EX', 120,
+      );
+    } catch { /* non-critical — DB-persisted state is the fallback */ }
+  }
+
+  /** Flush any pending broadcast immediately (call on status transitions). */
+  private async flushBroadcast(): Promise<void> {
+    if (this.broadcastTimer) {
+      clearTimeout(this.broadcastTimer);
+      this.broadcastTimer = null;
+    }
+    await this.broadcastStateToValkey();
+  }
+
+  /** Clear the Valkey broadcast key (call on reset/idle). */
+  private async clearBroadcast(): Promise<void> {
+    if (this.broadcastTimer) {
+      clearTimeout(this.broadcastTimer);
+      this.broadcastTimer = null;
+    }
+    try {
+      const valkey = await getValkey();
+      if (valkey) await valkey.del(UpdateService.VALKEY_STATE_KEY);
+    } catch { /* non-critical */ }
+  }
+
+  /**
+   * Load the latest update state from Valkey (broadcast by whichever replica
+   * is running the update). Returns null if no broadcast exists.
+   */
+  static async loadBroadcastState(): Promise<ReturnType<UpdateService['getState']> | null> {
+    try {
+      const valkey = await getValkey();
+      if (!valkey) return null;
+      const raw = await valkey.get(UpdateService.VALKEY_STATE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 
   private async refreshNotification(): Promise<void> {
