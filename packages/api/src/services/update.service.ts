@@ -610,13 +610,13 @@ export class UpdateService {
         }
       }
 
-      // 3.5. Reconcile infrastructure: download new stack files and re-deploy
-      // This applies docker-stack.yml config changes (Traefik labels, network, ports, env vars)
-      // that the rolling image update doesn't cover. Runs AFTER backup/snapshot
-      // because `docker stack deploy` restarts services (including postgres).
+      // 3.5. Prepare infrastructure files: download new stack/traefik files and update env.
+      // The actual `docker stack deploy` is deferred to AFTER the fleet_api update
+      // to prevent restarting the API replica that's orchestrating this update.
       if (signal.aborted) throw new Error('Update aborted by admin');
-      this.appendLog('Reconciling infrastructure...');
-      await this.reconcileInfrastructure(imageTag);
+      this.appendLog('Preparing infrastructure files...');
+      await this.prepareInfrastructureFiles(imageTag);
+      await this.persistState();
 
       // 4. Fetch release checksums from the release body
       this.appendLog('Fetching release checksums...');
@@ -759,7 +759,20 @@ export class UpdateService {
         }
       } catch { /* non-critical */ }
 
-      // 10. Update fleet_api LAST. This will trigger a rolling restart that kills
+      // 10. Apply infrastructure: run `docker stack deploy` with the new stack files
+      //     that were downloaded in step 3.5. This is safe now because all non-API
+      //     services are updated and 'completed' is persisted. If stack deploy
+      //     restarts the API, the new container will see 'completed' state.
+      this.appendLog('Applying infrastructure changes (docker stack deploy)...');
+      try {
+        await this.applyStackDeploy();
+      } catch (err) {
+        // Non-fatal: services are already updated, stack config changes
+        // will be applied on next deploy or update.
+        this.appendLog(`Warning: Stack deploy failed (non-fatal): ${errorToString(err)}`);
+      }
+
+      // 11. Update fleet_api LAST. This will trigger a rolling restart that kills
       //     this container. We do NOT wait for convergence — Docker handles it.
       //     The new container starts with 'completed' state already persisted.
       this.appendLog(`Updating fleet_api to ${imageTag} — API will restart...`);
@@ -1494,18 +1507,15 @@ export class UpdateService {
   }
 
   /**
-   * Reconcile infrastructure: download new stack files from the release,
-   * update env file with new config, and re-deploy the stack.
-   * This handles changes to docker-stack.yml (Traefik labels, network config,
-   * port changes, new env vars) that the rolling image update doesn't cover.
+   * Phase 1 of infrastructure reconciliation: download new stack files from the
+   * release, update env config, create directories. This is SAFE — it only
+   * writes files on disk and never restarts any services.
    *
-   * Uses `docker stack deploy` which is idempotent — it only changes
-   * services whose config has actually changed.
-   * The FLEET_VERSION in env is kept at the OLD value so images don't change
-   * (the rolling update handles image changes separately).
+   * The dangerous `docker stack deploy` is deferred to applyStackDeploy()
+   * which runs AFTER the update is marked completed, so an API restart
+   * won't orphan the update process.
    */
-  private async reconcileInfrastructure(targetTag: string): Promise<void> {
-    this.appendLog('Reconciling infrastructure (stack files, env config)...');
+  private async prepareInfrastructureFiles(targetTag: string): Promise<void> {
     const token = process.env['GITHUB_TOKEN'] ?? '';
     const repo = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 
@@ -1518,10 +1528,10 @@ export class UpdateService {
           `grep -q '^PLATFORM_DOMAIN=' /opt/fleet/config/env && sed -i "s|^PLATFORM_DOMAIN=.*|PLATFORM_DOMAIN=${dbDomain}|" /opt/fleet/config/env || echo "PLATFORM_DOMAIN=${dbDomain}" >> /opt/fleet/config/env`,
           { timeoutMs: 10_000 },
         );
-        this.appendLog(`Synced PLATFORM_DOMAIN=${dbDomain} from DB to env file`);
+        this.appendLog(`  Synced PLATFORM_DOMAIN=${dbDomain} from DB to env file`);
       }
     } catch (err) {
-      this.appendLog(`WARN: Could not sync platform domain to env: ${err}`);
+      this.appendLog(`  WARN: Could not sync platform domain to env: ${err}`);
     }
 
     // Use the tag as-is for the raw GitHub URL (could be "1.2.3" or "v1.2.3")
@@ -1530,7 +1540,7 @@ export class UpdateService {
 
     const authCurl = token ? `-H "Authorization: token ${token}"` : '';
 
-    // Build the shell script that runs on the host
+    // Build the shell script — file operations only, NO docker stack deploy
     const script = `
 set -e
 
@@ -1555,7 +1565,7 @@ for TAG in ${versions.join(' ')}; do
 done
 
 if [ "\${DOWNLOADED}" != "true" ]; then
-  echo "WARN: Could not download stack files — skipping infrastructure reconciliation"
+  echo "WARN: Could not download stack files — skipping infrastructure prep"
   exit 0
 fi
 
@@ -1565,7 +1575,6 @@ mv "\${STACK_FILE}.new" "\${STACK_FILE}"
 if [ -f "\${TRAEFIK_DIR}/traefik.yml.new" ]; then
   cp "\${TRAEFIK_DIR}/traefik.yml" "\${TRAEFIK_DIR}/traefik.yml.bak" 2>/dev/null || true
   mv "\${TRAEFIK_DIR}/traefik.yml.new" "\${TRAEFIK_DIR}/traefik.yml"
-  # Substitute ACME email in Traefik config
   ACME_EMAIL=\$(grep '^ADMIN_EMAIL=' "\${ENV_FILE}" | cut -d= -f2)
   sed -i "s|\\\${ACME_EMAIL}|\${ACME_EMAIL}|g" "\${TRAEFIK_DIR}/traefik.yml"
 fi
@@ -1585,11 +1594,43 @@ if ! grep -q '^REGISTRY_HTTP_SECRET=' "\${ENV_FILE}"; then
 fi
 
 # 5. Ensure required bind-mount directories exist on the local node
-# (These may be new in the updated stack file and not yet created on existing installs)
 mkdir -p "\${FLEET_DIR}/nfs-exports/uploads"
 mkdir -p "\${FLEET_DIR}/traefik"
 
-# 6. Re-deploy the stack to apply config changes
+echo "Infrastructure files prepared successfully"
+`;
+
+    try {
+      const result = await orchestrator.runOnLocalHost(script, { timeoutMs: 60_000 });
+      for (const line of result.stdout.split('\n').filter(Boolean)) {
+        this.appendLog(`  [infra] ${line}`);
+      }
+    } catch (err) {
+      // Non-fatal — the update can still proceed.
+      this.appendLog(`  [infra] WARNING: Infrastructure file prep failed: ${errorToString(err)}`);
+    }
+  }
+
+  /**
+   * Phase 2 of infrastructure reconciliation: run `docker stack deploy` to
+   * apply config changes from the new stack file. This is the DANGEROUS step
+   * that can restart services (including fleet_api).
+   *
+   * Called AFTER 'completed' is persisted and fleet_api is updated, so even
+   * if this restarts the API, the new container sees 'completed' state.
+   */
+  private async applyStackDeploy(): Promise<void> {
+    const script = `
+set -e
+
+FLEET_DIR="/opt/fleet"
+ENV_FILE="\${FLEET_DIR}/config/env"
+
+if [ ! -f "\${FLEET_DIR}/docker-stack.yml" ]; then
+  echo "No stack file found — skipping stack deploy"
+  exit 0
+fi
+
 # Source env for variable substitution
 set -a
 . "\${ENV_FILE}"
@@ -1602,7 +1643,6 @@ export VALKEY_PASSWORD
 cd "\${FLEET_DIR}"
 
 # Ensure required bind-mount directories exist on ALL Swarm nodes before deploying
-# (prevents "bind source path does not exist" errors during rolling updates)
 docker service create --name fleet-pre-deploy-dirs --mode global --restart-condition none \
   --mount type=bind,source=/,target=/host \
   alpine sh -c 'mkdir -p /host/opt/fleet/nfs-exports/uploads && echo done' 2>/dev/null || true
@@ -1610,20 +1650,17 @@ sleep 5
 docker service rm fleet-pre-deploy-dirs 2>/dev/null || true
 
 docker stack deploy -c docker-stack.yml --with-registry-auth fleet 2>&1 || echo "WARN: stack deploy had errors (non-fatal)"
-echo "Infrastructure reconciliation complete"
+echo "Stack deploy complete"
 `;
 
     try {
-      const result = await orchestrator.runOnLocalHost(script, { timeoutMs: 120000 });
+      const result = await orchestrator.runOnLocalHost(script, { timeoutMs: 120_000 });
       for (const line of result.stdout.split('\n').filter(Boolean)) {
         this.appendLog(`  [infra] ${line}`);
       }
     } catch (err) {
-      // Non-fatal — the update can still proceed even if infra reconciliation fails.
-      // The new code will work, just some stack config changes won't be applied until
-      // the admin manually re-deploys or the next update.
-      this.appendLog(`  [infra] WARNING: Infrastructure reconciliation failed: ${errorToString(err)}`);
-      this.appendLog('  [infra] Stack config changes may not be fully applied. Check Settings > Registry for health.');
+      this.appendLog(`  [infra] WARNING: Stack deploy failed: ${errorToString(err)}`);
+      this.appendLog('  [infra] Config changes may not be fully applied. Re-deploy via Settings or next update.');
     }
   }
 

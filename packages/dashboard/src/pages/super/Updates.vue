@@ -75,20 +75,22 @@ function cancelConfirm() {
   confirmCallback = null
 }
 
-// Progress stepper
+// Progress stepper — order MUST match the backend execution order in update.service.ts
 const PROGRESS_STEPS = [
   { key: 'starting', label: 'updates.stepStarting' },
+  { key: 'migrating', label: 'updates.stepMigrate' },
   { key: 'backing-up', label: 'updates.stepBackup' },
   { key: 'pulling', label: 'updates.stepSnapshot' },
   { key: 'verifying-images', label: 'updates.stepVerifyImages' },
-  { key: 'migrating', label: 'updates.stepMigrate' },
   { key: 'updating', label: 'updates.stepUpdate' },
   { key: 'seeding', label: 'updates.stepSeed' },
   { key: 'verifying', label: 'updates.stepVerify' },
 ]
 
 const currentStepIndex = computed(() => {
-  const status = updateState.value?.status
+  let status = updateState.value?.status
+  // 'checking' is the lock-acquisition phase — map it to 'starting' for the stepper
+  if (status === 'checking') status = 'starting'
   if (status === 'completed') return PROGRESS_STEPS.length
   if (status === 'rolling-back' || status === 'failed') return -1
   return PROGRESS_STEPS.findIndex(s => s.key === status)
