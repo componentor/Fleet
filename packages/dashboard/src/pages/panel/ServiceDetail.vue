@@ -440,6 +440,13 @@ function insertDockerfileTemplate() {
 
 async function rebuildService() {
   if (!confirm('Rebuild the service with the current Dockerfile?')) return
+
+  // Optimistic update
+  if (service.value) {
+    service.value = { ...service.value, status: 'deploying' }
+  }
+  activeTab.value = 'overview'
+
   try {
     let result: any
     if (service.value?.sourceType === 'upload') {
@@ -449,15 +456,15 @@ async function rebuildService() {
     }
     toast.success('Rebuild triggered')
     await refreshService()
-    // Auto-start deployment tracking and deploy stream
-    startDeploymentPolling()
     const newDeploymentId = result?.deploymentId
     if (newDeploymentId) {
-      latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
+      latestDeployment.value = { id: newDeploymentId, status: 'building', log: '', progressStep: 'queued' }
       deployStream.start(newDeploymentId)
     }
+    startDeploymentPolling()
   } catch (err: any) {
     toast.error(err?.body?.error || 'Failed to trigger rebuild')
+    await refreshService()
   }
 }
 
@@ -808,19 +815,29 @@ async function restartService() {
 
 async function redeployService() {
   actionLoading.value = 'redeploy'
+
+  // Optimistic update: immediately show deploying state and switch to overview
+  // so the progress stepper is visible before the API responds
+  const hasBuildSource = service.value?.sourceType === 'github' || service.value?.sourceType === 'upload'
+  if (service.value) {
+    service.value = { ...service.value, status: 'deploying' }
+  }
+  if (hasBuildSource) {
+    activeTab.value = 'overview'
+  }
+
   try {
     const result: any = await api.post(`/services/${serviceId}/redeploy`, {})
     await refreshService()
     // For image-only redeploys, the deployment completes immediately (no build step).
     // Only start deploy stream for services with a build source (github/upload).
-    const hasBuildSource = service.value?.sourceType === 'github' || service.value?.sourceType === 'upload'
     if (hasBuildSource) {
-      startDeploymentPolling()
       const newDeploymentId = result?.deploymentId
       if (newDeploymentId) {
-        latestDeployment.value = { id: newDeploymentId, status: 'building', log: '' }
+        latestDeployment.value = { id: newDeploymentId, status: 'building', log: '', progressStep: 'queued' }
         deployStream.start(newDeploymentId)
       }
+      startDeploymentPolling()
     }
     // Always start status polling to track Docker task state transitions
     if (service.value?.status === 'deploying') {
@@ -828,6 +845,8 @@ async function redeployService() {
     }
   } catch {
     toast.error(t('service.redeployFailed', 'Failed to redeploy service'))
+    // Revert optimistic update on failure
+    await refreshService()
   } finally {
     actionLoading.value = ''
   }
@@ -1301,13 +1320,14 @@ onUnmounted(() => {
             Cancel Deploy
           </button>
           <button
-            v-if="service.status !== 'stopped'"
+            v-if="service.status !== 'stopped' && service.status !== 'deploying'"
             @click="redeployService"
             :disabled="!!actionLoading"
             class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
           >
-            <Play class="w-4 h-4" />
-            Redeploy
+            <Loader2 v-if="actionLoading === 'redeploy'" class="w-4 h-4 animate-spin" />
+            <Play v-else class="w-4 h-4" />
+            {{ actionLoading === 'redeploy' ? 'Deploying...' : 'Redeploy' }}
           </button>
           <button
             v-if="service.status !== 'stopped'"
@@ -1335,6 +1355,19 @@ onUnmounted(() => {
             <Trash2 class="w-4 h-4" />
             Delete
           </button>
+        </div>
+      </div>
+
+      <!-- Deploying banner (always visible regardless of tab) -->
+      <div
+        v-if="service.status === 'deploying' && activeTab !== 'overview'"
+        class="mb-4 flex items-center gap-3 rounded-xl border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 px-4 py-3 cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
+        @click="activeTab = 'overview'"
+      >
+        <Loader2 class="w-5 h-5 text-primary-600 dark:text-primary-400 animate-spin shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-primary-800 dark:text-primary-200">Deployment in progress</p>
+          <p class="text-xs text-primary-600 dark:text-primary-400">Click to view progress</p>
         </div>
       </div>
 
@@ -1366,13 +1399,6 @@ onUnmounted(() => {
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Status</p>
               <p class="text-lg font-bold text-gray-900 dark:text-white capitalize">{{ service.status }}</p>
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Replicas</p>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">
-                <template v-if="dockerStatus">{{ dockerStatus.runningTasks }}/{{ dockerStatus.desiredTasks }}</template>
-                <template v-else>{{ service.replicas ?? 1 }}</template>
-              </p>
-            </div>
             <a
               v-if="service.domain"
               :href="`${service.sslEnabled ? 'https' : 'http'}://${service.domain}`"
@@ -1386,6 +1412,13 @@ onUnmounted(() => {
             <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Domain</p>
               <p class="text-lg font-bold text-gray-900 dark:text-white">None</p>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Replicas</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white">
+                <template v-if="dockerStatus">{{ dockerStatus.runningTasks }}/{{ dockerStatus.desiredTasks }}</template>
+                <template v-else>{{ service.replicas ?? 1 }}</template>
+              </p>
             </div>
             <div v-if="service.region" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Region</p>
@@ -1732,6 +1765,42 @@ onUnmounted(() => {
                       <span class="text-gray-500 dark:text-gray-400">Disk W:</span>
                       <span class="ml-1 text-gray-700 dark:text-gray-300 font-medium">{{ formatSize(ctr.blockWriteBytes) }}</span>
                     </div>
+                  </div>
+                </div>
+
+                <!-- Volumes -->
+                <div v-if="(service.volumes as any[])?.length" class="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 space-y-3">
+                  <div class="flex items-center gap-1.5">
+                    <HardDrive class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Volumes</span>
+                  </div>
+                  <div v-for="vol in (service.volumes as any[])" :key="vol.source" class="space-y-1">
+                    <template v-if="volumeManager.accountVolumes.value.find(v => v.name === vol.source)">
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-500 dark:text-gray-400 font-mono truncate">{{ vol.source }}</span>
+                        <span class="font-medium text-gray-700 dark:text-gray-300 shrink-0 ml-2">
+                          {{ (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.usedGb ?? 0).toFixed(1) }} / {{ volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb ?? 0 }} GB
+                        </span>
+                      </div>
+                      <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          :class="['h-full rounded-full transition-all',
+                            ((volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.usedGb ?? 0) / (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb || 1)) < 0.7 ? 'bg-blue-500' :
+                            ((volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.usedGb ?? 0) / (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb || 1)) < 0.9 ? 'bg-yellow-500' : 'bg-red-500']"
+                          :style="{ width: (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb ?? 0) > 0 ? `${Math.min(100, ((volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.usedGb ?? 0) / (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.sizeGb ?? 1)) * 100)}%` : '0%' }"
+                        />
+                      </div>
+                      <div class="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500">
+                        <span>{{ vol.target }}</span>
+                        <span>{{ (volumeManager.accountVolumes.value.find(v => v.name === vol.source)?.availableGb ?? 0).toFixed(1) }} GB free</span>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-500 dark:text-gray-400 font-mono truncate">{{ vol.source }}</span>
+                        <span class="text-gray-400 dark:text-gray-500 text-[10px]">{{ vol.target }}</span>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </div>
