@@ -732,12 +732,32 @@ export class KubernetesService implements OrchestratorService {
     containerId: string,
     opts?: { tail?: number; since?: number; follow?: boolean; timestamps?: boolean },
   ): Promise<Buffer | NodeJS.ReadableStream> {
-    // In Kubernetes, "containerId" is used as a pod name
-    // Try to read logs from the pod directly
-    const namespace = 'default';
+    // containerId from getServiceTasks is formatted as "namespace/podName"
+    let namespace = 'default';
+    let podName = containerId;
+    if (containerId.includes('/')) {
+      const parts = containerId.split('/');
+      namespace = parts[0]!;
+      podName = parts[1]!;
+    }
+
+    if (opts?.follow) {
+      const output = new PassThrough();
+      const pod = await this.coreApi.readNamespacedPod({ name: podName, namespace });
+      const containerName = pod.spec?.containers?.[0]?.name;
+      if (containerName) {
+        this.k8sLog.log(namespace, podName, containerName, output, {
+          follow: true,
+          tailLines: opts?.tail ?? 100,
+          timestamps: opts?.timestamps ?? true,
+        }).catch(() => {});
+      }
+      return output;
+    }
+
     try {
       const log = await this.coreApi.readNamespacedPodLog(
-        { name: containerId, namespace, tailLines: opts?.tail ?? 100, timestamps: opts?.timestamps ?? true },
+        { name: podName, namespace, tailLines: opts?.tail ?? 100, timestamps: opts?.timestamps ?? true },
       );
       return Buffer.from(typeof log === 'string' ? log : String(log));
     } catch {

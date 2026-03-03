@@ -1154,7 +1154,13 @@ adminRoutes.openapi(autoTranslateRoute, (async (c: any) => {
 
 // ── Platform Logs (Docker container logs for fleet infrastructure) ──
 
+// Docker Swarm uses underscores; Kubernetes uses hyphens
 const ALLOWED_FLEET_SERVICES = ['fleet_api', 'fleet_dashboard', 'fleet_traefik'] as const;
+const K8S_SERVICE_NAMES: Record<string, string> = {
+  fleet_api: 'fleet-api',
+  fleet_dashboard: 'fleet-dashboard',
+  fleet_traefik: 'fleet-traefik',
+};
 
 const platformLogsQuerySchema = z.object({
   service: z.string().optional().openapi({ description: 'Docker service name (default: fleet_api)' }),
@@ -1223,18 +1229,26 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
       if (filtered) await stream.write(filtered.endsWith('\n') ? filtered : filtered + '\n');
     };
 
+    const isK8s = getDefaultOrchestratorType() === 'kubernetes';
+
     try {
-      // Find the Docker service by name
+      // Find the service by name — try both Docker Swarm and Kubernetes naming
+      const namesToTry = [serviceName];
+      const k8sName = K8S_SERVICE_NAMES[serviceName];
+      if (k8sName) namesToTry.push(k8sName);
+
       const allServices = await Promise.race([
-        orchestrator.listServices({ name: [serviceName] }),
+        orchestrator.listServices({ name: namesToTry }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out listing Docker services')), FETCH_TIMEOUT_MS),
+          setTimeout(() => reject(new Error('Timed out listing services')), FETCH_TIMEOUT_MS),
         ),
       ]);
-      const svc = allServices.find((s: any) => s.Spec?.Name === serviceName);
+      const svc = allServices.find((s: any) =>
+        namesToTry.includes(s.Spec?.Name),
+      );
 
       if (!svc) {
-        await stream.write(`Service "${serviceName}" not found in Docker Swarm.\n`);
+        await stream.write(`Service "${serviceName}" not found.\n`);
         return;
       }
 
@@ -1273,11 +1287,17 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
       }
 
       if (Buffer.isBuffer(result)) {
-        // Entire log returned as a buffer — demux and write at once
-        const { text, rest } = demux(result);
-        await filterAndWrite(text || rest.toString('utf-8'));
+        // Entire log returned as a buffer
+        if (isK8s) {
+          // Kubernetes returns plain text — no Docker frame headers
+          await filterAndWrite(result.toString('utf-8'));
+        } else {
+          // Docker multiplexed format — demux and write
+          const { text, rest } = demux(result);
+          await filterAndWrite(text || rest.toString('utf-8'));
+        }
       } else {
-        // Dockerode returned a stream — pipe through demuxer in real time.
+        // Stream response — pipe through in real time.
         // Use event listeners (not `for await`) to avoid hanging on streams
         // that never signal completion.
         await new Promise<void>((resolve) => {
@@ -1292,14 +1312,19 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
 
           dockerStream.on('data', (chunk: Buffer | string) => {
             const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            pending = Buffer.concat([pending, buf]) as Buffer;
-            const { text, rest } = demux(pending);
-            pending = rest;
-            if (text) filterAndWrite(text).catch(() => {});
+            if (isK8s) {
+              // K8s streams are plain text
+              filterAndWrite(buf.toString('utf-8')).catch(() => {});
+            } else {
+              pending = Buffer.concat([pending, buf]) as Buffer;
+              const { text, rest } = demux(pending);
+              pending = rest;
+              if (text) filterAndWrite(text).catch(() => {});
+            }
           });
 
           dockerStream.on('end', async () => {
-            if (pending.length > 0) {
+            if (!isK8s && pending.length > 0) {
               await filterAndWrite(pending.toString('utf-8')).catch(() => {});
             }
             finish();
@@ -1311,7 +1336,7 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
       }
     } catch (err: any) {
       const msg = err?.statusCode === 404 || err?.reason === 'no such service'
-        ? `Docker service "${serviceName}" not found.`
+        ? `Service "${serviceName}" not found.`
         : `Failed to fetch logs: ${err.message || 'unknown error'}`;
       logger.error({ err, serviceName }, 'Platform log fetch failed');
       await stream.write(`[Error] ${msg}\n`).catch(() => {});
