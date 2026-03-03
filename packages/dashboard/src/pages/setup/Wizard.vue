@@ -5,7 +5,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/auth'
 import {
   Sun, Moon, UserPlus, Globe, CheckCircle2, ArrowRight, ArrowLeft,
-  Loader2, Shield, Crown, Network, Container, AlertTriangle, RefreshCw,
+  Loader2, Shield, Crown, Network, Container, AlertTriangle, RefreshCw, Ship,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -14,9 +14,12 @@ const router = useRouter()
 const authStore = useAuthStore()
 const { theme, toggle } = useTheme()
 
-// Step 0 = choose mode, 1 = Docker/Swarm, 2 = Admin Account, 3 = Platform, 4 = Complete
+// Step 0 = choose mode, 1 = Infrastructure, 2 = Admin Account, 3 = Platform, 4 = Complete
 const currentStep = ref(0)
 const totalSteps = 4
+
+// Orchestrator choice: 'docker' | 'kubernetes' | 'both' | null
+const orchestratorChoice = ref<'docker' | 'kubernetes' | 'both' | null>(null)
 
 // Docker detection state
 interface DockerState {
@@ -44,7 +47,7 @@ const loading = ref(false)
 const error = ref('')
 
 const steps = computed(() => [
-  { number: 1, label: t('setup.stepDocker'), icon: Container },
+  { number: 1, label: t('setup.stepInfra'), icon: Network },
   { number: 2, label: t('setup.stepAdmin'), icon: UserPlus },
   { number: 3, label: t('setup.stepPlatform'), icon: Globe },
   { number: 4, label: t('setup.stepComplete'), icon: CheckCircle2 },
@@ -63,12 +66,17 @@ const emailError = computed(() => {
   return ''
 })
 
-const dockerSkipped = ref(false)
+const infraSkipped = ref(false)
 
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
-      return dockerSkipped.value || (dockerState.value?.available && dockerState.value?.swarm === 'active')
+      if (infraSkipped.value) return true
+      if (!orchestratorChoice.value) return false
+      // For kubernetes-only, just having a choice is enough (k3s installed later)
+      if (orchestratorChoice.value === 'kubernetes') return true
+      // For docker or both, need Docker + Swarm active
+      return dockerState.value?.available && dockerState.value?.swarm === 'active'
     case 2:
       return (
         name.value.length > 0 &&
@@ -119,7 +127,15 @@ async function initSwarm() {
 
 function chooseLeader() {
   currentStep.value = 1
-  detectDocker()
+  detectDocker() // detect in background regardless of choice
+}
+
+function selectOrchestrator(choice: 'docker' | 'kubernetes' | 'both') {
+  orchestratorChoice.value = choice
+  if (choice === 'docker' || choice === 'both') {
+    // Docker detection already running from chooseLeader, but re-trigger if needed
+    if (!dockerState.value && !dockerLoading.value) detectDocker()
+  }
 }
 
 function chooseWorker() {
@@ -198,8 +214,8 @@ async function goToDashboard() {
     </button>
 
     <!-- Header -->
-    <div class="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-      <div class="max-w-3xl mx-auto px-6 py-4">
+    <div class="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6">
+      <div class="max-w-3xl mx-auto py-4">
         <div class="flex items-center gap-2">
           <Shield class="w-6 h-6 text-primary-600 dark:text-primary-400" />
           <h1 class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ $t('setup.title') }}</h1>
@@ -304,84 +320,104 @@ async function goToDashboard() {
             <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
           </div>
 
-          <!-- Step 1: Docker & Swarm -->
+          <!-- Step 1: Infrastructure / Orchestrator -->
           <div v-if="currentStep === 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('setup.dockerSwarm') }}</h2>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('setup.dockerSwarmDesc') }}</p>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('setup.infraTitle') }}</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('setup.infraDesc') }}</p>
             </div>
             <div class="p-6 space-y-5">
-              <!-- Loading -->
-              <div v-if="dockerLoading" class="flex items-center justify-center py-8 gap-3 text-gray-500 dark:text-gray-400">
-                <Loader2 class="w-5 h-5 animate-spin" />
-                <span class="text-sm">{{ $t('setup.detectingDocker') }}</span>
+              <!-- Orchestrator choice cards -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button
+                  v-for="opt in [
+                    { key: 'docker', label: $t('setup.orchDocker'), desc: $t('setup.orchDockerDesc'), icon: Container },
+                    { key: 'kubernetes', label: $t('setup.orchK8s'), desc: $t('setup.orchK8sDesc'), icon: Ship },
+                    { key: 'both', label: $t('setup.orchBoth'), desc: $t('setup.orchBothDesc'), icon: Network },
+                  ] as const"
+                  :key="opt.key"
+                  @click="selectOrchestrator(opt.key as any)"
+                  :class="[
+                    'text-left p-4 rounded-lg border-2 transition-all',
+                    orchestratorChoice === opt.key
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
+                  ]"
+                >
+                  <component :is="opt.icon" :class="['w-5 h-5 mb-2', orchestratorChoice === opt.key ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400 dark:text-gray-500']" />
+                  <p :class="['text-sm font-semibold', orchestratorChoice === opt.key ? 'text-primary-700 dark:text-primary-300' : 'text-gray-900 dark:text-white']">{{ opt.label }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ opt.desc }}</p>
+                </button>
               </div>
 
-              <template v-else-if="dockerState">
-                <!-- Docker status -->
-                <div class="flex items-center gap-3 p-4 rounded-lg" :class="dockerState.available ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'">
-                  <CheckCircle2 v-if="dockerState.available" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
-                  <AlertTriangle v-else class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
-                  <div>
-                    <p class="text-sm font-medium" :class="dockerState.available ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300'">
-                      {{ dockerState.available ? $t('setup.dockerInstalled') : $t('setup.dockerNotAvailable') }}
-                    </p>
-                    <p v-if="!dockerState.available" class="text-xs text-red-600 dark:text-red-400 mt-1">
-                      {{ $t('setup.installDockerHint') }}
-                    </p>
-                    <div v-if="!dockerState.available" class="mt-2">
-                      <p class="text-xs text-red-600 dark:text-red-400 mb-1">{{ $t('setup.installDockerAutoHint') }}</p>
-                      <code class="text-xs bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-700 dark:text-red-300">sudo bash install.sh</code>
+              <!-- Docker detection (shown when docker or both is selected) -->
+              <template v-if="orchestratorChoice === 'docker' || orchestratorChoice === 'both'">
+                <div v-if="dockerLoading" class="flex items-center justify-center py-6 gap-3 text-gray-500 dark:text-gray-400">
+                  <Loader2 class="w-5 h-5 animate-spin" />
+                  <span class="text-sm">{{ $t('setup.detectingDocker') }}</span>
+                </div>
+
+                <template v-else-if="dockerState">
+                  <div class="flex items-center gap-3 p-4 rounded-lg" :class="dockerState.available ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'">
+                    <CheckCircle2 v-if="dockerState.available" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                    <AlertTriangle v-else class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+                    <div>
+                      <p class="text-sm font-medium" :class="dockerState.available ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300'">
+                        {{ dockerState.available ? $t('setup.dockerInstalled') : $t('setup.dockerNotAvailable') }}
+                      </p>
+                      <p v-if="!dockerState.available" class="text-xs text-red-600 dark:text-red-400 mt-1">{{ $t('setup.installDockerHint') }}</p>
+                      <div v-if="!dockerState.available" class="mt-2">
+                        <p class="text-xs text-red-600 dark:text-red-400 mb-1">{{ $t('setup.installDockerAutoHint') }}</p>
+                        <code class="text-xs bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-700 dark:text-red-300">sudo bash install.sh</code>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <!-- Swarm status -->
-                <div v-if="dockerState.available" class="flex items-center gap-3 p-4 rounded-lg" :class="dockerState.swarm === 'active' ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'">
-                  <CheckCircle2 v-if="dockerState.swarm === 'active'" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
-                  <AlertTriangle v-else class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0" />
-                  <div class="flex-1">
-                    <p class="text-sm font-medium" :class="dockerState.swarm === 'active' ? 'text-green-800 dark:text-green-300' : 'text-yellow-800 dark:text-yellow-300'">
-                      <template v-if="dockerState.swarm === 'active'">
-                        {{ $t('setup.swarmActive', { role: dockerState.role ?? 'manager' }) }}
-                      </template>
-                      <template v-else>
-                        {{ $t('setup.swarmNotInit') }}
-                      </template>
-                    </p>
-                    <p v-if="dockerState.swarm === 'active' && dockerState.nodeId" class="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                      {{ $t('setup.nodeId') }}: {{ dockerState.nodeId }}
-                    </p>
+                  <div v-if="dockerState.available" class="flex items-center gap-3 p-4 rounded-lg" :class="dockerState.swarm === 'active' ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'">
+                    <CheckCircle2 v-if="dockerState.swarm === 'active'" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                    <AlertTriangle v-else class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0" />
+                    <div class="flex-1">
+                      <p class="text-sm font-medium" :class="dockerState.swarm === 'active' ? 'text-green-800 dark:text-green-300' : 'text-yellow-800 dark:text-yellow-300'">
+                        <template v-if="dockerState.swarm === 'active'">{{ $t('setup.swarmActive', { role: dockerState.role ?? 'manager' }) }}</template>
+                        <template v-else>{{ $t('setup.swarmNotInit') }}</template>
+                      </p>
+                      <p v-if="dockerState.swarm === 'active' && dockerState.nodeId" class="text-xs text-green-600 dark:text-green-400 mt-0.5">{{ $t('setup.nodeId') }}: {{ dockerState.nodeId }}</p>
+                    </div>
+                    <button
+                      v-if="dockerState.swarm !== 'active'"
+                      @click="initSwarm"
+                      :disabled="swarmInitLoading"
+                      class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
+                    >
+                      <Loader2 v-if="swarmInitLoading" class="w-3.5 h-3.5 animate-spin" />
+                      {{ swarmInitLoading ? $t('setup.initializing') : $t('setup.initSwarm') }}
+                    </button>
                   </div>
-                  <button
-                    v-if="dockerState.swarm !== 'active'"
-                    @click="initSwarm"
-                    :disabled="swarmInitLoading"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
-                  >
-                    <Loader2 v-if="swarmInitLoading" class="w-3.5 h-3.5 animate-spin" />
-                    {{ swarmInitLoading ? $t('setup.initializing') : $t('setup.initSwarm') }}
-                  </button>
-                </div>
 
-                <!-- Refresh & Skip -->
-                <div v-if="!dockerState.available || dockerState.swarm !== 'active'" class="flex flex-col items-center gap-3">
-                  <button
-                    @click="detectDocker"
-                    :disabled="dockerLoading"
-                    class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                  >
-                    <RefreshCw class="w-4 h-4" />
-                    {{ $t('setup.recheck') }}
-                  </button>
-                  <button
-                    @click="dockerSkipped = true; nextStep()"
-                    class="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline underline-offset-2 transition-colors"
-                  >
-                    {{ $t('setup.skipDocker') }}
-                  </button>
-                </div>
+                  <div v-if="!dockerState.available || dockerState.swarm !== 'active'" class="flex items-center justify-center gap-4">
+                    <button @click="detectDocker" :disabled="dockerLoading" class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
+                      <RefreshCw class="w-4 h-4" />
+                      {{ $t('setup.recheck') }}
+                    </button>
+                  </div>
+                </template>
               </template>
+
+              <!-- Kubernetes info (shown when kubernetes or both is selected) -->
+              <div v-if="orchestratorChoice === 'kubernetes' || orchestratorChoice === 'both'" class="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                <p class="text-sm font-medium text-blue-800 dark:text-blue-300">{{ $t('setup.k8sNote') }}</p>
+                <p class="text-xs text-blue-600 dark:text-blue-400 mt-1">{{ $t('setup.k8sNoteDesc') }}</p>
+              </div>
+
+              <!-- Skip link -->
+              <div class="flex justify-center">
+                <button
+                  @click="infraSkipped = true; nextStep()"
+                  class="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline underline-offset-2 transition-colors"
+                >
+                  {{ $t('setup.skipInfra') }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -477,11 +513,15 @@ async function goToDashboard() {
                 <div><span class="font-medium text-gray-900 dark:text-white">{{ $t('setup.admin') }}:</span> {{ email }}</div>
                 <div v-if="domain"><span class="font-medium text-gray-900 dark:text-white">{{ $t('setup.domain') }}:</span> {{ domain }}</div>
                 <div v-if="platformName"><span class="font-medium text-gray-900 dark:text-white">{{ $t('setup.platform') }}:</span> {{ platformName }}</div>
+                <div v-if="orchestratorChoice && !infraSkipped">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ $t('setup.orchestrator') }}:</span>
+                  {{ orchestratorChoice === 'docker' ? $t('setup.orchDocker') : orchestratorChoice === 'kubernetes' ? $t('setup.orchK8s') : $t('setup.orchBoth') }}
+                </div>
                 <div v-if="dockerState?.swarm === 'active'">
                   <span class="font-medium text-gray-900 dark:text-white">{{ $t('setup.swarm') }}:</span> Active ({{ dockerState.role ?? 'manager' }})
                 </div>
-                <div v-else-if="dockerSkipped" class="text-yellow-600 dark:text-yellow-400">
-                  <span class="font-medium text-gray-900 dark:text-white">Docker:</span> {{ $t('setup.dockerSkipped') }}
+                <div v-if="infraSkipped" class="text-yellow-600 dark:text-yellow-400">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ $t('setup.orchestrator') }}:</span> {{ $t('setup.infraSkipped') }}
                 </div>
               </div>
             </div>
