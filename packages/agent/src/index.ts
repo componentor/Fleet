@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process'
 import { WebSocketServer } from 'ws'
 import { NodeMonitor } from './monitor.js'
 import { NfsManager } from './nfs.js'
-import { handleExecRequest, handleExecStreamRequest, handleExecInputRequest, handleExecWebSocket } from './exec.js'
+import { handleExecRequest, handleExecStreamRequest, handleExecInputRequest, handleExecWebSocket, handleStatsRequest } from './exec.js'
 import { logger } from './logger.js'
 
 const ORCHESTRATOR = process.env.ORCHESTRATOR || 'swarm'
@@ -106,6 +106,14 @@ healthServer = createServer((req, res) => {
   } else if (!IS_K8S && req.url === '/exec-input' && req.method === 'POST') {
     handleExecInputRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
       logger.error({ err }, 'Exec input handler error')
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal error' }))
+      }
+    })
+  } else if (!IS_K8S && req.url === '/stats' && req.method === 'POST') {
+    handleStatsRequest(req, res, NODE_AUTH_TOKEN).catch((err) => {
+      logger.error({ err }, 'Stats request handler error')
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Internal error' }))

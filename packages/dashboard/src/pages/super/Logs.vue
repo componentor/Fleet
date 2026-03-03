@@ -21,6 +21,7 @@ const copied = ref(false)
 const logContainer = ref<HTMLPreElement | null>(null)
 
 let autoRefreshInterval: ReturnType<typeof setInterval> | null = null
+let fetchAbort: AbortController | null = null
 
 const tailOptions = [100, 500, 1000, 5000]
 
@@ -39,21 +40,43 @@ const lineCount = computed(() => {
 })
 
 async function fetchLogs() {
+  // Abort any in-flight request
+  if (fetchAbort) fetchAbort.abort()
+  fetchAbort = new AbortController()
+
   loading.value = true
+  logs.value = ''
+  warning.value = ''
+
   try {
     const params = new URLSearchParams()
     params.set('service', service.value)
     params.set('tail', String(tail.value))
     if (searchQuery.value.trim()) params.set('search', searchQuery.value.trim())
-    const data = await api.get<any>(`/admin/logs?${params.toString()}`)
-    logs.value = data?.logs ?? ''
-    warning.value = data?.warning ?? ''
-    if (data?.availableServices) availableServices.value = data.availableServices
-    await nextTick()
-    scrollToBottom()
-  } catch {
-    logs.value = ''
-    warning.value = 'Failed to fetch logs'
+
+    const response = await api.getStream(
+      `/admin/logs?${params.toString()}`,
+      (chunk) => {
+        logs.value += chunk
+        nextTick(() => scrollToBottom())
+      },
+      fetchAbort.signal,
+    )
+
+    // Read metadata from response headers
+    const svcHeader = response.headers.get('X-Fleet-Available-Services')
+    if (svcHeader) availableServices.value = svcHeader.split(',')
+  } catch (err: any) {
+    if (err?.name === 'AbortError') return
+    // Fallback: endpoint may have returned JSON (e.g. warning / not found)
+    if (err?.body) {
+      const body = err.body as Record<string, any>
+      logs.value = body?.logs ?? ''
+      warning.value = body?.warning ?? 'Failed to fetch logs'
+      if (body?.availableServices) availableServices.value = body.availableServices
+    } else {
+      warning.value = 'Failed to fetch logs'
+    }
   } finally {
     loading.value = false
   }
@@ -97,6 +120,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval)
+  if (fetchAbort) fetchAbort.abort()
 })
 </script>
 

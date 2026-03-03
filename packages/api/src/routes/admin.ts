@@ -1180,7 +1180,7 @@ const platformLogsRoute = createRoute({
 adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
   const serviceName = c.req.query('service') || 'fleet_api';
   const tail = Math.min(parseInt(c.req.query('tail') ?? '500', 10) || 500, 5000);
-  const search = c.req.query('search')?.trim() || '';
+  const search = c.req.query('search')?.trim().toLowerCase() || '';
 
   if (!ALLOWED_FLEET_SERVICES.includes(serviceName as any)) {
     return c.json({ error: `Invalid service. Allowed: ${ALLOWED_FLEET_SERVICES.join(', ')}` }, 400);
@@ -1197,42 +1197,82 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
 
     const result = await orchestrator.getServiceLogs(svc.ID, { tail, follow: false });
 
-    // Dockerode returns a Buffer when follow=false
-    let raw: Buffer;
-    if (Buffer.isBuffer(result)) {
-      raw = result;
-    } else {
-      const chunks: Buffer[] = [];
-      for await (const chunk of result) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    // Stream the response — demux Docker's multiplexed log frames and write
+    // text as it arrives so the client sees output in real time.
+    c.header('Content-Type', 'text/plain; charset=utf-8');
+    c.header('X-Fleet-Service', serviceName);
+    c.header('X-Fleet-Available-Services', ALLOWED_FLEET_SERVICES.join(','));
+
+    return c.stream(async (stream: any) => {
+      const TIMEOUT_MS = 30_000;
+
+      /** Demux complete frames from a buffer, return leftover */
+      const demux = (buf: Buffer): { text: string; rest: Buffer } => {
+        let text = '';
+        let offset = 0;
+        while (offset + 8 <= buf.length) {
+          const size = buf.readUInt32BE(offset + 4);
+          if (offset + 8 + size > buf.length) break;
+          text += buf.subarray(offset + 8, offset + 8 + size).toString('utf-8');
+          offset += 8 + size;
+        }
+        return { text, rest: buf.subarray(offset) };
+      };
+
+      /** Apply server-side search filter (line-by-line) */
+      const filterAndWrite = async (text: string) => {
+        if (!text) return;
+        if (!search) {
+          await stream.write(text);
+          return;
+        }
+        const filtered = text
+          .split('\n')
+          .filter((line) => line.toLowerCase().includes(search))
+          .join('\n');
+        if (filtered) await stream.write(filtered.endsWith('\n') ? filtered : filtered + '\n');
+      };
+
+      if (Buffer.isBuffer(result)) {
+        // Entire log returned as a buffer — demux and write at once
+        const { text, rest } = demux(result);
+        await filterAndWrite(text || rest.toString('utf-8'));
+      } else {
+        // Dockerode returned a stream — pipe through demuxer in real time.
+        // Use event listeners (not `for await`) to avoid hanging on streams
+        // that never signal completion.
+        await new Promise<void>((resolve) => {
+          let pending = Buffer.alloc(0);
+          const dockerStream = result as NodeJS.ReadableStream;
+
+          const finish = () => {
+            dockerStream.removeAllListeners();
+            dockerStream.destroy();
+            resolve();
+          };
+
+          dockerStream.on('data', (chunk: Buffer | string) => {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            pending = Buffer.concat([pending, buf]);
+            const { text, rest } = demux(pending);
+            pending = rest;
+            if (text) filterAndWrite(text).catch(() => {});
+          });
+
+          dockerStream.on('end', async () => {
+            // Flush any remaining partial data
+            if (pending.length > 0) {
+              await filterAndWrite(pending.toString('utf-8')).catch(() => {});
+            }
+            finish();
+          });
+
+          dockerStream.on('error', finish);
+          // Safety: close stream if Docker never ends
+          setTimeout(finish, TIMEOUT_MS);
+        });
       }
-      raw = Buffer.concat(chunks);
-    }
-
-    // Docker multiplexed log format: each frame has an 8-byte header
-    // [stream_type(1), 0, 0, 0, size(4 big-endian)] followed by payload
-    const lines: string[] = [];
-    let offset = 0;
-    while (offset + 8 <= raw.length) {
-      const size = raw.readUInt32BE(offset + 4);
-      if (offset + 8 + size > raw.length) break;
-      const payload = raw.subarray(offset + 8, offset + 8 + size).toString('utf-8');
-      lines.push(payload);
-      offset += 8 + size;
-    }
-
-    let logText = lines.length > 0 ? lines.join('') : raw.toString('utf-8');
-
-    // Server-side search filter
-    if (search) {
-      const lowerSearch = search.toLowerCase();
-      logText = logText
-        .split('\n')
-        .filter((line) => line.toLowerCase().includes(lowerSearch))
-        .join('\n');
-    }
-
-    return c.json({ logs: logText, service: serviceName, availableServices: ALLOWED_FLEET_SERVICES });
+    });
   } catch (err: any) {
     if (err?.statusCode === 404 || err?.reason === 'no such service') {
       return c.json({ logs: '', service: serviceName, warning: `Docker service "${serviceName}" not found.`, availableServices: ALLOWED_FLEET_SERVICES });

@@ -104,14 +104,16 @@ export async function detectRuntime(
 function generateStaticDockerfile(): string {
   return `FROM nginx:alpine
 COPY . /usr/share/nginx/html
-RUN printf 'server {\\n\\
-  listen 80;\\n\\
-  root /usr/share/nginx/html;\\n\\
-  index index.html;\\n\\
-  location / {\\n\\
-    try_files $uri $uri/ /index.html;\\n\\
-  }\\n\\
-}\\n' > /etc/nginx/conf.d/default.conf
+RUN <<'EOF' cat > /etc/nginx/conf.d/default.conf
+server {
+  listen 80;
+  root /usr/share/nginx/html;
+  index index.html;
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
+EOF
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 `;

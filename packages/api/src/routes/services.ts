@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
+import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { orchestrator } from '../services/orchestrator.js';
@@ -685,6 +685,7 @@ serviceRoutes.openapi(aggregatedLogsRoute, (async (c: any) => {
   // Fetch logs from each service in parallel (limited to 10 at a time)
   const logEntries: { serviceName: string; serviceId: string; line: string; timestamp: string }[] = [];
 
+  const LOGS_TIMEOUT_MS = 15_000;
   const fetchPromises = deployedServices.slice(0, 10).map(async (svc) => {
     try {
       const result = await orchestrator.getServiceLogs(svc.dockerServiceId!, { tail: Math.min(tail, 200), follow: false });
@@ -693,11 +694,21 @@ serviceRoutes.openapi(aggregatedLogsRoute, (async (c: any) => {
       if (Buffer.isBuffer(result)) {
         raw = result;
       } else {
-        const chunks: Buffer[] = [];
-        for await (const chunk of result) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
-        }
-        raw = Buffer.concat(chunks);
+        raw = await new Promise<Buffer>((resolve) => {
+          const chunks: Buffer[] = [];
+          const stream = result as NodeJS.ReadableStream;
+          const finish = () => {
+            stream.removeAllListeners();
+            stream.destroy();
+            resolve(Buffer.concat(chunks));
+          };
+          stream.on('data', (chunk: Buffer | string) => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          });
+          stream.on('end', finish);
+          stream.on('error', finish);
+          setTimeout(finish, LOGS_TIMEOUT_MS);
+        });
       }
 
       // Demultiplex Docker frame headers
@@ -882,14 +893,18 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
-  // Per-account service quota
-  const SERVICE_QUOTA = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
+  // Per-account service quota (DB overrides env)
+  let serviceQuota = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
+  try {
+    const dbVal = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'limits:maxServicesPerAccount') });
+    if (dbVal?.value != null) serviceQuota = Number(dbVal.value) || serviceQuota;
+  } catch { /* use env default */ }
   const existingCount = await db.query.services.findMany({
     where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
     columns: { id: true },
   });
-  if (existingCount.length >= SERVICE_QUOTA) {
-    return c.json({ error: `Service limit reached (${SERVICE_QUOTA}). Please delete unused services or contact support.` }, 429);
+  if (existingCount.length >= serviceQuota) {
+    return c.json({ error: `Service limit reached (${serviceQuota}). Please delete unused services or contact support.` }, 429);
   }
 
   // Enforce per-container resource limits
@@ -1205,7 +1220,10 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
     const tasks = await orchestrator.getServiceTasks(svc.dockerServiceId);
     const runningTasks = tasks.filter((t) => t.status === 'running');
 
-    // Fetch stats for all running containers in parallel (limit concurrency)
+    // Fetch stats for all running containers using node-aware routing
+    // This routes through Fleet agents on remote nodes so stats work
+    // regardless of which API replica handles the request.
+    const { dockerService } = await import('../services/docker.service.js');
     const containerStats: Array<{ containerId: string; stats: import('../services/docker.service.js').ContainerStats | null }> = [];
     const CONCURRENCY = 10;
     for (let i = 0; i < runningTasks.length; i += CONCURRENCY) {
@@ -1214,7 +1232,7 @@ serviceRoutes.openapi(getServiceStatsRoute, (async (c: any) => {
         batch.map(async (t) => {
           const containerId = t.containerStatus?.containerId;
           if (!containerId) return { containerId: '', stats: null };
-          const stats = await orchestrator.getContainerStats(containerId);
+          const stats = await dockerService.nodeAwareGetContainerStats(containerId, t.nodeId);
           return { containerId, stats };
         }),
       );
@@ -1279,17 +1297,21 @@ serviceRoutes.openapi(updateServiceRoute, (async (c: any) => {
     return c.json({ error: 'Service not found' }, 404);
   }
 
-  // Enforce per-account total replica quota when scaling
+  // Enforce per-account total replica quota when scaling (DB overrides env)
   if (data.replicas !== undefined && data.replicas > (svc.replicas ?? 1)) {
-    const MAX_TOTAL_REPLICAS = parseInt(process.env['MAX_TOTAL_REPLICAS_PER_ACCOUNT'] ?? '200', 10);
+    let maxTotalReplicas = parseInt(process.env['MAX_TOTAL_REPLICAS_PER_ACCOUNT'] ?? '200', 10);
+    try {
+      const dbVal = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'limits:maxTotalReplicasPerAccount') });
+      if (dbVal?.value != null) maxTotalReplicas = Number(dbVal.value) || maxTotalReplicas;
+    } catch { /* use env default */ }
     const allServices = await db.query.services.findMany({
       where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
       columns: { id: true, replicas: true },
     });
     const currentTotal = allServices.reduce((sum, s) => sum + (s.id === serviceId ? 0 : (s.replicas ?? 1)), 0);
-    if (currentTotal + data.replicas > MAX_TOTAL_REPLICAS) {
+    if (currentTotal + data.replicas > maxTotalReplicas) {
       return c.json({
-        error: `Total replica limit (${MAX_TOTAL_REPLICAS}) would be exceeded. Current: ${currentTotal}, requested: ${data.replicas}.`,
+        error: `Total replica limit (${maxTotalReplicas}) would be exceeded. Current: ${currentTotal}, requested: ${data.replicas}.`,
       }, 429);
     }
   }
@@ -2230,24 +2252,33 @@ serviceRoutes.openapi(getServiceLogsRoute, (async (c: any) => {
   }
 
   const tail = Math.min(parseInt(c.req.query('tail') ?? '100', 10), 5000);
+  const LOGS_TIMEOUT_MS = 30_000;
 
   try {
-    const result = await orchestrator.getServiceLogs(svc.dockerServiceId, {
-      tail,
-      follow: false,
-    });
+    const result = await orchestrator.getServiceLogs(svc.dockerServiceId, { tail, follow: false });
 
-    // Dockerode returns a Buffer when follow=false
+    // Consume the result — Dockerode may return a Buffer or a stream.
+    // Use event listeners (not `for await`) because Dockerode's service log
+    // streams can fail to signal completion, causing `for await` to hang.
     let raw: Buffer;
     if (Buffer.isBuffer(result)) {
       raw = result;
     } else {
-      // Fallback: consume stream if somehow a stream is returned
-      const chunks: Buffer[] = [];
-      for await (const chunk of result) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
-      }
-      raw = Buffer.concat(chunks);
+      raw = await new Promise<Buffer>((resolve) => {
+        const chunks: Buffer[] = [];
+        const stream = result as NodeJS.ReadableStream;
+        const finish = () => {
+          stream.removeAllListeners();
+          stream.destroy();
+          resolve(Buffer.concat(chunks));
+        };
+        stream.on('data', (chunk: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        stream.on('end', finish);
+        stream.on('error', finish);
+        setTimeout(finish, LOGS_TIMEOUT_MS);
+      });
     }
 
     // Docker multiplexed log format: each frame has an 8-byte header
@@ -2569,14 +2600,18 @@ serviceRoutes.openapi(previewServiceRoute, (async (c: any) => {
 
   const warnings: string[] = [];
 
-  // Check service quota
-  const SERVICE_QUOTA = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
+  // Check service quota (DB overrides env)
+  let previewQuota = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
+  try {
+    const dbVal = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'limits:maxServicesPerAccount') });
+    if (dbVal?.value != null) previewQuota = Number(dbVal.value) || previewQuota;
+  } catch { /* use env default */ }
   const existingCount = await db.query.services.findMany({
     where: and(eq(services.accountId, accountId), isNull(services.deletedAt)),
     columns: { id: true },
   });
-  if (existingCount.length >= SERVICE_QUOTA) {
-    warnings.push(`Service limit reached (${SERVICE_QUOTA}). Deployment will fail.`);
+  if (existingCount.length >= previewQuota) {
+    warnings.push(`Service limit reached (${previewQuota}). Deployment will fail.`);
   }
 
   // Check port collisions

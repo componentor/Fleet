@@ -304,6 +304,106 @@ export async function handleExecInputRequest(
 }
 
 /**
+ * Handle container stats requests.
+ * POST /stats { containerIds: string[] }
+ * Returns JSON { stats: { [containerId]: ContainerStats } }
+ * Uses the Docker stats API (one-shot) for each container on this node.
+ */
+export async function handleStatsRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  authToken: string | undefined,
+): Promise<void> {
+  // Verify auth
+  const authHeader = req.headers['authorization']
+  if (authToken && (!authHeader || authHeader !== `Bearer ${authToken}`)) {
+    res.writeHead(401, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Unauthorized' }))
+    return
+  }
+
+  let body = ''
+  for await (const chunk of req) {
+    body += chunk
+    if (body.length > 100_000) {
+      res.writeHead(413, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Request too large' }))
+      return
+    }
+  }
+
+  let parsed: { containerIds: string[] }
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Invalid JSON' }))
+    return
+  }
+
+  const { containerIds } = parsed
+  if (!Array.isArray(containerIds) || containerIds.length === 0) {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Missing containerIds array' }))
+    return
+  }
+
+  const stats: Record<string, any> = {}
+
+  await Promise.all(
+    containerIds.slice(0, 50).map(async (id) => {
+      try {
+        const container = docker.getContainer(id)
+        const s = await container.stats({ stream: false }) as any
+
+        const cpuDelta = (s.cpu_stats?.cpu_usage?.total_usage ?? 0) - (s.precpu_stats?.cpu_usage?.total_usage ?? 0)
+        const systemDelta = (s.cpu_stats?.system_cpu_usage ?? 0) - (s.precpu_stats?.system_cpu_usage ?? 0)
+        const numCpus = s.cpu_stats?.online_cpus ?? s.cpu_stats?.cpu_usage?.percpu_usage?.length ?? 1
+        const cpuPercent = systemDelta > 0 ? (cpuDelta / systemDelta) * numCpus * 100 : 0
+
+        const memoryUsageBytes = s.memory_stats?.usage ?? 0
+        const memoryLimitBytes = s.memory_stats?.limit ?? 1
+        const memoryPercent = (memoryUsageBytes / memoryLimitBytes) * 100
+
+        let networkRxBytes = 0
+        let networkTxBytes = 0
+        if (s.networks) {
+          for (const netStats of Object.values(s.networks) as any[]) {
+            networkRxBytes += netStats.rx_bytes ?? 0
+            networkTxBytes += netStats.tx_bytes ?? 0
+          }
+        }
+
+        let blockReadBytes = 0
+        let blockWriteBytes = 0
+        const ioStats = s.blkio_stats?.io_service_bytes_recursive ?? []
+        for (const entry of ioStats) {
+          if (entry.op === 'read' || entry.op === 'Read') blockReadBytes += entry.value ?? 0
+          if (entry.op === 'write' || entry.op === 'Write') blockWriteBytes += entry.value ?? 0
+        }
+
+        stats[id] = {
+          cpuPercent: Math.round(cpuPercent * 100) / 100,
+          memoryUsageBytes,
+          memoryLimitBytes,
+          memoryPercent: Math.round(memoryPercent * 100) / 100,
+          networkRxBytes,
+          networkTxBytes,
+          blockReadBytes,
+          blockWriteBytes,
+          pids: s.pids_stats?.current ?? 0,
+        }
+      } catch {
+        // Container not found on this node or stats unavailable
+      }
+    }),
+  )
+
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ stats }))
+}
+
+/**
  * Handle interactive terminal WebSocket connections.
  * Pipes bidirectionally between WebSocket and Docker exec stream.
  */

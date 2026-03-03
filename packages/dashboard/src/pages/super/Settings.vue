@@ -39,6 +39,10 @@ const platformDomain = ref('')
 const platformUrl = ref('')
 const supportEmail = ref('')
 
+// Resource limits
+const maxServicesPerAccount = ref('50')
+const maxTotalReplicasPerAccount = ref('200')
+
 // Stripe settings
 const stripePublishableKey = ref('')
 const stripeSecretKey = ref('')
@@ -216,6 +220,9 @@ async function fetchSettings() {
     smtpPassHint.value = smtpPassVal && smtpPassVal !== '' ? smtpPassVal : ''
     const resendKeyVal = data['email:resendApiKey'] as string ?? ''
     resendApiKeyHint.value = resendKeyVal && resendKeyVal !== '' ? resendKeyVal : ''
+    // Resource limits
+    maxServicesPerAccount.value = String(data['limits:maxServicesPerAccount'] ?? '50')
+    maxTotalReplicasPerAccount.value = String(data['limits:maxTotalReplicasPerAccount'] ?? '200')
   } catch {
     // Settings may not exist yet
   } finally {
@@ -1043,6 +1050,35 @@ onMounted(() => {
                   <Loader2 v-if="savingField === 'general:platform:supportEmail'" class="w-4 h-4 animate-spin" />
                   <Save v-else class="w-4 h-4" />
                 </button>
+              </div>
+            </div>
+
+            <!-- Resource Limits -->
+            <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{{ t('super.settings.resourceLimits') }}</h3>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.maxServicesPerAccount') }}</label>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ t('super.settings.maxServicesPerAccountDesc') }}</p>
+                  <div class="flex items-center gap-2 max-w-xs">
+                    <input v-model="maxServicesPerAccount" type="number" min="1" max="10000" @keydown.enter="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                    <button @click="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" :disabled="savingField === 'general:limits:maxServicesPerAccount'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                      <Loader2 v-if="savingField === 'general:limits:maxServicesPerAccount'" class="w-4 h-4 animate-spin" />
+                      <Save v-else class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ t('super.settings.maxReplicasPerAccount') }}</label>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ t('super.settings.maxReplicasPerAccountDesc') }}</p>
+                  <div class="flex items-center gap-2 max-w-xs">
+                    <input v-model="maxTotalReplicasPerAccount" type="number" min="1" max="100000" @keydown.enter="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
+                    <button @click="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" :disabled="savingField === 'general:limits:maxTotalReplicasPerAccount'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                      <Loader2 v-if="savingField === 'general:limits:maxTotalReplicasPerAccount'" class="w-4 h-4 animate-spin" />
+                      <Save v-else class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

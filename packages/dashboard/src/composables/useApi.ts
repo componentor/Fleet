@@ -182,6 +182,57 @@ export function useApi() {
       return withToastError(request<T>('DELETE', path, body))
     },
 
+    /** Streaming GET — calls onChunk with text as it arrives. Returns the Response for header access. */
+    async getStream(
+      path: string,
+      onChunk: (text: string) => void,
+      signal?: AbortSignal,
+    ): Promise<Response> {
+      const headers: Record<string, string> = {}
+
+      let token: string | null = null
+      try {
+        const { useAuthStore } = await import('@/stores/auth')
+        const authStore = useAuthStore()
+        token = authStore.token
+      } catch {}
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+
+      const accountId = localStorage.getItem('fleet_account_id')
+      if (accountId) {
+        headers['X-Account-Id'] = accountId
+      }
+
+      const response = await fetch(`${BASE_URL}${path}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers,
+        signal,
+      })
+
+      if (!response.ok) {
+        let errorBody: unknown
+        const text = await response.text()
+        try { errorBody = JSON.parse(text) } catch { errorBody = text }
+        throw new ApiError(response.status, response.statusText, errorBody)
+      }
+
+      const reader = response.body?.getReader()
+      if (reader) {
+        const decoder = new TextDecoder()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          onChunk(decoder.decode(value, { stream: true }))
+        }
+      }
+
+      return response
+    },
+
     async upload<T>(path: string, formData: FormData): Promise<T> {
       const headers: Record<string, string> = {}
 

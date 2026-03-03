@@ -1559,7 +1559,7 @@ settings.get('/orchestrator/k3s-status', authMiddleware, requireAdmin as any, (a
     installed = output.includes('INSTALLED');
     running = !output.includes('NOT_RUNNING');
 
-    // Read join token
+    // Read join token — look for the token line (starts with K10 or similar)
     const tokenLine = output.split('\n').find((l: string) => l.startsWith('K10') || l.startsWith('K3s'));
     if (tokenLine && tokenLine !== 'NO_TOKEN') {
       joinToken = tokenLine.trim();
@@ -1574,6 +1574,16 @@ settings.get('/orchestrator/k3s-status', authMiddleware, requireAdmin as any, (a
     if (ip) serverUrl = `https://${ip}:6443`;
   } catch {
     logs.push('Could not check k3s status on local host');
+  }
+
+  // Fallback: check env vars (set by install.sh via env_file)
+  if (!joinToken && process.env['K3S_TOKEN']) {
+    joinToken = process.env['K3S_TOKEN'];
+    logs.push('Token found from environment variable');
+  }
+  if (!serverUrl && process.env['K3S_URL']) {
+    serverUrl = process.env['K3S_URL'];
+    logs.push('Server URL found from environment variable');
   }
 
   // Persist discovered token/URL to DB so install-k3s-agents can find them
@@ -1704,7 +1714,7 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
   const user = c.get('user') as AuthUser;
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  // Read join token and server URL — try DB first, then read from host file
+  // Read join token and server URL — try DB first, then env vars, then host file
   let joinToken = '';
   let serverUrl = '';
 
@@ -1715,7 +1725,11 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
   const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
   if (urlRow?.value) serverUrl = urlRow.value as string;
 
-  // If not in DB, try reading from host file via each available orchestrator backend
+  // Fallback: check env vars (set by install.sh via env_file)
+  if (!joinToken && process.env['K3S_TOKEN']) joinToken = process.env['K3S_TOKEN'];
+  if (!serverUrl && process.env['K3S_URL']) serverUrl = process.env['K3S_URL'];
+
+  // Fallback: try reading from host file via each available orchestrator backend
   if (!joinToken || !serverUrl) {
     const backends: OrchestratorType[] = ['swarm', 'kubernetes'];
     for (const backend of backends) {
@@ -1739,18 +1753,18 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
         // This backend can't run host commands — try the next one
       }
     }
+  }
 
-    // Persist discovered token/URL to DB for next time
-    if (joinToken && !tokenRow?.value) {
-      await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
-        .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
-        .catch(() => {});
-    }
-    if (serverUrl && !urlRow?.value) {
-      await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
-        .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
-        .catch(() => {});
-    }
+  // Persist discovered token/URL to DB for future requests
+  if (joinToken && !tokenRow?.value) {
+    await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+      .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
+      .catch(() => {});
+  }
+  if (serverUrl && !urlRow?.value) {
+    await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+      .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
+      .catch(() => {});
   }
 
   if (!joinToken || !serverUrl) {
