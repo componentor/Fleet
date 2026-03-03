@@ -534,32 +534,21 @@ updateRoutes.openapi(seedRoute, (async (c: any) => {
   }
 }) as any);
 
-// POST /reset — force-reset a stuck update state and release the lock
+// POST /reset — force-reset update state and release the lock.
+// Always succeeds — an admin hitting reset should never be blocked.
 updateRoutes.openapi(resetRoute, (async (c: any) => {
   const state = updateService.getState();
 
-  // Check both in-memory AND DB-persisted state — another replica may have left stale state
-  const allowedStates = ['failed', 'checking', 'backing-up', 'pulling', 'verifying-images', 'migrating', 'updating', 'seeding', 'verifying', 'rolling-back'];
+  // Also check DB-persisted state for reporting purposes
   let persistedStatus: string | null = null;
-
-  if (!allowedStates.includes(state.status)) {
-    // In-memory is idle/completed — check if DB has stale state from another replica
-    try {
-      const { UpdateService } = await import('../services/update.service.js');
-      const persisted = await UpdateService.loadPersistedState();
-      if (persisted && persisted.status !== 'idle') {
-        persistedStatus = persisted.status;
-      }
-    } catch {
-      // DB read failed
+  try {
+    const { UpdateService } = await import('../services/update.service.js');
+    const persisted = await UpdateService.loadPersistedState();
+    if (persisted && persisted.status !== 'idle') {
+      persistedStatus = persisted.status;
     }
-
-    if (!persistedStatus) {
-      return c.json({
-        error: `System is currently "${state.status}" — no reset needed. Reset is for stuck or failed states.`,
-        currentStatus: state.status,
-      }, 400);
-    }
+  } catch {
+    // DB read failed
   }
 
   const result = await updateService.forceReset();
