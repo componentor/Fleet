@@ -2,7 +2,8 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { timingSafeEqual } from 'node:crypto';
 import net from 'node:net';
-import { db, nodes, nodeMetrics, insertReturning, updateReturning, eq, and, gte, desc, isNull } from '@fleet/db';
+import { db, nodes, nodeMetrics, services, insertReturning, updateReturning, eq, and, gte, desc, isNull, isNotNull } from '@fleet/db';
+import { dockerService } from '../services/docker.service.js';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { orchestrator } from '../services/orchestrator.js';
 import { logger, logToErrorTable } from '../services/logger.js';
@@ -762,6 +763,130 @@ adminNodeRoutes.openapi(probeNodeRoute, (async (c: any) => {
       suggestedRole,
     },
   });
+}) as any);
+
+// ── GET /:id/containers — list all containers on a node ──
+
+const getNodeContainersRoute = createRoute({
+  method: 'get',
+  path: '/{id}/containers',
+  tags: ['Nodes'],
+  summary: 'List containers running on a node with optional stats',
+  security: bearerSecurity,
+  request: {
+    params: nodeIdParamSchema,
+    query: z.object({
+      stats: z.enum(['true', 'false']).optional().openapi({ description: 'Include container stats (default true)' }),
+    }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Node containers with stats'),
+    ...standardErrors,
+    404: jsonContent(errorResponseSchema, 'Node not found'),
+  },
+});
+
+adminNodeRoutes.openapi(getNodeContainersRoute, (async (c: any) => {
+  const { id: nodeId } = c.req.valid('param');
+  const includeStats = c.req.valid('query')?.stats !== 'false';
+
+  const node = await db.query.nodes.findFirst({
+    where: eq(nodes.id, nodeId),
+  });
+
+  if (!node) {
+    return c.json({ error: 'Node not found' }, 404);
+  }
+
+  if (!node.dockerNodeId) {
+    return c.json({ containers: [], summary: { total: 0, running: 0, stopped: 0 } });
+  }
+
+  try {
+    // Get all tasks on this node
+    const tasks = await orchestrator.listTasks({ node: [node.dockerNodeId] });
+
+    // Build a map of Docker service ID → service name
+    const dockerServices = await orchestrator.listServices();
+    const serviceNameMap = new Map<string, string>();
+    for (const svc of dockerServices) {
+      serviceNameMap.set(svc.ID, svc.Spec?.Name ?? svc.ID);
+    }
+
+    // Build a map of Docker service ID → Fleet service info
+    const fleetServices = await db.query.services.findMany({
+      where: and(isNotNull(services.dockerServiceId), isNull(services.deletedAt)),
+      columns: { id: true, name: true, dockerServiceId: true },
+    });
+    const fleetServiceMap = new Map<string, { id: string; name: string }>();
+    for (const fs of fleetServices) {
+      if (fs.dockerServiceId) {
+        fleetServiceMap.set(fs.dockerServiceId, { id: fs.id, name: fs.name });
+      }
+    }
+
+    // Filter to relevant tasks (running + recently stopped)
+    const relevantTasks = tasks.filter((t: any) => {
+      const state = t.Status?.State;
+      return state === 'running' || state === 'starting' || state === 'ready' ||
+             t.DesiredState === 'running';
+    });
+
+    // Build container list
+    const containers = relevantTasks.map((t: any) => {
+      const dockerServiceId = t.ServiceID ?? '';
+      const dockerServiceName = serviceNameMap.get(dockerServiceId) ?? dockerServiceId;
+      const fleetSvc = fleetServiceMap.get(dockerServiceId);
+      const containerId = t.Status?.ContainerStatus?.ContainerID ?? '';
+
+      return {
+        taskId: (t.ID ?? '').slice(0, 12),
+        containerId,
+        nodeId: t.NodeID ?? '',
+        dockerServiceId,
+        dockerServiceName,
+        fleetServiceId: fleetSvc?.id ?? null,
+        fleetServiceName: fleetSvc?.name ?? null,
+        image: (t.Spec?.ContainerSpec?.Image ?? '').split('@')[0], // strip digest
+        state: t.Status?.State ?? 'unknown',
+        desiredState: t.DesiredState ?? 'unknown',
+        createdAt: t.CreatedAt ?? null,
+        stats: null as any,
+      };
+    });
+
+    // Fetch per-container stats if requested
+    if (includeStats) {
+      const running = containers.filter((c) => c.state === 'running' && c.containerId);
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < running.length; i += BATCH_SIZE) {
+        const batch = running.slice(i, i + BATCH_SIZE);
+        const results = await Promise.allSettled(
+          batch.map((c) => dockerService.nodeAwareGetContainerStats(c.containerId, c.nodeId)),
+        );
+        for (let j = 0; j < batch.length; j++) {
+          const result = results[j];
+          if (result && result.status === 'fulfilled' && result.value) {
+            batch[j]!.stats = result.value;
+          }
+        }
+      }
+    }
+
+    const running = containers.filter((c) => c.state === 'running').length;
+
+    return c.json({
+      containers,
+      summary: {
+        total: containers.length,
+        running,
+        stopped: containers.length - running,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to list node containers');
+    return c.json({ containers: [], summary: { total: 0, running: 0, stopped: 0 } });
+  }
 }) as any);
 
 nodeRoutes.route('/', adminNodeRoutes);

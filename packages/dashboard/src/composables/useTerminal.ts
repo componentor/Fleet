@@ -23,6 +23,7 @@ export function useTerminal() {
   let everConnected = false
   let currentContainerId: string | null = null
   let currentReplicaLabel: string | null = null
+  let customWsUrl: string | null = null
 
   const MAX_RECONNECT_ATTEMPTS = 5
   const BASE_DELAY_MS = 1000
@@ -81,7 +82,7 @@ export function useTerminal() {
     }
   }
 
-  function connect(serviceId: string, containerId?: string, replicaLabel?: string) {
+  function connect(serviceId: string, containerId?: string, replicaLabel?: string, wsUrl?: string) {
     if (!terminal) return
 
     // Tear down any existing connection first to prevent orphaned WebSockets
@@ -106,6 +107,7 @@ export function useTerminal() {
     currentServiceId = serviceId
     currentContainerId = containerId ?? null
     currentReplicaLabel = replicaLabel ?? null
+    customWsUrl = wsUrl ?? null
     reconnectAttempts = 0
     everConnected = false
     doConnect(serviceId)
@@ -117,14 +119,18 @@ export function useTerminal() {
     connectionState.value = reconnectAttempts > 0 ? 'reconnecting' : 'connecting'
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}`
     const authStore = useAuthStore()
     const token = authStore.token
     const accountId = localStorage.getItem('fleet_account_id')
 
-    let url = `${wsUrl}?accountId=${accountId}`
-    if (currentContainerId) {
-      url += `&containerId=${encodeURIComponent(currentContainerId)}`
+    let url: string
+    if (customWsUrl) {
+      url = `${protocol}//${window.location.host}${customWsUrl}`
+    } else {
+      url = `${protocol}//${window.location.host}/api/v1/terminal/${serviceId}?accountId=${accountId}`
+      if (currentContainerId) {
+        url += `&containerId=${encodeURIComponent(currentContainerId)}`
+      }
     }
 
     ws = new WebSocket(url, [`auth-${token}`])
