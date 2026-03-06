@@ -51,13 +51,13 @@ class StripeSyncService {
     if (productId) {
       await stripeService.updateProduct(productId, {
         name: plan.name,
-        description: plan.description ?? undefined,
+        description: plan.description || undefined,
         metadata: { planId: plan.id, slug: plan.slug },
       });
     } else {
       const product = await stripeService.createProduct(
         plan.name,
-        plan.description ?? undefined,
+        plan.description || undefined,
         { planId: plan.id, slug: plan.slug },
       );
       productId = product.id;
