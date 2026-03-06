@@ -1248,7 +1248,11 @@ authed.openapi(serviceCheckoutRoute, (async (c: any) => {
   });
   if (selectedPlan?.isFree) {
     const config = await db.query.billingConfig.findFirst();
-    const maxFree = config?.maxFreeServicesPerAccount;
+    const override = await db.query.accountBillingOverrides.findFirst({
+      where: eq(accountBillingOverrides.accountId, accountId),
+    });
+    // Per-account override takes priority over global setting
+    const maxFree = override?.maxFreeServices ?? config?.maxFreeServicesPerAccount;
     if (maxFree != null) {
       const freePlanIds = (await db.select({ id: billingPlans.id }).from(billingPlans).where(eq(billingPlans.isFree, true))).map(p => p.id);
       const freeSubCount = await db.select({ count: countSql() }).from(subscriptions)
@@ -1609,7 +1613,11 @@ authed.openapi(freeTierUsageRoute, (async (c: any) => {
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const config = await db.query.billingConfig.findFirst();
-  const limit = config?.maxFreeServicesPerAccount ?? null;
+  const override = await db.query.accountBillingOverrides.findFirst({
+    where: eq(accountBillingOverrides.accountId, accountId),
+  });
+  // Per-account override takes priority over global setting
+  const limit = override?.maxFreeServices ?? config?.maxFreeServicesPerAccount ?? null;
 
   const freePlanIds = (await db.select({ id: billingPlans.id }).from(billingPlans).where(eq(billingPlans.isFree, true))).map(p => p.id);
   let used = 0;
@@ -2575,22 +2583,41 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
     with: { prices: true },
   });
 
-  // Strip sensitive Stripe fields and prices relation
-  const safePlans = plans.map(({ stripeProductId, stripePriceIds, prices, ...rest }: any) => ({
-    ...rest,
-    _currencyPrices: prices,
-  }));
-
-  // Apply per-currency pricing: use fixed price if set, otherwise convert from USD
+  // Strip sensitive Stripe fields, keep currency prices for cycle lookup
   const tc = targetCurrency?.toUpperCase() ?? 'USD';
-  for (const plan of safePlans) {
-    const fixedPrice = plan._currencyPrices?.find((p: any) => p.currency === tc);
-    if (fixedPrice) {
-      plan.priceCents = fixedPrice.priceCents;
+  const safePlans = [];
+  for (const { stripeProductId, stripePriceIds, prices, ...rest } of plans as any[]) {
+    const plan: any = { ...rest };
+
+    // Build per-cycle price map for the requested currency
+    // { monthly: 500, yearly: 5000, ... } — only cycles that have fixed prices
+    const cyclePrices: Record<string, number> = {};
+    for (const p of (prices ?? [])) {
+      if (p.currency === tc) {
+        cyclePrices[p.cycle || 'monthly'] = p.priceCents;
+      }
+    }
+
+    // Apply fixed monthly price if available for this currency
+    if (cyclePrices.monthly != null) {
+      plan.priceCents = cyclePrices.monthly;
     } else if (tc !== 'USD' && plan.priceCents != null) {
       plan.priceCents = await exchangeRateService.convertCents(plan.priceCents, 'USD', tc);
     }
-    delete plan._currencyPrices;
+
+    // Apply fixed yearly price if available for this currency
+    if (cyclePrices.yearly != null) {
+      plan.yearlyPriceCents = cyclePrices.yearly;
+    } else if (tc !== 'USD' && plan.yearlyPriceCents != null) {
+      plan.yearlyPriceCents = await exchangeRateService.convertCents(plan.yearlyPriceCents, 'USD', tc);
+    }
+
+    // Include full cycle prices map so frontend can use specific prices per cycle
+    if (Object.keys(cyclePrices).length > 0) {
+      plan.cyclePrices = cyclePrices;
+    }
+
+    safePlans.push(plan);
   }
 
   // Include billing config for cycle/trial info

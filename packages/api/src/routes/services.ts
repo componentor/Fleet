@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, billingPlans, subscriptions, billingConfig, stacks, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
+import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, billingPlans, subscriptions, billingConfig, accountBillingOverrides, stacks, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { orchestrator } from '../services/orchestrator.js';
@@ -1029,6 +1029,21 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     // Plan limits override user-specified values
     data.cpuLimit = plan.cpuLimit;
     data.memoryLimit = plan.memoryLimit;
+
+    // Apply per-account overrides
+    const billingOverride = await db.query.accountBillingOverrides.findFirst({
+      where: eq(accountBillingOverrides.accountId, accountId),
+    });
+    if (billingOverride) {
+      // Free tier: direct replacement of plan limits
+      if (plan.isFree) {
+        if (billingOverride.freeTierCpuLimit != null) data.cpuLimit = billingOverride.freeTierCpuLimit;
+        if (billingOverride.freeTierMemoryLimit != null) data.memoryLimit = billingOverride.freeTierMemoryLimit;
+      }
+      // Boost: applies to all tiers, only increases (never decreases below plan limit)
+      if (billingOverride.boostCpuLimit != null) data.cpuLimit = Math.max(data.cpuLimit, billingOverride.boostCpuLimit);
+      if (billingOverride.boostMemoryLimit != null) data.memoryLimit = Math.max(data.memoryLimit, billingOverride.boostMemoryLimit);
+    }
   }
 
   // Per-account service quota (DB overrides env)
@@ -1086,6 +1101,15 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     constraints.push(`node.labels.region == ${data.region}`);
   }
 
+  // Always create a stack for every deployment
+  const [stackRow] = await insertReturning(stacks, {
+    accountId,
+    name: data.name,
+    templateSlug: null,
+    status: 'active',
+  });
+  const stackId = stackRow!.id;
+
   // Insert into DB
   const [svc] = await insertReturning(services, {
     accountId,
@@ -1115,6 +1139,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     registryPollEnabled: data.registryPollEnabled,
     registryPollInterval: data.registryPollInterval,
     registryWebhookSecret: data.sourceType === 'registry' ? (await import('node:crypto')).randomBytes(32).toString('hex') : null,
+    stackId,
     planId: data.planId ?? null,
     status: 'deploying',
   });

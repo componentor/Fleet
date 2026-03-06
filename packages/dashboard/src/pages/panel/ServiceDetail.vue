@@ -95,6 +95,7 @@ const serviceSubscription = ref<ServiceSubscription | null>(null)
 const billingLoading = ref(false)
 const showChangePlan = ref(false)
 const changePlanId = ref<string | null>(null)
+const selectedCycle = ref('monthly')
 const billingContactEmail = ref('')
 const billingContactName = ref('')
 
@@ -122,9 +123,9 @@ async function handleChangePlan(opts?: { confirm?: boolean }) {
   // No existing subscription — create a new one via checkout
   if (!serviceSubscription.value) {
     const url = await serviceBilling.createCheckout({
-      serviceId,
+      stackId: service.value?.stackId ?? undefined,
       planId: changePlanId.value,
-      billingCycle: 'monthly',
+      billingCycle: selectedCycle.value,
     })
     if (url) window.location.href = url
     return
@@ -2536,6 +2537,26 @@ onUnmounted(() => {
             <div v-if="showChangePlan" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Select New Plan</h3>
               <TierSelector v-model="changePlanId" :current-plan="serviceSubscription?.plan ?? undefined" />
+
+              <!-- Billing cycle selector -->
+              <div v-if="!serviceSubscription && serviceBilling.allowedCycles.value.length > 1" class="mt-4">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Billing Cycle</label>
+                <div class="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5">
+                  <button
+                    v-for="cycle in serviceBilling.allowedCycles.value"
+                    :key="cycle"
+                    @click="selectedCycle = cycle"
+                    :class="[
+                      'rounded-md px-3 py-1.5 text-xs font-medium transition-all capitalize',
+                      selectedCycle === cycle
+                        ? 'bg-primary-600 text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
+                    ]"
+                  >
+                    {{ cycle.replace('_', ' ') }}
+                  </button>
+                </div>
+              </div>
 
               <!-- Downgrade error (403) -->
               <div v-if="downgradeError" class="mt-4 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ShoppingBasket, X, Trash2, Globe, Minus, Plus, Server, Info } from 'lucide-vue-next'
-import { useCart } from '@/composables/useCart'
+import { useCart, CYCLE_MONTHS, CYCLE_LABELS, CYCLE_SHORT, type BillingCycle } from '@/composables/useCart'
 import { useCurrency } from '@/composables/useCurrency'
 
 const { t, locale } = useI18n()
@@ -19,6 +19,8 @@ interface ApiPlan {
   nameTranslations?: Record<string, string>
   descriptionTranslations?: Record<string, string>
   priceCents: number
+  yearlyPriceCents?: number | null
+  cyclePrices?: Record<string, number>
   isFree: boolean
   isDefault: boolean
   cpuLimit: number
@@ -40,6 +42,7 @@ const emit = defineEmits<{
 const plans = ref<ApiPlan[]>([])
 const plansLoaded = ref(false)
 const showComparison = ref(false)
+const allowedCycles = ref<BillingCycle[]>(['monthly', 'yearly'])
 
 function formatMemory(mb: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${mb} MB`
@@ -58,6 +61,7 @@ watch(() => props.open, async (isOpen) => {
       if (res.ok) {
         const data = await res.json()
         if (data.plans?.length) plans.value = data.plans
+        if (data.allowedCycles?.length) allowedCycles.value = data.allowedCycles
       }
     } catch { /* fallback: no plans shown */ }
     plansLoaded.value = true
@@ -77,18 +81,25 @@ function formattedHostingTotal() {
 function hostingCycleLabel() {
   const withPlans = items.value.filter(i => i.planPriceCents)
   if (withPlans.length === 0) return ''
-  const allYearly = withPlans.every(i => (i.billingCycle ?? 'yearly') === 'yearly')
-  const allMonthly = withPlans.every(i => (i.billingCycle ?? 'yearly') === 'monthly')
-  if (allYearly) return '/ ' + t('landing.cart.year', 'yr')
-  if (allMonthly) return '/ ' + t('landing.cart.month', 'mo')
-  return '/ ' + t('landing.cart.year', 'yr')
+  const cycle = withPlans[0]?.billingCycle ?? 'monthly'
+  const allSame = withPlans.every(i => (i.billingCycle ?? 'monthly') === cycle)
+  if (allSame) return '/ ' + CYCLE_SHORT[cycle]
+  return '/ ' + CYCLE_SHORT.monthly
 }
 
-function planPrice(plan: ApiPlan, cycle: 'monthly' | 'yearly') {
+function getCyclePriceCents(plan: ApiPlan, cycle: BillingCycle): number {
+  // 1. Use specific cycle price if configured for this currency
+  if (plan.cyclePrices?.[cycle] != null) return plan.cyclePrices[cycle]
+  // 2. For yearly, use explicit yearlyPriceCents if set
+  if (cycle === 'yearly' && plan.yearlyPriceCents != null) return plan.yearlyPriceCents
+  // 3. Fall back to monthly base × cycle multiplier
+  return Math.round(plan.priceCents * CYCLE_MONTHS[cycle])
+}
+
+function planPrice(plan: ApiPlan, cycle: BillingCycle) {
   if (plan.isFree) return t('landing.pricing.plans.free.name', 'Free')
-  const amount = cycle === 'yearly' ? (plan.priceCents * 12) / 100 : plan.priceCents / 100
-  const label = cycle === 'yearly' ? t('landing.cart.year', 'yr') : t('landing.cart.month', 'mo')
-  return `${formatCurrency(amount, cartCurrency.value)}/${label}`
+  const amount = getCyclePriceCents(plan, cycle) / 100
+  return `${formatCurrency(amount, cartCurrency.value)}/${CYCLE_SHORT[cycle]}`
 }
 
 function togglePlan(domain: string, plan: ApiPlan) {
@@ -271,29 +282,20 @@ function togglePlan(domain: string, plan: ApiPlan) {
                       </button>
                     </div>
                     <!-- Billing cycle toggle (only when a paid plan is selected) -->
-                    <div v-if="item.planId && item.planPriceCents && item.planPriceCents > 0" class="mt-2 flex items-center gap-1">
-                      <div class="inline-flex rounded-lg border border-surface-200 dark:border-surface-700 p-0.5">
+                    <div v-if="item.planId && item.planPriceCents && item.planPriceCents > 0 && allowedCycles.length > 1" class="mt-2 flex items-center gap-1">
+                      <div class="inline-flex rounded-lg border border-surface-200 dark:border-surface-700 p-0.5 flex-wrap">
                         <button
-                          @click="setBillingCycle(item.domain, 'yearly')"
+                          v-for="cycle in allowedCycles"
+                          :key="cycle"
+                          @click="setBillingCycle(item.domain, cycle)"
                           :class="[
                             'rounded-md px-2.5 py-1 text-[11px] font-medium transition-all',
-                            (item.billingCycle ?? 'yearly') === 'yearly'
+                            (item.billingCycle ?? 'monthly') === cycle
                               ? 'bg-primary-600 text-white shadow-sm'
                               : 'text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-200',
                           ]"
                         >
-                          {{ t('landing.cart.yearly', 'Yearly') }}
-                        </button>
-                        <button
-                          @click="setBillingCycle(item.domain, 'monthly')"
-                          :class="[
-                            'rounded-md px-2.5 py-1 text-[11px] font-medium transition-all',
-                            item.billingCycle === 'monthly'
-                              ? 'bg-primary-600 text-white shadow-sm'
-                              : 'text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-200',
-                          ]"
-                        >
-                          {{ t('landing.cart.monthly', 'Monthly') }}
+                          {{ CYCLE_LABELS[cycle] }}
                         </button>
                       </div>
                     </div>

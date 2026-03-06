@@ -31,6 +31,7 @@ export const billingPlans = mysqlTable('billing_plans', {
   bandwidthLimit: int('bandwidth_limit'),
   maxUsersPerAccount: int('max_users_per_account'),
   priceCents: int('price_cents').notNull(),
+  yearlyPriceCents: int('yearly_price_cents'),
   stripeProductId: varchar('stripe_product_id', { length: 255 }),
   stripePriceIds: json('stripe_price_ids').$default(() => ({})),
   nameTranslations: json('name_translations').$default(() => ({})),
@@ -171,6 +172,15 @@ export const accountBillingOverrides = mysqlTable('account_billing_overrides', {
   storageCentsPerGbMonthOverride: int('storage_cents_per_gb_month_override'),
   bandwidthCentsPerGbOverride: int('bandwidth_cents_per_gb_override'),
   containerCentsPerHourOverride: int('container_cents_per_hour_override'),
+  maxFreeServices: int('max_free_services'),
+  freeTierCpuLimit: int('free_tier_cpu_limit'),
+  freeTierMemoryLimit: int('free_tier_memory_limit'),
+  freeTierContainerLimit: int('free_tier_container_limit'),
+  freeTierStorageLimit: int('free_tier_storage_limit'),
+  boostCpuLimit: int('boost_cpu_limit'),
+  boostMemoryLimit: int('boost_memory_limit'),
+  boostContainerLimit: int('boost_container_limit'),
+  boostStorageLimit: int('boost_storage_limit'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -191,10 +201,11 @@ export const billingPlanPrices = mysqlTable('billing_plan_prices', {
     .notNull(),
   currency: varchar('currency', { length: 3 }).notNull(),
   priceCents: int('price_cents').notNull(),
+  cycle: varchar('cycle', { length: 20 }).notNull().default('monthly'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
-  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+  uniqueIndex('idx_billing_plan_prices_plan_currency_cycle').on(table.planId, table.currency, table.cycle),
 ]);
 
 export const billingPlansRelations = relations(

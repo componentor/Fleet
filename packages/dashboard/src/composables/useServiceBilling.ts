@@ -18,7 +18,6 @@ export interface ServiceTier {
   storageLimit: number
   bandwidthLimit: number | null
   volumeIncludedGb: number
-  scope: 'service' | 'stack'
   isFree: boolean
   isDefault: boolean
   sortOrder: number
@@ -51,9 +50,12 @@ export type ChangePlanResult =
   | { ok: true }
   | { ok: false; status?: number; conflicts?: ResourceConflict[]; message?: string }
 
+export type BillingCycle = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'
+
 // Module-level shared state
 const tiers = ref<ServiceTier[]>([])
 const tiersLoaded = ref(false)
+const allowedCycles = ref<BillingCycle[]>(['monthly', 'yearly'])
 
 /** Get the localized name/description for a plan-like object */
 export function usePlanLocale() {
@@ -75,8 +77,9 @@ export function useServiceBilling() {
   async function fetchTiers() {
     if (tiersLoaded.value) return
     try {
-      const data = await api.get<{ plans: ServiceTier[] }>(`/billing/public/plans?currency=${selectedCurrency.value}`)
+      const data = await api.get<{ plans: ServiceTier[]; allowedCycles?: BillingCycle[] }>(`/billing/public/plans?currency=${selectedCurrency.value}`)
       tiers.value = (data.plans ?? []).sort((a, b) => a.sortOrder - b.sortOrder)
+      if (data.allowedCycles?.length) allowedCycles.value = data.allowedCycles
       tiersLoaded.value = true
     } catch {
       // Fallback — tiers may not be configured yet
@@ -210,6 +213,7 @@ export function useServiceBilling() {
     tiers,
     tiersLoaded,
     freeTier,
+    allowedCycles,
     fetchTiers,
     refreshTiers,
     fetchServiceSubscription,

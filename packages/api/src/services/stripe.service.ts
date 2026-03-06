@@ -2,6 +2,21 @@ import Stripe from 'stripe';
 import { db, platformSettings, eq } from '@fleet/db';
 import { decrypt } from './crypto.service.js';
 
+/** Stripe product tax code for SaaS / cloud services */
+export const SAAS_TAX_CODE = 'txcd_10103001';
+
+/** Check if Stripe Tax is enabled in platform settings */
+async function isStripeTaxEnabled(): Promise<boolean> {
+  try {
+    const row = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'stripe:taxEnabled'),
+    });
+    return row?.value === 'true' || row?.value === true;
+  } catch {
+    return false;
+  }
+}
+
 let _stripe: Stripe | null = null;
 
 async function getStripe(): Promise<Stripe> {
@@ -63,12 +78,19 @@ export class StripeService {
     successUrl: string,
     cancelUrl: string,
   ): Promise<Stripe.Checkout.Session> {
+    const taxEnabled = await isStripeTaxEnabled();
     return (await getStripe()).checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
+      ...(taxEnabled && {
+        automatic_tax: { enabled: true },
+      }),
     });
   }
 
@@ -151,6 +173,7 @@ export class StripeService {
       metadata['registrationId'] = registrationId;
     }
 
+    const taxEnabled = await isStripeTaxEnabled();
     return (await getStripe()).checkout.sessions.create({
       customer: customerId,
       mode: 'payment',
@@ -164,6 +187,7 @@ export class StripeService {
             product_data: {
               name: registrationId ? `Domain Renewal: ${domain}` : `Domain Registration: ${domain}`,
               description: `${years} year${years > 1 ? 's' : ''}`,
+              tax_code: taxEnabled ? 'txcd_10103001' : undefined,
             },
             unit_amount: amountCents,
           },
@@ -173,6 +197,12 @@ export class StripeService {
       metadata,
       success_url: successUrl,
       cancel_url: cancelUrl,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
+      ...(taxEnabled && {
+        automatic_tax: { enabled: true },
+      }),
     });
   }
 
@@ -259,6 +289,7 @@ export class StripeService {
     cancelUrl: string,
     mode: 'subscription' | 'payment' = 'subscription',
   ): Promise<Stripe.Checkout.Session> {
+    const taxEnabled = await isStripeTaxEnabled();
     return (await getStripe()).checkout.sessions.create({
       customer: customerId,
       mode,
@@ -267,6 +298,12 @@ export class StripeService {
       success_url: successUrl,
       cancel_url: cancelUrl,
       subscription_data: mode === 'subscription' ? { metadata } : undefined,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
+      ...(taxEnabled && {
+        automatic_tax: { enabled: true },
+      }),
     });
   }
 
@@ -473,6 +510,7 @@ export class StripeService {
     connectAccountId: string;
     applicationFeeAmount: number;
   }): Promise<Stripe.Checkout.Session> {
+    const taxEnabled = await isStripeTaxEnabled();
     return (await getStripe()).checkout.sessions.create({
       customer: params.customerId,
       mode: 'payment',
@@ -486,6 +524,15 @@ export class StripeService {
           destination: params.connectAccountId,
         },
       },
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
+      ...(taxEnabled && {
+        automatic_tax: {
+          enabled: true,
+          liability: { type: 'account' as const, account: params.connectAccountId },
+        },
+      }),
     });
   }
 
@@ -503,6 +550,7 @@ export class StripeService {
     connectAccountId: string;
     applicationFeePercent: number;
   }): Promise<Stripe.Checkout.Session> {
+    const taxEnabled = await isStripeTaxEnabled();
     return (await getStripe()).checkout.sessions.create({
       customer: params.customerId,
       mode: 'subscription',
@@ -516,7 +564,21 @@ export class StripeService {
         transfer_data: {
           destination: params.connectAccountId,
         },
+        ...(taxEnabled && {
+          invoice_settings: {
+            issuer: { type: 'account' as const, account: params.connectAccountId },
+          },
+        }),
       },
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
+      ...(taxEnabled && {
+        automatic_tax: {
+          enabled: true,
+          liability: { type: 'account' as const, account: params.connectAccountId },
+        },
+      }),
     });
   }
 

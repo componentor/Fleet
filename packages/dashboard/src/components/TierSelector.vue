@@ -6,7 +6,6 @@ import { Check, Cpu, HardDrive, MemoryStick, Zap } from 'lucide-vue-next'
 
 const props = defineProps<{
   modelValue?: string | null
-  stackMode?: boolean
   disabled?: boolean
   currentPlan?: ServiceTier
 }>()
@@ -46,7 +45,7 @@ function isFreeTierDisabled(tier: ServiceTier): boolean {
 }
 
 const filteredTiers = computed(() => {
-  let list = props.stackMode ? tiers.value.filter(t => t.scope === 'stack') : tiers.value.filter(t => t.scope === 'service')
+  let list = [...tiers.value]
   if (props.currentPlan && !allowDowngrade.value) {
     list = list.filter(t => !isDowngrade(t))
   }

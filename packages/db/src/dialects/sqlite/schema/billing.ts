@@ -26,6 +26,7 @@ export const billingPlans = sqliteTable('billing_plans', {
   bandwidthLimit: integer('bandwidth_limit'),
   maxUsersPerAccount: integer('max_users_per_account'),
   priceCents: integer('price_cents').notNull(),
+  yearlyPriceCents: integer('yearly_price_cents'),
   stripeProductId: text('stripe_product_id'),
   stripePriceIds: text('stripe_price_ids', { mode: 'json' }).$default(() => ({})),
   nameTranslations: text('name_translations', { mode: 'json' }).$default(() => ({})),
@@ -170,6 +171,15 @@ export const accountBillingOverrides = sqliteTable('account_billing_overrides', 
   storageCentsPerGbMonthOverride: integer('storage_cents_per_gb_month_override'),
   bandwidthCentsPerGbOverride: integer('bandwidth_cents_per_gb_override'),
   containerCentsPerHourOverride: integer('container_cents_per_hour_override'),
+  maxFreeServices: integer('max_free_services'),
+  freeTierCpuLimit: integer('free_tier_cpu_limit'),
+  freeTierMemoryLimit: integer('free_tier_memory_limit'),
+  freeTierContainerLimit: integer('free_tier_container_limit'),
+  freeTierStorageLimit: integer('free_tier_storage_limit'),
+  boostCpuLimit: integer('boost_cpu_limit'),
+  boostMemoryLimit: integer('boost_memory_limit'),
+  boostContainerLimit: integer('boost_container_limit'),
+  boostStorageLimit: integer('boost_storage_limit'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
@@ -190,10 +200,11 @@ export const billingPlanPrices = sqliteTable('billing_plan_prices', {
     .notNull(),
   currency: text('currency').notNull(),
   priceCents: integer('price_cents').notNull(),
+  cycle: text('cycle').notNull().default('monthly'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
-  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+  uniqueIndex('idx_billing_plan_prices_plan_currency_cycle').on(table.planId, table.currency, table.cycle),
 ]);
 
 export const billingPlansRelations = relations(

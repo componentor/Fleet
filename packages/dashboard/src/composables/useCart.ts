@@ -1,5 +1,35 @@
 import { ref, computed, watch } from 'vue'
 
+export type BillingCycle = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'
+
+/** Monthly-equivalent multiplier for each cycle */
+export const CYCLE_MONTHS: Record<BillingCycle, number> = {
+  daily: 1 / 30,
+  weekly: 7 / 30,
+  monthly: 1,
+  quarterly: 3,
+  half_yearly: 6,
+  yearly: 12,
+}
+
+export const CYCLE_LABELS: Record<BillingCycle, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  half_yearly: 'Half Yearly',
+  yearly: 'Yearly',
+}
+
+export const CYCLE_SHORT: Record<BillingCycle, string> = {
+  daily: 'day',
+  weekly: 'wk',
+  monthly: 'mo',
+  quarterly: 'qtr',
+  half_yearly: '6mo',
+  yearly: 'yr',
+}
+
 export interface CartItem {
   type: 'domain'
   domain: string
@@ -12,7 +42,9 @@ export interface CartItem {
   planSlug?: string
   planName?: string
   planPriceCents?: number
-  billingCycle?: 'monthly' | 'yearly'
+  planYearlyPriceCents?: number | null
+  planCyclePrices?: Record<string, number>
+  billingCycle?: BillingCycle
 }
 
 const STORAGE_KEY = 'fleet-cart'
@@ -37,13 +69,20 @@ export function useCart() {
   const count = computed(() => items.value.length)
   const total = computed(() => items.value.reduce((sum, i) => sum + i.price * i.years, 0))
 
+  function getItemCyclePriceCents(item: CartItem): number {
+    if (!item.planPriceCents) return 0
+    const cycle = item.billingCycle ?? 'monthly'
+    // 1. Specific cycle price configured for this currency
+    if (item.planCyclePrices?.[cycle] != null) return item.planCyclePrices[cycle]
+    // 2. Explicit yearly price
+    if (cycle === 'yearly' && item.planYearlyPriceCents != null) return item.planYearlyPriceCents
+    // 3. Monthly base × multiplier
+    return Math.round(item.planPriceCents * CYCLE_MONTHS[cycle])
+  }
+
   // Sum of attached hosting plan costs (in display currency amount, not cents)
   const hostingTotal = computed(() =>
-    items.value.reduce((sum, i) => {
-      if (!i.planPriceCents) return sum
-      const cycle = i.billingCycle ?? 'yearly'
-      return sum + (cycle === 'yearly' ? (i.planPriceCents * 12) / 100 : i.planPriceCents / 100)
-    }, 0),
+    items.value.reduce((sum, i) => sum + getItemCyclePriceCents(i) / 100, 0),
   )
 
   function addDomain(domain: string, price: number, currency: string, renewalPrice?: number, years = 1) {
@@ -74,7 +113,7 @@ export function useCart() {
     }
   }
 
-  function setPlan(domain: string, plan: { id: string; slug: string; name: string; priceCents: number } | null) {
+  function setPlan(domain: string, plan: { id: string; slug: string; name: string; priceCents: number; yearlyPriceCents?: number | null; cyclePrices?: Record<string, number> } | null) {
     const item = items.value.find(i => i.domain === domain)
     if (!item) return
     if (plan) {
@@ -82,17 +121,21 @@ export function useCart() {
       item.planSlug = plan.slug
       item.planName = plan.name
       item.planPriceCents = plan.priceCents
-      if (!item.billingCycle) item.billingCycle = 'yearly'
+      item.planYearlyPriceCents = plan.yearlyPriceCents ?? undefined
+      item.planCyclePrices = plan.cyclePrices
+      if (!item.billingCycle) item.billingCycle = 'monthly'
     } else {
       item.planId = undefined
       item.planSlug = undefined
       item.planName = undefined
       item.planPriceCents = undefined
+      item.planYearlyPriceCents = undefined
+      item.planCyclePrices = undefined
       item.billingCycle = undefined
     }
   }
 
-  function setBillingCycle(domain: string, cycle: 'monthly' | 'yearly') {
+  function setBillingCycle(domain: string, cycle: BillingCycle) {
     const item = items.value.find(i => i.domain === domain)
     if (item) item.billingCycle = cycle
   }

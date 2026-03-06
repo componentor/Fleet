@@ -51,6 +51,7 @@ const stripePublishableKey = ref('')
 const stripeSecretKey = ref('')
 const stripeWebhookSecret = ref('')
 const stripeConfigured = ref(false)
+const stripeTaxEnabled = ref(false)
 const stripeSecretKeyHint = ref('')
 const stripeWebhookSecretHint = ref('')
 const stripeTestLoading = ref(false)
@@ -545,6 +546,7 @@ async function fetchStripe() {
   try {
     const data = await api.get<any>('/settings/stripe')
     stripeConfigured.value = data.configured ?? false
+    stripeTaxEnabled.value = data.taxEnabled ?? false
     if (data.configured) {
       stripePublishableKey.value = data.publishableKey ?? ''
       stripeSecretKeyHint.value = data.secretKeyHint ?? ''
@@ -895,8 +897,8 @@ function saveGoogleField(key: string, value: string) {
   })
 }
 
-function saveStripeField(key: string, value: string) {
-  if (!value) return
+function saveStripeField(key: string, value: any) {
+  if (!value && value !== false) return
   saveOneField(`stripe:${key}`, () => api.patch('/settings/stripe', { [key]: value }), async () => {
     if (key === 'secretKey') stripeSecretKey.value = ''
     if (key === 'webhookSecret') stripeWebhookSecret.value = ''
@@ -1585,6 +1587,21 @@ onMounted(() => {
               </div>
               <div v-if="stripeTestResult" class="p-3 rounded-lg text-sm" :class="stripeTestResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'">
                 {{ stripeTestResult.message }}
+              </div>
+
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Automatic Tax (Stripe Tax)</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Enable Stripe Tax to automatically calculate and collect taxes on checkout sessions.</p>
+                </div>
+                <button
+                  @click="stripeTaxEnabled = !stripeTaxEnabled; saveStripeField('taxEnabled', stripeTaxEnabled)"
+                  :disabled="savingField === 'stripe:taxEnabled'"
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50"
+                  :class="stripeTaxEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'"
+                >
+                  <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform" :class="stripeTaxEnabled ? 'translate-x-6' : 'translate-x-1'" />
+                </button>
               </div>
             </div>
           </div>

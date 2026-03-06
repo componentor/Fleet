@@ -31,6 +31,7 @@ export const billingPlans = pgTable('billing_plans', {
   bandwidthLimit: integer('bandwidth_limit'),
   maxUsersPerAccount: integer('max_users_per_account'),
   priceCents: integer('price_cents').notNull(),
+  yearlyPriceCents: integer('yearly_price_cents'),
   stripeProductId: varchar('stripe_product_id'),
   stripePriceIds: jsonb('stripe_price_ids').default({}),
   nameTranslations: jsonb('name_translations').default({}),
@@ -173,6 +174,15 @@ export const accountBillingOverrides = pgTable('account_billing_overrides', {
   storageCentsPerGbMonthOverride: integer('storage_cents_per_gb_month_override'),
   bandwidthCentsPerGbOverride: integer('bandwidth_cents_per_gb_override'),
   containerCentsPerHourOverride: integer('container_cents_per_hour_override'),
+  maxFreeServices: integer('max_free_services'),
+  freeTierCpuLimit: integer('free_tier_cpu_limit'),
+  freeTierMemoryLimit: integer('free_tier_memory_limit'),
+  freeTierContainerLimit: integer('free_tier_container_limit'),
+  freeTierStorageLimit: integer('free_tier_storage_limit'),
+  boostCpuLimit: integer('boost_cpu_limit'),
+  boostMemoryLimit: integer('boost_memory_limit'),
+  boostContainerLimit: integer('boost_container_limit'),
+  boostStorageLimit: integer('boost_storage_limit'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -193,10 +203,11 @@ export const billingPlanPrices = pgTable('billing_plan_prices', {
     .notNull(),
   currency: varchar('currency', { length: 3 }).notNull(),
   priceCents: integer('price_cents').notNull(),
+  cycle: varchar('cycle', { length: 20 }).notNull().default('monthly'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
-  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+  uniqueIndex('idx_billing_plan_prices_plan_currency_cycle').on(table.planId, table.currency, table.cycle),
 ]);
 
 export const billingPlansRelations = relations(

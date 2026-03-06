@@ -199,6 +199,10 @@ const recentServices = computed(() =>
   }).slice(0, 5)
 )
 
+function openDomain(domain: string) {
+  window.open(`https://${domain}`, '_blank', 'noopener,noreferrer')
+}
+
 function formatDate(ts: any) {
   if (!ts) return ''
   const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
@@ -417,6 +421,14 @@ onMounted(async () => {
                   :class="['w-2 h-2 rounded-full shrink-0', d.status === 'active' ? 'bg-green-500' : 'bg-yellow-500']"
                   :title="d.status"
                 ></span>
+                <button
+                  v-if="d.status === 'active'"
+                  @click.prevent="openDomain(d.domain)"
+                  class="ml-1 p-1 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  :title="$t('domains.openInNewTab', 'Open site')"
+                >
+                  <ExternalLink class="w-3.5 h-3.5" />
+                </button>
               </div>
             </router-link>
           </div>

@@ -434,6 +434,10 @@ async function dismissState() {
   if (updateState.value?.status === 'completed' && updateState.value.targetVersion) {
     setCurrentVersion(updateState.value.targetVersion.replace(/^v/, ''))
   }
+  // Clear server-side persisted/broadcast state so it doesn't come back
+  try {
+    await api.post<any>('/updates/reset', {})
+  } catch { /* ignore — may already be cleared */ }
   updateState.value = { status: 'idle' }
   updateAvailable.value = false
   // Re-fetch to get fresh data from the (hopefully) new API

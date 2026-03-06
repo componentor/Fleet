@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -41,6 +41,11 @@ const deletionBillingPolicy = ref<'immediate' | 'end_of_period'>('end_of_period'
 const maxFreeServicesPerAccount = ref<number | null>(null)
 const savingTierPolicies = ref(false)
 
+// ─── Allowed Currencies ─────────────────────────────────────
+const allowedCurrenciesList = ref<string[]>([])
+const newCurrency = ref('')
+const savingCurrencies = ref(false)
+
 // ─── Service Tiers ──────────────────────────────────────────
 const plans = ref<any[]>([])
 const showPlanForm = ref(false)
@@ -50,15 +55,26 @@ const planForm = ref({
   isDefault: false, isFree: false, visible: true,
   cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
   storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
-  priceCents: 0, volumeIncludedGb: 0, scope: 'service' as 'service' | 'stack',
+  priceCents: 0, yearlyPriceCents: null as number | null, volumeIncludedGb: 0,
   nameTranslations: {} as Record<string, string>,
   descriptionTranslations: {} as Record<string, string>,
 })
 
 // ─── Plan Currency Prices ─────────────────────────────────────
 const editingPricesPlanId = ref<string | null>(null)
-const planCurrencyPrices = ref<{ currency: string; priceCents: number }[]>([])
+// Currency prices: each entry = { currency, cycle, priceCents }
+// Grouped by currency in UI, with a column per active cycle
+const planCurrencyPrices = ref<{ currency: string; cycle: string; priceCents: number }[]>([])
 const savingPrices = ref(false)
+
+// Get unique currencies from the prices list
+function getCurrencies(): string[] {
+  const seen = new Set<string>()
+  for (const p of planCurrencyPrices.value) {
+    if (p.currency) seen.add(p.currency)
+  }
+  return [...seen]
+}
 
 async function openCurrencyPrices(plan: any) {
   if (editingPricesPlanId.value === plan.id) {
@@ -68,23 +84,47 @@ async function openCurrencyPrices(plan: any) {
   editingPricesPlanId.value = plan.id
   planCurrencyPrices.value = (plan.prices || []).map((p: any) => ({
     currency: p.currency,
+    cycle: p.cycle || 'monthly',
     priceCents: p.priceCents,
   }))
 }
 
 function addCurrencyPrice() {
-  planCurrencyPrices.value.push({ currency: '', priceCents: 0 })
+  // Add one row per active cycle for the new currency
+  for (const cycle of allowedCycles.value) {
+    planCurrencyPrices.value.push({ currency: '', cycle, priceCents: 0 })
+  }
 }
 
-function removeCurrencyPrice(index: number) {
-  planCurrencyPrices.value.splice(index, 1)
+function removeCurrencyRows(currency: string) {
+  planCurrencyPrices.value = planCurrencyPrices.value.filter(p => p.currency !== currency)
+}
+
+function getPriceForCycle(currency: string, cycle: string): number {
+  const entry = planCurrencyPrices.value.find(p => p.currency === currency && p.cycle === cycle)
+  return entry?.priceCents ?? 0
+}
+
+function setPriceForCycle(currency: string, cycle: string, value: number) {
+  const entry = planCurrencyPrices.value.find(p => p.currency === currency && p.cycle === cycle)
+  if (entry) {
+    entry.priceCents = value
+  } else {
+    planCurrencyPrices.value.push({ currency, cycle, priceCents: value })
+  }
+}
+
+function setCurrencyForGroup(oldCurrency: string, newCurrency: string) {
+  for (const p of planCurrencyPrices.value) {
+    if (p.currency === oldCurrency) p.currency = newCurrency.toUpperCase()
+  }
 }
 
 async function saveCurrencyPrices() {
   if (!editingPricesPlanId.value) return
   savingPrices.value = true
   try {
-    const valid = planCurrencyPrices.value.filter(p => p.currency.length === 3)
+    const valid = planCurrencyPrices.value.filter(p => p.currency.length === 3 && p.priceCents > 0)
     await api.put(`/billing/admin/plans/${editingPricesPlanId.value}/prices`, { prices: valid })
     showSuccess('Currency prices saved')
     const data = await api.get<any[]>('/billing/admin/plans')
@@ -128,6 +168,63 @@ const subs = ref<any[]>([])
 
 // ─── Account Overrides ───────────────────────────────────────
 const overrides = ref<any[]>([])
+const editingOverrideId = ref<string | null>(null)
+const overrideForm = ref({
+  maxFreeServices: null as number | null,
+  freeTierCpuLimit: null as number | null,
+  freeTierMemoryLimit: null as number | null,
+  freeTierContainerLimit: null as number | null,
+  freeTierStorageLimit: null as number | null,
+  boostCpuLimit: null as number | null,
+  boostMemoryLimit: null as number | null,
+  boostContainerLimit: null as number | null,
+  boostStorageLimit: null as number | null,
+})
+const savingOverride = ref(false)
+
+function editOverride(o: any) {
+  if (editingOverrideId.value === o.accountId) {
+    editingOverrideId.value = null
+    return
+  }
+  editingOverrideId.value = o.accountId
+  overrideForm.value = {
+    maxFreeServices: o.maxFreeServices ?? null,
+    freeTierCpuLimit: o.freeTierCpuLimit ?? null,
+    freeTierMemoryLimit: o.freeTierMemoryLimit ?? null,
+    freeTierContainerLimit: o.freeTierContainerLimit ?? null,
+    freeTierStorageLimit: o.freeTierStorageLimit ?? null,
+    boostCpuLimit: o.boostCpuLimit ?? null,
+    boostMemoryLimit: o.boostMemoryLimit ?? null,
+    boostContainerLimit: o.boostContainerLimit ?? null,
+    boostStorageLimit: o.boostStorageLimit ?? null,
+  }
+}
+
+async function saveOverride(accountId: string) {
+  savingOverride.value = true
+  try {
+    await api.patch(`/billing/admin/account-overrides/${accountId}`, {
+      maxFreeServices: overrideForm.value.maxFreeServices || null,
+      freeTierCpuLimit: overrideForm.value.freeTierCpuLimit || null,
+      freeTierMemoryLimit: overrideForm.value.freeTierMemoryLimit || null,
+      freeTierContainerLimit: overrideForm.value.freeTierContainerLimit || null,
+      freeTierStorageLimit: overrideForm.value.freeTierStorageLimit || null,
+      boostCpuLimit: overrideForm.value.boostCpuLimit || null,
+      boostMemoryLimit: overrideForm.value.boostMemoryLimit || null,
+      boostContainerLimit: overrideForm.value.boostContainerLimit || null,
+      boostStorageLimit: overrideForm.value.boostStorageLimit || null,
+    })
+    showSuccess('Account override saved')
+    const data = await api.get<any[]>('/billing/admin/account-overrides')
+    overrides.value = data
+    editingOverrideId.value = null
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save override'
+  } finally {
+    savingOverride.value = false
+  }
+}
 
 const allCycles = [
   { id: 'daily', label: 'Daily' },
@@ -177,7 +274,7 @@ function openPlanForm(plan?: any) {
       isDefault: false, isFree: false, visible: true,
       cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
       storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
-      priceCents: 0, volumeIncludedGb: 0, scope: 'service',
+      priceCents: 0, yearlyPriceCents: null, volumeIncludedGb: 0,
       nameTranslations: {}, descriptionTranslations: {},
     }
   }
@@ -191,7 +288,7 @@ function formatCents(cents: number): string {
 async function fetchAll() {
   loading.value = true
   try {
-    const [configData, plansData, pricingData, locData, limitsData, subsData, overridesData] = await Promise.all([
+    const [configData, plansData, pricingData, locData, limitsData, subsData, overridesData, currenciesData] = await Promise.all([
       api.get<any>('/billing/config'),
       api.get<any[]>('/billing/admin/plans'),
       api.get<any>('/billing/admin/pricing'),
@@ -199,6 +296,7 @@ async function fetchAll() {
       api.get<any>('/billing/admin/resource-limits'),
       api.get<any[]>('/billing/admin/subscriptions'),
       api.get<any[]>('/billing/admin/account-overrides'),
+      api.get<{ currencies: string[] }>('/billing/admin/allowed-currencies').catch(() => ({ currencies: [] })),
     ])
 
     billingModel.value = configData.billingModel ?? 'fixed'
@@ -218,6 +316,8 @@ async function fetchAll() {
     allowDowngrade.value = configData.allowDowngrade ?? true
     deletionBillingPolicy.value = configData.deletionBillingPolicy ?? 'end_of_period'
     maxFreeServicesPerAccount.value = configData.maxFreeServicesPerAccount ?? null
+
+    allowedCurrenciesList.value = currenciesData.currencies ?? []
 
     plans.value = plansData
     pricing.value = { ...pricing.value, ...pricingData }
@@ -291,14 +391,46 @@ async function saveTierPolicies() {
   }
 }
 
+function addCurrency() {
+  const code = newCurrency.value.toUpperCase().trim()
+  if (code.length !== 3 || allowedCurrenciesList.value.includes(code)) return
+  allowedCurrenciesList.value.push(code)
+  newCurrency.value = ''
+}
+
+function removeCurrencyFromList(code: string) {
+  if (allowedCurrenciesList.value.length <= 1) return
+  allowedCurrenciesList.value = allowedCurrenciesList.value.filter(c => c !== code)
+}
+
+async function saveCurrenciesConfig() {
+  savingCurrencies.value = true
+  error.value = ''
+  try {
+    const result = await api.put<{ currencies: string[] }>('/billing/admin/allowed-currencies', {
+      currencies: allowedCurrenciesList.value,
+    })
+    allowedCurrenciesList.value = result.currencies
+    showSuccess('Allowed currencies saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save currencies'
+  } finally {
+    savingCurrencies.value = false
+  }
+}
+
 async function savePlan() {
   saving.value = true
   error.value = ''
   try {
+    const payload = {
+      ...planForm.value,
+      yearlyPriceCents: planForm.value.yearlyPriceCents || null,
+    }
     if (editingPlan.value) {
-      await api.patch(`/billing/admin/plans/${editingPlan.value.id}`, planForm.value)
+      await api.patch(`/billing/admin/plans/${editingPlan.value.id}`, payload)
     } else {
-      await api.post('/billing/admin/plans', planForm.value)
+      await api.post('/billing/admin/plans', payload)
     }
     showPlanForm.value = false
     showSuccess('Plan saved')
@@ -314,22 +446,19 @@ async function savePlan() {
 async function movePlan(index: number, direction: -1 | 1) {
   const target = index + direction
   if (target < 0 || target >= plans.value.length) return
-  const a = plans.value[index]
-  const b = plans.value[target]
-  // Swap sortOrder values
-  const tmpSort = a.sortOrder
-  a.sortOrder = b.sortOrder
-  b.sortOrder = tmpSort
   // Swap in array
-  plans.value[index] = b
-  plans.value[target] = a
-  plans.value = [...plans.value]
-  // Persist both
+  const arr = [...plans.value]
+  ;[arr[index], arr[target]] = [arr[target], arr[index]]
+  // Assign sequential sortOrder based on new positions
+  for (let i = 0; i < arr.length; i++) {
+    arr[i].sortOrder = i
+  }
+  plans.value = arr
+  // Persist all updated sort orders
   try {
-    await Promise.all([
-      api.patch(`/billing/admin/plans/${a.id}`, { sortOrder: a.sortOrder }),
-      api.patch(`/billing/admin/plans/${b.id}`, { sortOrder: b.sortOrder }),
-    ])
+    await Promise.all(
+      arr.map((p, i) => api.patch(`/billing/admin/plans/${p.id}`, { sortOrder: i }))
+    )
   } catch {
     // Reload on error
     const data = await api.get<any[]>('/billing/admin/plans')
@@ -348,13 +477,23 @@ async function deletePlan(id: string) {
   }
 }
 
+const syncStatus = ref<Record<string, 'syncing' | 'ok' | 'error'>>({})
+
 async function syncPlan(id: string) {
   syncing.value = true
+  syncStatus.value[id] = 'syncing'
   try {
     await api.post(`/billing/admin/plans/${id}/sync-stripe`, {})
+    syncStatus.value[id] = 'ok'
     showSuccess('Plan synced to Stripe')
+    // Refresh to get updated stripeProductId
+    const data = await api.get<any[]>('/billing/admin/plans')
+    plans.value = data
+    setTimeout(() => { delete syncStatus.value[id] }, 3000)
   } catch (err: any) {
+    syncStatus.value[id] = 'error'
     error.value = err?.body?.error || 'Stripe sync failed'
+    setTimeout(() => { delete syncStatus.value[id] }, 5000)
   } finally {
     syncing.value = false
   }
@@ -536,6 +675,55 @@ onMounted(() => { fetchAll() })
         </form>
       </div>
 
+      <!-- Section: Allowed Currencies -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <DollarSign class="w-5 h-5 text-green-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Allowed Currencies</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure which currencies customers can pay in. Prices will be converted using exchange rates unless a fixed per-currency price is set.</p>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="flex flex-wrap gap-2">
+            <span
+              v-for="cur in allowedCurrenciesList"
+              :key="cur"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              {{ cur }}
+              <button
+                v-if="allowedCurrenciesList.length > 1"
+                @click="removeCurrencyFromList(cur)"
+                class="text-gray-400 hover:text-red-500 transition-colors"
+              >
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </span>
+          </div>
+          <div class="flex items-center gap-2 max-w-xs">
+            <input
+              v-model="newCurrency"
+              type="text"
+              placeholder="e.g. EUR"
+              maxlength="3"
+              @keydown.enter="addCurrency"
+              class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <button @click="addCurrency" :disabled="newCurrency.trim().length !== 3" class="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors">
+              <Plus class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="flex justify-end">
+            <button @click="saveCurrenciesConfig" :disabled="savingCurrencies || allowedCurrenciesList.length === 0" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingCurrencies" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ savingCurrencies ? 'Saving...' : 'Save Currencies' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Section: Data Lifecycle -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -707,11 +895,9 @@ onMounted(() => { fetchAll() })
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Scope</label>
-                <select v-model="planForm.scope" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-                  <option value="service">Per Service</option>
-                  <option value="stack">Per Stack</option>
-                </select>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.yearlyPrice') }}</label>
+                <input v-model.number="planForm.yearlyPriceCents" type="number" min="0" :placeholder="`Auto: ${planForm.priceCents * 12}`" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                <p class="text-xs text-gray-400 mt-0.5">Leave empty = monthly × 12</p>
               </div>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
@@ -817,7 +1003,11 @@ onMounted(() => { fetchAll() })
                   </div>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono whitespace-nowrap">{{ plan.slug }}</td>
-                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">{{ formatCents(plan.priceCents) }}/mo</td>
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">
+                  {{ formatCents(plan.priceCents) }}/mo
+                  <span v-if="plan.yearlyPriceCents != null" class="text-gray-500 dark:text-gray-400 ml-1">· {{ formatCents(plan.yearlyPriceCents) }}/yr</span>
+                  <span v-else class="text-gray-400 dark:text-gray-500 ml-1">· {{ formatCents(plan.priceCents * 12) }}/yr</span>
+                </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.maxUsersPerAccount ? plan.maxUsersPerAccount : '∞' }}</td>
                 <td class="px-6 py-4">
@@ -832,7 +1022,12 @@ onMounted(() => { fetchAll() })
                       {{ editingPricesPlanId === plan.id ? 'Close' : 'Prices' }}
                       <span v-if="plan.prices?.length" class="text-gray-400">({{ plan.prices.length }})</span>
                     </button>
-                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">{{ t('super.billing.sync') }}</button>
+                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs hover:underline" :class="syncStatus[plan.id] === 'ok' ? 'text-green-600 dark:text-green-400' : syncStatus[plan.id] === 'error' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'">
+                      <template v-if="syncStatus[plan.id] === 'syncing'"><Loader2 class="w-3 h-3 animate-spin inline" /> Syncing...</template>
+                      <template v-else-if="syncStatus[plan.id] === 'ok'">Synced!</template>
+                      <template v-else-if="syncStatus[plan.id] === 'error'">Failed</template>
+                      <template v-else>{{ t('super.billing.sync') }}</template>
+                    </button>
                     <button @click="deletePlan(plan.id)" class="text-xs text-red-600 dark:text-red-400 hover:underline">{{ t('super.billing.hide') }}</button>
                   </div>
                 </td>
@@ -845,12 +1040,18 @@ onMounted(() => { fetchAll() })
                       <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Per-currency prices for "{{ plan.name }}"</p>
                       <button @click="addCurrencyPrice" type="button" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">+ Add currency</button>
                     </div>
-                    <p v-if="planCurrencyPrices.length === 0" class="text-xs text-gray-500 dark:text-gray-400">No fixed currency prices — all currencies use exchange rate conversion from USD base price.</p>
-                    <div v-for="(cp, idx) in planCurrencyPrices" :key="idx" class="flex items-center gap-3">
-                      <input v-model="cp.currency" placeholder="EUR" maxlength="3" class="w-20 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      <input v-model.number="cp.priceCents" type="number" min="0" placeholder="cents/mo" class="w-32 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      <span class="text-xs text-gray-500">= {{ (cp.priceCents / 100).toFixed(2) }} {{ cp.currency.toUpperCase() || '?' }}/mo</span>
-                      <button @click="removeCurrencyPrice(idx)" type="button" class="text-xs text-red-500 hover:underline">Remove</button>
+                    <p v-if="getCurrencies().length === 0" class="text-xs text-gray-500 dark:text-gray-400">No fixed currency prices — all currencies use exchange rate conversion from base price.</p>
+                    <div v-for="cur in getCurrencies()" :key="cur" class="space-y-1">
+                      <div class="flex items-center gap-2">
+                        <input :value="cur" @change="setCurrencyForGroup(cur, ($event.target as HTMLInputElement).value)" placeholder="EUR" maxlength="3" class="w-20 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm uppercase font-medium focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <div v-for="cycle in allowedCycles" :key="cycle" class="flex items-center gap-1">
+                            <label class="text-xs text-gray-500 dark:text-gray-400 w-16 text-right">{{ cycle }}</label>
+                            <input :value="getPriceForCycle(cur, cycle)" @input="setPriceForCycle(cur, cycle, Number(($event.target as HTMLInputElement).value) || 0)" type="number" min="0" placeholder="cents" class="w-24 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          </div>
+                        </div>
+                        <button @click="removeCurrencyRows(cur)" type="button" class="text-xs text-red-500 hover:underline ml-2">Remove</button>
+                      </div>
                     </div>
                     <div class="flex justify-end">
                       <button @click="saveCurrencyPrices" :disabled="savingPrices" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
@@ -1094,15 +1295,98 @@ onMounted(() => { fetchAll() })
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 <th class="px-6 py-3">{{ t('super.billing.account') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.discount') }}</th>
+                <th class="px-6 py-3">Free Tiers</th>
+                <th class="px-6 py-3">Resource Boost</th>
                 <th class="px-6 py-3">{{ t('super.billing.notes') }}</th>
+                <th class="px-6 py-3">{{ t('common.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-              <tr v-for="o in overrides" :key="o.id">
+              <template v-for="o in overrides" :key="o.id">
+              <tr>
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ o.account?.name ?? o.accountId }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ o.discountPercent }}%</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <span v-if="o.maxFreeServices != null" class="px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded mr-1">{{ o.maxFreeServices }} free</span>
+                  <span v-if="o.freeTierCpuLimit != null || o.freeTierMemoryLimit != null" class="text-xs text-gray-500">
+                    {{ o.freeTierCpuLimit != null ? `${o.freeTierCpuLimit}mc` : '' }}{{ o.freeTierCpuLimit != null && o.freeTierMemoryLimit != null ? ' / ' : '' }}{{ o.freeTierMemoryLimit != null ? `${o.freeTierMemoryLimit}MB` : '' }}
+                  </span>
+                  <span v-if="o.maxFreeServices == null && o.freeTierCpuLimit == null && o.freeTierMemoryLimit == null" class="text-gray-400">—</span>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <span v-if="o.boostCpuLimit != null || o.boostMemoryLimit != null" class="text-xs">
+                    <span v-if="o.boostCpuLimit != null" class="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded mr-1">{{ o.boostCpuLimit }}mc</span>
+                    <span v-if="o.boostMemoryLimit != null" class="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded">{{ o.boostMemoryLimit }}MB</span>
+                  </span>
+                  <span v-else class="text-gray-400">—</span>
+                </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ o.notes ?? '-' }}</td>
+                <td class="px-6 py-4">
+                  <button @click="editOverride(o)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">
+                    {{ editingOverrideId === o.accountId ? 'Close' : 'Edit Overrides' }}
+                  </button>
+                </td>
               </tr>
+              <tr v-if="editingOverrideId === o.accountId" class="bg-gray-50 dark:bg-gray-750">
+                <td colspan="6" class="px-6 py-4">
+                  <div class="space-y-4">
+                    <div>
+                      <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Free tier overrides</p>
+                      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Free Services</label>
+                          <input v-model.number="overrideForm.maxFreeServices" type="number" min="0" placeholder="Global default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU (millicores)</label>
+                          <input v-model.number="overrideForm.freeTierCpuLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (MB)</label>
+                          <input v-model.number="overrideForm.freeTierMemoryLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Containers</label>
+                          <input v-model.number="overrideForm.freeTierContainerLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (GB)</label>
+                          <input v-model.number="overrideForm.freeTierStorageLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                      </div>
+                      <p class="text-xs text-gray-400 mt-1">Replaces free plan limits for this account.</p>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Resource boost (all tiers)</p>
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU (millicores)</label>
+                          <input v-model.number="overrideForm.boostCpuLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (MB)</label>
+                          <input v-model.number="overrideForm.boostMemoryLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Containers</label>
+                          <input v-model.number="overrideForm.boostContainerLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (GB)</label>
+                          <input v-model.number="overrideForm.boostStorageLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                      </div>
+                      <p class="text-xs text-gray-400 mt-1">Applies to all tiers. Effective limit = max(plan limit, boost). Can only increase, never reduce.</p>
+                    </div>
+                    <div class="flex justify-end">
+                      <button @click="saveOverride(o.accountId)" :disabled="savingOverride" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
+                        {{ savingOverride ? 'Saving...' : 'Save overrides' }}
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>

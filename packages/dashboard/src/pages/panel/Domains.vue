@@ -490,7 +490,7 @@ onMounted(() => {
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(d.expiresAt) }}</td>
-                <td v-if="canWrite" class="px-6 py-4 text-right">
+                <td class="px-6 py-4 text-right">
                   <div class="flex items-center justify-end gap-2" @click.stop>
                     <button
                       v-if="d.status === 'active'"
@@ -501,29 +501,31 @@ onMounted(() => {
                       <ExternalLink class="w-3.5 h-3.5" />
                       {{ t('domains.open') }}
                     </button>
-                    <button
-                      v-if="d.type === 'external' || d.type === 'purchased'"
-                      @click="goToDomainDetail(d)"
-                      class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      :title="t('domains.manageDns')"
-                    >
-                      <Settings2 class="w-3.5 h-3.5" />
-                      {{ t('domains.dns') }}
-                    </button>
-                    <button
-                      v-if="d.type === 'external'"
-                      @click="deleteDomain(d.id)"
-                      class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                    >
-                      {{ t('domains.remove') }}
-                    </button>
-                    <button
-                      v-if="d.type === 'subdomain'"
-                      @click="releaseSubdomain(d.id)"
-                      class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
-                    >
-                      {{ t('domains.release') }}
-                    </button>
+                    <template v-if="canWrite">
+                      <button
+                        v-if="d.type === 'external' || d.type === 'purchased'"
+                        @click="goToDomainDetail(d)"
+                        class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        :title="t('domains.manageDns')"
+                      >
+                        <Settings2 class="w-3.5 h-3.5" />
+                        {{ t('domains.dns') }}
+                      </button>
+                      <button
+                        v-if="d.type === 'external'"
+                        @click="deleteDomain(d.id)"
+                        class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                      >
+                        {{ t('domains.remove') }}
+                      </button>
+                      <button
+                        v-if="d.type === 'subdomain'"
+                        @click="releaseSubdomain(d.id)"
+                        class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                      >
+                        {{ t('domains.release') }}
+                      </button>
+                    </template>
                   </div>
                 </td>
               </tr>

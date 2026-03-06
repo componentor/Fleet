@@ -51,10 +51,6 @@ import { useSidebarCollapse } from '@/composables/useSidebarCollapse'
 
 const commandPalette = useCommandPalette()
 const { brandTitle, logoSrc, setAccountName } = useBranding()
-
-watch(() => currentAccount.value?.name, (name) => {
-  setAccountName(name ?? null)
-}, { immediate: true })
 const api = useApi()
 
 const { t, locale } = useI18n()
@@ -64,6 +60,10 @@ const { theme, toggle } = useTheme()
 const { user, isSuper, logout } = useAuth()
 const { currentAccount, accounts, switchAccount } = useAccount()
 const { canAdmin, canOwner } = useRole()
+
+watch(() => currentAccount.value?.name, (name) => {
+  setAccountName(name ?? null)
+}, { immediate: true })
 
 const isImpersonating = computed(() => !!sessionStorage.getItem('fleet_impersonating'))
 
