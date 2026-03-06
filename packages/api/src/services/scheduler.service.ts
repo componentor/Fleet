@@ -198,6 +198,28 @@ class SchedulerService {
       },
     );
 
+    // Analytics collection — every 5 minutes
+    // Scrapes Traefik Prometheus metrics and stores per-service analytics
+    await getMaintenanceQueue().add(
+      'analytics-collection',
+      { type: 'analytics-collection' },
+      {
+        repeat: { every: 5 * 60 * 1000 },
+        jobId: 'system:analytics-collection',
+      },
+    );
+
+    // Analytics downsampling — every 6 hours
+    // Rolls up 5m→1h (after 48h) and 1h→1d (after 30d) to reduce storage
+    await getMaintenanceQueue().add(
+      'analytics-downsample',
+      { type: 'analytics-downsample' },
+      {
+        repeat: { pattern: '0 */6 * * *' },
+        jobId: 'system:analytics-downsample',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),

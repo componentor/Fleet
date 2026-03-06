@@ -192,6 +192,9 @@
       "business": "Business",
       "system": "System",
       "services": "Services",
+      "hosting": "My Hosting",
+      "deploy": "Deploy",
+      "tools": "Tools",
       "infrastructure": "Infrastructure",
       "team": "Team",
       "other": "Other"
@@ -261,9 +264,17 @@
     "memoryAllocated": "Memory Allocated",
     "deployFirst": "Deploy your first service",
     "getStarted": "Get started by deploying a service to see your dashboard come to life.",
+    "registerFirst": "Register your first domain",
+    "getStartedDomains": "Start by registering a domain or deploying a service to bring your dashboard to life.",
     "estimatedCost": "Est. Cost",
     "volumeUsage": "Volume Usage",
-    "viewAll": "View all"
+    "viewAll": "View all",
+    "myDomains": "My Domains",
+    "myServices": "My Services",
+    "noDomainsYet": "No domains yet. Register your first domain to get started.",
+    "domainPurchased": "Registered",
+    "domainExternal": "External",
+    "domainSubdomain": "Subdomain"
   },
   "services": {
     "title": "Services",
@@ -289,6 +300,10 @@
     "start": "Start",
     "stop": "Stop",
     "restart": "Restart",
+    "restartAll": "Restart all",
+    "deleteStack": "Delete stack",
+    "deleteStackSuccess": "Stack deleted",
+    "deleteStackFailed": "Failed to delete stack",
     "destroy": "Destroy",
     "scale": "Scale",
     "logs": "Logs",
@@ -2002,7 +2017,7 @@
       "queues": "Queues",
       "active": "Active",
       "disabled": "Disabled",
-      "dockerSwarm": "Docker Swarm",
+      "dockerSwarm": "Orchestrator",
       "totalNodes": "Total Nodes",
       "managers": "Managers",
       "workers": "Workers",
@@ -2836,8 +2851,10 @@
     "getStartedFree": "Get Started Free",
     "continue": "Continue",
     "containers": "containers",
+    "container": "container",
     "memory": "RAM",
     "cpu": "CPU cores",
+    "cpuSingular": "CPU core",
     "storage": "storage",
     "dayTrial": "day free trial",
     "noPlansAvailable": "No plans available at the moment.",
@@ -2950,13 +2967,78 @@
       "login": "Log In"
     },
     "hero": {
-      "badge": "Open Source PaaS Platform",
+      "badge": "PaaS Platform",
       "deployManage": "Deploy & Manage",
       "dockerServices": "Docker Services",
       "atScale": "at Scale",
-      "subtitle": "Fleet is an open-source, multi-tenant PaaS built on Docker Swarm. Self-host your own Heroku/Vercel alternative with full control over your infrastructure.",
+      "subtitle": "Fleet is a multi-tenant PaaS built on Docker Swarm. Self-host your own Heroku/Vercel alternative with full control over your infrastructure.",
       "getStarted": "Get Started",
       "viewOnGithub": "View on GitHub"
+    },
+    "domainSearch": {
+      "heroBadge": "Your website starts here",
+      "heroTitle": "Find Your Perfect",
+      "heroHighlight": "Domain Name",
+      "heroSubtitle": "Search, register, and host your website — all in one place.",
+      "placeholder": "Enter your domain name...",
+      "searchBtn": "Search",
+      "popular": "Popular:",
+      "searching": "Searching available domains...",
+      "available": "Available",
+      "taken": "Taken",
+      "yr": "yr",
+      "addToCart": "Add to Cart",
+      "inCart": "In Cart",
+      "noResults": "No domains found. Try a different search term."
+    },
+    "cart": {
+      "title": "Your Cart",
+      "empty": "Your cart is empty",
+      "emptyHint": "Search for a domain to get started",
+      "year": "yr",
+      "years": "yrs",
+      "total": "Total",
+      "domains": "Domains",
+      "hosting": "Hosting",
+      "addHosting": "Add hosting",
+      "yearly": "Yearly",
+      "monthly": "Monthly",
+      "month": "mo",
+      "comparePlans": "Compare plans",
+      "planPrice": "Price",
+      "memory": "RAM",
+      "storage": "Storage",
+      "services": "Services",
+      "unlimited": "Unlimited",
+      "exclVat": "Excl. VAT",
+      "checkout": "Continue to Checkout"
+    },
+    "howItWorks": {
+      "label": "How It Works",
+      "title": "Get Online in 3 Simple Steps",
+      "step1Title": "Search Your Domain",
+      "step1Desc": "Find the perfect domain name for your project or business.",
+      "step2Title": "Pick a Tier",
+      "step2Desc": "Choose a service tier that fits your needs. Start free.",
+      "step3Title": "Go Live",
+      "step3Desc": "Deploy your site or app in seconds. We handle the rest."
+    },
+    "whyChooseUs": {
+      "label": "Why Choose Us",
+      "title": "Everything You Need to Succeed Online",
+      "subtitle": "From domain registration to deployment, we provide a complete hosting solution.",
+      "fastDns": "Fast DNS",
+      "fastDnsDesc": "Global DNS propagation in minutes, not hours.",
+      "freeSsl": "Free SSL",
+      "freeSslDesc": "Automatic HTTPS certificates for every domain.",
+      "oneClickApps": "1-Click Apps",
+      "oneClickAppsDesc": "Deploy WordPress, databases, and more from our marketplace.",
+      "uptime": "99.9% Uptime",
+      "uptimeDesc": "Redundant infrastructure with automatic failover.",
+      "domainMgmt": "Domain Management",
+      "domainMgmtDesc": "Full DNS control, WHOIS privacy, and easy transfers.",
+      "backups": "Automatic Backups",
+      "backupsDesc": "Daily backups with one-click restore."
     },
     "terminal": {
       "title": "terminal",
@@ -3009,11 +3091,14 @@
     },
     "pricing": {
       "label": "Pricing",
-      "title": "Simple, transparent pricing",
-      "subtitle": "Start free and scale as you grow. All plans include the full Fleet platform.",
+      "title": "Pay per service",
+      "subtitle": "Every account is free. Pick a tier for each service you deploy.",
       "popular": "Popular",
-      "getStarted": "Get Started",
-      "perMonth": "/mo",
+      "getStarted": "Start Free",
+      "getStartedFree": "Start Free",
+      "choosePlan": "Get Started",
+      "perMonth": "per service/mo",
+      "perYear": "per service / yr",
       "plans": {
         "free": {
           "name": "Free",
@@ -3045,9 +3130,9 @@
       }
     },
     "cta": {
-      "title": "Ready to deploy your infrastructure?",
-      "subtitle": "Get started with Fleet in minutes. Deploy on your own servers and take full control of your platform.",
-      "getStarted": "Get Started Free",
+      "title": "Ready to get your website online?",
+      "subtitle": "Launch your website in minutes with reliable hosting, custom domains, and automatic SSL — no technical expertise required.",
+      "getStarted": "Start Free",
       "starOnGithub": "Star on GitHub"
     },
     "footer": {
@@ -3058,12 +3143,13 @@
       "terms": "Terms",
       "discord": "Discord",
       "status": "Status",
-      "rights": "Fleet. All rights reserved."
+      "api": "API",
+      "rights": "Siglar Development AS (org. nr. 912 000 621). All rights reserved."
     },
     "privacy": {
       "title": "Privacy Policy",
       "lastUpdated": "Last updated: February 20, 2026",
-      "intro": "This Privacy Policy explains how {platformName} (\"we\", \"us\", or \"our\") collects, uses, and protects your information when you use our platform. We are committed to safeguarding your privacy and handling your data transparently.",
+      "intro": "This Privacy Policy explains how {platformName}, operated by Siglar Development AS (org. nr. 912 000 621), Krabberødveien 47, 3960 Stathelle, Norway (\"we\", \"us\", or \"our\"), collects, uses, and protects your information when you use our platform. We are committed to safeguarding your privacy and handling your data transparently.",
       "infoCollect": {
         "title": "1. Information We Collect",
         "body": "Account Information: When you create an account, we collect your name, email address, and password (stored as an Argon2 hash — we never store plaintext passwords).\n\nUsage Data: We collect information about how you use the platform, including services deployed, resource usage (CPU, memory, storage), deployment logs, and API access patterns.\n\nPayment Information: If you subscribe to a paid plan, payment details are processed and stored by Stripe. We do not store your full credit card number on our servers.\n\nTechnical Data: We automatically collect IP addresses, browser type, and device information when you access the dashboard. This data is used for security monitoring and rate limiting.\n\nService Data: Any data you store within your deployed containers, volumes, and backups is your data. We access it only to provide the service (e.g., running backups, restoring services) and never for other purposes."
@@ -3098,7 +3184,7 @@
       },
       "contact": {
         "title": "9. Contact Us",
-        "body": "If you have questions about this Privacy Policy or wish to exercise your data rights, please contact us at:\n\nEmail: {contactEmail}"
+        "body": "If you have questions about this Privacy Policy or wish to exercise your data rights, please contact us at:\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, Norway\nOrg. nr: 912 000 621\nEmail: privacy@siglar.com"
       }
     },
     "terms": {
@@ -3107,7 +3193,7 @@
       "intro": "By accessing or using {platformName} (\"the Service\"), you agree to be bound by these Terms of Service (\"Terms\"). If you do not agree to these Terms, do not use the Service.",
       "description": {
         "title": "1. Description of Service",
-        "body": "{platformName} is an open-source, multi-tenant Platform-as-a-Service (PaaS) built on Docker Swarm. The Service provides container orchestration, automated deployments, domain management, backup management, billing integration, and related infrastructure management tools.\n\n{platformName} may be self-hosted on your own infrastructure or accessed through a managed instance. These Terms apply to your use of the Service regardless of how it is deployed."
+        "body": "{platformName} is a multi-tenant Platform-as-a-Service (PaaS) built on Docker Swarm. The Service provides container orchestration, automated deployments, domain management, backup management, billing integration, and related infrastructure management tools.\n\n{platformName} may be self-hosted on your own infrastructure or accessed through a managed instance. These Terms apply to your use of the Service regardless of how it is deployed."
       },
       "account": {
         "title": "2. Account Registration & Security",
@@ -3127,7 +3213,7 @@
       },
       "ip": {
         "title": "6. Intellectual Property",
-        "body": "{platformName} is open-source software licensed under its respective license. Your use of the {platformName} platform does not grant you any ownership rights to the platform's intellectual property.\n\nYou retain full ownership of all code, data, and content you deploy on the Service. We claim no intellectual property rights over your content."
+        "body": "{platformName} is proprietary software. Your use of the {platformName} platform does not grant you any ownership rights to the platform's intellectual property.\n\nYou retain full ownership of all code, data, and content you deploy on the Service. We claim no intellectual property rights over your content."
       },
       "dataPrivacy": {
         "title": "7. Data & Privacy",
@@ -3143,7 +3229,7 @@
       },
       "governingLaw": {
         "title": "10. Governing Law",
-        "body": "These Terms shall be governed by and construed in accordance with applicable laws. Any disputes arising from these Terms or your use of the Service shall be resolved through good-faith negotiation first, and if necessary, through binding arbitration or in the courts of competent jurisdiction."
+        "body": "These Terms shall be governed by and construed in accordance with the laws of Norway. Any disputes arising from these Terms or your use of the Service shall be resolved through good-faith negotiation first, and if necessary, through the courts of Skien tingrett, Norway."
       },
       "changes": {
         "title": "11. Changes to These Terms",
@@ -3151,14 +3237,14 @@
       },
       "contact": {
         "title": "12. Contact Us",
-        "body": "If you have questions about these Terms of Service, please contact us at:\n\nEmail: {contactEmail}"
+        "body": "If you have questions about these Terms of Service, please contact us at:\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, Norway\nOrg. nr: 912 000 621\nEmail: privacy@siglar.com"
       }
     },
     "docs": {
       "title": "Docs",
       "navigation": "Navigation",
       "gettingStarted": "Getting Started",
-      "gettingStartedIntro": "Fleet is an open-source, multi-tenant PaaS built on Docker Swarm. This guide will help you set up your first Fleet cluster and deploy a service.",
+      "gettingStartedIntro": "Fleet is a multi-tenant PaaS built on Docker Swarm. This guide will help you set up your first Fleet cluster and deploy a service.",
       "prerequisites": "Prerequisites",
       "prereq1": "A Linux server (Ubuntu 22.04+, Debian 12+, Rocky 9+, or Fedora 39+ recommended)",
       "prereq2": "Root or sudo access (the install script handles Docker, NFS, and all dependencies automatically)",

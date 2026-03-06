@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { stacks } from './stacks';
 
 export const billingPlans = mysqlTable('billing_plans', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -32,6 +33,10 @@ export const billingPlans = mysqlTable('billing_plans', {
   priceCents: int('price_cents').notNull(),
   stripeProductId: varchar('stripe_product_id', { length: 255 }),
   stripePriceIds: json('stripe_price_ids').$default(() => ({})),
+  nameTranslations: json('name_translations').$default(() => ({})),
+  descriptionTranslations: json('description_translations').$default(() => ({})),
+  scope: varchar('scope', { length: 255 }).default('service'),
+  volumeIncludedGb: int('volume_included_gb').default(0),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -52,6 +57,11 @@ export const subscriptions = mysqlTable('subscriptions', {
   currentPeriodStart: timestamp('current_period_start'),
   currentPeriodEnd: timestamp('current_period_end'),
   cancelledAt: timestamp('cancelled_at'),
+  serviceId: varchar('service_id', { length: 36 }),
+  stackId: varchar('stack_id', { length: 36 })
+    .references(() => stacks.id, { onDelete: 'set null' }),
+  paymentContactName: varchar('payment_contact_name', { length: 255 }),
+  paymentContactEmail: varchar('payment_contact_email', { length: 255 }),
   pastDueSince: timestamp('past_due_since'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -59,6 +69,8 @@ export const subscriptions = mysqlTable('subscriptions', {
   index('idx_subscriptions_account_id').on(table.accountId),
   index('idx_subscriptions_status').on(table.status),
   index('idx_subscriptions_past_due_since').on(table.pastDueSince),
+  index('idx_subscriptions_service_id').on(table.serviceId),
+  index('idx_subscriptions_stack_id').on(table.stackId),
 ]);
 
 export const usageRecords = mysqlTable('usage_records', {
@@ -73,9 +85,13 @@ export const usageRecords = mysqlTable('usage_records', {
   memoryMbHours: bigint('memory_mb_hours', { mode: 'number' }).default(sql`0`),
   storageGb: int('storage_gb').default(0),
   bandwidthGb: int('bandwidth_gb').default(0),
+  serviceId: varchar('service_id', { length: 36 }),
+  stackId: varchar('stack_id', { length: 36 }),
   recordedAt: timestamp('recorded_at').defaultNow(),
 }, (table) => [
   index('idx_usage_records_account_id').on(table.accountId),
+  index('idx_usage_records_service_id').on(table.serviceId),
+  index('idx_usage_records_stack_id').on(table.stackId),
 ]);
 
 export const pricingConfig = mysqlTable('pricing_config', {
@@ -115,6 +131,9 @@ export const billingConfig = mysqlTable('billing_config', {
   volumeDeletionEnabled: boolean('volume_deletion_enabled').default(true),
   purgeEnabled: boolean('purge_enabled').default(true),
   purgeRetentionDays: int('purge_retention_days').default(30),
+  allowDowngrade: boolean('allow_downgrade').default(true),
+  deletionBillingPolicy: varchar('deletion_billing_policy', { length: 20 }).default('end_of_period').notNull(),
+  maxFreeServicesPerAccount: int('max_free_services_per_account'),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
@@ -180,6 +199,10 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   plan: one(billingPlans, {
     fields: [subscriptions.planId],
     references: [billingPlans.id],
+  }),
+  stack: one(stacks, {
+    fields: [subscriptions.stackId],
+    references: [stacks.id],
   }),
 }));
 

@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { resolve as dnsResolve } from 'node:dns/promises';
-import { db, dnsZones, dnsRecords, domainRegistrations, insertReturning, updateReturning, safeTransaction, eq, and } from '@fleet/db';
+import { db, dnsZones, dnsRecords, domainRegistrations, services, insertReturning, updateReturning, safeTransaction, eq, and, or, like, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { dnsManager } from '../services/dns-provider-manager.js';
@@ -134,6 +134,30 @@ const getZoneRoute = createRoute({
   },
 });
 
+const getZoneServicesRoute = createRoute({
+  method: 'get',
+  path: '/zones/{id}/services',
+  tags: ['DNS'],
+  summary: 'Get services bound to a domain zone',
+  security: bearerSecurity,
+  middleware: [requireMember] as const,
+  request: {
+    params: zoneIdParamSchema,
+  },
+  responses: {
+    ...standardErrors,
+    200: jsonContent(z.object({
+      services: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        stackId: z.string().nullable(),
+        status: z.string(),
+        volumes: z.array(z.object({ source: z.string(), target: z.string() })),
+      })),
+    }), 'Services using this domain'),
+  },
+});
+
 const deleteZoneRoute = createRoute({
   method: 'delete',
   path: '/zones/{id}',
@@ -143,6 +167,13 @@ const deleteZoneRoute = createRoute({
   middleware: [requireMember] as const,
   request: {
     params: zoneIdParamSchema,
+    body: {
+      content: { 'application/json': { schema: z.object({
+        deleteServices: z.array(z.string().uuid()).optional(),
+        deleteVolumes: z.array(z.string()).optional(),
+      }).optional() } },
+      required: false,
+    },
   },
   responses: {
     ...standardErrors,
@@ -388,6 +419,55 @@ dnsRoutes.openapi(getZoneRoute, (async (c: any) => {
   return c.json({ ...zone, isPurchased: !!registration });
 }) as any);
 
+// GET /zones/:id/services — find services bound to this domain
+dnsRoutes.openapi(getZoneServicesRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: zoneId } = c.req.valid('param');
+
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const zone = await db.query.dnsZones.findFirst({
+    where: and(eq(dnsZones.id, zoneId), eq(dnsZones.accountId, accountId)),
+  });
+
+  if (!zone) {
+    return c.json({ error: 'Zone not found' }, 404);
+  }
+
+  // Find services whose domain matches or is a subdomain of this zone
+  const boundServices = await db.select({
+    id: services.id,
+    name: services.name,
+    stackId: services.stackId,
+    status: services.status,
+    volumes: services.volumes,
+  })
+    .from(services)
+    .where(and(
+      eq(services.accountId, accountId),
+      isNull(services.deletedAt),
+      or(
+        eq(services.domain, zone.domain),
+        like(services.domain, `%.${zone.domain}`),
+      ),
+    ));
+
+  return c.json({
+    services: boundServices.map((s) => ({
+      id: s.id,
+      name: s.name,
+      stackId: s.stackId ?? null,
+      status: s.status ?? 'unknown',
+      volumes: ((s.volumes as Array<{ source: string; target: string }>) ?? []).map((v) => ({
+        source: v.source,
+        target: v.target,
+      })),
+    })),
+  });
+}) as any);
+
 // DELETE /zones/:id
 dnsRoutes.openapi(deleteZoneRoute, (async (c: any) => {
   const accountId = c.get('accountId');
@@ -403,6 +483,23 @@ dnsRoutes.openapi(deleteZoneRoute, (async (c: any) => {
 
   if (!zone) {
     return c.json({ error: 'Zone not found' }, 404);
+  }
+
+  // Delete selected services if requested
+  let body: { deleteServices?: string[]; deleteVolumes?: string[] } | undefined;
+  try { body = await c.req.json(); } catch { /* no body */ }
+
+  if (body?.deleteServices?.length) {
+    for (const serviceId of body.deleteServices) {
+      try {
+        // Soft-delete the service
+        await db.update(services)
+          .set({ deletedAt: new Date(), status: 'deleted' })
+          .where(and(eq(services.id, serviceId), eq(services.accountId, accountId)));
+      } catch (err) {
+        logger.error({ err, serviceId }, 'Failed to delete service during domain cleanup');
+      }
+    }
   }
 
   // Remove from providers (best-effort)

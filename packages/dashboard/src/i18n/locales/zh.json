@@ -192,6 +192,9 @@
       "business": "商务",
       "system": "系统",
       "services": "服务",
+      "hosting": "我的托管",
+      "deploy": "部署",
+      "tools": "工具",
       "infrastructure": "基础设施",
       "team": "团队",
       "other": "其他"
@@ -263,7 +266,15 @@
     "getStarted": "部署一个服务，让您的仪表板活起来。",
     "estimatedCost": "预计费用",
     "volumeUsage": "卷使用量",
-    "viewAll": "查看全部"
+    "viewAll": "查看全部",
+    "myDomains": "我的域名",
+    "myServices": "我的服务",
+    "noDomainsYet": "暂无域名。注册您的第一个域名以开始使用。",
+    "domainPurchased": "已注册",
+    "domainExternal": "外部",
+    "domainSubdomain": "子域名",
+    "registerFirst": "注册您的第一个域名",
+    "getStartedDomains": "注册一个域名或部署一个服务，让您的仪表板活起来。"
   },
   "services": {
     "title": "服务",
@@ -289,6 +300,10 @@
     "start": "启动",
     "stop": "停止",
     "restart": "重启",
+    "restartAll": "全部重启",
+    "deleteStack": "删除应用栈",
+    "deleteStackSuccess": "应用栈已删除",
+    "deleteStackFailed": "删除应用栈失败",
     "destroy": "销毁",
     "scale": "扩缩容",
     "logs": "日志",
@@ -1988,7 +2003,7 @@
       "queues": "队列",
       "active": "活跃",
       "disabled": "已禁用",
-      "dockerSwarm": "Docker Swarm",
+      "dockerSwarm": "编排器",
       "totalNodes": "节点总数",
       "managers": "管理节点",
       "workers": "工作节点",
@@ -2822,8 +2837,10 @@
     "getStartedFree": "免费开始",
     "continue": "继续",
     "containers": "容器",
+    "container": "容器",
     "memory": "内存",
     "cpu": "CPU核心",
+    "cpuSingular": "CPU核心",
     "storage": "存储",
     "dayTrial": "天免费试用",
     "noPlansAvailable": "暂无可用套餐。",
@@ -2936,11 +2953,11 @@
       "login": "登录"
     },
     "hero": {
-      "badge": "开源 PaaS 平台",
+      "badge": "PaaS 平台",
       "deployManage": "部署与管理",
       "dockerServices": "Docker 服务",
       "atScale": "大规模运行",
-      "subtitle": "Fleet 是一个基于 Docker Swarm 的开源多租户 PaaS 平台。自托管您自己的 Heroku/Vercel 替代方案，完全掌控您的基础设施。",
+      "subtitle": "Fleet 是一个基于 Docker Swarm 的多租户 PaaS 平台。自托管您自己的 Heroku/Vercel 替代方案，完全掌控您的基础设施。",
       "getStarted": "开始使用",
       "viewOnGithub": "在 GitHub 上查看"
     },
@@ -2995,11 +3012,14 @@
     },
     "pricing": {
       "label": "定价",
-      "title": "简单透明的定价",
-      "subtitle": "免费开始，随需扩展。所有套餐均包含完整的 Fleet 平台。",
+      "title": "按服务付费",
+      "subtitle": "所有账户免费。为您部署的每项服务选择一个等级。",
       "popular": "热门",
-      "getStarted": "开始使用",
-      "perMonth": "/月",
+      "getStarted": "免费开始",
+      "getStartedFree": "免费开始",
+      "choosePlan": "立即开始",
+      "perMonth": "每服务/月",
+      "perYear": "每服务 / 年",
       "plans": {
         "free": {
           "name": "免费",
@@ -3030,9 +3050,74 @@
         }
       }
     },
+    "domainSearch": {
+      "heroBadge": "您的网站从这里开始",
+      "heroTitle": "找到您的完美",
+      "heroHighlight": "域名",
+      "heroSubtitle": "搜索、注册和托管您的网站 — 一站式服务。",
+      "placeholder": "输入您的域名...",
+      "searchBtn": "搜索",
+      "popular": "热门：",
+      "searching": "正在搜索可用域名...",
+      "available": "可用",
+      "taken": "已被注册",
+      "yr": "年",
+      "addToCart": "加入购物车",
+      "inCart": "已在购物车",
+      "noResults": "未找到域名。请尝试其他搜索词。"
+    },
+    "cart": {
+      "title": "购物车",
+      "empty": "购物车是空的",
+      "emptyHint": "搜索域名开始",
+      "year": "年",
+      "years": "年",
+      "total": "总计",
+      "domains": "域名",
+      "hosting": "主机托管",
+      "addHosting": "添加托管",
+      "yearly": "按年",
+      "monthly": "按月",
+      "month": "月",
+      "comparePlans": "比较方案",
+      "planPrice": "价格",
+      "memory": "内存",
+      "storage": "存储",
+      "services": "服务",
+      "unlimited": "无限",
+      "exclVat": "不含增值税",
+      "checkout": "继续结账"
+    },
+    "howItWorks": {
+      "label": "使用流程",
+      "title": "3个简单步骤即可上线",
+      "step1Title": "搜索域名",
+      "step1Desc": "为您的项目或企业找到完美的域名。",
+      "step2Title": "选择等级",
+      "step2Desc": "为您的服务选择合适的等级。免费起步。",
+      "step3Title": "立即上线",
+      "step3Desc": "几秒钟内部署您的网站或应用。其余的交给我们。"
+    },
+    "whyChooseUs": {
+      "label": "为什么选择我们",
+      "title": "在线成功所需的一切",
+      "subtitle": "从域名注册到部署，我们提供完整的托管解决方案。",
+      "fastDns": "快速 DNS",
+      "fastDnsDesc": "全球 DNS 传播只需几分钟，而非数小时。",
+      "freeSsl": "免费 SSL",
+      "freeSslDesc": "为每个域名自动签发 HTTPS 证书。",
+      "oneClickApps": "一键部署应用",
+      "oneClickAppsDesc": "从市场一键部署 WordPress、数据库等热门应用。",
+      "uptime": "99.9% 正常运行时间",
+      "uptimeDesc": "冗余基础设施，自动故障转移。",
+      "domainMgmt": "域名管理",
+      "domainMgmtDesc": "完整的 DNS 控制、WHOIS 隐私保护和便捷的域名转移。",
+      "backups": "自动备份",
+      "backupsDesc": "每日备份，一键恢复。"
+    },
     "cta": {
-      "title": "准备好部署您的基础设施了吗？",
-      "subtitle": "几分钟即可开始使用 Fleet。在您自己的服务器上部署，完全掌控您的平台。",
+      "title": "准备好让您的网站上线了吗？",
+      "subtitle": "几分钟即可启动您的网站，提供可靠的托管、自定义域名和自动SSL — 无需技术专业知识。",
       "getStarted": "免费开始",
       "starOnGithub": "在 GitHub 上加星"
     },
@@ -3043,13 +3128,14 @@
       "privacy": "隐私政策",
       "terms": "服务条款",
       "discord": "Discord",
-      "rights": "Fleet。保留所有权利。",
-      "status": "系统状态"
+      "rights": "Siglar Development AS (组织编号 912 000 621). 保留所有权利。",
+      "status": "系统状态",
+      "api": "API"
     },
     "privacy": {
       "title": "隐私政策",
       "lastUpdated": "最后更新：2026年2月20日",
-      "intro": "本隐私政策说明 {platformName}（以下简称「我们」）在您使用我们的平台时如何收集、使用和保护您的信息。我们致力于保护您的隐私并透明地处理您的数据。",
+      "intro": "本隐私政策说明 {platformName}（由 Siglar Development AS（组织编号 912 000 621）运营，地址：Krabberødveien 47, 3960 Stathelle, 挪威，以下简称「我们」）在您使用我们的平台时如何收集、使用和保护您的信息。我们致力于保护您的隐私并透明地处理您的数据。",
       "infoCollect": {
         "title": "1. 我们收集的信息",
         "body": "账户信息：当您创建账户时，我们会收集您的姓名、电子邮件地址和密码（以 Argon2 哈希存储——我们绝不存储明文密码）。\n\n使用数据：我们收集有关您如何使用平台的信息，包括部署的服务、资源使用情况（CPU、内存、存储）、部署日志和 API 访问模式。\n\n支付信息：如果您订阅付费计划，支付详情由 Stripe 处理和存储。我们不会在服务器上存储您的完整信用卡号。\n\n技术数据：当您访问仪表板时，我们会自动收集 IP 地址、浏览器类型和设备信息。这些数据用于安全监控和速率限制。\n\n服务数据：您在已部署的容器、卷和备份中存储的任何数据都是您的数据。我们仅在提供服务时访问它（例如运行备份、恢复服务），绝不用于其他目的。"
@@ -3084,7 +3170,7 @@
       },
       "contact": {
         "title": "9. 联系我们",
-        "body": "如果您对本隐私政策有疑问或希望行使您的数据权利，请通过以下方式联系我们：\n\n电子邮件：{contactEmail}"
+        "body": "如果您对本隐私政策有疑问或希望行使您的数据权利，请通过以下方式联系我们：\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, 挪威\n组织编号：912 000 621\n电子邮件：privacy@siglar.com"
       }
     },
     "terms": {
@@ -3093,7 +3179,7 @@
       "intro": "访问或使用 {platformName}（以下简称「服务」）即表示您同意受这些服务条款（以下简称「条款」）的约束。如果您不同意这些条款，请不要使用本服务。",
       "description": {
         "title": "1. 服务说明",
-        "body": "{platformName} 是一个基于 Docker Swarm 构建的开源多租户平台即服务（PaaS）。本服务提供容器编排、自动部署、域名管理、备份管理、计费集成和相关的基础设施管理工具。\n\n{platformName} 可以自托管在您自己的基础设施上，也可以通过托管实例访问。无论如何部署，这些条款都适用于您对本服务的使用。"
+        "body": "{platformName} 是一个基于 Docker Swarm 构建的多租户平台即服务（PaaS）。本服务提供容器编排、自动部署、域名管理、备份管理、计费集成和相关的基础设施管理工具。\n\n{platformName} 可以自托管在您自己的基础设施上，也可以通过托管实例访问。无论如何部署，这些条款都适用于您对本服务的使用。"
       },
       "account": {
         "title": "2. 账户注册与安全",
@@ -3113,7 +3199,7 @@
       },
       "ip": {
         "title": "6. 知识产权",
-        "body": "{platformName} 是根据其相应许可证授权的开源软件。使用 {platformName} 平台不授予您对平台知识产权的任何所有权。\n\n您保留对在本服务上部署的所有代码、数据和内容的完全所有权。我们不主张对您的内容拥有任何知识产权。"
+        "body": "{platformName} 是专有软件。使用 {platformName} 平台不授予您对平台知识产权的任何所有权。\n\n您保留对在本服务上部署的所有代码、数据和内容的完全所有权。我们不主张对您的内容拥有任何知识产权。"
       },
       "dataPrivacy": {
         "title": "7. 数据与隐私",
@@ -3129,7 +3215,7 @@
       },
       "governingLaw": {
         "title": "10. 适用法律",
-        "body": "这些条款应受适用法律管辖并据其解释。因这些条款或您使用本服务引起的任何争议应首先通过善意协商解决，如有必要，通过具有约束力的仲裁或在有管辖权的法院解决。"
+        "body": "这些条款应受挪威法律管辖并据其解释。因这些条款或您使用本服务引起的任何争议应首先通过善意协商解决，如有必要，通过挪威 Skien tingrett 法院解决。"
       },
       "changes": {
         "title": "11. 条款变更",
@@ -3137,14 +3223,14 @@
       },
       "contact": {
         "title": "12. 联系我们",
-        "body": "如果您对这些服务条款有疑问，请通过以下方式联系我们：\n\n电子邮件：{contactEmail}"
+        "body": "如果您对这些服务条款有疑问，请通过以下方式联系我们：\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, 挪威\n组织编号：912 000 621\n电子邮件：privacy@siglar.com"
       }
     },
     "docs": {
       "title": "文档",
       "navigation": "导航",
       "gettingStarted": "快速开始",
-      "gettingStartedIntro": "Fleet 是一个基于 Docker Swarm 的开源多租户 PaaS 平台。本指南将帮助您设置第一个 Fleet 集群并部署一个服务。",
+      "gettingStartedIntro": "Fleet 是一个基于 Docker Swarm 的多租户 PaaS 平台。本指南将帮助您设置第一个 Fleet 集群并部署一个服务。",
       "prerequisites": "前提条件",
       "prereq1": "一台 Linux 服务器（推荐 Ubuntu 22.04+、Debian 12+、Rocky 9+ 或 Fedora 39+）",
       "prereq2": "Root 或 sudo 权限（安装脚本会自动处理 Docker、NFS 和所有依赖项）",

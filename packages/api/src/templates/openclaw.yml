@@ -1,0 +1,38 @@
+slug: openclaw
+name: OpenClaw
+description: Self-hosted personal AI assistant with web browsing, file management, voice interaction, and 20+ messaging platform integrations.
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/openclaw.png
+category: ai
+
+variables:
+  - name: OPENCLAW_GATEWAY_TOKEN
+    label: Gateway Token
+    type: password
+    required: true
+    generate: true
+  - name: OPENCLAW_DOMAIN
+    label: Domain
+    type: string
+    required: false
+    default: localhost
+
+services:
+  - name: openclaw
+    image: ghcr.io/openclaw/openclaw:latest
+    ports:
+      - target: 18789
+        published: 18789
+    env:
+      OPENCLAW_GATEWAY_TOKEN: "{{OPENCLAW_GATEWAY_TOKEN}}"
+      OPENCLAW_GATEWAY_PORT: "18789"
+      OPENCLAW_GATEWAY_BIND: "lan"
+    volumes:
+      - source: openclaw_data
+        target: /home/node/.openclaw
+    domain: "{{OPENCLAW_DOMAIN}}"
+    resources:
+      cpuLimit: 2
+      memoryLimit: 2048
+
+volumes:
+  - openclaw_data

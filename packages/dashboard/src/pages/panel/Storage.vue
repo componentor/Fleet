@@ -114,7 +114,13 @@ async function deleteVolume(volumeId: string) {
     await api.del(`/storage/volumes/${volumeId}`)
     await fetchVolumes()
   } catch (err: any) {
-    error.value = err?.body?.error || t('storagePage.deleteFailed')
+    const body = err?.body
+    if (body?.services?.length) {
+      const names = (body.services as Array<{ name: string }>).map(s => s.name).join(', ')
+      error.value = `Volume is in use by: ${names}. Delete or reconfigure those services first.`
+    } else {
+      error.value = body?.error || t('storagePage.deleteFailed')
+    }
   }
 }
 

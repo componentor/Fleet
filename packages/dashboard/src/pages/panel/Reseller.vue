@@ -71,7 +71,7 @@ const signupSlug = ref('')
 const customDomain = ref('')
 const brandName = ref('')
 const brandLogoUrl = ref('')
-const brandPrimaryColor = ref('#6366f1')
+const brandPrimaryColor = ref('#0284c7')
 const brandDescription = ref('')
 const savingBranding = ref(false)
 
@@ -175,7 +175,7 @@ async function fetchDashboard() {
       customDomain.value = ra.customDomain ?? ''
       brandName.value = ra.brandName ?? ''
       brandLogoUrl.value = ra.brandLogoUrl ?? ''
-      brandPrimaryColor.value = ra.brandPrimaryColor ?? '#6366f1'
+      brandPrimaryColor.value = ra.brandPrimaryColor ?? '#0284c7'
       brandDescription.value = ra.brandDescription ?? ''
     }
   } catch {
@@ -910,7 +910,7 @@ onMounted(() => {
                           v-model="brandPrimaryColor"
                           type="text"
                           pattern="#[0-9a-fA-F]{6}"
-                          placeholder="#6366f1"
+                          placeholder="#0284c7"
                           class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
                         />
                       </div>

@@ -20,3 +20,5 @@ export * from './registry-credentials';
 export * from './admin-roles';
 export * from './support';
 export * from './self-healing';
+export * from './stacks';
+export * from './analytics';

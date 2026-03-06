@@ -8,8 +8,10 @@ import {
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useVolumeManager } from '@/composables/useVolumeManager'
+import { useServiceBilling } from '@/composables/useServiceBilling'
 import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
+import TierSelector from '@/components/TierSelector.vue'
 import { useI18n } from 'vue-i18n'
 
 interface ManifestEnvVar {
@@ -44,6 +46,10 @@ const route = useRoute()
 const store = useServicesStore()
 const api = useApi()
 const volumeManager = useVolumeManager()
+const serviceBilling = useServiceBilling()
+
+// Plan selection
+const selectedPlanId = ref('')
 
 // ── State ────────────────────────────────────────────────────────────────
 const loading = ref(true)
@@ -92,6 +98,7 @@ async function handleDeployVolumeCreated(index: number, vol: { name: string; dis
 // ── Lifecycle ────────────────────────────────────────────────────────────
 onMounted(async () => {
   volumeManager.fetchAll()
+  serviceBilling.fetchTiers()
   if (!repoParam.value) {
     error.value = 'Missing required "repo" query parameter. URL should be /deploy/gh?repo=owner/repo'
     loading.value = false
@@ -248,7 +255,7 @@ const validationErrors = computed(() => {
   return errors
 })
 
-const canDeploy = computed(() => validationErrors.value.length === 0 && !deploying.value)
+const canDeploy = computed(() => validationErrors.value.length === 0 && !deploying.value && !!selectedPlanId.value)
 
 // ── Deploy ───────────────────────────────────────────────────────────────
 async function deploy() {
@@ -288,6 +295,7 @@ async function deploy() {
       volumes: volumesPayload.length > 0 ? volumesPayload : undefined,
       domain: domain.value || undefined,
       replicas: replicas.value,
+      planId: selectedPlanId.value || undefined,
     } as any)
 
     // Trigger initial deployment
@@ -549,6 +557,12 @@ const repoName = computed(() => repoParam.value.split('/')[1] || '')
               </button>
             </div>
             <p v-if="ports.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noPorts') }}</p>
+          </div>
+
+          <!-- Service Plan -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <TierSelector v-model="selectedPlanId" />
           </div>
 
           <!-- Persistent Storage -->

@@ -201,13 +201,76 @@ async function verifyDomain() {
   }
 }
 
+// Domain deletion modal state
+interface BoundService {
+  id: string
+  name: string
+  stackId: string | null
+  status: string
+  volumes: Array<{ source: string; target: string }>
+}
+const deletingDomainId = ref<string | null>(null)
+const deletingDomainName = ref('')
+const deletingBoundServices = ref<BoundService[]>([])
+const deleteServiceSelections = ref<Record<string, boolean>>({})
+const deleteVolumeSelections = ref<Record<string, boolean>>({})
+const deleteModalLoading = ref(false)
+const showDeleteModal = ref(false)
+
 async function deleteDomain(id: string) {
-  if (!confirm(t('domains.confirmDelete'))) return
+  // Fetch bound services first
+  deleteModalLoading.value = true
+  deletingDomainId.value = id
+  const zone = zones.value.find((z: any) => z.id === id)
+  deletingDomainName.value = zone?.domain ?? ''
   try {
-    await api.del(`/dns/zones/${id}`)
-    await fetchDomains()
+    const result = await api.get<{ services: BoundService[] }>(`/dns/zones/${id}/services`)
+    deletingBoundServices.value = result.services ?? []
+    // Default all selections to true
+    deleteServiceSelections.value = {}
+    deleteVolumeSelections.value = {}
+    for (const svc of deletingBoundServices.value) {
+      deleteServiceSelections.value[svc.id] = true
+      for (const vol of svc.volumes) {
+        deleteVolumeSelections.value[vol.source] = true
+      }
+    }
+    showDeleteModal.value = true
   } catch {
-    // ignore
+    // If services endpoint fails, just show simple confirm
+    if (confirm(t('domains.confirmDelete'))) {
+      try {
+        await api.del(`/dns/zones/${id}`)
+        await fetchDomains()
+      } catch { /* ignore */ }
+    }
+  } finally {
+    deleteModalLoading.value = false
+  }
+}
+
+async function confirmDeleteDomain() {
+  if (!deletingDomainId.value) return
+  deleteModalLoading.value = true
+  try {
+    const selectedServices = Object.entries(deleteServiceSelections.value)
+      .filter(([, v]) => v)
+      .map(([id]) => id)
+    const selectedVolumes = Object.entries(deleteVolumeSelections.value)
+      .filter(([, v]) => v)
+      .map(([name]) => name)
+
+    await api.del(`/dns/zones/${deletingDomainId.value}`, {
+      deleteServices: selectedServices.length > 0 ? selectedServices : undefined,
+      deleteVolumes: selectedVolumes.length > 0 ? selectedVolumes : undefined,
+    })
+    showDeleteModal.value = false
+    deletingDomainId.value = null
+    await fetchDomains()
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to delete domain'
+  } finally {
+    deleteModalLoading.value = false
   }
 }
 
@@ -790,5 +853,56 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Domain Deletion Modal -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showDeleteModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showDeleteModal = false">
+          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Delete domain {{ deletingDomainName }}</h3>
+            </div>
+            <div class="px-6 py-4 space-y-4 max-h-96 overflow-y-auto">
+              <template v-if="deletingBoundServices.length > 0">
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  The following services use this domain. Select which to delete:
+                </p>
+                <div v-for="svc in deletingBoundServices" :key="svc.id" class="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 space-y-2">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" v-model="deleteServiceSelections[svc.id]" class="rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500" />
+                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ svc.name }}</span>
+                    <span class="text-xs px-1.5 py-0.5 rounded-full" :class="svc.status === 'running' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'">{{ svc.status }}</span>
+                  </label>
+                  <div v-if="svc.volumes.length > 0 && deleteServiceSelections[svc.id]" class="ml-6 space-y-1">
+                    <label v-for="vol in svc.volumes" :key="vol.source" class="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" v-model="deleteVolumeSelections[vol.source]" class="rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500" />
+                      <span class="text-xs font-mono text-gray-600 dark:text-gray-400">{{ vol.source }}</span>
+                      <span class="text-[10px] text-gray-400">→ {{ vol.target }}</span>
+                    </label>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  No services are using this domain. Are you sure you want to delete it?
+                </p>
+              </template>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3">
+              <button @click="showDeleteModal = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:underline">
+                Cancel
+              </button>
+              <button
+                @click="confirmDeleteDomain"
+                :disabled="deleteModalLoading"
+                class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {{ deleteModalLoading ? 'Deleting...' : 'Delete' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

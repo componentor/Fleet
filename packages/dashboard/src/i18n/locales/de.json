@@ -192,6 +192,9 @@
       "business": "Geschaft",
       "system": "System",
       "services": "Dienste",
+      "hosting": "Mein Hosting",
+      "deploy": "Bereitstellen",
+      "tools": "Werkzeuge",
       "infrastructure": "Infrastruktur",
       "team": "Team",
       "other": "Sonstiges"
@@ -263,7 +266,15 @@
     "getStarted": "Starten Sie mit der Bereitstellung eines Dienstes, um Ihr Dashboard zum Leben zu erwecken.",
     "estimatedCost": "Gesch. Kosten",
     "volumeUsage": "Volumennutzung",
-    "viewAll": "Alle anzeigen"
+    "viewAll": "Alle anzeigen",
+    "myDomains": "Meine Domains",
+    "myServices": "Meine Dienste",
+    "noDomainsYet": "Noch keine Domains. Registrieren Sie Ihre erste Domain.",
+    "domainPurchased": "Registriert",
+    "domainExternal": "Extern",
+    "domainSubdomain": "Subdomain",
+    "registerFirst": "Registrieren Sie Ihre erste Domain",
+    "getStartedDomains": "Registrieren Sie eine Domain oder stellen Sie einen Dienst bereit, um Ihr Dashboard zum Leben zu erwecken."
   },
   "services": {
     "title": "Dienste",
@@ -289,6 +300,10 @@
     "start": "Starten",
     "stop": "Stoppen",
     "restart": "Neustarten",
+    "restartAll": "Alle neustarten",
+    "deleteStack": "Stack löschen",
+    "deleteStackSuccess": "Stack gelöscht",
+    "deleteStackFailed": "Stack konnte nicht gelöscht werden",
     "destroy": "Zerstören",
     "scale": "Skalieren",
     "logs": "Protokolle",
@@ -1988,7 +2003,7 @@
       "queues": "Warteschlangen",
       "active": "Aktiv",
       "disabled": "Deaktiviert",
-      "dockerSwarm": "Docker Swarm",
+      "dockerSwarm": "Orchestrator",
       "totalNodes": "Knoten gesamt",
       "managers": "Manager",
       "workers": "Worker",
@@ -2822,8 +2837,10 @@
     "getStartedFree": "Kostenlos starten",
     "continue": "Weiter",
     "containers": "Container",
+    "container": "Container",
     "memory": "RAM",
     "cpu": "CPU-Kerne",
+    "cpuSingular": "CPU-Kern",
     "storage": "Speicher",
     "dayTrial": "Tage kostenlose Testphase",
     "noPlansAvailable": "Derzeit keine Pläne verfügbar.",
@@ -2936,11 +2953,11 @@
       "login": "Anmelden"
     },
     "hero": {
-      "badge": "Open-Source-PaaS-Plattform",
+      "badge": "PaaS-Plattform",
       "deployManage": "Bereitstellen & Verwalten",
       "dockerServices": "Docker-Dienste",
       "atScale": "im großen Maßstab",
-      "subtitle": "Fleet ist eine Open-Source, mandantenfähige PaaS-Plattform auf Basis von Docker Swarm. Hosten Sie Ihre eigene Heroku/Vercel-Alternative mit voller Kontrolle über Ihre Infrastruktur.",
+      "subtitle": "Fleet ist eine mandantenfähige PaaS-Plattform auf Basis von Docker Swarm. Hosten Sie Ihre eigene Heroku/Vercel-Alternative mit voller Kontrolle über Ihre Infrastruktur.",
       "getStarted": "Loslegen",
       "viewOnGithub": "Auf GitHub ansehen"
     },
@@ -2995,11 +3012,14 @@
     },
     "pricing": {
       "label": "Preise",
-      "title": "Einfache, transparente Preise",
-      "subtitle": "Starten Sie kostenlos und skalieren Sie mit Ihrem Wachstum. Alle Pläne beinhalten die vollständige Fleet-Plattform.",
+      "title": "Zahlung pro Dienst",
+      "subtitle": "Jedes Konto ist kostenlos. Wählen Sie eine Stufe für jeden Dienst, den Sie bereitstellen.",
       "popular": "Beliebt",
-      "getStarted": "Loslegen",
-      "perMonth": "/Mo.",
+      "getStarted": "Kostenlos starten",
+      "getStartedFree": "Kostenlos starten",
+      "choosePlan": "Loslegen",
+      "perMonth": "pro Dienst/Mo.",
+      "perYear": "pro Dienst / Jahr",
       "plans": {
         "free": {
           "name": "Kostenlos",
@@ -3030,9 +3050,74 @@
         }
       }
     },
+    "domainSearch": {
+      "heroBadge": "Ihre Website beginnt hier",
+      "heroTitle": "Finden Sie Ihre perfekte",
+      "heroHighlight": "Domain",
+      "heroSubtitle": "Suchen, registrieren und hosten — alles an einem Ort.",
+      "placeholder": "Geben Sie Ihren Domainnamen ein...",
+      "searchBtn": "Suchen",
+      "popular": "Beliebt:",
+      "searching": "Verfügbare Domains werden gesucht...",
+      "available": "Verfügbar",
+      "taken": "Vergeben",
+      "yr": "Jahr",
+      "addToCart": "In den Warenkorb",
+      "inCart": "Im Warenkorb",
+      "noResults": "Keine Domains gefunden. Versuchen Sie einen anderen Suchbegriff."
+    },
+    "cart": {
+      "title": "Warenkorb",
+      "empty": "Ihr Warenkorb ist leer",
+      "emptyHint": "Suchen Sie eine Domain um loszulegen",
+      "year": "J.",
+      "years": "J.",
+      "total": "Gesamt",
+      "domains": "Domains",
+      "hosting": "Hosting",
+      "addHosting": "Hosting hinzufügen",
+      "yearly": "Jährlich",
+      "monthly": "Monatlich",
+      "month": "Mo.",
+      "comparePlans": "Pläne vergleichen",
+      "planPrice": "Preis",
+      "memory": "Arbeitsspeicher",
+      "storage": "Speicher",
+      "services": "Dienste",
+      "unlimited": "Unbegrenzt",
+      "exclVat": "Zzgl. MwSt.",
+      "checkout": "Zur Kasse"
+    },
+    "howItWorks": {
+      "label": "So funktioniert's",
+      "title": "In 3 einfachen Schritten online",
+      "step1Title": "Domain suchen",
+      "step1Desc": "Finden Sie den perfekten Domainnamen für Ihr Projekt oder Unternehmen.",
+      "step2Title": "Stufe wählen",
+      "step2Desc": "Wählen Sie eine Dienststufe, die zu Ihnen passt. Kostenlos starten.",
+      "step3Title": "Online gehen",
+      "step3Desc": "Veröffentlichen Sie Ihre Website oder App in Sekunden. Wir kümmern uns um den Rest."
+    },
+    "whyChooseUs": {
+      "label": "Warum wir",
+      "title": "Alles, was Sie für Ihren Online-Erfolg brauchen",
+      "subtitle": "Von der Domain-Registrierung bis zur Bereitstellung bieten wir eine komplette Hosting-Lösung.",
+      "fastDns": "Schnelles DNS",
+      "fastDnsDesc": "Globale DNS-Verbreitung in Minuten, nicht Stunden.",
+      "freeSsl": "Kostenloses SSL",
+      "freeSslDesc": "Automatische HTTPS-Zertifikate für jede Domain.",
+      "oneClickApps": "1-Klick-Apps",
+      "oneClickAppsDesc": "WordPress, Datenbanken und mehr aus unserem Marktplatz bereitstellen.",
+      "uptime": "99,9% Verfügbarkeit",
+      "uptimeDesc": "Redundante Infrastruktur mit automatischem Failover.",
+      "domainMgmt": "Domain-Verwaltung",
+      "domainMgmtDesc": "Volle DNS-Kontrolle, WHOIS-Schutz und einfache Transfers.",
+      "backups": "Automatische Backups",
+      "backupsDesc": "Tägliche Backups mit Ein-Klick-Wiederherstellung."
+    },
     "cta": {
-      "title": "Bereit, Ihre Infrastruktur bereitzustellen?",
-      "subtitle": "Starten Sie mit Fleet in wenigen Minuten. Stellen Sie auf Ihren eigenen Servern bereit und übernehmen Sie die volle Kontrolle über Ihre Plattform.",
+      "title": "Bereit, Ihre Website online zu bringen?",
+      "subtitle": "Starten Sie Ihre Website in wenigen Minuten mit zuverlässigem Hosting, eigenen Domains und automatischem SSL — keine technischen Kenntnisse erforderlich.",
       "getStarted": "Kostenlos starten",
       "starOnGithub": "Auf GitHub markieren"
     },
@@ -3043,13 +3128,14 @@
       "privacy": "Datenschutz",
       "terms": "AGB",
       "discord": "Discord",
-      "rights": "Fleet. Alle Rechte vorbehalten.",
-      "status": "Status"
+      "rights": "Siglar Development AS (Org.-Nr. 912 000 621). Alle Rechte vorbehalten.",
+      "status": "Status",
+      "api": "API"
     },
     "privacy": {
       "title": "Datenschutzerklärung",
       "lastUpdated": "Zuletzt aktualisiert: 20. Februar 2026",
-      "intro": "Diese Datenschutzerklärung erläutert, wie {platformName} (\"wir\", \"uns\" oder \"unser\") Ihre Informationen erhebt, nutzt und schützt, wenn Sie unsere Plattform nutzen. Wir verpflichten uns, Ihre Privatsphäre zu schützen und Ihre Daten transparent zu behandeln.",
+      "intro": "Diese Datenschutzerklärung erläutert, wie {platformName}, betrieben von Siglar Development AS (Org.-Nr. 912 000 621), Krabberødveien 47, 3960 Stathelle, Norwegen (\"wir\", \"uns\" oder \"unser\"), Ihre Informationen erhebt, nutzt und schützt, wenn Sie unsere Plattform nutzen. Wir verpflichten uns, Ihre Privatsphäre zu schützen und Ihre Daten transparent zu behandeln.",
       "infoCollect": {
         "title": "1. Informationen, die wir erheben",
         "body": "Kontoinformationen: Bei der Erstellung eines Kontos erheben wir Ihren Namen, Ihre E-Mail-Adresse und Ihr Passwort (gespeichert als Argon2-Hash — wir speichern niemals Passwörter im Klartext).\n\nNutzungsdaten: Wir erheben Informationen darüber, wie Sie die Plattform nutzen, einschließlich bereitgestellter Dienste, Ressourcennutzung (CPU, Speicher, Festplatte), Bereitstellungsprotokolle und API-Zugriffsmuster.\n\nZahlungsinformationen: Wenn Sie einen kostenpflichtigen Plan abonnieren, werden Zahlungsdetails von Stripe verarbeitet und gespeichert. Wir speichern Ihre vollständige Kreditkartennummer nicht auf unseren Servern.\n\nTechnische Daten: Wir erheben automatisch IP-Adressen, Browsertyp und Geräteinformationen, wenn Sie auf das Dashboard zugreifen. Diese Daten werden für Sicherheitsüberwachung und Ratenbegrenzung verwendet.\n\nDienstdaten: Alle Daten, die Sie in Ihren bereitgestellten Containern, Volumes und Backups speichern, sind Ihre Daten. Wir greifen nur darauf zu, um den Dienst bereitzustellen (z.B. Backups durchführen, Dienste wiederherstellen) und niemals für andere Zwecke."
@@ -3084,7 +3170,7 @@
       },
       "contact": {
         "title": "9. Kontaktieren Sie uns",
-        "body": "Wenn Sie Fragen zu dieser Datenschutzerklärung haben oder Ihre Datenrechte ausüben möchten, kontaktieren Sie uns bitte unter:\n\nE-Mail: {contactEmail}"
+        "body": "Wenn Sie Fragen zu dieser Datenschutzerklärung haben oder Ihre Datenrechte ausüben möchten, kontaktieren Sie uns bitte unter:\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, Norwegen\nOrg.-Nr.: 912 000 621\nE-Mail: privacy@siglar.com"
       }
     },
     "terms": {
@@ -3093,7 +3179,7 @@
       "intro": "Durch den Zugriff auf oder die Nutzung von {platformName} (\"der Dienst\") erklären Sie sich mit diesen Nutzungsbedingungen (\"Bedingungen\") einverstanden. Wenn Sie diesen Bedingungen nicht zustimmen, nutzen Sie den Dienst nicht.",
       "description": {
         "title": "1. Beschreibung des Dienstes",
-        "body": "{platformName} ist eine Open-Source, mandantenfähige Platform-as-a-Service (PaaS), die auf Docker Swarm aufbaut. Der Dienst bietet Container-Orchestrierung, automatisierte Bereitstellungen, Domänenverwaltung, Backup-Verwaltung, Abrechnungsintegration und verwandte Infrastruktur-Management-Tools.\n\n{platformName} kann auf Ihrer eigenen Infrastruktur selbst gehostet oder über eine verwaltete Instanz genutzt werden. Diese Bedingungen gelten für Ihre Nutzung des Dienstes, unabhängig davon, wie er bereitgestellt wird."
+        "body": "{platformName} ist eine mandantenfähige Platform-as-a-Service (PaaS), die auf Docker Swarm aufbaut. Der Dienst bietet Container-Orchestrierung, automatisierte Bereitstellungen, Domänenverwaltung, Backup-Verwaltung, Abrechnungsintegration und verwandte Infrastruktur-Management-Tools.\n\n{platformName} kann auf Ihrer eigenen Infrastruktur selbst gehostet oder über eine verwaltete Instanz genutzt werden. Diese Bedingungen gelten für Ihre Nutzung des Dienstes, unabhängig davon, wie er bereitgestellt wird."
       },
       "account": {
         "title": "2. Kontoregistrierung und Sicherheit",
@@ -3113,7 +3199,7 @@
       },
       "ip": {
         "title": "6. Geistiges Eigentum",
-        "body": "{platformName} ist Open-Source-Software, die unter ihrer jeweiligen Lizenz lizenziert ist. Ihre Nutzung der {platformName}-Plattform gewährt Ihnen keine Eigentumsrechte am geistigen Eigentum der Plattform.\n\nSie behalten das vollständige Eigentum an allem Code, allen Daten und Inhalten, die Sie auf dem Dienst bereitstellen. Wir beanspruchen keine geistigen Eigentumsrechte an Ihren Inhalten."
+        "body": "{platformName} ist proprietäre Software. Ihre Nutzung der {platformName}-Plattform gewährt Ihnen keine Eigentumsrechte am geistigen Eigentum der Plattform.\n\nSie behalten das vollständige Eigentum an allem Code, allen Daten und Inhalten, die Sie auf dem Dienst bereitstellen. Wir beanspruchen keine geistigen Eigentumsrechte an Ihren Inhalten."
       },
       "dataPrivacy": {
         "title": "7. Daten und Datenschutz",
@@ -3129,7 +3215,7 @@
       },
       "governingLaw": {
         "title": "10. Anwendbares Recht",
-        "body": "Diese Bedingungen unterliegen dem anwendbaren Recht und werden in Übereinstimmung damit ausgelegt. Streitigkeiten, die sich aus diesen Bedingungen oder Ihrer Nutzung des Dienstes ergeben, sollen zunächst durch Verhandlungen in gutem Glauben und, falls erforderlich, durch verbindliche Schlichtung oder vor den zuständigen Gerichten beigelegt werden."
+        "body": "Diese Bedingungen unterliegen dem norwegischen Recht und werden in Übereinstimmung damit ausgelegt. Streitigkeiten, die sich aus diesen Bedingungen oder Ihrer Nutzung des Dienstes ergeben, sollen zunächst durch Verhandlungen in gutem Glauben und, falls erforderlich, durch das Skien tingrett, Norwegen, beigelegt werden."
       },
       "changes": {
         "title": "11. Änderungen dieser Bedingungen",
@@ -3137,14 +3223,14 @@
       },
       "contact": {
         "title": "12. Kontaktieren Sie uns",
-        "body": "Wenn Sie Fragen zu diesen Nutzungsbedingungen haben, kontaktieren Sie uns bitte unter:\n\nE-Mail: {contactEmail}"
+        "body": "Wenn Sie Fragen zu diesen Nutzungsbedingungen haben, kontaktieren Sie uns bitte unter:\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, Norwegen\nOrg.-Nr.: 912 000 621\nE-Mail: privacy@siglar.com"
       }
     },
     "docs": {
       "title": "Dokumentation",
       "navigation": "Navigation",
       "gettingStarted": "Erste Schritte",
-      "gettingStartedIntro": "Fleet ist eine Open-Source, mandantenfähige PaaS-Plattform auf Basis von Docker Swarm. Diese Anleitung hilft Ihnen, Ihr erstes Fleet-Cluster einzurichten und einen Dienst bereitzustellen.",
+      "gettingStartedIntro": "Fleet ist eine mandantenfähige PaaS-Plattform auf Basis von Docker Swarm. Diese Anleitung hilft Ihnen, Ihr erstes Fleet-Cluster einzurichten und einen Dienst bereitzustellen.",
       "prerequisites": "Voraussetzungen",
       "prereq1": "Ein Linux-Server (Ubuntu 22.04+, Debian 12+, Rocky 9+ oder Fedora 39+ empfohlen)",
       "prereq2": "Root- oder Sudo-Zugang (das Installationsskript installiert Docker, NFS und alle Abhängigkeiten automatisch)",

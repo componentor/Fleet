@@ -129,19 +129,24 @@ const allNavGroups: NavGroup[] = [
     ],
   },
   {
-    labelKey: 'nav.group.services',
+    labelKey: 'nav.group.hosting',
     items: [
+      { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
       { nameKey: 'nav.services', path: '/panel/services', icon: Box },
+      { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
+    ],
+  },
+  {
+    labelKey: 'nav.group.deploy',
+    items: [
       { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
       { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
     ],
   },
   {
-    labelKey: 'nav.group.infrastructure',
+    labelKey: 'nav.group.tools',
     items: [
-      { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
       { nameKey: 'nav.terminal', path: '/panel/terminal', icon: TerminalIcon },
-      { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
       { nameKey: 'nav.backups', path: '/panel/backups', icon: Archive },
       { nameKey: 'nav.logs', path: '/panel/logs', icon: FileText },
       { nameKey: 'nav.ssh', path: '/panel/ssh', icon: Key },
@@ -225,21 +230,21 @@ function changeLocale(newLocale: string) {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div :class="['flex items-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'justify-center px-2' : 'justify-between px-6']">
+      <div :class="['flex items-center justify-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'px-2' : 'px-6']">
         <RouterLink to="/" :class="['flex items-center', collapsed ? 'justify-center' : 'gap-2']">
           <img v-if="resellerBranding.found && resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
           <img v-else-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
           <template v-else>
             <svg class="w-8 h-8 shrink-0" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-              <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4f46e5"/></linearGradient></defs>
+              <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0ea5e9"/><stop offset="100%" stop-color="#0369a1"/></linearGradient></defs>
               <rect width="64" height="64" rx="14" fill="url(#nav-g)"/>
               <text x="32" y="44" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="36" fill="#fff" text-anchor="middle">F</text>
             </svg>
           </template>
-          <span v-if="!collapsed && resellerBranding.found && resellerBranding.brandName && !resellerBranding.brandLogoUrl" class="text-xl font-bold text-primary-600 dark:text-primary-400">
+          <span v-if="!collapsed && resellerBranding.found && resellerBranding.brandName" class="text-xl font-medium text-gray-900 dark:text-white truncate">
             {{ resellerBranding.brandName }}
           </span>
-          <span v-else-if="!collapsed && !resellerBranding.found && !logoSrc()" class="text-xl font-bold text-primary-600 dark:text-primary-400">
+          <span v-else-if="!collapsed && !resellerBranding.found" class="text-xl font-medium text-gray-900 dark:text-white truncate">
             {{ brandTitle }}
           </span>
         </RouterLink>
@@ -526,7 +531,7 @@ function changeLocale(newLocale: string) {
 .sidebar-banner-shimmer {
   position: relative;
   overflow: hidden;
-  background: conic-gradient(from var(--shimmer-angle) at var(--shimmer-x) 50%, #6d28d9, #8b5cf6, #9b7fe6, #8b5cf6, #6d28d9);
+  background: conic-gradient(from var(--shimmer-angle) at var(--shimmer-x) 50%, #075985, #0284c7, #0ea5e9, #0284c7, #075985);
   animation: sidebar-rotate 10s linear infinite, sidebar-drift 7s ease-in-out infinite alternate;
 }
 

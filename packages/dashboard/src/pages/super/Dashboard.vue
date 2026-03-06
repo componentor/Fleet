@@ -57,9 +57,9 @@ async function fetchStats() {
 const errorStats = computed(() => stats.value?.errors ?? { unresolved: 0, last24h: 0, fatal: 0 })
 
 const statCards = computed(() => [
-  { label: t('super.dashboard.totalAccounts'), value: String(animatedAccounts.value), icon: Users, color: 'text-white', bg: 'bg-gradient-to-br from-blue-500 to-indigo-600', link: '/admin/accounts' },
+  { label: t('super.dashboard.totalAccounts'), value: String(animatedAccounts.value), icon: Users, color: 'text-white', bg: 'bg-gradient-to-br from-orange-500 to-red-600', link: '/admin/accounts' },
   { label: t('super.dashboard.activeServices'), value: `${animatedRunning.value} / ${animatedServices.value}`, icon: Activity, color: 'text-white', bg: 'bg-gradient-to-br from-green-500 to-emerald-600', link: '/admin/services' },
-  { label: t('super.dashboard.nodes'), value: String(animatedNodes.value), icon: Server, color: 'text-white', bg: 'bg-gradient-to-br from-purple-500 to-violet-600', link: '/admin/nodes' },
+  { label: t('super.dashboard.nodes'), value: String(animatedNodes.value), icon: Server, color: 'text-white', bg: 'bg-gradient-to-br from-slate-700 to-gray-900', link: '/admin/nodes' },
   { label: t('super.dashboard.users'), value: String(animatedUsers.value), icon: Users, color: 'text-white', bg: 'bg-gradient-to-br from-amber-500 to-orange-600', link: '/admin/users' },
 ])
 

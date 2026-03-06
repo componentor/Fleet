@@ -192,6 +192,9 @@
       "business": "Forretning",
       "system": "System",
       "services": "Tjenester",
+      "hosting": "Min hosting",
+      "deploy": "Distribuer",
+      "tools": "Verktøy",
       "infrastructure": "Infrastruktur",
       "team": "Team",
       "other": "Annet"
@@ -264,7 +267,15 @@
     "getStarted": "Kom i gang ved å distribuere en tjeneste for å se kontrollpanelet ditt bli levende.",
     "estimatedCost": "Est. kostnad",
     "volumeUsage": "Volumbruk",
-    "viewAll": "Vis alle"
+    "viewAll": "Vis alle",
+    "myDomains": "Mine domener",
+    "myServices": "Mine tjenester",
+    "noDomainsYet": "Ingen domener ennå. Registrer ditt første domene for å komme i gang.",
+    "domainPurchased": "Registrert",
+    "domainExternal": "Eksternt",
+    "domainSubdomain": "Underdomene",
+    "registerFirst": "Registrer ditt første domene",
+    "getStartedDomains": "Start med å registrere et domene eller distribuere en tjeneste for å bringe kontrollpanelet ditt til liv."
   },
   "services": {
     "title": "Tjenester",
@@ -290,6 +301,10 @@
     "start": "Start",
     "stop": "Stopp",
     "restart": "Omstart",
+    "restartAll": "Omstart alle",
+    "deleteStack": "Slett stack",
+    "deleteStackSuccess": "Stack slettet",
+    "deleteStackFailed": "Kunne ikke slette stack",
     "destroy": "Slett",
     "scale": "Skaler",
     "logs": "Logger",
@@ -1989,7 +2004,7 @@
       "queues": "Køer",
       "active": "Aktiv",
       "disabled": "Deaktivert",
-      "dockerSwarm": "Docker Swarm",
+      "dockerSwarm": "Orkestrator",
       "totalNodes": "Totalt noder",
       "managers": "Ledere",
       "workers": "Arbeidere",
@@ -2823,8 +2838,10 @@
     "getStartedFree": "Kom i gang gratis",
     "continue": "Fortsett",
     "containers": "containere",
+    "container": "container",
     "memory": "RAM",
     "cpu": "CPU-kjerner",
+    "cpuSingular": "CPU-kjerne",
     "storage": "lagring",
     "dayTrial": "dagers gratis prøveperiode",
     "noPlansAvailable": "Ingen planer tilgjengelig for øyeblikket.",
@@ -2860,7 +2877,13 @@
     "registerDomain": "Registrer et domene",
     "registerDomainDesc": "Få et eget domene for tjenestene dine.",
     "domainsSaved": "Vi har lagret domenevalgene dine — du kan konfigurere dem under Domener.",
-    "skipToDashboard": "Hopp til dashbordet"
+    "skipToDashboard": "Hopp til dashbordet",
+    "backToHome": "Tilbake til forsiden",
+    "cartSummary": "{count} domene(r) i handlekurven din",
+    "choosePlanCartDesc": "Velg en hostingplan for domenene dine",
+    "domainsReadyToRegister": "Domenene dine er klare til registrering!",
+    "completeRegistration": "Fullfør domeneregistrering",
+    "completeRegistrationDesc": "Fullfør registreringen av dine valgte domener"
   },
   "subAccounts": {
     "title": "Underkontoer",
@@ -2937,13 +2960,78 @@
       "login": "Logg inn"
     },
     "hero": {
-      "badge": "Åpen kildekode PaaS-plattform",
+      "badge": "PaaS-plattform",
       "deployManage": "Distribuer og administrer",
       "dockerServices": "Docker-tjenester",
       "atScale": "i stor skala",
-      "subtitle": "Fleet er en åpen kildekode, multi-tenant PaaS bygget på Docker Swarm. Drift din egen Heroku/Vercel-alternativ med full kontroll over infrastrukturen.",
+      "subtitle": "Fleet er en multi-tenant PaaS bygget på Docker Swarm. Drift din egen Heroku/Vercel-alternativ med full kontroll over infrastrukturen.",
       "getStarted": "Kom i gang",
       "viewOnGithub": "Se på GitHub"
+    },
+    "domainSearch": {
+      "heroBadge": "Nettsiden din starter her",
+      "heroTitle": "Finn ditt perfekte",
+      "heroHighlight": "Domenenavn",
+      "heroSubtitle": "Søk, registrer og host nettsiden din — alt på ett sted.",
+      "placeholder": "Skriv inn domenenavnet ditt...",
+      "searchBtn": "Søk",
+      "popular": "Populære:",
+      "searching": "Søker etter tilgjengelige domener...",
+      "available": "Ledig",
+      "taken": "Opptatt",
+      "yr": "år",
+      "addToCart": "Legg i handlekurv",
+      "inCart": "I handlekurv",
+      "noResults": "Ingen domener funnet. Prøv et annet søkeord."
+    },
+    "cart": {
+      "title": "Handlekurv",
+      "empty": "Handlekurven er tom",
+      "emptyHint": "Søk etter et domene for å komme i gang",
+      "year": "år",
+      "years": "år",
+      "total": "Totalt",
+      "domains": "Domener",
+      "hosting": "Hosting",
+      "addHosting": "Legg til hosting",
+      "yearly": "Årlig",
+      "monthly": "Månedlig",
+      "month": "mnd",
+      "comparePlans": "Sammenlign planer",
+      "planPrice": "Pris",
+      "memory": "Minne",
+      "storage": "Lagring",
+      "services": "Tjenester",
+      "unlimited": "Ubegrenset",
+      "exclVat": "Ekskl. MVA",
+      "checkout": "Gå til kassen"
+    },
+    "howItWorks": {
+      "label": "Slik fungerer det",
+      "title": "Kom på nett i 3 enkle steg",
+      "step1Title": "Søk etter domene",
+      "step1Desc": "Finn det perfekte domenenavnet for prosjektet eller bedriften din.",
+      "step2Title": "Velg et nivå",
+      "step2Desc": "Velg et tjenestenivå som passer dine behov. Start gratis.",
+      "step3Title": "Gå live",
+      "step3Desc": "Publiser nettsiden eller appen din på sekunder. Vi tar oss av resten."
+    },
+    "whyChooseUs": {
+      "label": "Hvorfor velge oss",
+      "title": "Alt du trenger for å lykkes på nett",
+      "subtitle": "Fra domeneregistrering til publisering — vi tilbyr en komplett hostingløsning.",
+      "fastDns": "Rask DNS",
+      "fastDnsDesc": "Global DNS-spredning på minutter, ikke timer.",
+      "freeSsl": "Gratis SSL",
+      "freeSslDesc": "Automatiske HTTPS-sertifikater for hvert domene.",
+      "oneClickApps": "1-klikk-apper",
+      "oneClickAppsDesc": "Installer WordPress, databaser og mer fra vår markedsplass.",
+      "uptime": "99.9% Oppetid",
+      "uptimeDesc": "Redundant infrastruktur med automatisk failover.",
+      "domainMgmt": "Domeneadministrasjon",
+      "domainMgmtDesc": "Full DNS-kontroll, WHOIS-personvern og enkle overføringer.",
+      "backups": "Automatiske sikkerhetskopier",
+      "backupsDesc": "Daglige sikkerhetskopier med ett-klikks gjenoppretting."
     },
     "terminal": {
       "title": "terminal",
@@ -2996,11 +3084,14 @@
     },
     "pricing": {
       "label": "Priser",
-      "title": "Enkle, transparente priser",
-      "subtitle": "Start gratis og skaler etter hvert som du vokser. Alle planer inkluderer hele Fleet-plattformen.",
+      "title": "Betal per tjeneste",
+      "subtitle": "Alle kontoer er gratis. Velg et nivå for hver tjeneste du distribuerer.",
       "popular": "Populær",
-      "getStarted": "Kom i gang",
-      "perMonth": "/mnd",
+      "getStarted": "Start gratis",
+      "getStartedFree": "Start gratis",
+      "choosePlan": "Kom i gang",
+      "perMonth": "per tjeneste / mnd",
+      "perYear": "per tjeneste / år",
       "plans": {
         "free": {
           "name": "Gratis",
@@ -3032,9 +3123,9 @@
       }
     },
     "cta": {
-      "title": "Klar til å distribuere infrastrukturen din?",
-      "subtitle": "Kom i gang med Fleet på minutter. Distribuer på dine egne servere og ta full kontroll over plattformen din.",
-      "getStarted": "Kom i gang gratis",
+      "title": "Klar til å få nettsiden din på nett?",
+      "subtitle": "Lanser nettsiden din på minutter med pålitelig hosting, egne domener og automatisk SSL — ingen teknisk kompetanse nødvendig.",
+      "getStarted": "Start gratis",
       "starOnGithub": "Stjerne på GitHub"
     },
     "footer": {
@@ -3045,12 +3136,13 @@
       "terms": "Vilkår",
       "discord": "Discord",
       "status": "Status",
-      "rights": "Fleet. Alle rettigheter reservert."
+      "api": "API",
+      "rights": "Siglar Development AS (org. nr. 912 000 621). Alle rettigheter reservert."
     },
     "privacy": {
       "title": "Personvernerklæring",
       "lastUpdated": "Sist oppdatert: 20. februar 2026",
-      "intro": "Denne personvernerklæringen forklarer hvordan {platformName} (\"vi\", \"oss\" eller \"vår\") samler inn, bruker og beskytter informasjonen din når du bruker plattformen vår. Vi er forpliktet til å beskytte personvernet ditt og håndtere dataene dine på en transparent måte.",
+      "intro": "Denne personvernerklæringen forklarer hvordan {platformName}, driftet av Siglar Development AS (org. nr. 912 000 621), Krabberødveien 47, 3960 Stathelle, Norge (\"vi\", \"oss\" eller \"vår\"), samler inn, bruker og beskytter informasjonen din når du bruker plattformen vår. Vi er forpliktet til å beskytte personvernet ditt og håndtere dataene dine på en transparent måte.",
       "infoCollect": {
         "title": "1. Informasjon vi samler inn",
         "body": "Kontoinformasjon: Når du oppretter en konto, samler vi inn navn, e-postadresse og passord (lagret som en Argon2-hash — vi lagrer aldri passord i klartekst).\n\nBruksdata: Vi samler inn informasjon om hvordan du bruker plattformen, inkludert tjenester som er distribuert, ressursbruk (CPU, minne, lagring), distribusjonslogger og API-tilgangsmønstre.\n\nBetalingsinformasjon: Hvis du abonnerer på en betalt plan, behandles og lagres betalingsdetaljer av Stripe. Vi lagrer ikke hele kredittkortnummeret ditt på våre servere.\n\nTekniske data: Vi samler automatisk inn IP-adresser, nettlesertype og enhetsinformasjon når du bruker dashbordet. Disse dataene brukes til sikkerhetsovervåking og hastighetsbegrensning.\n\nTjenestedata: Alle data du lagrer i dine distribuerte containere, volumer og sikkerhetskopier er dine data. Vi har kun tilgang til dem for å levere tjenesten (f.eks. kjøre sikkerhetskopier, gjenopprette tjenester) og aldri for andre formål."
@@ -3085,7 +3177,7 @@
       },
       "contact": {
         "title": "9. Kontakt oss",
-        "body": "Hvis du har spørsmål om denne personvernerklæringen eller ønsker å utøve dine datarettigheter, vennligst kontakt oss på:\n\nE-post: {contactEmail}"
+        "body": "Hvis du har spørsmål om denne personvernerklæringen eller ønsker å utøve dine datarettigheter, vennligst kontakt oss på:\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, Norge\nOrg. nr: 912 000 621\nE-post: privacy@siglar.com"
       }
     },
     "terms": {
@@ -3094,7 +3186,7 @@
       "intro": "Ved å bruke {platformName} (\"Tjenesten\") godtar du å være bundet av disse tjenestevilkårene (\"Vilkårene\"). Hvis du ikke godtar disse vilkårene, skal du ikke bruke Tjenesten.",
       "description": {
         "title": "1. Beskrivelse av tjenesten",
-        "body": "{platformName} er en åpen kildekode, multi-tenant Platform-as-a-Service (PaaS) bygget på Docker Swarm. Tjenesten tilbyr containerorkestrering, automatiserte distribusjoner, domeneadministrasjon, sikkerhetskopiadministrasjon, faktureringsintegrasjon og relaterte infrastrukturstyringsverktøy.\n\n{platformName} kan selvhostes på din egen infrastruktur eller nås gjennom en administrert instans. Disse vilkårene gjelder for din bruk av Tjenesten uavhengig av hvordan den er distribuert."
+        "body": "{platformName} er en multi-tenant Platform-as-a-Service (PaaS) bygget på Docker Swarm. Tjenesten tilbyr containerorkestrering, automatiserte distribusjoner, domeneadministrasjon, sikkerhetskopiadministrasjon, faktureringsintegrasjon og relaterte infrastrukturstyringsverktøy.\n\n{platformName} kan selvhostes på din egen infrastruktur eller nås gjennom en administrert instans. Disse vilkårene gjelder for din bruk av Tjenesten uavhengig av hvordan den er distribuert."
       },
       "account": {
         "title": "2. Kontoregistrering og sikkerhet",
@@ -3114,7 +3206,7 @@
       },
       "ip": {
         "title": "6. Immaterielle rettigheter",
-        "body": "{platformName} er åpen kildekode-programvare lisensiert under sin respektive lisens. Din bruk av {platformName}-plattformen gir deg ingen eierrettigheter til plattformens immaterielle eiendom.\n\nDu beholder fullt eierskap til all kode, data og innhold du distribuerer på Tjenesten. Vi krever ingen immaterielle rettigheter over ditt innhold."
+        "body": "{platformName} er proprietær programvare. Din bruk av {platformName}-plattformen gir deg ingen eierrettigheter til plattformens immaterielle eiendom.\n\nDu beholder fullt eierskap til all kode, data og innhold du distribuerer på Tjenesten. Vi krever ingen immaterielle rettigheter over ditt innhold."
       },
       "dataPrivacy": {
         "title": "7. Data og personvern",
@@ -3130,7 +3222,7 @@
       },
       "governingLaw": {
         "title": "10. Gjeldende lovgivning",
-        "body": "Disse vilkårene skal reguleres av og tolkes i samsvar med gjeldende lover. Eventuelle tvister som oppstår fra disse vilkårene eller din bruk av Tjenesten skal løses gjennom forhandlinger i god tro først, og om nødvendig gjennom bindende voldgift eller i domstolene med riktig jurisdiksjon."
+        "body": "Disse vilkårene skal reguleres av og tolkes i samsvar med norsk lov. Eventuelle tvister som oppstår fra disse vilkårene eller din bruk av Tjenesten skal løses gjennom forhandlinger i god tro først, og om nødvendig gjennom Skien tingrett, Norge."
       },
       "changes": {
         "title": "11. Endringer i disse vilkårene",
@@ -3138,14 +3230,14 @@
       },
       "contact": {
         "title": "12. Kontakt oss",
-        "body": "Hvis du har spørsmål om disse tjenestevilkårene, vennligst kontakt oss på:\n\nE-post: {contactEmail}"
+        "body": "Hvis du har spørsmål om disse tjenestevilkårene, vennligst kontakt oss på:\n\nSiglar Development AS\nKrabberødveien 47, 3960 Stathelle, Norge\nOrg. nr: 912 000 621\nE-post: privacy@siglar.com"
       }
     },
     "docs": {
       "title": "Dokumentasjon",
       "navigation": "Navigasjon",
       "gettingStarted": "Kom i gang",
-      "gettingStartedIntro": "Fleet er en åpen kildekode, multi-tenant PaaS bygget på Docker Swarm. Denne guiden hjelper deg med å sette opp ditt første Fleet-kluster og distribuere en tjeneste.",
+      "gettingStartedIntro": "Fleet er en multi-tenant PaaS bygget på Docker Swarm. Denne guiden hjelper deg med å sette opp ditt første Fleet-kluster og distribuere en tjeneste.",
       "prerequisites": "Forutsetninger",
       "prereq1": "En Linux-server (Ubuntu 22.04+, Debian 12+, Rocky 9+ eller Fedora 39+ anbefalt)",
       "prereq2": "Root- eller sudo-tilgang (installasjonsskriptet håndterer Docker, NFS og alle avhengigheter automatisk)",

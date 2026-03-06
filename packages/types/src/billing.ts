@@ -57,6 +57,10 @@ export interface BillingPlan {
   priceCents: number;
   stripeProductId: string | null;
   stripePriceIds: Record<string, string>;
+  nameTranslations: Record<string, string>;
+  descriptionTranslations: Record<string, string>;
+  scope: 'service' | 'stack';
+  volumeIncludedGb: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,12 +74,17 @@ export interface Subscription {
   stripeCustomerId: string | null;
   billingCycle: BillingCycle;
   status: SubscriptionStatus;
+  serviceId: string | null;
+  stackId: string | null;
+  paymentContactName: string | null;
+  paymentContactEmail: string | null;
   trialEndsAt: Date | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
   cancelledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  plan?: BillingPlan;
 }
 
 export interface UsageRecord {
@@ -141,4 +150,29 @@ export interface CreateCheckoutInput {
   planId?: string;
   successUrl: string;
   cancelUrl: string;
+}
+
+export interface CreateServiceCheckoutInput {
+  accountId: string;
+  serviceId?: string;
+  stackId?: string;
+  planId: string;
+  billingCycle: BillingCycle;
+  currency?: string;
+  paymentMethodId?: string;
+  billingContactEmail?: string;
+  billingContactName?: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface Stack {
+  id: string;
+  accountId: string;
+  name: string | null;
+  templateSlug: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
 }

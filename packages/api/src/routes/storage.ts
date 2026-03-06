@@ -350,6 +350,27 @@ storage.openapi(deleteVolumeRoute, (async (c: any) => {
     return c.json({ error: 'Volume not found' }, 404);
   }
 
+  // Check if any active services reference this volume
+  const activeServices = await db.select({
+    id: services.id,
+    name: services.name,
+    volumes: services.volumes,
+  })
+    .from(services)
+    .where(and(eq(services.accountId, accountId), isNull(services.deletedAt)));
+
+  const boundServices = activeServices.filter((s) => {
+    const vols = (s.volumes as Array<{ source: string }>) ?? [];
+    return vols.some((v) => v.source === dbVolume.name);
+  });
+
+  if (boundServices.length > 0) {
+    return c.json({
+      error: 'Volume is in use by active services',
+      services: boundServices.map((s) => ({ id: s.id, name: s.name })),
+    }, 409);
+  }
+
   try {
     await storageManager.deleteVolume(accountId, dbVolume.name);
     return c.json({ message: 'Volume deleted' });

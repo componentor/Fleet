@@ -33,6 +33,18 @@ async function getStripe(): Promise<Stripe> {
 
 export class StripeService {
   /**
+   * Check if Stripe is configured (env or DB).
+   */
+  async isConfigured(): Promise<boolean> {
+    try {
+      await getStripe();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Create a Stripe customer for an account.
    */
   async createCustomer(
@@ -533,6 +545,45 @@ export class StripeService {
     connectAccountId: string,
   ): Promise<Stripe.LoginLink> {
     return (await getStripe()).accounts.createLoginLink(connectAccountId);
+  }
+
+  /**
+   * Update the default payment method for a specific subscription.
+   */
+  async updateSubscriptionPaymentMethod(
+    subscriptionId: string,
+    paymentMethodId: string,
+  ): Promise<Stripe.Subscription> {
+    return (await getStripe()).subscriptions.update(subscriptionId, {
+      default_payment_method: paymentMethodId,
+    });
+  }
+
+  /**
+   * Change the plan/price on an existing subscription (upgrade/downgrade).
+   * Prorates automatically so the customer pays the difference immediately.
+   */
+  async updateSubscriptionPlan(
+    subscriptionId: string,
+    newPriceData: Stripe.Checkout.SessionCreateParams.LineItem.PriceData,
+  ): Promise<Stripe.Subscription> {
+    const stripe = await getStripe();
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    const existingItem = sub.items.data[0];
+    if (!existingItem) throw new Error('Subscription has no items');
+
+    // Create an ad-hoc price for the new plan
+    const price = await stripe.prices.create({
+      currency: newPriceData.currency!,
+      product_data: newPriceData.product_data as Stripe.PriceCreateParams.ProductData,
+      unit_amount: newPriceData.unit_amount!,
+      recurring: newPriceData.recurring as Stripe.PriceCreateParams.Recurring,
+    });
+
+    return stripe.subscriptions.update(subscriptionId, {
+      items: [{ id: existingItem.id, price: price.id }],
+      proration_behavior: 'always_invoice',
+    });
   }
 
   /**

@@ -66,6 +66,14 @@ async function upsertSetting(key: string, value: unknown): Promise<void> {
     where: eq(platformSettings.key, key),
   });
 
+  if (value == null) {
+    // Delete the setting if value is null/undefined (column is NOT NULL)
+    if (existing) {
+      await db.delete(platformSettings).where(eq(platformSettings.id, existing.id));
+    }
+    return;
+  }
+
   if (existing) {
     await db
       .update(platformSettings)

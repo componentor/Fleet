@@ -22,9 +22,8 @@ const { brandTitle, logoSrc, brandGithubUrl } = useBranding()
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
-            <span class="text-lg font-bold text-gray-900 dark:text-white">{{ brandTitle }}</span>
+            <span class="text-lg font-medium text-gray-900 dark:text-white">{{ brandTitle }}</span>
           </div>
-          <p class="text-sm text-surface-500">{{ $t('landing.footer.builtWith') }}</p>
         </div>
 
         <!-- Links -->
@@ -44,6 +43,14 @@ const { brandTitle, logoSrc, brandGithubUrl } = useBranding()
           >
             {{ $t('landing.footer.docs') }}
           </router-link>
+          <a
+            href="/api/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
+          >
+            {{ $t('landing.footer.api', 'API') }}
+          </a>
           <router-link
             to="/privacy"
             class="text-sm text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"

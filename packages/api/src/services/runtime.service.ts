@@ -13,21 +13,10 @@ type FileReader = (name: string) => Promise<string | null>;
 
 /**
  * Convert a multi-line config string into a Dockerfile RUN instruction
- * that writes it to a file using printf. Works without BuildKit.
+ * that writes it to a file using a shell heredoc.
  */
 function writeFileRun(config: string, targetPath: string): string {
-  const lines = config.split('\n');
-  const parts: string[] = [`RUN printf '%s\\n' \\`];
-  for (let i = 0; i < lines.length; i++) {
-    const escaped = (lines[i] ?? '').replace(/'/g, "'\\''" );
-    const isLast = i === lines.length - 1;
-    if (isLast) {
-      parts.push(`  '${escaped}' > ${targetPath}`);
-    } else {
-      parts.push(`  '${escaped}' \\`);
-    }
-  }
-  return parts.join('\n');
+  return `RUN cat <<'NGINX_CONF' > ${targetPath}\n${config}\nNGINX_CONF`;
 }
 
 /** Default nginx server block used for static sites and build-only Node.js projects. */

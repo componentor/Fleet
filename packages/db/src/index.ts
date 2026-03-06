@@ -105,6 +105,10 @@ export const backupSchedulesRelations = _schema.backupSchedulesRelations;
 export const emailTemplates = _schema.emailTemplates as typeof PgSchema.emailTemplates;
 export const emailLog = _schema.emailLog as typeof PgSchema.emailLog;
 
+// stacks.ts
+export const stacks = _schema.stacks as typeof PgSchema.stacks;
+export const stacksRelations = _schema.stacksRelations;
+
 // marketplace.ts
 export const appTemplates = _schema.appTemplates as typeof PgSchema.appTemplates;
 
@@ -121,6 +125,10 @@ export const statusPostTranslationsRelations = _schema.statusPostTranslationsRel
 // metrics.ts
 export const nodeMetrics = _schema.nodeMetrics as typeof PgSchema.nodeMetrics;
 export const nodeMetricsRelations = _schema.nodeMetricsRelations;
+
+// analytics.ts
+export const serviceAnalytics = _schema.serviceAnalytics as typeof PgSchema.serviceAnalytics;
+export const serviceAnalyticsRelations = _schema.serviceAnalyticsRelations;
 
 // notifications.ts
 export const notifications = _schema.notifications as typeof PgSchema.notifications;

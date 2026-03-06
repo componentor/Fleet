@@ -4,12 +4,13 @@ import { useI18n } from 'vue-i18n'
 import {
   Box, Globe, HardDrive, DollarSign, Activity, Loader2, Clock,
   Rocket, Sun, Moon, Sunset, CheckCircle, Wifi, Container,
-  Sparkles, ArrowRight, Cpu, MemoryStick,
+  Sparkles, ArrowRight, Cpu, MemoryStick, ExternalLink, Shield,
 } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useServicesStore } from '@/stores/services'
 import { useAccount } from '@/composables/useAccount'
 import { useAuth } from '@/composables/useAuth'
+import { useDomainPicker } from '@/composables/useDomainPicker'
 import ResourceGauge from '@/components/ResourceGauge.vue'
 
 const { t } = useI18n()
@@ -17,8 +18,8 @@ const api = useApi()
 const servicesStore = useServicesStore()
 const { currentAccount } = useAccount()
 const { user } = useAuth()
+const domainPicker = useDomainPicker()
 
-const domains = ref<any[]>([])
 const activityFeed = ref<any[]>([])
 const volumesList = ref<any[]>([])
 const loading = ref(true)
@@ -171,11 +172,24 @@ const formattedCost = computed(() => {
 })
 
 const stats = computed(() => [
+  { label: t('dashboard.domains'), value: String(animatedDomains.value), icon: Globe, color: 'text-white', bg: 'bg-gradient-to-br from-orange-500 to-red-600', to: '/panel/domains' },
   { label: t('dashboard.runningServices'), value: String(animatedRunning.value), icon: Box, color: 'text-white', bg: 'bg-gradient-to-br from-green-500 to-emerald-600', to: '/panel/services' },
-  { label: t('dashboard.totalServices'), value: String(animatedTotal.value), icon: HardDrive, color: 'text-white', bg: 'bg-gradient-to-br from-purple-500 to-violet-600', to: '/panel/services' },
-  { label: t('dashboard.domains'), value: String(animatedDomains.value), icon: Globe, color: 'text-white', bg: 'bg-gradient-to-br from-blue-500 to-indigo-600', to: '/panel/domains' },
+  { label: t('dashboard.totalServices'), value: String(animatedTotal.value), icon: HardDrive, color: 'text-white', bg: 'bg-gradient-to-br from-slate-700 to-gray-900', to: '/panel/services' },
   { label: t('dashboard.estimatedCost'), value: formattedCost.value, icon: DollarSign, color: 'text-white', bg: 'bg-gradient-to-br from-amber-500 to-orange-600', to: '/panel/billing' },
 ])
+
+// Top domains for the dashboard overview
+const myDomains = computed(() => domainPicker.domains.value.slice(0, 6))
+const domainTypeLabel = (type: string) => {
+  if (type === 'purchased') return t('dashboard.domainPurchased', 'Registered')
+  if (type === 'external') return t('dashboard.domainExternal', 'External')
+  return t('dashboard.domainSubdomain', 'Subdomain')
+}
+const domainTypeBadge = (type: string) => {
+  if (type === 'purchased') return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+  if (type === 'external') return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+  return 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+}
 
 const recentServices = computed(() =>
   [...servicesStore.services].sort((a: any, b: any) => {
@@ -238,7 +252,7 @@ onMounted(async () => {
   try {
     await Promise.all([
       servicesStore.fetchServices(),
-      api.get<any[]>('/dns/zones').then(data => { domains.value = data }).catch(() => {}),
+      domainPicker.fetchDomains(true),
       currentAccount.value?.id
         ? api.get<any>(`/accounts/${currentAccount.value.id}/activity?limit=20`)
             .then(data => {
@@ -265,7 +279,7 @@ onMounted(async () => {
     // Trigger count-up animations after data loads
     await nextTick()
     animateValue(animatedRunning, runningCount.value)
-    animateValue(animatedDomains, domains.value.length, 900)
+    animateValue(animatedDomains, domainPicker.domains.value.length, 900)
     animateValue(animatedTotal, servicesStore.services.length, 1000)
     animateValue(animatedCost, billingUsage.value?.estimatedCostCents ?? 0, 1100)
   } finally {
@@ -305,21 +319,30 @@ onMounted(async () => {
     </div>
 
     <template v-else>
-      <!-- Empty state (no services at all) -->
-      <div v-if="servicesStore.services.length === 0 && domains.length === 0" class="text-center py-16">
+      <!-- Empty state (no services and no domains) -->
+      <div v-if="servicesStore.services.length === 0 && domainPicker.domains.value.length === 0" class="text-center py-16">
         <div class="mx-auto w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center mb-4">
-          <Rocket class="w-8 h-8 text-primary-500" />
+          <Globe class="w-8 h-8 text-primary-500" />
         </div>
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">{{ $t('dashboard.deployFirst') }}</h2>
-        <p class="text-gray-500 dark:text-gray-400 text-sm mb-6 max-w-md mx-auto">{{ $t('dashboard.getStarted') }}</p>
-        <router-link
-          to="/panel/deploy"
-          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors shadow-sm"
-        >
-          <Rocket class="w-4 h-4" />
-          {{ $t('services.deployNew') }}
-          <ArrowRight class="w-4 h-4" />
-        </router-link>
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">{{ $t('dashboard.registerFirst', 'Register your first domain') }}</h2>
+        <p class="text-gray-500 dark:text-gray-400 text-sm mb-6 max-w-md mx-auto">{{ $t('dashboard.getStartedDomains', 'Start by registering a domain or deploying a service to bring your dashboard to life.') }}</p>
+        <div class="flex items-center justify-center gap-3">
+          <router-link
+            to="/panel/domains"
+            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors shadow-sm"
+          >
+            <Globe class="w-4 h-4" />
+            {{ $t('dashboard.addDomain') }}
+            <ArrowRight class="w-4 h-4" />
+          </router-link>
+          <router-link
+            to="/panel/deploy"
+            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors"
+          >
+            <Rocket class="w-4 h-4" />
+            {{ $t('services.deployNew') }}
+          </router-link>
+        </div>
       </div>
 
       <template v-else>
@@ -343,56 +366,152 @@ onMounted(async () => {
           </router-link>
         </div>
 
-        <!-- Services health bar -->
-        <div v-if="healthBreakdown.total > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-8 transition-all duration-200 hover:shadow-md">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.servicesHealth') }}</h3>
-            <div v-if="allHealthy" class="flex items-center gap-1.5 text-green-600 dark:text-green-400">
-              <CheckCircle class="w-4 h-4" />
-              <span class="text-xs font-medium">{{ $t('dashboard.allHealthy') }}</span>
+        <!-- My Domains -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8 transition-all duration-200 hover:shadow-md">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <Globe class="w-5 h-5 text-blue-500" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.myDomains', 'My Domains') }}</h2>
+            </div>
+            <router-link to="/panel/domains" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+              {{ $t('dashboard.viewAll') }}
+              <ArrowRight class="w-3 h-3" />
+            </router-link>
+          </div>
+          <div v-if="myDomains.length === 0" class="px-6 py-10 text-center">
+            <Globe class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+            <p class="text-gray-500 dark:text-gray-400 text-sm mb-3">{{ $t('dashboard.noDomainsYet', 'No domains yet. Register your first domain to get started.') }}</p>
+            <router-link
+              to="/panel/domains"
+              class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+            >
+              <Globe class="w-4 h-4" />
+              {{ $t('dashboard.addDomain') }}
+            </router-link>
+          </div>
+          <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
+            <router-link
+              v-for="d in myDomains"
+              :key="d.domain"
+              to="/panel/domains"
+              class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block"
+            >
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                  :class="d.type === 'purchased' ? 'bg-green-50 dark:bg-green-900/20' : d.type === 'external' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-purple-50 dark:bg-purple-900/20'"
+                >
+                  <Shield v-if="d.type === 'purchased'" class="w-4 h-4 text-green-500" />
+                  <ExternalLink v-else-if="d.type === 'external'" class="w-4 h-4 text-blue-500" />
+                  <Globe v-else class="w-4 h-4 text-purple-500" />
+                </div>
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ d.domain }}</p>
+                  <p v-if="d.assignedServiceName" class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ d.assignedServiceName }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0 ml-4">
+                <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold', domainTypeBadge(d.type)]">
+                  {{ domainTypeLabel(d.type) }}
+                </span>
+                <span
+                  :class="['w-2 h-2 rounded-full shrink-0', d.status === 'active' ? 'bg-green-500' : 'bg-yellow-500']"
+                  :title="d.status"
+                ></span>
+              </div>
+            </router-link>
+          </div>
+        </div>
+
+        <!-- My Services -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8 transition-all duration-200 hover:shadow-md">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <Box class="w-5 h-5 text-green-500" />
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.myServices', 'My Services') }}</h2>
+            </div>
+            <router-link to="/panel/services" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+              {{ $t('dashboard.viewAll') }}
+              <ArrowRight class="w-3 h-3" />
+            </router-link>
+          </div>
+          <!-- Health bar (inline) -->
+          <div v-if="healthBreakdown.total > 0" class="px-6 pt-4 pb-2">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex flex-wrap gap-3">
+                <div v-if="healthBreakdown.running > 0" class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.running }} {{ $t('dashboard.running') }}</span>
+                </div>
+                <div v-if="healthBreakdown.deploying > 0" class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.deploying }} {{ $t('dashboard.deploying') }}</span>
+                </div>
+                <div v-if="healthBreakdown.stopped > 0" class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.stopped }} {{ $t('dashboard.stopped') }}</span>
+                </div>
+                <div v-if="healthBreakdown.failed > 0" class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.failed }} {{ $t('dashboard.failed') }}</span>
+                </div>
+              </div>
+              <div v-if="allHealthy" class="flex items-center gap-1 text-green-600 dark:text-green-400">
+                <CheckCircle class="w-3.5 h-3.5" />
+                <span class="text-xs font-medium">{{ $t('dashboard.allHealthy') }}</span>
+              </div>
+            </div>
+            <div class="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden flex">
+              <div v-if="healthBreakdown.running > 0" class="bg-green-500 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.running) }" />
+              <div v-if="healthBreakdown.deploying > 0" class="bg-yellow-500 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.deploying) }" />
+              <div v-if="healthBreakdown.stopped > 0" class="bg-gray-400 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.stopped) }" />
+              <div v-if="healthBreakdown.failed > 0" class="bg-red-500 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.failed) }" />
             </div>
           </div>
-          <!-- Segmented bar -->
-          <div class="h-3 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden flex">
-            <div
-              v-if="healthBreakdown.running > 0"
-              class="bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-700 ease-out"
-              :style="{ width: healthWidth(healthBreakdown.running) }"
-            />
-            <div
-              v-if="healthBreakdown.deploying > 0"
-              class="bg-gradient-to-r from-yellow-400 to-amber-500 transition-all duration-700 ease-out"
-              :style="{ width: healthWidth(healthBreakdown.deploying) }"
-            />
-            <div
-              v-if="healthBreakdown.stopped > 0"
-              class="bg-gradient-to-r from-gray-400 to-gray-500 dark:from-gray-500 dark:to-gray-600 transition-all duration-700 ease-out"
-              :style="{ width: healthWidth(healthBreakdown.stopped) }"
-            />
-            <div
-              v-if="healthBreakdown.failed > 0"
-              class="bg-gradient-to-r from-red-500 to-rose-600 transition-all duration-700 ease-out"
-              :style="{ width: healthWidth(healthBreakdown.failed) }"
-            />
-          </div>
-          <!-- Legend -->
-          <div class="flex flex-wrap gap-4 mt-3">
-            <div v-if="healthBreakdown.running > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-green-500 to-emerald-500"></span>
-              <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.running') }} ({{ healthBreakdown.running }})</span>
+          <div class="divide-y divide-gray-200 dark:divide-gray-700">
+            <div v-if="recentServices.length === 0" class="px-6 py-10 text-center">
+              <Box class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+              <p class="text-gray-500 dark:text-gray-400 text-sm mb-3">{{ $t('dashboard.noServicesYet') }}</p>
+              <router-link
+                to="/panel/deploy"
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+              >
+                <Rocket class="w-4 h-4" />
+                {{ $t('services.deployNew', 'Deploy') }}
+              </router-link>
             </div>
-            <div v-if="healthBreakdown.deploying > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500"></span>
-              <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.deploying') }} ({{ healthBreakdown.deploying }})</span>
-            </div>
-            <div v-if="healthBreakdown.stopped > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-gray-400 to-gray-500"></span>
-              <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.stopped') }} ({{ healthBreakdown.stopped }})</span>
-            </div>
-            <div v-if="healthBreakdown.failed > 0" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-red-500 to-rose-600"></span>
-              <span class="text-xs text-gray-600 dark:text-gray-400">{{ $t('dashboard.failed') }} ({{ healthBreakdown.failed }})</span>
-            </div>
+            <router-link
+              v-for="svc in recentServices"
+              :key="svc.id"
+              :to="`/panel/services/${svc.id}`"
+              class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block"
+            >
+              <div class="flex items-center gap-3">
+                <span
+                  :class="[
+                    'w-2.5 h-2.5 rounded-full shrink-0',
+                    svc.status === 'running' ? 'bg-green-500 animate-pulse' :
+                    svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
+                  ]"
+                ></span>
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ svc.name }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ svc.image }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 shrink-0 ml-4">
+                <span
+                  :class="[
+                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+                    svc.status === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
+                    svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                    'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                  ]"
+                >
+                  {{ svc.status }}
+                </span>
+                <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{{ formatDate(svc.updatedAt || svc.createdAt) }}</span>
+              </div>
+            </router-link>
           </div>
         </div>
 
@@ -410,38 +529,6 @@ onMounted(async () => {
               :detail="gauge.detail"
             />
           </div>
-        </div>
-
-        <!-- Quick actions -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-          <router-link
-            to="/panel/deploy"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Rocket class="w-5 h-5 text-green-500 group-hover:text-green-600 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('services.deployNew', 'Deploy') }}</span>
-          </router-link>
-          <router-link
-            to="/panel/services"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Box class="w-5 h-5 text-purple-500 group-hover:text-purple-600 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.services', 'Services') }}</span>
-          </router-link>
-          <router-link
-            to="/panel/domains"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Globe class="w-5 h-5 text-blue-500 group-hover:text-blue-600 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.domains', 'Domains') }}</span>
-          </router-link>
-          <router-link
-            to="/panel/marketplace"
-            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all duration-200 group"
-          >
-            <Container class="w-5 h-5 text-amber-500 group-hover:text-amber-600 transition-colors" />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">{{ $t('nav.marketplace', 'Marketplace') }}</span>
-          </router-link>
         </div>
 
         <!-- Volume usage breakdown -->
@@ -472,52 +559,6 @@ onMounted(async () => {
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ (vol.usedGb ?? 0).toFixed(1) }} / {{ vol.sizeGb }} GB</span>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- Recent services -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md">
-          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
-            <Activity class="w-5 h-5 text-gray-500 dark:text-gray-400" />
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.recentServices') }}</h2>
-          </div>
-          <div class="divide-y divide-gray-200 dark:divide-gray-700">
-            <div v-if="recentServices.length === 0" class="px-6 py-12 text-center">
-              <p class="text-gray-500 dark:text-gray-400 text-sm">{{ $t('dashboard.noServicesYet') }}</p>
-            </div>
-            <router-link
-              v-for="svc in recentServices"
-              :key="svc.id"
-              :to="`/panel/services/${svc.id}`"
-              class="px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block"
-            >
-              <div class="flex items-center gap-3">
-                <span
-                  :class="[
-                    'w-2.5 h-2.5 rounded-full shrink-0',
-                    svc.status === 'running' ? 'bg-green-500 animate-pulse' :
-                    svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
-                  ]"
-                ></span>
-                <div class="min-w-0">
-                  <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ svc.name }}</p>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ svc.image }}</p>
-                </div>
-              </div>
-              <div class="flex items-center gap-3 shrink-0 ml-4">
-                <span
-                  :class="[
-                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
-                    svc.status === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-                    svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
-                    'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-                  ]"
-                >
-                  {{ svc.status }}
-                </span>
-                <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{{ formatDate(svc.updatedAt || svc.createdAt) }}</span>
-              </div>
-            </router-link>
           </div>
         </div>
 

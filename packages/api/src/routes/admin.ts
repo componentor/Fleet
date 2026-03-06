@@ -1184,6 +1184,44 @@ const platformLogsRoute = createRoute({
   },
 });
 
+/**
+ * Collect a Dockerode log result (Buffer or ReadableStream) into a single Buffer.
+ * Handles streams that fail to signal completion by using a timeout.
+ */
+async function collectLogBuffer(result: Buffer | NodeJS.ReadableStream, timeoutMs: number): Promise<Buffer> {
+  if (Buffer.isBuffer(result)) return result;
+
+  return new Promise<Buffer>((resolve) => {
+    const chunks: Buffer[] = [];
+    const s = result as NodeJS.ReadableStream & { destroy?(): void };
+    const finish = () => {
+      s.removeAllListeners();
+      s.destroy?.();
+      resolve(Buffer.concat(chunks));
+    };
+    s.on('data', (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    s.on('end', finish);
+    s.on('error', finish);
+    setTimeout(finish, timeoutMs);
+  });
+}
+
+/** Demux Docker multiplexed log frames into plain text. */
+function demuxDockerLogs(raw: Buffer): string {
+  const lines: string[] = [];
+  let offset = 0;
+  while (offset + 8 <= raw.length) {
+    const size = raw.readUInt32BE(offset + 4);
+    if (offset + 8 + size > raw.length) break;
+    lines.push(raw.subarray(offset + 8, offset + 8 + size).toString('utf-8'));
+    offset += 8 + size;
+  }
+  // If demux produced nothing, the output might be raw text (TTY mode)
+  return lines.length > 0 ? lines.join('') : raw.toString('utf-8');
+}
+
 adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
   const serviceName = c.req.query('service') || 'fleet_api';
   const tail = Math.min(parseInt(c.req.query('tail') ?? '500', 10) || 500, 5000);
@@ -1193,147 +1231,88 @@ adminRoutes.openapi(platformLogsRoute, (async (c: any) => {
     return c.json({ error: `Invalid service. Allowed: ${ALLOWED_FLEET_SERVICES.join(', ')}` }, 400);
   }
 
-  // Stream the response immediately so the client never stays PENDING.
-  // All Docker calls happen inside the stream callback.
   c.header('Content-Type', 'text/plain; charset=utf-8');
   c.header('X-Fleet-Available-Services', ALLOWED_FLEET_SERVICES.join(','));
 
   return stream(c, async (stream) => {
-    const STREAM_TIMEOUT_MS = 30_000;
-    const FETCH_TIMEOUT_MS = 15_000;
-
-    /** Demux Docker multiplexed log frames, return leftover */
-    const demux = (buf: Buffer): { text: string; rest: Buffer } => {
-      let text = '';
-      let offset = 0;
-      while (offset + 8 <= buf.length) {
-        const size = buf.readUInt32BE(offset + 4);
-        if (offset + 8 + size > buf.length) break;
-        text += buf.subarray(offset + 8, offset + 8 + size).toString('utf-8');
-        offset += 8 + size;
-      }
-      return { text, rest: buf.subarray(offset) };
-    };
-
-    /** Apply server-side search filter (line-by-line) */
-    const filterAndWrite = async (text: string) => {
-      if (!text) return;
-      if (!search) {
-        await stream.write(text);
-        return;
-      }
-      const filtered = text
-        .split('\n')
-        .filter((line) => line.toLowerCase().includes(search))
-        .join('\n');
-      if (filtered) await stream.write(filtered.endsWith('\n') ? filtered : filtered + '\n');
-    };
-
+    const TIMEOUT_MS = 30_000;
     const isK8s = getDefaultOrchestratorType() === 'kubernetes';
 
     try {
-      // Find the service by name — try both Docker Swarm and Kubernetes naming
+      // ── 1. Find the service ──
       const namesToTry = [serviceName];
       const k8sName = K8S_SERVICE_NAMES[serviceName];
       if (k8sName) namesToTry.push(k8sName);
 
-      const allServices = await Promise.race([
-        orchestrator.listServices({ name: namesToTry }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out listing services')), FETCH_TIMEOUT_MS),
-        ),
-      ]);
-      const svc = allServices.find((s: any) =>
-        namesToTry.includes(s.Spec?.Name),
-      );
+      const allServices = await orchestrator.listServices({ name: namesToTry });
+      const svc = allServices.find((s: any) => namesToTry.includes(s.Spec?.Name));
 
       if (!svc) {
         await stream.write(`Service "${serviceName}" not found.\n`);
         return;
       }
 
-      // Try container-level logs first (fast, no cross-node aggregation).
-      // Docker's service-level logs API aggregates across all replicas/nodes
-      // and can be extremely slow in multi-node Swarm clusters.
-      let result: Buffer | NodeJS.ReadableStream | null = null;
-      try {
-        const tasks = await Promise.race([
-          orchestrator.getServiceTasks(svc.ID),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Timed out listing tasks')), FETCH_TIMEOUT_MS),
-          ),
-        ]);
-        const runningTask = tasks.find((t: any) => t.status === 'running' && t.containerStatus?.containerId);
-        if (runningTask?.containerStatus?.containerId) {
-          result = await Promise.race([
-            orchestrator.getContainerLogs(runningTask.containerStatus.containerId, { tail, follow: false, timestamps: true }),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Timed out fetching container logs')), FETCH_TIMEOUT_MS),
-            ),
+      // ── 2. Collect logs into a buffer ──
+      let raw: Buffer | null = null;
+
+      // Strategy A: container-level logs (fast, no cross-node aggregation).
+      // Only works if the container is on the local Docker node.
+      if (!isK8s) {
+        try {
+          const [tasks, localNodeId] = await Promise.all([
+            orchestrator.getServiceTasks(svc.ID),
+            orchestrator.getLocalNodeId(),
           ]);
+          // Find a running task that is on THIS node so container.logs() can reach it
+          const localTask = tasks.find(
+            (t) => t.status === 'running' && t.nodeId === localNodeId && t.containerStatus?.containerId,
+          );
+          if (localTask?.containerStatus?.containerId) {
+            const result = await orchestrator.getContainerLogs(
+              localTask.containerStatus.containerId,
+              { tail, follow: false, timestamps: true },
+            );
+            raw = await collectLogBuffer(result, TIMEOUT_MS);
+          }
+        } catch (err: any) {
+          logger.debug({ err: err.message, serviceName }, 'Container-level log fetch failed, trying service logs');
         }
-      } catch {
-        // Container-level approach failed — fall back to service logs
       }
 
-      // Fall back to service-level logs if container approach didn't work
-      if (!result) {
-        result = await Promise.race([
-          orchestrator.getServiceLogs(svc.ID, { tail, follow: false }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Timed out fetching logs from Docker')), FETCH_TIMEOUT_MS),
-          ),
-        ]);
-      }
-
-      if (Buffer.isBuffer(result)) {
-        // Entire log returned as a buffer
-        if (isK8s) {
-          // Kubernetes returns plain text — no Docker frame headers
-          await filterAndWrite(result.toString('utf-8'));
-        } else {
-          // Docker multiplexed format — demux and write
-          const { text, rest } = demux(result);
-          await filterAndWrite(text || rest.toString('utf-8'));
+      // Strategy B: service-level logs (works across nodes but slower).
+      if (!raw || raw.length === 0) {
+        try {
+          const result = await orchestrator.getServiceLogs(svc.ID, { tail, follow: false });
+          raw = await collectLogBuffer(result, TIMEOUT_MS);
+        } catch (err: any) {
+          logger.error({ err, serviceName }, 'Service-level log fetch failed');
+          await stream.write(`[Error] Failed to fetch logs: ${err.message || 'unknown error'}\n`);
+          return;
         }
-      } else {
-        // Stream response — pipe through in real time.
-        // Use event listeners (not `for await`) to avoid hanging on streams
-        // that never signal completion.
-        await new Promise<void>((resolve) => {
-          let pending: Buffer = Buffer.alloc(0);
-          const dockerStream = result as NodeJS.ReadableStream & { destroy?: () => void };
-
-          const finish = () => {
-            dockerStream.removeAllListeners();
-            dockerStream.destroy?.();
-            resolve();
-          };
-
-          dockerStream.on('data', (chunk: Buffer | string) => {
-            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            if (isK8s) {
-              // K8s streams are plain text
-              filterAndWrite(buf.toString('utf-8')).catch(() => {});
-            } else {
-              pending = Buffer.concat([pending, buf]) as Buffer;
-              const { text, rest } = demux(pending);
-              pending = rest;
-              if (text) filterAndWrite(text).catch(() => {});
-            }
-          });
-
-          dockerStream.on('end', async () => {
-            if (!isK8s && pending.length > 0) {
-              await filterAndWrite(pending.toString('utf-8')).catch(() => {});
-            }
-            finish();
-          });
-
-          dockerStream.on('error', finish);
-          setTimeout(finish, STREAM_TIMEOUT_MS);
-        });
       }
+
+      if (!raw || raw.length === 0) {
+        await stream.write('No log output returned by Docker.\n');
+        return;
+      }
+
+      // ── 3. Decode: demux Docker frames or use raw text for K8s ──
+      const text = isK8s ? raw.toString('utf-8') : demuxDockerLogs(raw);
+
+      // ── 4. Apply server-side search filter ──
+      let output = text;
+      if (search) {
+        output = text
+          .split('\n')
+          .filter((line) => line.toLowerCase().includes(search))
+          .join('\n');
+        if (!output.trim()) {
+          await stream.write('No log lines match your search filter.\n');
+          return;
+        }
+      }
+
+      await stream.write(output);
     } catch (err: any) {
       const msg = err?.statusCode === 404 || err?.reason === 'no such service'
         ? `Service "${serviceName}" not found.`

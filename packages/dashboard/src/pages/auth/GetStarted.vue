@@ -4,7 +4,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAccountStore } from '@/stores/account'
-import { useApi } from '@/composables/useApi'
 import { useTheme } from '@/composables/useTheme'
 import { useBranding } from '@/composables/useBranding'
 import {
@@ -14,29 +13,33 @@ import {
   Loader2,
   Check,
   ArrowRight,
-  Rocket,
   Package,
   Globe,
   Store,
   Sun,
   Moon,
-  Sparkles,
+  ShoppingCart,
 } from 'lucide-vue-next'
+import { useCart } from '@/composables/useCart'
+import { useCurrency } from '@/composables/useCurrency'
+import CartDrawer from '@/components/landing/CartDrawer.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
-const api = useApi()
 const authStore = useAuthStore()
 const accountStore = useAccountStore()
 const { theme, toggle: toggleTheme } = useTheme()
 const { brandTitle, logoSrc } = useBranding()
+const cart = useCart()
+const { formatCurrency, selectedCurrency } = useCurrency()
+const cartOpen = ref(false)
 
 // ── Wizard state ──────────────────────────────────────────────────────────────
 
-type WizardStep = 'plan' | 'account' | 'checkout' | 'welcome' | 'start'
+type WizardStep = 'account' | 'welcome' | 'start'
 
-const currentStep = ref<WizardStep>('plan')
+const currentStep = ref<WizardStep>('account')
 const loading = ref(false)
 const error = ref('')
 
@@ -45,81 +48,21 @@ const name = ref('')
 const email = ref('')
 const password = ref('')
 
-// Step 2: Plan selection
-interface PlanData {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  isFree: boolean
-  isDefault: boolean
-  priceCents: number
-  cpuLimit: number
-  memoryLimit: number
-  containerLimit: number
-  storageLimit: number
-  sortOrder: number
-}
-
-const plans = ref<PlanData[]>([])
-const plansLoading = ref(false)
-const selectedPlanId = ref<string | null>(null)
-const selectedCycle = ref<string>('monthly')
-const allowedCycles = ref<string[]>(['monthly', 'yearly'])
-const trialDays = ref<number>(0)
-
-// Step 3: Checkout
-const checkoutLoading = ref(false)
-
 // Query params
-const preselectedPlan = (route.query.plan as string) || null
-const preselectedCycle = (route.query.cycle as string) || null
 const preselectedDomains = (route.query.domains as string) || (route.query.domain as string) || null
+const hasCart = route.query.cart === 'true' || cart.count.value > 0
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 
-const selectedPlan = computed(() => plans.value.find((p) => p.id === selectedPlanId.value))
-
 const stepIndex = computed(() => {
-  const map: Record<WizardStep, number> = { plan: 0, account: 1, checkout: 2, welcome: 3, start: 4 }
+  const map: Record<WizardStep, number> = { account: 0, welcome: 1, start: 2 }
   return map[currentStep.value]
 })
 
 const steps = computed(() => [
-  { key: 'plan', label: t('onboarding.stepPlan') },
   { key: 'account', label: t('onboarding.stepAccount') },
-  { key: 'checkout', label: t('onboarding.stepCheckout') },
   { key: 'welcome', label: t('onboarding.stepWelcome') },
 ])
-
-const formatPrice = (cents: number) => {
-  if (cents === 0) return t('onboarding.free')
-  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`
-}
-
-const cycleLabel = (cycle: string) => {
-  const labels: Record<string, string> = {
-    monthly: t('onboarding.monthly'),
-    yearly: t('onboarding.yearly'),
-    quarterly: t('onboarding.quarterly'),
-    half_yearly: t('onboarding.halfYearly'),
-    weekly: t('onboarding.weekly'),
-    daily: t('onboarding.daily'),
-  }
-  return labels[cycle] || cycle
-}
-
-const cycleSuffix = (cycle: string) => {
-  const suffixes: Record<string, string> = {
-    monthly: t('onboarding.perMonth'),
-    yearly: t('onboarding.perYear'),
-    quarterly: t('onboarding.perQuarter'),
-    half_yearly: t('onboarding.perHalfYear'),
-    weekly: t('onboarding.perWeek'),
-    daily: t('onboarding.perDay'),
-  }
-  return suffixes[cycle] || ''
-}
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -128,70 +71,13 @@ onMounted(async () => {
   if (!authStore.initialized) await authStore.init()
   if (authStore.isAuthenticated) {
     await accountStore.fetchAccounts()
-  }
-
-  // Handle return from Stripe checkout
-  const stepParam = route.query.step as string
-  const sessionId = route.query.session_id as string
-
-  if (stepParam === 'welcome' && sessionId && authStore.isAuthenticated) {
+    // Already logged in — go straight to welcome/start
     currentStep.value = 'welcome'
-    await fetchPlans()
     return
   }
 
-  if (stepParam === 'plan') {
-    // Cancelled checkout — go back to plan selection
-    currentStep.value = 'plan'
-    await fetchPlans()
-    return
-  }
-
-  // Always start on plan selection — transparency first
-  currentStep.value = 'plan'
-  await fetchPlans()
+  currentStep.value = 'account'
 })
-
-// ── API calls ─────────────────────────────────────────────────────────────────
-
-async function fetchPlans() {
-  plansLoading.value = true
-  try {
-    const data = await api.get<{
-      plans: PlanData[]
-      allowedCycles?: string[]
-      trialDays?: number
-    }>('/billing/public/plans')
-
-    plans.value = data.plans || []
-
-    if (data.allowedCycles?.length) {
-      allowedCycles.value = data.allowedCycles
-    }
-    if (data.trialDays) {
-      trialDays.value = data.trialDays
-    }
-
-    // Preselect from query param
-    if (preselectedPlan) {
-      const match = plans.value.find((p) => p.slug === preselectedPlan)
-      if (match) selectedPlanId.value = match.id
-    }
-    if (preselectedCycle && allowedCycles.value.includes(preselectedCycle)) {
-      selectedCycle.value = preselectedCycle
-    }
-
-    // Default to highlighted (non-free, non-default) or first plan
-    if (!selectedPlanId.value && plans.value.length) {
-      const recommended = plans.value.find((p) => !p.isFree && p.isDefault)
-      selectedPlanId.value = recommended?.id ?? plans.value[0]?.id ?? null
-    }
-  } catch {
-    // Plans will show empty state
-  } finally {
-    plansLoading.value = false
-  }
-}
 
 // ── Step handlers ─────────────────────────────────────────────────────────────
 
@@ -202,8 +88,7 @@ async function handleRegister() {
     await authStore.register({ name: name.value, email: email.value, password: password.value })
     await accountStore.fetchAccounts()
     sessionStorage.setItem('fleet_just_logged_in', '1')
-    // Account created — proceed with the selected plan
-    await proceedAfterAuth()
+    currentStep.value = 'welcome'
   } catch (e: any) {
     error.value = e?.body?.error ?? e?.body?.message ?? t('onboarding.registrationFailed')
   } finally {
@@ -222,64 +107,15 @@ function registerWithGoogle() {
   window.location.href = '/api/v1/auth/google'
 }
 
-async function handlePlanSelect(plan: PlanData) {
-  selectedPlanId.value = plan.id
-
-  // If not authenticated yet, go to account creation first
-  if (!authStore.isAuthenticated) {
-    currentStep.value = 'account'
-    return
-  }
-
-  // Already authenticated — proceed directly
-  await proceedAfterAuth()
-}
-
-async function proceedAfterAuth() {
-  const plan = selectedPlan.value
-  if (!plan) {
-    currentStep.value = 'plan'
-    return
-  }
-
-  if (plan.isFree) {
-    // Skip checkout for free plans
-    currentStep.value = 'welcome'
-    return
-  }
-
-  // Proceed to checkout
-  currentStep.value = 'checkout'
-  await startCheckout(plan)
-}
-
-async function startCheckout(plan: PlanData) {
-  checkoutLoading.value = true
-  try {
-    const appUrl = window.location.origin
-    const result = await api.post<{ url: string }>('/billing/checkout', {
-      billingModel: 'fixed',
-      billingCycle: selectedCycle.value,
-      planId: plan.id,
-      successUrl: `${appUrl}/get-started?step=welcome&session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${appUrl}/get-started?step=plan`,
-    })
-
-    if (result.url) {
-      window.location.href = result.url
-    }
-  } catch (e: any) {
-    error.value = e?.body?.error ?? t('onboarding.checkoutFailed')
-    currentStep.value = 'plan'
-  } finally {
-    checkoutLoading.value = false
-  }
-}
-
 function goToStart() {
   // Save preselected domains
   if (preselectedDomains) {
     localStorage.setItem('fleet_onboarding_domains', preselectedDomains)
+  }
+  // If cart has domains, save them for post-signup flow
+  if (cart.count.value > 0) {
+    const domainNames = cart.items.value.map(i => i.domain).join(',')
+    localStorage.setItem('fleet_onboarding_domains', domainNames)
   }
   currentStep.value = 'start'
 }
@@ -332,7 +168,7 @@ watch(currentStep, (step) => {
             </svg>
           </div>
         </template>
-        <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</h1>
+        <h1 class="text-3xl font-medium text-gray-900 dark:text-white">{{ brandTitle }}</h1>
       </router-link>
     </div>
 
@@ -376,144 +212,36 @@ watch(currentStep, (step) => {
       </template>
     </div>
 
-    <!-- ═══ Step 1: Choose Your Plan ═══ -->
-    <Transition name="wizard" mode="out-in">
-      <div
-        v-if="currentStep === 'plan'"
-        key="plan"
-        class="w-full max-w-4xl relative z-10 animate-slide-up-fade"
-      >
-        <div class="text-center mb-8">
-          <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ $t('onboarding.choosePlan') }}</h2>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $t('onboarding.choosePlanDesc') }}</p>
-        </div>
-
-        <!-- Billing cycle toggle -->
-        <div v-if="allowedCycles.length > 1" class="flex justify-center mb-8">
-          <div class="inline-flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-            <button
-              v-for="cycle in allowedCycles"
-              :key="cycle"
-              @click="selectedCycle = cycle"
-              :class="[
-                'px-4 py-2 rounded-md text-sm font-medium transition-all',
-                selectedCycle === cycle
-                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
-              ]"
-            >
-              {{ cycleLabel(cycle) }}
-            </button>
+    <!-- Cart summary banner (clickable to open drawer) -->
+    <button
+      v-if="cart.count.value > 0 && stepIndex < 3"
+      @click="cartOpen = true"
+      class="w-full max-w-md mb-4 relative z-10 animate-fade-in-up text-left cursor-pointer"
+      style="animation-delay: 0.08s;"
+    >
+      <div class="bg-white dark:bg-gray-800 border border-primary-200 dark:border-primary-800 rounded-xl px-5 py-3.5 shadow-sm hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-lg bg-primary-50 dark:bg-primary-900/20 shrink-0">
+            <ShoppingCart class="w-4 h-4 text-primary-600 dark:text-primary-400" />
           </div>
-        </div>
-
-        <!-- Plan cards -->
-        <div v-if="plansLoading" class="flex justify-center py-12">
-          <Loader2 class="w-8 h-8 text-primary-500 animate-spin" />
-        </div>
-
-        <div v-else-if="plans.length" class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 stagger-children">
-          <div
-            v-for="plan in plans"
-            :key="plan.id"
-            :class="[
-              'relative bg-white dark:bg-gray-800 rounded-2xl border p-6 transition-all duration-300 hover:-translate-y-1 cursor-pointer',
-              selectedPlanId === plan.id
-                ? 'border-primary-500 shadow-lg shadow-primary-500/10 ring-2 ring-primary-500/20'
-                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-lg',
-            ]"
-            @click="selectedPlanId = plan.id"
-          >
-            <!-- Popular badge -->
-            <div
-              v-if="plan.isDefault && !plan.isFree"
-              class="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-0.5 rounded-full text-xs font-semibold text-white"
-            >
-              {{ $t('onboarding.popular') }}
-            </div>
-
-            <div class="mb-4">
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ plan.name }}</h3>
-              <p v-if="plan.description" class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ plan.description }}</p>
-            </div>
-
-            <!-- Price -->
-            <div class="mb-6 flex items-baseline gap-1">
-              <span class="text-3xl font-extrabold text-gray-900 dark:text-white">{{ formatPrice(plan.priceCents) }}</span>
-              <span v-if="!plan.isFree" class="text-sm text-gray-500 dark:text-gray-400">{{ cycleSuffix(selectedCycle) }}</span>
-            </div>
-
-            <!-- Resource limits -->
-            <ul class="space-y-2.5 mb-6">
-              <li class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                <Check class="w-4 h-4 text-primary-500 shrink-0" />
-                {{ plan.containerLimit === -1 ? $t('onboarding.unlimited') : plan.containerLimit }} {{ $t('onboarding.containers') }}
-              </li>
-              <li class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                <Check class="w-4 h-4 text-primary-500 shrink-0" />
-                {{ plan.memoryLimit >= 1024 ? `${(plan.memoryLimit / 1024).toFixed(plan.memoryLimit % 1024 === 0 ? 0 : 1)}GB` : `${plan.memoryLimit}MB` }} {{ $t('onboarding.memory') }}
-              </li>
-              <li class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                <Check class="w-4 h-4 text-primary-500 shrink-0" />
-                {{ plan.cpuLimit === -1 ? $t('onboarding.unlimited') : plan.cpuLimit }} {{ $t('onboarding.cpu') }}
-              </li>
-              <li class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                <Check class="w-4 h-4 text-primary-500 shrink-0" />
-                {{ plan.storageLimit === -1 ? $t('onboarding.unlimited') : plan.storageLimit }}GB {{ $t('onboarding.storage') }}
-              </li>
-            </ul>
-
-            <!-- Trial badge -->
-            <div v-if="trialDays > 0 && !plan.isFree" class="mb-4">
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-xs font-medium text-green-700 dark:text-green-400">
-                <Sparkles class="w-3 h-3" />
-                {{ trialDays }} {{ $t('onboarding.dayTrial') }}
-              </span>
-            </div>
-
-            <!-- Select button -->
-            <button
-              @click.stop="handlePlanSelect(plan)"
-              :class="[
-                'w-full py-2.5 rounded-lg text-sm font-semibold transition-all',
-                selectedPlanId === plan.id && !plan.isFree
-                  ? 'bg-primary-600 hover:bg-primary-700 text-white shadow-md shadow-primary-500/20'
-                  : plan.isFree
-                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                    : 'bg-primary-600 hover:bg-primary-700 text-white',
-              ]"
-            >
-              <span v-if="plan.isFree">{{ $t('onboarding.getStartedFree') }}</span>
-              <span v-else class="flex items-center justify-center gap-1.5">
-                {{ $t('onboarding.continue') }}
-                <ArrowRight class="w-3.5 h-3.5" />
-              </span>
-            </button>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ $t('onboarding.cartSummary', { count: cart.count.value }, `${cart.count.value} domain(s) in your cart`) }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+              {{ cart.items.value.map(i => i.domain).join(', ') }}
+            </p>
           </div>
+          <span class="text-sm font-semibold text-primary-600 dark:text-primary-400 shrink-0">
+            {{ formatCurrency(cart.total.value, cart.items.value[0]?.currency ?? selectedCurrency) }}
+          </span>
         </div>
-
-        <!-- No plans fallback -->
-        <div v-else class="text-center py-12">
-          <p class="text-gray-500 dark:text-gray-400">{{ $t('onboarding.noPlansAvailable') }}</p>
-          <button
-            @click="navigateTo('/panel')"
-            class="mt-4 px-6 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
-          >
-            {{ $t('onboarding.skipToDashboard') }}
-          </button>
-        </div>
-
-        <!-- Login link -->
-        <p class="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
-          {{ $t('onboarding.alreadyHaveAccount') }}
-          <router-link to="/login" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
-            {{ $t('onboarding.signIn') }}
-          </router-link>
-        </p>
       </div>
-    </Transition>
+    </button>
 
-    <!-- ═══ Step 2: Account Creation ═══ -->
+    <CartDrawer :open="cartOpen" @close="cartOpen = false" />
+
+    <!-- ═══ Step 1: Account Creation ═══ -->
     <Transition name="wizard" mode="out-in">
       <div
         v-if="currentStep === 'account'"
@@ -615,7 +343,7 @@ watch(currentStep, (step) => {
             <!-- Login link -->
             <p class="text-center text-sm text-gray-500 dark:text-gray-400">
               {{ $t('onboarding.alreadyHaveAccount') }}
-              <router-link to="/login" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
+              <router-link to="/login?redirect=/get-started" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
                 {{ $t('onboarding.signIn') }}
               </router-link>
             </p>
@@ -624,35 +352,7 @@ watch(currentStep, (step) => {
       </div>
     </Transition>
 
-    <!-- ═══ Step 3: Checkout Redirect ═══ -->
-    <Transition name="wizard" mode="out-in">
-      <div
-        v-if="currentStep === 'checkout'"
-        key="checkout"
-        class="w-full max-w-md relative z-10 text-center animate-slide-up-fade"
-      >
-        <div class="bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-200 dark:border-gray-700 p-12">
-          <Loader2 class="w-10 h-10 text-primary-500 animate-spin mx-auto mb-4" />
-          <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">{{ $t('onboarding.redirectingCheckout') }}</h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('onboarding.redirectingCheckoutDesc') }}</p>
-
-          <!-- Error fallback -->
-          <div v-if="error" class="mt-6">
-            <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
-              <p class="text-sm text-red-700 dark:text-red-300">{{ error }}</p>
-            </div>
-            <button
-              @click="currentStep = 'plan'; error = ''"
-              class="text-sm text-primary-600 dark:text-primary-400 hover:underline font-medium"
-            >
-              {{ $t('onboarding.backToPlans') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- ═══ Step 4: Welcome ═══ -->
+    <!-- ═══ Step 2: Welcome ═══ -->
     <Transition name="wizard" mode="out-in">
       <div
         v-if="currentStep === 'welcome'"
@@ -670,29 +370,6 @@ watch(currentStep, (step) => {
           </h2>
           <p class="text-gray-500 dark:text-gray-400 mb-8">{{ $t('onboarding.welcomeBackDesc') }}</p>
 
-          <!-- Plan summary -->
-          <div v-if="selectedPlan" class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-8 text-left">
-            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{{ $t('onboarding.yourPlan') }}</h3>
-            <div class="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span class="text-gray-400 dark:text-gray-500">{{ $t('onboarding.plan') }}</span>
-                <p class="font-medium text-gray-900 dark:text-white">{{ selectedPlan.name }}</p>
-              </div>
-              <div>
-                <span class="text-gray-400 dark:text-gray-500">{{ $t('onboarding.containers') }}</span>
-                <p class="font-medium text-gray-900 dark:text-white">{{ selectedPlan.containerLimit === -1 ? $t('onboarding.unlimited') : selectedPlan.containerLimit }}</p>
-              </div>
-              <div>
-                <span class="text-gray-400 dark:text-gray-500">{{ $t('onboarding.memory') }}</span>
-                <p class="font-medium text-gray-900 dark:text-white">{{ selectedPlan.memoryLimit >= 1024 ? `${(selectedPlan.memoryLimit / 1024).toFixed(0)}GB` : `${selectedPlan.memoryLimit}MB` }}</p>
-              </div>
-              <div>
-                <span class="text-gray-400 dark:text-gray-500">{{ $t('onboarding.storage') }}</span>
-                <p class="font-medium text-gray-900 dark:text-white">{{ selectedPlan.storageLimit === -1 ? $t('onboarding.unlimited') : `${selectedPlan.storageLimit}GB` }}</p>
-              </div>
-            </div>
-          </div>
-
           <button
             @click="goToStart"
             class="inline-flex items-center gap-2 px-8 py-3 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-semibold transition-colors"
@@ -704,7 +381,7 @@ watch(currentStep, (step) => {
       </div>
     </Transition>
 
-    <!-- ═══ Step 5: Where To Start ═══ -->
+    <!-- ═══ Step 3: Where To Start ═══ -->
     <Transition name="wizard" mode="out-in">
       <div
         v-if="currentStep === 'start'"
@@ -716,9 +393,29 @@ watch(currentStep, (step) => {
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $t('onboarding.whereToStartDesc') }}</p>
         </div>
 
-        <!-- Domains notice -->
+        <!-- Cart domains notice -->
         <div
-          v-if="preselectedDomains"
+          v-if="cart.count.value > 0"
+          class="mb-6 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl px-5 py-4"
+        >
+          <div class="flex items-start gap-3">
+            <ShoppingCart class="w-5 h-5 text-primary-600 dark:text-primary-400 shrink-0 mt-0.5" />
+            <div class="flex-1">
+              <p class="text-sm font-medium text-primary-700 dark:text-primary-300 mb-2">
+                {{ $t('onboarding.domainsReadyToRegister', 'Your domains are ready to register!') }}
+              </p>
+              <div class="space-y-1">
+                <div v-for="item in cart.items.value" :key="item.domain" class="flex items-center justify-between text-sm">
+                  <span class="text-primary-600 dark:text-primary-400 font-mono">{{ item.domain }}</span>
+                  <span class="text-primary-500 dark:text-primary-400 font-medium">${{ item.price.toFixed(2) }}/yr</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Legacy domains notice -->
+        <div
+          v-else-if="preselectedDomains"
           class="mb-6 flex items-center gap-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg px-4 py-3"
         >
           <Globe class="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" />
@@ -726,6 +423,32 @@ watch(currentStep, (step) => {
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2 stagger-children">
+          <!-- Register a Domain (promoted to first when cart has items) -->
+          <button
+            @click="navigateTo('/panel/domains')"
+            :class="[
+              'group rounded-xl border p-6 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-lg',
+              cart.count.value > 0
+                ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-200 dark:border-primary-800 hover:border-primary-400 dark:hover:border-primary-600 sm:col-span-2'
+                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-700 order-4',
+            ]"
+          >
+            <div class="flex items-start gap-4">
+              <div class="p-2.5 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 shrink-0">
+                <Globe class="w-5 h-5" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
+                  {{ cart.count.value > 0 ? $t('onboarding.completeRegistration', 'Complete Domain Registration') : $t('onboarding.registerDomain') }}
+                </h3>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {{ cart.count.value > 0 ? $t('onboarding.completeRegistrationDesc', 'Finalize the registration of your selected domains') : $t('onboarding.registerDomainDesc') }}
+                </p>
+              </div>
+              <ArrowRight class="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
+            </div>
+          </button>
+
           <!-- Deploy from Docker Hub -->
           <button
             @click="navigateTo('/panel/deploy')"
@@ -740,25 +463,6 @@ watch(currentStep, (step) => {
                   {{ $t('onboarding.deployDocker') }}
                 </h3>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $t('onboarding.deployDockerDesc') }}</p>
-              </div>
-              <ArrowRight class="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
-            </div>
-          </button>
-
-          <!-- Deploy from GitHub -->
-          <button
-            @click="navigateTo('/panel/deploy')"
-            class="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-primary-300 dark:hover:border-primary-700"
-          >
-            <div class="flex items-start gap-4">
-              <div class="p-2.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 shrink-0">
-                <Github class="w-5 h-5" />
-              </div>
-              <div class="flex-1 min-w-0">
-                <h3 class="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
-                  {{ $t('onboarding.deployGithub') }}
-                </h3>
-                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $t('onboarding.deployGithubDesc') }}</p>
               </div>
               <ArrowRight class="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
             </div>
@@ -782,34 +486,15 @@ watch(currentStep, (step) => {
               <ArrowRight class="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
             </div>
           </button>
-
-          <!-- Register a Domain -->
-          <button
-            @click="navigateTo('/panel/domains')"
-            class="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-primary-300 dark:hover:border-primary-700"
-          >
-            <div class="flex items-start gap-4">
-              <div class="p-2.5 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 shrink-0">
-                <Globe class="w-5 h-5" />
-              </div>
-              <div class="flex-1 min-w-0">
-                <h3 class="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
-                  {{ $t('onboarding.registerDomain') }}
-                </h3>
-                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $t('onboarding.registerDomainDesc') }}</p>
-              </div>
-              <ArrowRight class="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover:text-primary-500 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
-            </div>
-          </button>
         </div>
 
-        <!-- Skip to dashboard -->
+        <!-- Skip to dashboard or back to landing -->
         <div class="mt-8 text-center">
           <button
-            @click="navigateTo('/panel')"
+            @click="navigateTo(authStore.isAuthenticated ? '/panel' : '/')"
             class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
           >
-            {{ $t('onboarding.skipToDashboard') }} &rarr;
+            {{ authStore.isAuthenticated ? $t('onboarding.skipToDashboard') : $t('onboarding.backToHome', 'Back to home') }} &rarr;
           </button>
         </div>
       </div>

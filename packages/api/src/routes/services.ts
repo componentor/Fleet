@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
+import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, billingPlans, subscriptions, billingConfig, stacks, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { orchestrator } from '../services/orchestrator.js';
@@ -21,6 +21,72 @@ import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, stan
 import { isNginxService, DEFAULT_NGINX_CONFIG } from '../services/runtime.service.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve the Stripe secret key from env or DB-stored admin settings.
+ * Returns null if Stripe is not configured rather than throwing.
+ */
+async function getStripeKey(): Promise<string | null> {
+  let key = process.env['STRIPE_SECRET_KEY'];
+  if (!key) {
+    const row = await db.query.platformSettings.findFirst({
+      where: eq(platformSettings.key, 'stripe:secretKey'),
+    });
+    if (row?.value && typeof row.value === 'string' && row.value.length > 0) {
+      try {
+        key = decrypt(row.value);
+      } catch {
+        // Decryption failed — key was stored without encryption or is corrupt
+      }
+    }
+  }
+  return key ?? null;
+}
+
+/**
+ * Cancel a subscription when its associated service or stack is deleted.
+ * Respects the platform-level deletion billing policy:
+ * - 'immediate': cancel immediately with proration
+ * - 'end_of_period' (default): cancel at end of current billing period
+ */
+async function cancelSubscriptionByPolicy(sub: { id: string; stripeSubscriptionId: string | null }) {
+  const config = await db.query.billingConfig.findFirst();
+  const policy = (config as any)?.deletionBillingPolicy ?? 'end_of_period';
+
+  if (policy === 'immediate') {
+    if (sub.stripeSubscriptionId) {
+      try {
+        const stripeKey = await getStripeKey();
+        if (stripeKey) {
+          const Stripe = (await import('stripe')).default;
+          const stripe = new Stripe(stripeKey);
+          await stripe.subscriptions.cancel(sub.stripeSubscriptionId, { prorate: true });
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to cancel Stripe subscription');
+      }
+    }
+    await db.update(subscriptions)
+      .set({ status: 'cancelled', cancelledAt: new Date() })
+      .where(eq(subscriptions.id, sub.id));
+  } else {
+    if (sub.stripeSubscriptionId) {
+      try {
+        const stripeKey = await getStripeKey();
+        if (stripeKey) {
+          const Stripe = (await import('stripe')).default;
+          const stripe = new Stripe(stripeKey);
+          await stripe.subscriptions.update(sub.stripeSubscriptionId, { cancel_at_period_end: true });
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to update Stripe subscription');
+      }
+    }
+    await db.update(subscriptions)
+      .set({ cancelledAt: new Date() })
+      .where(eq(subscriptions.id, sub.id));
+  }
+}
 
 /**
  * Get the container disk size limit for an account (in MB).
@@ -165,6 +231,7 @@ const createServiceSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).default([]),
   registryPollEnabled: z.boolean().default(false),
   registryPollInterval: z.number().int().min(60).max(86400).default(300),
+  planId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().nullable().optional()),
 }).openapi('CreateServiceRequest');
 
 const updateServiceSchema = z.object({
@@ -375,8 +442,8 @@ const updateServiceRoute = createRoute({
   },
 });
 
-const deleteQuerySchema = z.object({
-  deleteVolumes: z.enum(['true', 'false']).optional().openapi({ description: 'Also delete related storage volumes' }),
+const deleteBodySchema = z.object({
+  deleteVolumeNames: z.array(z.string()).default([]).openapi({ description: 'List of volume source names to permanently delete. Volumes not in this list will be kept.' }),
 });
 
 const deleteServiceRoute = createRoute({
@@ -388,7 +455,7 @@ const deleteServiceRoute = createRoute({
   middleware: [requireMember, requireScope('write')] as const,
   request: {
     params: idParamSchema,
-    query: deleteQuerySchema,
+    body: jsonBody(deleteBodySchema),
   },
   responses: {
     200: jsonContent(messageResponseSchema, 'Service destroyed'),
@@ -555,7 +622,7 @@ const deleteStackRoute = createRoute({
   middleware: [requireMember, requireScope('write')] as const,
   request: {
     params: stackIdParamSchema,
-    query: deleteQuerySchema,
+    body: jsonBody(deleteBodySchema),
   },
   responses: {
     200: jsonContent(z.any(), 'Stack deleted'),
@@ -951,6 +1018,19 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
 
   const data = c.req.valid('json');
 
+  // If a planId is provided, look up the plan and enforce its resource limits
+  if (data.planId) {
+    const plan = await db.query.billingPlans.findFirst({
+      where: eq(billingPlans.id, data.planId),
+    });
+    if (!plan) {
+      return c.json({ error: 'Selected plan not found' }, 400);
+    }
+    // Plan limits override user-specified values
+    data.cpuLimit = plan.cpuLimit;
+    data.memoryLimit = plan.memoryLimit;
+  }
+
   // Per-account service quota (DB overrides env)
   let serviceQuota = parseInt(process.env['MAX_SERVICES_PER_ACCOUNT'] ?? '50', 10);
   try {
@@ -1035,6 +1115,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     registryPollEnabled: data.registryPollEnabled,
     registryPollInterval: data.registryPollInterval,
     registryWebhookSecret: data.sourceType === 'registry' ? (await import('node:crypto')).randomBytes(32).toString('hex') : null,
+    planId: data.planId ?? null,
     status: 'deploying',
   });
 
@@ -1576,8 +1657,9 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const { id: serviceId } = c.req.valid('param');
-  const { deleteVolumes: deleteVolumesParam } = c.req.valid('query');
-  const shouldDeleteVolumes = deleteVolumesParam === 'true';
+  const body = await c.req.json().catch(() => ({}));
+  const { deleteVolumeNames = [] } = body as { deleteVolumeNames?: string[] };
+  const deleteVolumeSet = new Set(deleteVolumeNames);
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -1635,7 +1717,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
 
   // Clean up Docker volumes (only if no other active services reference them)
   const vols = svc.volumes as Array<{ source: string; target: string }> | null;
-  logger.info({ serviceId, shouldDeleteVolumes, volumeCount: vols?.length ?? 0, volumes: vols }, 'Service delete: volume cleanup');
+  logger.info({ serviceId, deleteVolumeNames, volumeCount: vols?.length ?? 0, volumes: vols }, 'Service delete: volume cleanup');
   if (vols && vols.length > 0) {
     // Check ALL other active services in the account that reference the same volumes
     const otherServices = await db.query.services.findMany({
@@ -1655,7 +1737,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
 
     for (const v of vols) {
       const isUsed = usedByOthers.has(v.source);
-      logger.info({ volume: v.source, isUsed, shouldDeleteVolumes }, 'Service delete: processing volume');
+      logger.info({ volume: v.source, isUsed, deleteRequested: deleteVolumeSet.has(v.source) }, 'Service delete: processing volume');
       if (v.source && !isUsed) {
         // Remove Docker volume on ALL Swarm nodes (not just the manager)
         await orchestrator.removeDockerVolumeOnAllNodes(v.source).catch((err) => {
@@ -1663,8 +1745,8 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
           logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume on service delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'delete-docker-volume' } });
         });
 
-        // Also delete storage volumes (GlusterFS + DB record) when requested
-        if (shouldDeleteVolumes) {
+        // Also delete storage volumes (GlusterFS + DB record) when requested for this specific volume
+        if (deleteVolumeSet.has(v.source)) {
           logger.info({ volume: v.source, accountId }, 'Service delete: calling storageManager.deleteVolume');
           await storageManager.deleteVolume(accountId, v.source).catch((err) => {
             logger.warn({ err, volume: v.source }, 'Failed to delete storage volume on service delete');
@@ -1685,17 +1767,45 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
       }
     }
   } else {
-    logger.info({ serviceId, shouldDeleteVolumes }, 'Service delete: no volumes on service record');
+    logger.info({ serviceId, deleteVolumeNames }, 'Service delete: no volumes on service record');
   }
 
   // Soft-delete the service (keep deployment history)
   await db.update(services).set({ deletedAt: new Date(), status: 'deleted' }).where(eq(services.id, serviceId));
 
+  // Auto-cancel associated subscription
+  try {
+    const serviceSub = await db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.serviceId, serviceId),
+        eq(subscriptions.accountId, accountId),
+        isNull(subscriptions.cancelledAt),
+      ),
+    });
+    if (serviceSub) await cancelSubscriptionByPolicy(serviceSub);
+
+    // If service was in a stack, check if stack is now empty
+    if (svc.stackId) {
+      const remaining = await db.select({ id: services.id })
+        .from(services)
+        .where(and(eq(services.stackId, svc.stackId), isNull(services.deletedAt)));
+      if (remaining.length === 0) {
+        const stackSub = await db.query.subscriptions.findFirst({
+          where: and(eq(subscriptions.stackId, svc.stackId), isNull(subscriptions.cancelledAt)),
+        });
+        if (stackSub) await cancelSubscriptionByPolicy(stackSub);
+        await db.update(stacks).set({ deletedAt: new Date(), status: 'deleted' })
+          .where(eq(stacks.id, svc.stackId));
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, 'Failed to cancel subscription on service deletion');
+  }
 
   eventService.log({
     ...eventContext(c),
     eventType: EventTypes.SERVICE_DELETED,
-    description: `Deleted service '${svc.name}'${shouldDeleteVolumes ? ' (with volumes)' : ''}`,
+    description: `Deleted service '${svc.name}'${deleteVolumeNames.length > 0 ? ` (deleted volumes: ${deleteVolumeNames.join(', ')})` : ''}`,
     resourceId: serviceId,
     resourceName: svc.name,
   });
@@ -2399,8 +2509,9 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const user = c.get('user');
   const { stackId } = c.req.valid('param');
-  const { deleteVolumes: deleteVolumesParam } = c.req.valid('query');
-  const shouldDeleteVolumes = deleteVolumesParam === 'true';
+  const body = await c.req.json().catch(() => ({}));
+  const { deleteVolumeNames = [] } = body as { deleteVolumeNames?: string[] };
+  const deleteVolumeSet = new Set(deleteVolumeNames);
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
@@ -2498,8 +2609,8 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
       logToErrorTable({ level: 'warn', message: `Failed to remove Docker volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-docker-volume' } });
     });
 
-    // Also delete storage volumes (GlusterFS + DB record) when requested
-    if (shouldDeleteVolumes) {
+    // Also delete storage volumes (GlusterFS + DB record) when requested for this specific volume
+    if (deleteVolumeSet.has(volName)) {
       await storageManager.deleteVolume(accountId, volName).catch((err) => {
         logger.warn({ err, volume: volName }, 'Failed to delete storage volume during stack delete');
         logToErrorTable({ level: 'warn', message: `Failed to delete storage volume during stack delete: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'stack-delete-storage-volume' } });
@@ -2517,10 +2628,20 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
     }
   }
 
+  // Auto-cancel stack subscription
+  try {
+    const stackSub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.stackId, stackId), isNull(subscriptions.cancelledAt)),
+    });
+    if (stackSub) await cancelSubscriptionByPolicy(stackSub);
+  } catch (err) {
+    logger.error({ err }, 'Failed to cancel stack subscription on deletion');
+  }
+
   eventService.log({
     ...eventContext(c),
     eventType: EventTypes.STACK_DELETED,
-    description: `Deleted stack (${stackServices.length} services)`,
+    description: `Deleted stack (${stackServices.length} services)${deleteVolumeNames.length > 0 ? ` (deleted volumes: ${deleteVolumeNames.join(', ')})` : ''}`,
     details: { serviceCount: stackServices.length },
   });
   return c.json({ message: 'Stack deleted', results });
