@@ -290,6 +290,8 @@ export const resellerAccounts = mysqlTable('reseller_accounts', {
   canSubAccountResell: boolean('can_sub_account_resell').default(false),
   signupSlug: varchar('signup_slug', { length: 255 }).unique(),
   customDomain: varchar('custom_domain', { length: 255 }),
+  customDomainVerified: boolean('custom_domain_verified').default(false),
+  customDomainToken: varchar('custom_domain_token', { length: 255 }),
   brandName: varchar('brand_name', { length: 255 }),
   brandLogoUrl: varchar('brand_logo_url', { length: 1024 }),
   brandPrimaryColor: varchar('brand_primary_color', { length: 20 }),

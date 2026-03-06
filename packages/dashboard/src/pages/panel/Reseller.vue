@@ -69,11 +69,17 @@ const savingMarkup = ref(false)
 // Branding form
 const signupSlug = ref('')
 const customDomain = ref('')
+const customDomainVerified = ref(false)
+const customDomainToken = ref('')
 const brandName = ref('')
 const brandLogoUrl = ref('')
 const brandPrimaryColor = ref('#0284c7')
 const brandDescription = ref('')
 const savingBranding = ref(false)
+const verifyingDomain = ref(false)
+
+// Platform host from config
+const platformHostValue = ref('')
 
 // Sub-account toggling
 const togglingSubAccount = ref<string | null>(null)
@@ -92,6 +98,8 @@ const activeSection = ref<'overview' | 'pricing' | 'branding' | 'customers'>('ov
 
 // ---------- Computed ----------
 const programEnabled = computed(() => config.value?.enabled === true)
+
+const platformHost = computed(() => platformHostValue.value || window.location.host)
 
 const signupPageUrl = computed(() => {
   if (!signupSlug.value) return null
@@ -156,6 +164,7 @@ async function fetchStatus() {
     config.value = data.config ?? {}
     canApply.value = data.canApply ?? false
     pendingApplication.value = data.pendingApplication ?? false
+    if (data.platformHost) platformHostValue.value = data.platformHost
   } catch {
     config.value = { enabled: false }
   }
@@ -173,6 +182,8 @@ async function fetchDashboard() {
       markupFixed.value = ra.markupFixed ?? 0
       signupSlug.value = ra.signupSlug ?? ''
       customDomain.value = ra.customDomain ?? ''
+      customDomainVerified.value = ra.customDomainVerified ?? false
+      customDomainToken.value = ra.customDomainToken ?? ''
       brandName.value = ra.brandName ?? ''
       brandLogoUrl.value = ra.brandLogoUrl ?? ''
       brandPrimaryColor.value = ra.brandPrimaryColor ?? '#0284c7'
@@ -267,6 +278,23 @@ async function saveBranding() {
   }
 }
 
+async function verifyDomain() {
+  verifyingDomain.value = true
+  try {
+    const result = await api.post<any>('/reseller/verify-domain', {})
+    if (result.verified) {
+      customDomainVerified.value = true
+      toast.success('Domain verified successfully')
+    } else {
+      toast.error(result.message || 'Domain verification failed')
+    }
+  } catch (err: any) {
+    toast.error(err?.body?.error || 'Domain verification failed')
+  } finally {
+    verifyingDomain.value = false
+  }
+}
+
 async function connectStripe() {
   connectingStripe.value = true
   try {
@@ -319,6 +347,15 @@ function formatCents(cents: number): string {
     currency: 'USD',
     minimumFractionDigits: 2,
   }).format(cents / 100)
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success('Copied')
+  } catch {
+    toast.error('Failed to copy')
+  }
 }
 
 async function copySignupUrl() {
@@ -983,13 +1020,50 @@ onMounted(() => {
                         Custom Domain
                         <span class="text-gray-400 dark:text-gray-500 font-normal ml-1">(optional)</span>
                       </label>
-                      <input
-                        v-model="customDomain"
-                        type="text"
-                        placeholder="hosting.yourbrand.com"
-                        class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
-                      />
-                      <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Point a CNAME to your platform</p>
+                      <div class="flex gap-2">
+                        <input
+                          v-model="customDomain"
+                          type="text"
+                          placeholder="hosting.yourbrand.com"
+                          class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+                        />
+                        <span v-if="customDomainVerified && customDomain" class="flex items-center gap-1 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-xs font-medium whitespace-nowrap">
+                          <CheckCircle class="w-3.5 h-3.5" /> Verified
+                        </span>
+                      </div>
+                      <div v-if="customDomain" class="mt-2 space-y-2">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                          1. Add a <strong>CNAME</strong> record pointing to <code class="font-mono text-primary-600 dark:text-primary-400">{{ platformHost }}</code>
+                        </p>
+                        <div v-if="customDomainToken && !customDomainVerified" class="space-y-2">
+                          <p class="text-xs text-gray-500 dark:text-gray-400">
+                            2. Add a <strong>TXT</strong> record on <code class="font-mono text-primary-600 dark:text-primary-400">{{ customDomain }}</code> with the value:
+                          </p>
+                          <div class="flex items-center gap-2">
+                            <code class="flex-1 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-mono text-gray-700 dark:text-gray-300 select-all break-all">{{ customDomainToken }}</code>
+                            <button
+                              type="button"
+                              @click="copyToClipboard(customDomainToken)"
+                              class="shrink-0 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors"
+                            >
+                              <Copy class="w-4 h-4" />
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            :disabled="verifyingDomain"
+                            @click="verifyDomain"
+                            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
+                          >
+                            <Loader2 v-if="verifyingDomain" class="w-3.5 h-3.5 animate-spin" />
+                            <CheckCircle v-else class="w-3.5 h-3.5" />
+                            Verify Domain
+                          </button>
+                        </div>
+                      </div>
+                      <p v-else class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        Save branding first to get a verification token.
+                      </p>
                     </div>
                   </div>
                 </div>

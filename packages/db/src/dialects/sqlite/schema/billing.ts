@@ -295,6 +295,8 @@ export const resellerAccounts = sqliteTable('reseller_accounts', {
   canSubAccountResell: integer('can_sub_account_resell', { mode: 'boolean' }).default(false),
   signupSlug: text('signup_slug').unique(),
   customDomain: text('custom_domain'),
+  customDomainVerified: integer('custom_domain_verified', { mode: 'boolean' }).default(false),
+  customDomainToken: text('custom_domain_token'),
   brandName: text('brand_name'),
   brandLogoUrl: text('brand_logo_url'),
   brandPrimaryColor: text('brand_primary_color'),

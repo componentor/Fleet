@@ -1,7 +1,7 @@
 /**
- * Error thrown when the Fleet API returns a non-2xx response.
+ * Error thrown when the Siglar API returns a non-2xx response.
  */
-export class FleetApiError extends Error {
+export class SiglarApiError extends Error {
   /** HTTP status code */
   readonly status: number;
   /** Error code from the API response body, if present */
@@ -11,7 +11,7 @@ export class FleetApiError extends Error {
 
   constructor(status: number, message: string, body?: unknown, code?: string) {
     super(message);
-    this.name = 'FleetApiError';
+    this.name = 'SiglarApiError';
     this.status = status;
     this.code = code;
     this.body = body;

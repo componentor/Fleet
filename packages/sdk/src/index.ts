@@ -1,5 +1,5 @@
-export { FleetClient } from './client.js';
-export { FleetApiError } from './errors.js';
+export { SiglarClient } from './client.js';
+export { SiglarApiError } from './errors.js';
 
 // Resource classes (for advanced usage / typing)
 export { ServiceResource } from './resources/services.js';
@@ -10,7 +10,7 @@ export type { SharedDomain } from './resources/domains.js';
 
 // Types
 export type {
-  FleetClientOptions,
+  SiglarClientOptions,
   CreateServiceInput,
   UpdateServiceInput,
   PortMapping,
