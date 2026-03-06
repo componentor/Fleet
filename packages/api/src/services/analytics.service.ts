@@ -76,7 +76,7 @@ class AnalyticsService {
       // 2. Fetch metrics from all Traefik instances
       const metricsTexts = await this.fetchTraefikMetrics();
       if (metricsTexts.length === 0) {
-        logger.debug('No Traefik metrics available');
+        logger.warn('No Traefik metrics available — analytics collection skipped');
         return;
       }
 
@@ -203,7 +203,12 @@ class AnalyticsService {
       }
 
       // Execute all Valkey SETs in one round-trip via pipeline
-      await setPipeline.exec();
+      try {
+        await setPipeline.exec();
+      } catch (pipelineErr) {
+        // MISCONF or other transient Valkey errors should not block DB inserts
+        logger.warn({ err: pipelineErr }, 'Valkey pipeline failed (analytics tracking may be inaccurate next cycle)');
+      }
 
       // 6. Batch insert into DB in chunks of 1000
       for (let i = 0; i < insertBatch.length; i += INSERT_CHUNK_SIZE) {

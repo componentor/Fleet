@@ -2938,7 +2938,7 @@ const envUpdateRoute = createRoute({
   request: {
     body: jsonBody(z.object({
       updates: z.array(z.object({
-        key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.\-]*$/, 'Invalid variable name'),
+        key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.\-/+@:]*$/, 'Invalid variable name'),
         value: z.string(),
       })).max(50),
       restartServices: z.boolean().default(false),

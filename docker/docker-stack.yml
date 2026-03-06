@@ -44,6 +44,7 @@ services:
       valkey-server
       --requirepass ${VALKEY_PASSWORD}
       --appendonly yes
+      --stop-writes-on-bgsave-error no
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
     environment:

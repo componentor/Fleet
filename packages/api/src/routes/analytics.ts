@@ -5,6 +5,8 @@ import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { jsonContent, standardErrors, bearerSecurity } from './_schemas.js';
 
+const isSqlite = getDialect() === 'sqlite';
+
 const analyticsRoutes = new OpenAPIHono<{
   Variables: { user: AuthUser; accountId: string };
 }>();
@@ -122,18 +124,25 @@ analyticsRoutes.openapi(getServiceAnalyticsRoute, (async (c: any) => {
     .groupBy(sql`bucket`)
     .orderBy(sql`bucket`);
 
-  const data = rows.map((r) => ({
-    timestamp: new Date(r.bucket as any).toISOString(),
-    requests: Number(r.requests) || 0,
-    bytesIn: Number(r.bytesIn) || 0,
-    bytesOut: Number(r.bytesOut) || 0,
-    statusBreakdown: {
-      '2xx': Number(r.requests2xx) || 0,
-      '3xx': Number(r.requests3xx) || 0,
-      '4xx': Number(r.requests4xx) || 0,
-      '5xx': Number(r.requests5xx) || 0,
-    },
-  }));
+  const data = rows.map((r) => {
+    // SQLite timeBucketExpr returns unix seconds; PG/MySQL return Date-like values
+    const bucketVal = r.bucket as any;
+    const ts = isSqlite && typeof bucketVal === 'number'
+      ? new Date(bucketVal * 1000)
+      : new Date(bucketVal);
+    return {
+      timestamp: ts.toISOString(),
+      requests: Number(r.requests) || 0,
+      bytesIn: Number(r.bytesIn) || 0,
+      bytesOut: Number(r.bytesOut) || 0,
+      statusBreakdown: {
+        '2xx': Number(r.requests2xx) || 0,
+        '3xx': Number(r.requests3xx) || 0,
+        '4xx': Number(r.requests4xx) || 0,
+        '5xx': Number(r.requests5xx) || 0,
+      },
+    };
+  });
 
   const summary = {
     totalRequests: data.reduce((a, d) => a + d.requests, 0),
@@ -185,18 +194,24 @@ analyticsRoutes.openapi(getAccountAnalyticsRoute, (async (c: any) => {
     .groupBy(sql`bucket`)
     .orderBy(sql`bucket`);
 
-  const data = rows.map((r) => ({
-    timestamp: new Date(r.bucket as any).toISOString(),
-    requests: Number(r.requests) || 0,
-    bytesIn: Number(r.bytesIn) || 0,
-    bytesOut: Number(r.bytesOut) || 0,
-    statusBreakdown: {
-      '2xx': Number(r.requests2xx) || 0,
-      '3xx': Number(r.requests3xx) || 0,
-      '4xx': Number(r.requests4xx) || 0,
-      '5xx': Number(r.requests5xx) || 0,
-    },
-  }));
+  const data = rows.map((r) => {
+    const bucketVal = r.bucket as any;
+    const ts = isSqlite && typeof bucketVal === 'number'
+      ? new Date(bucketVal * 1000)
+      : new Date(bucketVal);
+    return {
+      timestamp: ts.toISOString(),
+      requests: Number(r.requests) || 0,
+      bytesIn: Number(r.bytesIn) || 0,
+      bytesOut: Number(r.bytesOut) || 0,
+      statusBreakdown: {
+        '2xx': Number(r.requests2xx) || 0,
+        '3xx': Number(r.requests3xx) || 0,
+        '4xx': Number(r.requests4xx) || 0,
+        '5xx': Number(r.requests5xx) || 0,
+      },
+    };
+  });
 
   const summary = {
     totalRequests: data.reduce((a, d) => a + d.requests, 0),

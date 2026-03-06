@@ -59,6 +59,11 @@ const tabs = computed(() => {
     { id: 'terminal', label: 'Terminal' },
     { id: 'deployments', label: 'Deployments' },
     { id: 'backups', label: 'Backups' },
+  )
+  if (service.value?.volumes?.length > 0) {
+    base.push({ id: 'volumes', label: 'Volumes' })
+  }
+  base.push(
     { id: 'settings', label: 'Settings' },
   )
   return base
@@ -3225,6 +3230,33 @@ onUnmounted(() => {
                 </div>
               </div>
             </template>
+          </div>
+        </div>
+
+        <!-- Volumes -->
+        <div v-if="activeTab === 'volumes'" class="space-y-4">
+          <div
+            v-for="vol in (service?.volumes ?? [])"
+            :key="vol.source"
+            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+          >
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <HardDrive class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <div>
+                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ vol.source }}</h3>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 font-mono">→ {{ vol.target }}</p>
+                </div>
+              </div>
+              <span v-if="vol.readonly" class="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">Read-only</span>
+            </div>
+            <div class="p-4">
+              <FileExplorer :volumeName="vol.source" />
+            </div>
+          </div>
+          <div v-if="!service?.volumes?.length" class="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
+            <HardDrive class="w-8 h-8 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
+            <p>No volumes attached to this service.</p>
           </div>
         </div>
 

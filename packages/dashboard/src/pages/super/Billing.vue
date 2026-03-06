@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock } from 'lucide-vue-next'
+import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -308,6 +308,32 @@ async function savePlan() {
     error.value = err?.body?.error || 'Failed to save plan'
   } finally {
     saving.value = false
+  }
+}
+
+async function movePlan(index: number, direction: -1 | 1) {
+  const target = index + direction
+  if (target < 0 || target >= plans.value.length) return
+  const a = plans.value[index]
+  const b = plans.value[target]
+  // Swap sortOrder values
+  const tmpSort = a.sortOrder
+  a.sortOrder = b.sortOrder
+  b.sortOrder = tmpSort
+  // Swap in array
+  plans.value[index] = b
+  plans.value[target] = a
+  plans.value = [...plans.value]
+  // Persist both
+  try {
+    await Promise.all([
+      api.patch(`/billing/admin/plans/${a.id}`, { sortOrder: a.sortOrder }),
+      api.patch(`/billing/admin/plans/${b.id}`, { sortOrder: b.sortOrder }),
+    ])
+  } catch {
+    // Reload on error
+    const data = await api.get<any[]>('/billing/admin/plans')
+    plans.value = data
   }
 }
 
@@ -771,12 +797,24 @@ onMounted(() => { fetchAll() })
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-              <template v-for="plan in plans" :key="plan.id">
+              <template v-for="(plan, planIdx) in plans" :key="plan.id">
               <tr :class="!plan.visible ? 'opacity-50' : ''">
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium whitespace-nowrap">
-                  {{ plan.name }}
-                  <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">{{ t('super.billing.free') }}</span>
-                  <span v-if="plan.isDefault" class="ml-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded">{{ t('super.billing.default') }}</span>
+                  <div class="flex items-center gap-2">
+                    <div class="flex flex-col">
+                      <button @click="movePlan(planIdx, -1)" :disabled="planIdx === 0" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-25 disabled:cursor-not-allowed p-0.5">
+                        <ArrowUp class="w-3 h-3" />
+                      </button>
+                      <button @click="movePlan(planIdx, 1)" :disabled="planIdx === plans.length - 1" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-25 disabled:cursor-not-allowed p-0.5">
+                        <ArrowDown class="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div>
+                      {{ plan.name }}
+                      <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">{{ t('super.billing.free') }}</span>
+                      <span v-if="plan.isDefault" class="ml-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded">{{ t('super.billing.default') }}</span>
+                    </div>
+                  </div>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono whitespace-nowrap">{{ plan.slug }}</td>
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">{{ formatCents(plan.priceCents) }}/mo</td>
