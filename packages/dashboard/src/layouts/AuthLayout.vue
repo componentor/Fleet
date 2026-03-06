@@ -11,7 +11,8 @@ import CartDrawer from '@/components/landing/CartDrawer.vue'
 
 const { t } = useI18n()
 const { theme, toggle } = useTheme()
-const { brandTitle, logoSrc } = useBranding()
+const { brandTitle, logoSrc, setAccountName } = useBranding()
+setAccountName(null)
 const cart = useCart()
 const { formatCurrency, selectedCurrency } = useCurrency()
 const cartOpen = ref(false)

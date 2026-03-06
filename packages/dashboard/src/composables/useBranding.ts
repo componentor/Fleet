@@ -11,9 +11,21 @@ const brandFaviconUrl = ref<string | null>(null)
 const brandGithubUrl = ref<string | null>(null)
 const loaded = ref(false)
 
+// Track current account name for title updates
+let currentAccountName: string | null = null
+
+function updateDocumentTitle() {
+  const base = `${brandTitle.value || 'Fleet'} Hosting`
+  document.title = currentAccountName ? `${base} | ${currentAccountName}` : base
+}
+
+function setAccountName(name: string | null) {
+  currentAccountName = name
+  updateDocumentTitle()
+}
+
 function applyBranding() {
-  // Set document title
-  document.title = brandTitle.value || 'Fleet'
+  updateDocumentTitle()
 
   // Set favicon — override the default SVG when custom branding is set,
   // otherwise leave the default <link> from index.html intact.
@@ -82,6 +94,7 @@ export function useBranding() {
     brandGithubUrl,
     loaded,
     refresh,
+    setAccountName,
     /** Full URL for logo image src */
     logoSrc: () => brandLogoUrl.value ? `${BASE_URL}${brandLogoUrl.value}` : null,
   }

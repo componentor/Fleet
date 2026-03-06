@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { RouterView, RouterLink, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
@@ -50,7 +50,11 @@ import { useBranding } from '@/composables/useBranding'
 import { useSidebarCollapse } from '@/composables/useSidebarCollapse'
 
 const commandPalette = useCommandPalette()
-const { brandTitle, logoSrc } = useBranding()
+const { brandTitle, logoSrc, setAccountName } = useBranding()
+
+watch(() => currentAccount.value?.name, (name) => {
+  setAccountName(name ?? null)
+}, { immediate: true })
 const api = useApi()
 
 const { t, locale } = useI18n()
