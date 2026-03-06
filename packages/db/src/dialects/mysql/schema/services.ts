@@ -11,6 +11,7 @@ import {
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { billingPlans } from './billing';
 
 export const services = mysqlTable('services', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -57,6 +58,8 @@ export const services = mysqlTable('services', {
   robotsConfig: json('robots_config'),
   nginxConfig: text('nginx_config'),
   stackId: varchar('stack_id', { length: 36 }),
+  planId: varchar('plan_id', { length: 36 })
+    .references(() => billingPlans.id, { onDelete: 'set null' }),
   stoppedAt: timestamp('stopped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -67,6 +70,7 @@ export const services = mysqlTable('services', {
   index('idx_services_stack_id').on(table.stackId),
   index('idx_services_github_autodeploy').on(table.githubRepo, table.githubBranch, table.autoDeploy),
   index('idx_services_deleted_at').on(table.deletedAt),
+  index('idx_services_plan_id').on(table.planId),
 ]);
 
 export const deployments = mysqlTable('deployments', {
@@ -93,6 +97,10 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
   account: one(accounts, {
     fields: [services.accountId],
     references: [accounts.id],
+  }),
+  plan: one(billingPlans, {
+    fields: [services.planId],
+    references: [billingPlans.id],
   }),
   deployments: many(deployments),
 }));

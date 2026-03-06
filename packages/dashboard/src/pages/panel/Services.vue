@@ -8,6 +8,7 @@ import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 import { useRole } from '@/composables/useRole'
+import { useServiceBilling } from '@/composables/useServiceBilling'
 
 const { t } = useI18n()
 
@@ -16,6 +17,12 @@ const store = useServicesStore()
 const api = useApi()
 const toast = useToast()
 const { canWrite } = useRole()
+const { tiers, fetchTiers } = useServiceBilling()
+
+function tierName(planId: string | null | undefined): string | null {
+  if (!planId) return null
+  return tiers.value.find(t => t.id === planId)?.name ?? null
+}
 
 const stackActionLoading = ref<string | null>(null)
 const deletingStackId = ref<string | null>(null)
@@ -201,17 +208,36 @@ async function restartStack(stackId: string) {
   }
 }
 
+const deletingStackVolumes = computed(() => {
+  if (!deletingStackId.value) return []
+  const stackServices = store.services.filter(s => s.stackId === deletingStackId.value)
+  const seen = new Set<string>()
+  const volumes: Array<{ source: string; target: string }> = []
+  for (const svc of stackServices) {
+    const vols = (svc as any).volumes as Array<{ source: string; target: string }> | undefined
+    if (vols) {
+      for (const v of vols) {
+        if (v.source && !seen.has(v.source)) {
+          seen.add(v.source)
+          volumes.push(v)
+        }
+      }
+    }
+  }
+  return volumes
+})
+
 function promptDeleteStack(stackId: string, name: string) {
   deletingStackId.value = stackId
   deletingStackName.value = name
 }
 
-async function confirmDeleteStack(deleteVolumes: boolean) {
+async function confirmDeleteStack(deleteVolumeNames: string[]) {
   const stackId = deletingStackId.value
   if (!stackId) return
   stackActionLoading.value = stackId
   try {
-    await store.deleteStack(stackId, { deleteVolumes })
+    await store.deleteStack(stackId, { deleteVolumeNames })
     deletingStackId.value = null
     deletingStackName.value = ''
     toast.success(t('services.deleteStackSuccess', 'Stack deleted'))
@@ -250,6 +276,7 @@ watch(hasDeployingServices, (deploying) => {
 
 onMounted(() => {
   store.fetchServices()
+  fetchTiers()
 })
 
 onUnmounted(() => {
@@ -342,7 +369,7 @@ onUnmounted(() => {
           <div class="flex items-center gap-3 flex-1 min-w-0">
             <div class="flex items-center gap-2 min-w-0">
               <Layers class="w-4 h-4 text-primary-600 dark:text-primary-400 shrink-0" />
-              <span class="text-sm font-semibold text-gray-900 dark:text-white truncate">{{ stackName(group.services) }}</span>
+              <router-link :to="`/panel/stacks/${group.stackId}`" class="text-sm font-semibold text-gray-900 dark:text-white truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline" @click.stop>{{ stackName(group.services) }}</router-link>
             </div>
             <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0', statusBadge(stackStatus(group.services))]">
               {{ stackStatus(group.services) }}
@@ -419,7 +446,12 @@ onUnmounted(() => {
             <div class="flex items-center gap-3 min-w-0">
               <span :class="[statusColor(service.status), 'w-2 h-2 rounded-full shrink-0', service.status === 'deploying' ? 'animate-pulse' : '']"></span>
               <div class="min-w-0">
-                <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ service.name }}</p>
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ service.name }}</p>
+                  <span v-if="tierName((service as any).planId)" class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 shrink-0">
+                    {{ tierName((service as any).planId) }}
+                  </span>
+                </div>
                 <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{{ service.image }}</p>
                 <p v-if="(service as any).lastDeployError" class="text-xs text-red-500 dark:text-red-400 truncate mt-0.5">{{ (service as any).lastDeployError }}</p>
               </div>
@@ -452,6 +484,9 @@ onUnmounted(() => {
                   <span :class="[statusColor(service.status), 'w-2.5 h-2.5 rounded-full', service.status === 'deploying' ? 'animate-pulse' : '']"></span>
                   <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ service.name }}</h3>
                 </div>
+                <span v-if="tierName((service as any).planId)" class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+                  {{ tierName((service as any).planId) }}
+                </span>
               </div>
               <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', statusBadge(service.status)]">
                 {{ service.status }}
@@ -506,7 +541,7 @@ onUnmounted(() => {
     :title="t('confirmDelete.titleStack', 'Delete Stack')"
     :message="t('confirmDelete.messageStack', 'Are you sure you want to delete stack')"
     :item-name="deletingStackName"
-    :show-volume-toggle="true"
+    :volumes="deletingStackVolumes"
     :loading="!!stackActionLoading"
     @confirm="confirmDeleteStack"
     @cancel="deletingStackId = null; deletingStackName = ''"

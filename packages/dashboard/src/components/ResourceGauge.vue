@@ -34,7 +34,7 @@ const gradientStops = computed(() => {
   }
   if (animated.value >= 90) return ['#ef4444', '#e11d48']   // red → rose
   if (animated.value >= 70) return ['#f59e0b', '#f97316']   // amber → orange
-  return ['#6366f1', '#8b5cf6']                             // indigo → violet
+  return ['#0ea5e9', '#0369a1']                             // sky → ocean blue
 })
 
 onMounted(() => {

@@ -17,6 +17,7 @@ export const accounts = sqliteTable('accounts', {
   trustRevocable: integer('trust_revocable', { mode: 'boolean' }).default(false),
   stripeCustomerId: text('stripe_customer_id'),
   stripeConnectAccountId: text('stripe_connect_account_id'),
+  currency: text('currency').default('USD'),
   plan: text('plan', { mode: 'json' }),
   status: text('status').default('active'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

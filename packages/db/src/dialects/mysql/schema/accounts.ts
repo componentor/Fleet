@@ -21,6 +21,7 @@ export const accounts = mysqlTable('accounts', {
   trustRevocable: boolean('trust_revocable').default(false),
   stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
   stripeConnectAccountId: varchar('stripe_connect_account_id', { length: 255 }),
+  currency: varchar('currency', { length: 3 }).default('USD'),
   plan: json('plan'),
   status: varchar('status', { length: 255 }).default('active'),
   createdAt: timestamp('created_at').defaultNow(),

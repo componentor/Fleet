@@ -3,7 +3,7 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { db, appTemplates, services, deployments, storageVolumes, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
+import { db, appTemplates, services, deployments, storageVolumes, stacks, billingPlans, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
 import { orchestrator } from './orchestrator.js';
 import { getRegistryAuthForImage } from './docker.service.js';
 import { storageManager } from './storage/storage-manager.js';
@@ -261,6 +261,7 @@ export class TemplateService {
         sizeGb?: number;
         existingVolumeName?: string;
       }>;
+      planId?: string;
     },
   ): Promise<{
     services: Array<{ id: string; name: string; dockerServiceId: string | null }>;
@@ -276,7 +277,28 @@ export class TemplateService {
 
     const composeYaml = options?.composeOverride ?? template.composeTemplate;
     const parsed = this.parseTemplate(composeYaml);
-    const stackId = crypto.randomUUID();
+
+    // Create a proper stacks table row instead of a bare UUID
+    const [stackRow] = await insertReturning(stacks, {
+      accountId,
+      name: template.name ?? slug,
+      templateSlug: slug,
+      status: 'active',
+    });
+    const stackId = stackRow!.id;
+
+    // Look up plan resource limits if planId is provided
+    let planCpuLimit: number | null = null;
+    let planMemoryLimit: number | null = null;
+    if (options?.planId) {
+      const plan = await db.query.billingPlans.findFirst({
+        where: eq(billingPlans.id, options.planId),
+      });
+      if (plan) {
+        planCpuLimit = plan.cpuLimit;
+        planMemoryLimit = plan.memoryLimit;
+      }
+    }
 
     // Build the variable values: use provided config, fall back to defaults, generate passwords
     // Empty strings from the UI are treated as "not provided" so defaults can kick in
@@ -468,10 +490,11 @@ export class TemplateService {
       });
 
       // Apply per-service resource overrides if provided (override > template > null → docker.service defaults)
+      // Plan limits take priority when a plan is selected
       const overrides = options?.resourceOverrides?.[svcDef.name];
       const replicas = overrides?.replicas ?? 1;
-      const cpuLimit = overrides?.cpuLimit ?? svcDef.resources?.cpuLimit ?? null;
-      const memoryLimit = overrides?.memoryLimit ?? svcDef.resources?.memoryLimit ?? null;
+      const cpuLimit = planCpuLimit ?? overrides?.cpuLimit ?? svcDef.resources?.cpuLimit ?? null;
+      const memoryLimit = planMemoryLimit ?? overrides?.memoryLimit ?? svcDef.resources?.memoryLimit ?? null;
 
       // Insert service record into DB
       const [svc] = await insertReturning(services, {
@@ -489,6 +512,7 @@ export class TemplateService {
         sourceType: 'marketplace',
         cpuLimit,
         memoryLimit,
+        planId: options?.planId ?? null,
       });
 
       if (!svc) {

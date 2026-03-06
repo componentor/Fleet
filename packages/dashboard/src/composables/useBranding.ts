@@ -44,7 +44,7 @@ async function fetchBranding() {
       } catch { /* invalid cache */ }
     }
 
-    const res = await fetch(`${BASE_URL}/api/v1/branding/info`)
+    const res = await fetch(`${BASE_URL}/api/v1/branding/info?_t=${Date.now()}`)
     if (res.ok) {
       const data = await res.json()
       brandTitle.value = data.title || 'Fleet'

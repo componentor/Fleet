@@ -21,6 +21,7 @@ export const accounts = pgTable('accounts', {
   trustRevocable: boolean('trust_revocable').default(false),
   stripeCustomerId: varchar('stripe_customer_id'),
   stripeConnectAccountId: varchar('stripe_connect_account_id'),
+  currency: varchar('currency', { length: 3 }).default('USD'),
   plan: jsonb('plan'),
   status: varchar('status').default('active'),
   createdAt: timestamp('created_at').defaultNow(),

@@ -2,13 +2,19 @@
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
-import { Sun, Moon } from 'lucide-vue-next'
+import { Sun, Moon, ShoppingCart } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useBranding } from '@/composables/useBranding'
+import { useCart } from '@/composables/useCart'
+import { useCurrency } from '@/composables/useCurrency'
+import CartDrawer from '@/components/landing/CartDrawer.vue'
 
 const { t } = useI18n()
 const { theme, toggle } = useTheme()
 const { brandTitle, logoSrc } = useBranding()
+const cart = useCart()
+const { formatCurrency, selectedCurrency } = useCurrency()
+const cartOpen = ref(false)
 
 // Check if we're on a reseller's custom domain
 const resellerBranding = ref<{ found: boolean; brandName?: string; brandLogoUrl?: string; brandPrimaryColor?: string; slug?: string }>({ found: false })
@@ -70,11 +76,40 @@ onMounted(async () => {
               </svg>
             </div>
           </template>
-          <h1 class="text-3xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</h1>
+          <h1 class="text-3xl font-medium text-gray-900 dark:text-white">{{ brandTitle }}</h1>
         </RouterLink>
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('authLayout.tagline') }}</p>
       </template>
     </div>
+
+    <!-- Cart summary (clickable to open drawer) -->
+    <button
+      v-if="cart.count.value > 0"
+      @click="cartOpen = true"
+      class="w-full max-w-md mb-4 relative z-10 animate-fade-in-up text-left cursor-pointer"
+      style="animation-delay: 0.08s;"
+    >
+      <div class="bg-white dark:bg-gray-800 border border-primary-200 dark:border-primary-800 rounded-xl px-5 py-3.5 shadow-sm hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-lg bg-primary-50 dark:bg-primary-900/20 shrink-0">
+            <ShoppingCart class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ $t('onboarding.cartSummary', { count: cart.count.value }, `${cart.count.value} domain(s) in your cart`) }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+              {{ cart.items.value.map((i: any) => i.domain).join(', ') }}
+            </p>
+          </div>
+          <span class="text-sm font-semibold text-primary-600 dark:text-primary-400 shrink-0">
+            {{ formatCurrency(cart.total.value, cart.items.value[0]?.currency ?? selectedCurrency) }}
+          </span>
+        </div>
+      </div>
+    </button>
+
+    <CartDrawer :open="cartOpen" @close="cartOpen = false" />
 
     <!-- Card -->
     <div class="w-full max-w-md relative z-10 animate-fade-in-up" style="animation-delay: 0.1s;">

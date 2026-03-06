@@ -35,7 +35,13 @@ const purgeEnabled = ref(true)
 const purgeRetentionDays = ref(30)
 const savingLifecycle = ref(false)
 
-// ─── Plans ───────────────────────────────────────────────────
+// ─── Tier Policies ───────────────────────────────────────────
+const allowDowngrade = ref(true)
+const deletionBillingPolicy = ref<'immediate' | 'end_of_period'>('end_of_period')
+const maxFreeServicesPerAccount = ref<number | null>(null)
+const savingTierPolicies = ref(false)
+
+// ─── Service Tiers ──────────────────────────────────────────
 const plans = ref<any[]>([])
 const showPlanForm = ref(false)
 const editingPlan = ref<any>(null)
@@ -44,7 +50,9 @@ const planForm = ref({
   isDefault: false, isFree: false, visible: true,
   cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
   storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
-  priceCents: 0,
+  priceCents: 0, volumeIncludedGb: 0, scope: 'service' as 'service' | 'stack',
+  nameTranslations: {} as Record<string, string>,
+  descriptionTranslations: {} as Record<string, string>,
 })
 
 // ─── Usage Pricing ───────────────────────────────────────────
@@ -128,7 +136,8 @@ function openPlanForm(plan?: any) {
       isDefault: false, isFree: false, visible: true,
       cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
       storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
-      priceCents: 0,
+      priceCents: 0, volumeIncludedGb: 0, scope: 'service',
+      nameTranslations: {}, descriptionTranslations: {},
     }
   }
   showPlanForm.value = true
@@ -165,6 +174,9 @@ async function fetchAll() {
     volumeDeletionEnabled.value = configData.volumeDeletionEnabled ?? true
     purgeEnabled.value = configData.purgeEnabled ?? true
     purgeRetentionDays.value = configData.purgeRetentionDays ?? 30
+    allowDowngrade.value = configData.allowDowngrade ?? true
+    deletionBillingPolicy.value = configData.deletionBillingPolicy ?? 'end_of_period'
+    maxFreeServicesPerAccount.value = configData.maxFreeServicesPerAccount ?? null
 
     plans.value = plansData
     pricing.value = { ...pricing.value, ...pricingData }
@@ -218,6 +230,23 @@ async function saveLifecycleConfig() {
     error.value = err?.body?.error || 'Failed to save lifecycle config'
   } finally {
     savingLifecycle.value = false
+  }
+}
+
+async function saveTierPolicies() {
+  savingTierPolicies.value = true
+  error.value = ''
+  try {
+    await api.patch('/billing/config', {
+      allowDowngrade: allowDowngrade.value,
+      deletionBillingPolicy: deletionBillingPolicy.value,
+      maxFreeServicesPerAccount: maxFreeServicesPerAccount.value,
+    })
+    showSuccess('Tier policies saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save tier policies'
+  } finally {
+    savingTierPolicies.value = false
   }
 }
 
@@ -521,11 +550,67 @@ onMounted(() => { fetchAll() })
         </form>
       </div>
 
-      <!-- Section 2: Plan Tiers -->
+      <!-- Section: Tier Policies -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <Shield class="w-5 h-5 text-indigo-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Tier Policies</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Control how users can change tiers and what happens to billing on deletion.</p>
+        </div>
+        <form @submit.prevent="saveTierPolicies" class="p-6 space-y-6">
+          <!-- Allow Downgrade -->
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Allow Tier Downgrade</label>
+              <p class="text-xs text-gray-500 dark:text-gray-400">When disabled, users can only upgrade or cancel — they cannot switch to a lower tier.</p>
+            </div>
+            <label class="flex items-center gap-3">
+              <input type="checkbox" v-model="allowDowngrade" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            </label>
+          </div>
+
+          <!-- Max Free Services -->
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Max Free Services per Account</label>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Limit how many services per account can use the free tier. Leave empty for unlimited.</p>
+            <input
+              type="number"
+              :value="maxFreeServicesPerAccount"
+              @input="maxFreeServicesPerAccount = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)"
+              min="0"
+              step="1"
+              placeholder="Unlimited"
+              class="w-full sm:w-40 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+
+          <!-- Billing on Deletion -->
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Billing on Service/Stack Deletion</label>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">What happens to billing when a user deletes their last service or stack.</p>
+            <select v-model="deletionBillingPolicy" class="w-full sm:w-auto px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="immediate">Bill immediately (prorate on deletion day)</option>
+              <option value="end_of_period">Let current period expire (cancel renewal only)</option>
+            </select>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button type="submit" :disabled="savingTierPolicies" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingTierPolicies" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ savingTierPolicies ? t('common.saving') : 'Save Tier Policies' }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Section 2: Service Tiers -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="min-w-0">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.billing.planTiers') }}</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Service Tiers</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.billing.planTiersDesc') }}</p>
           </div>
           <div class="flex gap-2 shrink-0">
@@ -541,7 +626,7 @@ onMounted(() => { fetchAll() })
         <!-- Plan form modal -->
         <div v-if="showPlanForm" class="p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750">
           <form @submit.prevent="savePlan" class="space-y-4">
-            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
               <div class="sm:col-span-2">
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.planName') }}</label>
                 <input v-model="planForm.name" required class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
@@ -554,8 +639,15 @@ onMounted(() => { fetchAll() })
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.monthlyPrice') }}</label>
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Scope</label>
+                <select v-model="planForm.scope" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+                  <option value="service">Per Service</option>
+                  <option value="stack">Per Stack</option>
+                </select>
+              </div>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
               <div>
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.cpuLimit') }}</label>
                 <input v-model.number="planForm.cpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
@@ -580,6 +672,10 @@ onMounted(() => { fetchAll() })
                 <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.maxUsers') }}</label>
                 <input v-model.number="planForm.maxUsersPerAccount" type="number" min="0" placeholder="0 = unlimited" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Volume Included (GB)</label>
+                <input v-model.number="planForm.volumeIncludedGb" type="number" min="0" placeholder="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              </div>
             </div>
             <div class="flex flex-wrap items-center gap-4">
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -592,6 +688,24 @@ onMounted(() => { fetchAll() })
                 <input type="checkbox" v-model="planForm.visible" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" /> {{ t('super.billing.visible') }}
               </label>
             </div>
+            <!-- Translations -->
+            <details class="border border-gray-200 dark:border-gray-700 rounded-lg">
+              <summary class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg">
+                {{ t('super.billing.translations', 'Translations') }}
+              </summary>
+              <div class="px-4 pb-4 pt-2 space-y-3">
+                <div v-for="loc in ['nb', 'de', 'zh']" :key="loc" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ loc.toUpperCase() }} — {{ t('super.billing.planName') }}</label>
+                    <input v-model="planForm.nameTranslations[loc]" :placeholder="planForm.name" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ loc.toUpperCase() }} — {{ t('super.billing.description', 'Description') }}</label>
+                    <input v-model="planForm.descriptionTranslations[loc]" :placeholder="planForm.description" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  </div>
+                </div>
+              </div>
+            </details>
             <div class="flex gap-2 justify-end">
               <button type="button" @click="showPlanForm = false" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">{{ t('common.cancel') }}</button>
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium">
@@ -819,6 +933,7 @@ onMounted(() => { fetchAll() })
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 <th class="px-6 py-3">{{ t('super.billing.account') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.plan') }}</th>
+                <th class="px-6 py-3">Service / Stack</th>
                 <th class="px-6 py-3">{{ t('super.billing.model') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.cycle') }}</th>
                 <th class="px-6 py-3">{{ t('common.status') }}</th>
@@ -828,6 +943,17 @@ onMounted(() => { fetchAll() })
               <tr v-for="sub in subs" :key="sub.id">
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ sub.account?.name ?? sub.accountId }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ sub.plan?.name ?? 'Usage only' }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <template v-if="sub.serviceId">
+                    <span class="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded mr-1">Service</span>
+                    {{ sub.service?.name ?? sub.serviceId }}
+                  </template>
+                  <template v-else-if="sub.stackId">
+                    <span class="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs rounded mr-1">Stack</span>
+                    {{ sub.stack?.name ?? sub.stackId }}
+                  </template>
+                  <span v-else class="text-gray-400">--</span>
+                </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 capitalize">{{ sub.billingModel }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ sub.billingCycle }}</td>
                 <td class="px-6 py-4">

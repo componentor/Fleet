@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false })
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive, FileCode, RotateCcw } from 'lucide-vue-next'
@@ -15,6 +16,8 @@ import { useTerminal } from '@/composables/useTerminal'
 import { useToast } from '@/composables/useToast'
 import { useVolumeManager } from '@/composables/useVolumeManager'
 import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
+import TierSelector from '@/components/TierSelector.vue'
+import { useServiceBilling, usePlanLocale, type ServiceSubscription, type ResourceConflict } from '@/composables/useServiceBilling'
 import { useI18n } from 'vue-i18n'
 import '@xterm/xterm/css/xterm.css'
 
@@ -29,6 +32,8 @@ const logStream = useLogStream()
 const deployStream = useDeployStream()
 const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 const volumeManager = useVolumeManager()
+const serviceBilling = useServiceBilling()
+const { planName } = usePlanLocale()
 
 const activeTab = ref('overview')
 const tabs = computed(() => {
@@ -48,6 +53,8 @@ const tabs = computed(() => {
     base.push({ id: 'nginx', label: 'Nginx' })
   }
   base.push(
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'billing', label: 'Billing' },
     { id: 'logs', label: 'Logs' },
     { id: 'terminal', label: 'Terminal' },
     { id: 'deployments', label: 'Deployments' },
@@ -77,6 +84,233 @@ const logsContainer = ref<HTMLElement | null>(null)
 
 const envVars = ref<{ key: string; value: string }[]>([])
 const settingsLoading = ref(false)
+
+// Billing tab state
+const serviceSubscription = ref<ServiceSubscription | null>(null)
+const billingLoading = ref(false)
+const showChangePlan = ref(false)
+const changePlanId = ref<string | null>(null)
+const billingContactEmail = ref('')
+const billingContactName = ref('')
+
+async function fetchServiceBilling() {
+  billingLoading.value = true
+  try {
+    serviceSubscription.value = await serviceBilling.fetchServiceSubscription(serviceId)
+    if (serviceSubscription.value) {
+      billingContactEmail.value = serviceSubscription.value.paymentContactEmail ?? ''
+      billingContactName.value = serviceSubscription.value.paymentContactName ?? ''
+    }
+  } finally {
+    billingLoading.value = false
+  }
+}
+
+const downgradeConflicts = ref<ResourceConflict[]>([])
+const showDowngradeConfirm = ref(false)
+const downgradeError = ref('')
+
+async function handleChangePlan(opts?: { confirm?: boolean }) {
+  if (!changePlanId.value) return
+  downgradeError.value = ''
+
+  // No existing subscription — create a new one via checkout
+  if (!serviceSubscription.value) {
+    const url = await serviceBilling.createCheckout({
+      serviceId,
+      planId: changePlanId.value,
+      billingCycle: 'monthly',
+    })
+    if (url) window.location.href = url
+    return
+  }
+
+  const result = await serviceBilling.changePlan(serviceSubscription.value.id, changePlanId.value, opts)
+  if (result.ok) {
+    showChangePlan.value = false
+    showDowngradeConfirm.value = false
+    downgradeConflicts.value = []
+    await fetchServiceBilling()
+    return
+  }
+  if (result.status === 409 && result.conflicts?.length) {
+    downgradeConflicts.value = result.conflicts
+    showDowngradeConfirm.value = true
+    return
+  }
+  if (result.status === 403) {
+    downgradeError.value = result.message ?? 'Downgrade is not allowed. You can only upgrade or cancel.'
+    return
+  }
+}
+
+function confirmDowngrade() {
+  handleChangePlan({ confirm: true })
+}
+
+function cancelDowngrade() {
+  showDowngradeConfirm.value = false
+  downgradeConflicts.value = []
+}
+
+function formatConflictField(field: string): string {
+  if (field === 'cpu') return 'CPU'
+  if (field === 'memory') return 'Memory'
+  if (field === 'replicas') return 'Replicas'
+  return field
+}
+
+function formatConflictValue(field: string, val: number): string {
+  if (field === 'cpu') return `${val} vCPU${val !== 1 ? 's' : ''}`
+  if (field === 'memory') return val >= 1024 ? `${(val / 1024).toFixed(val % 1024 === 0 ? 0 : 1)} GB` : `${val} MB`
+  return String(val)
+}
+
+async function handleUpdateContact() {
+  if (!serviceSubscription.value) return
+  await serviceBilling.updateContact(serviceSubscription.value.id, {
+    billingContactEmail: billingContactEmail.value || undefined,
+    billingContactName: billingContactName.value || undefined,
+  })
+}
+
+async function handleCancelSubscription() {
+  if (!serviceSubscription.value) return
+  const ok = await serviceBilling.cancelSubscription(serviceSubscription.value.id)
+  if (ok) await fetchServiceBilling()
+}
+
+// Analytics tab state
+interface AnalyticsDataPoint {
+  timestamp: string
+  requests: number
+  bytesIn: number
+  bytesOut: number
+  statusBreakdown: Record<string, number>
+}
+interface AnalyticsResponse {
+  data: AnalyticsDataPoint[]
+  summary: { totalRequests: number; totalBytesIn: number; totalBytesOut: number }
+}
+const analyticsData = ref<AnalyticsResponse | null>(null)
+const analyticsPeriod = ref<'24h' | '7d' | '30d'>('24h')
+const analyticsLoading = ref(false)
+
+async function fetchAnalytics() {
+  analyticsLoading.value = true
+  try {
+    analyticsData.value = await api.get<AnalyticsResponse>(
+      `/analytics/services/${serviceId}?period=${analyticsPeriod.value}`
+    )
+  } catch {
+    analyticsData.value = null
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toString()
+}
+
+const chartWidth = 600
+const chartHeight = 180
+const chartPadding = { top: 10, right: 10, bottom: 20, left: 50 }
+
+function buildPolylinePoints(values: number[]): string {
+  if (!values.length) return ''
+  const maxVal = Math.max(...values, 1)
+  const innerW = chartWidth - chartPadding.left - chartPadding.right
+  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
+  return values.map((v, i) => {
+    const x = chartPadding.left + (values.length === 1 ? innerW / 2 : (i / (values.length - 1)) * innerW)
+    const y = chartPadding.top + innerH - (v / maxVal) * innerH
+    return `${x},${y}`
+  }).join(' ')
+}
+
+function buildGridLines(values: number[]): { y: number; label: string }[] {
+  const maxVal = Math.max(...values, 1)
+  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
+  const steps = 4
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const val = (maxVal / steps) * i
+    const y = chartPadding.top + innerH - (val / maxVal) * innerH
+    return { y, label: val >= 1024 ? formatBytes(val) : formatNumber(Math.round(val)) }
+  })
+}
+
+function buildTimeLabels(data: AnalyticsDataPoint[]): { x: number; label: string }[] {
+  if (!data.length) return []
+  const innerW = chartWidth - chartPadding.left - chartPadding.right
+  const count = Math.min(data.length, 6)
+  const step = Math.max(1, Math.floor(data.length / count))
+  const labels: { x: number; label: string }[] = []
+  for (let i = 0; i < data.length; i += step) {
+    const point = data[i]
+    if (!point) continue
+    const d = new Date(point.timestamp)
+    const x = chartPadding.left + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW)
+    const label = analyticsPeriod.value === '24h'
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    labels.push({ x, label })
+  }
+  return labels
+}
+
+const requestsPoints = computed(() =>
+  analyticsData.value ? buildPolylinePoints(analyticsData.value.data.map(d => d.requests)) : ''
+)
+const bytesOutPoints = computed(() =>
+  analyticsData.value ? buildPolylinePoints(analyticsData.value.data.map(d => d.bytesOut)) : ''
+)
+const bytesInPoints = computed(() =>
+  analyticsData.value ? buildPolylinePoints(analyticsData.value.data.map(d => d.bytesIn)) : ''
+)
+const requestsGrid = computed(() =>
+  analyticsData.value ? buildGridLines(analyticsData.value.data.map(d => d.requests)) : []
+)
+const bandwidthGrid = computed(() => {
+  if (!analyticsData.value) return []
+  const combined = analyticsData.value.data.map(d => Math.max(d.bytesIn, d.bytesOut))
+  return buildGridLines(combined)
+})
+const timeLabels = computed(() =>
+  analyticsData.value ? buildTimeLabels(analyticsData.value.data) : []
+)
+
+const statusBreakdown = computed(() => {
+  if (!analyticsData.value?.data.length) return { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 }
+  const totals: Record<string, number> = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 }
+  for (const point of analyticsData.value.data) {
+    for (const [key, val] of Object.entries(point.statusBreakdown)) {
+      if (key in totals) totals[key] = (totals[key] ?? 0) + val
+    }
+  }
+  return totals
+})
+
+const statusBarSegments = computed(() => {
+  const b = statusBreakdown.value
+  const total = Object.values(b).reduce((a, c) => a + c, 0)
+  if (total === 0) return []
+  return [
+    { key: '2xx', pct: ((b['2xx'] ?? 0) / total) * 100, color: '#22c55e', label: '2xx' },
+    { key: '3xx', pct: ((b['3xx'] ?? 0) / total) * 100, color: '#3b82f6', label: '3xx' },
+    { key: '4xx', pct: ((b['4xx'] ?? 0) / total) * 100, color: '#eab308', label: '4xx' },
+    { key: '5xx', pct: ((b['5xx'] ?? 0) / total) * 100, color: '#ef4444', label: '5xx' },
+  ].filter(s => s.pct > 0)
+})
 
 // Service stats (health dashboard)
 const serviceStats = ref<any>(null)
@@ -136,6 +370,25 @@ const configRestartDelay = ref('10s')
 const configUpdateParallelism = ref(1)
 const configUpdateDelay = ref('10s')
 const configRollbackOnFailure = ref(true)
+
+// Tier limit computeds
+const tierPlan = computed(() => serviceSubscription.value?.plan ?? null)
+const tierCpuPercent = computed(() => {
+  if (!tierPlan.value?.cpuLimit) return 0
+  return Math.min(100, ((configCpuLimit.value ?? service.value?.cpuLimit ?? 0) / tierPlan.value.cpuLimit) * 100)
+})
+const tierMemoryPercent = computed(() => {
+  if (!tierPlan.value?.memoryLimit) return 0
+  return Math.min(100, ((configMemoryLimit.value ?? service.value?.memoryLimit ?? 0) / tierPlan.value.memoryLimit) * 100)
+})
+const tierReplicasPercent = computed(() => {
+  if (!tierPlan.value?.containerLimit) return 0
+  return Math.min(100, (configReplicas.value / tierPlan.value.containerLimit) * 100)
+})
+function formatMbForTier(mb: number): string {
+  if (mb >= 1024) return `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB`
+  return `${mb} MB`
+}
 const configLoading = ref(false)
 
 // Domain settings
@@ -974,10 +1227,10 @@ async function syncStatus() {
   }
 }
 
-async function confirmDeleteService(deleteVolumes: boolean) {
+async function confirmDeleteService(deleteVolumeNames: string[]) {
   actionLoading.value = 'delete'
   try {
-    await store.deleteService(serviceId, { deleteVolumes })
+    await store.deleteService(serviceId, { deleteVolumeNames })
     showDeleteModal.value = false
     router.push('/panel/services')
   } catch {
@@ -1261,6 +1514,8 @@ async function onTabChange(tabId: string) {
   if (tabId === 'nginx') fetchNginxConfig()
   if (tabId === 'deployments') fetchDeployments()
   if (tabId === 'settings' && service.value) {
+    // Fetch subscription for tier limits display
+    if (!serviceSubscription.value) fetchServiceBilling()
     const env = service.value.env ?? {}
     envVars.value = Object.entries(env).map(([key, value]) => ({ key, value: String(value) }))
     initMasking()
@@ -1315,6 +1570,20 @@ async function onTabChange(tabId: string) {
     })
   }
 }
+
+watch(activeTab, (tab) => {
+  if (tab === 'billing' && !serviceSubscription.value && !billingLoading.value) {
+    serviceBilling.fetchTiers()
+    fetchServiceBilling()
+  }
+  if (tab === 'analytics' && !analyticsData.value && !analyticsLoading.value) {
+    fetchAnalytics()
+  }
+})
+
+watch(analyticsPeriod, () => {
+  fetchAnalytics()
+})
 
 onMounted(async () => {
   fetchAccountDomains()
@@ -2039,6 +2308,315 @@ onUnmounted(() => {
               </p>
             </div>
           </div>
+        </div>
+
+        <!-- Analytics -->
+        <div v-if="activeTab === 'analytics'" class="space-y-6">
+          <div v-if="analyticsLoading" class="flex items-center justify-center py-12">
+            <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+          </div>
+
+          <template v-else-if="analyticsData">
+            <!-- Period selector -->
+            <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+              <button
+                v-for="p in (['24h', '7d', '30d'] as const)"
+                :key="p"
+                @click="analyticsPeriod = p"
+                :class="[
+                  'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+                  analyticsPeriod === p
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                ]"
+              >
+                {{ p }}
+              </button>
+            </div>
+
+            <!-- Summary cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Requests</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatNumber(analyticsData.summary.totalRequests) }}</p>
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Bandwidth In</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalBytesIn) }}</p>
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Bandwidth Out</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalBytesOut) }}</p>
+              </div>
+            </div>
+
+            <!-- Requests chart -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Requests</h3>
+              <div v-if="analyticsData.data.length === 0" class="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                No data yet. Analytics are collected every 5 minutes.
+              </div>
+              <svg v-else :viewBox="`0 0 ${chartWidth} ${chartHeight}`" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+                <!-- Grid lines -->
+                <line v-for="(g, i) in requestsGrid" :key="'rg'+i"
+                  :x1="chartPadding.left" :y1="g.y" :x2="chartWidth - chartPadding.right" :y2="g.y"
+                  stroke="currentColor" class="text-gray-200 dark:text-gray-700" stroke-width="0.5" />
+                <!-- Y-axis labels -->
+                <text v-for="(g, i) in requestsGrid" :key="'rl'+i"
+                  :x="chartPadding.left - 4" :y="g.y + 3"
+                  text-anchor="end" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ g.label }}</text>
+                <!-- X-axis labels -->
+                <text v-for="(tl, i) in timeLabels" :key="'tl'+i"
+                  :x="tl.x" :y="chartHeight - 2"
+                  text-anchor="middle" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ tl.label }}</text>
+                <!-- Area fill -->
+                <polygon
+                  v-if="requestsPoints"
+                  :points="`${chartPadding.left},${chartHeight - chartPadding.bottom} ${requestsPoints} ${chartWidth - chartPadding.right},${chartHeight - chartPadding.bottom}`"
+                  class="fill-primary-500/10 dark:fill-primary-400/10"
+                />
+                <!-- Line -->
+                <polyline
+                  v-if="requestsPoints"
+                  :points="requestsPoints"
+                  fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  class="stroke-primary-500 dark:stroke-primary-400"
+                />
+              </svg>
+            </div>
+
+            <!-- Bandwidth chart -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Bandwidth</h3>
+              <div class="flex items-center gap-4 mb-3 text-xs text-gray-500 dark:text-gray-400">
+                <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-blue-500 inline-block rounded"></span> In</span>
+                <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-emerald-500 inline-block rounded"></span> Out</span>
+              </div>
+              <div v-if="analyticsData.data.length === 0" class="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                No data yet.
+              </div>
+              <svg v-else :viewBox="`0 0 ${chartWidth} ${chartHeight}`" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+                <!-- Grid lines -->
+                <line v-for="(g, i) in bandwidthGrid" :key="'bg'+i"
+                  :x1="chartPadding.left" :y1="g.y" :x2="chartWidth - chartPadding.right" :y2="g.y"
+                  stroke="currentColor" class="text-gray-200 dark:text-gray-700" stroke-width="0.5" />
+                <!-- Y-axis labels -->
+                <text v-for="(g, i) in bandwidthGrid" :key="'bl'+i"
+                  :x="chartPadding.left - 4" :y="g.y + 3"
+                  text-anchor="end" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ g.label }}</text>
+                <!-- X-axis labels -->
+                <text v-for="(tl, i) in timeLabels" :key="'btl'+i"
+                  :x="tl.x" :y="chartHeight - 2"
+                  text-anchor="middle" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ tl.label }}</text>
+                <!-- In line -->
+                <polyline
+                  v-if="bytesInPoints"
+                  :points="bytesInPoints"
+                  fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  class="stroke-blue-500"
+                />
+                <!-- Out line -->
+                <polyline
+                  v-if="bytesOutPoints"
+                  :points="bytesOutPoints"
+                  fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  class="stroke-emerald-500"
+                />
+              </svg>
+            </div>
+
+            <!-- Status breakdown -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Status Codes</h3>
+              <div v-if="statusBarSegments.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
+                No request data yet.
+              </div>
+              <template v-else>
+                <!-- Stacked bar -->
+                <div class="h-6 rounded-full overflow-hidden flex">
+                  <div
+                    v-for="seg in statusBarSegments"
+                    :key="seg.key"
+                    :style="{ width: seg.pct + '%', backgroundColor: seg.color }"
+                    class="h-full transition-all duration-300"
+                  />
+                </div>
+                <!-- Legend -->
+                <div class="flex flex-wrap items-center gap-4 mt-3 text-xs text-gray-600 dark:text-gray-400">
+                  <span v-for="seg in statusBarSegments" :key="'l'+seg.key" class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: seg.color }" />
+                    {{ seg.label }}: {{ formatNumber(statusBreakdown[seg.key] ?? 0) }} ({{ seg.pct.toFixed(1) }}%)
+                  </span>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div v-else class="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
+            <Activity class="w-8 h-8 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
+            <p>Unable to load analytics data.</p>
+            <button @click="fetchAnalytics" class="mt-2 text-primary-600 dark:text-primary-400 hover:underline text-sm">Try again</button>
+          </div>
+        </div>
+
+        <!-- Billing -->
+        <div v-if="activeTab === 'billing'" class="space-y-6">
+          <div v-if="billingLoading" class="flex items-center justify-center py-12">
+            <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+          </div>
+
+          <template v-else>
+            <!-- Current Plan -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Current Plan</h3>
+                <button
+                  v-if="serviceSubscription"
+                  @click="showChangePlan = !showChangePlan; changePlanId = serviceSubscription?.planId ?? null"
+                  class="text-sm text-primary-600 dark:text-primary-400 hover:underline"
+                >
+                  {{ showChangePlan ? 'Cancel' : 'Change Plan' }}
+                </button>
+              </div>
+
+              <div v-if="serviceSubscription?.plan" class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <span class="text-gray-500 dark:text-gray-400 block">Plan</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ planName(serviceSubscription.plan) }}</span>
+                </div>
+                <div>
+                  <span class="text-gray-500 dark:text-gray-400 block">Price</span>
+                  <span class="font-medium text-gray-900 dark:text-white">
+                    {{ serviceSubscription.plan.isFree ? 'Free' : serviceBilling.formatCents(serviceSubscription.plan.priceCents) + '/mo' }}
+                  </span>
+                </div>
+                <div>
+                  <span class="text-gray-500 dark:text-gray-400 block">Status</span>
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="{
+                      'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400': serviceSubscription.status === 'active',
+                      'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400': serviceSubscription.status === 'past_due',
+                      'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400': serviceSubscription.status === 'cancelled',
+                      'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400': !['active', 'past_due', 'cancelled'].includes(serviceSubscription.status),
+                    }"
+                  >
+                    {{ serviceSubscription.status }}
+                  </span>
+                </div>
+                <div>
+                  <span class="text-gray-500 dark:text-gray-400 block">Cycle</span>
+                  <span class="font-medium text-gray-900 dark:text-white capitalize">{{ serviceSubscription.billingCycle }}</span>
+                </div>
+              </div>
+              <div v-else class="flex items-center justify-between">
+                <span class="text-sm text-gray-500 dark:text-gray-400">
+                  No plan assigned. This service is running on the free tier or an account-level subscription.
+                </span>
+                <button
+                  @click="showChangePlan = !showChangePlan; changePlanId = null"
+                  class="text-sm text-primary-600 dark:text-primary-400 hover:underline"
+                >
+                  {{ showChangePlan ? 'Cancel' : 'Upgrade' }}
+                </button>
+              </div>
+
+              <!-- Period info -->
+              <div v-if="serviceSubscription?.currentPeriodStart && serviceSubscription?.currentPeriodEnd" class="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                Current period: {{ new Date(serviceSubscription.currentPeriodStart).toLocaleDateString() }} &ndash; {{ new Date(serviceSubscription.currentPeriodEnd).toLocaleDateString() }}
+              </div>
+            </div>
+
+            <!-- Change Plan -->
+            <div v-if="showChangePlan" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Select New Plan</h3>
+              <TierSelector v-model="changePlanId" :current-plan="serviceSubscription?.plan ?? undefined" />
+
+              <!-- Downgrade error (403) -->
+              <div v-if="downgradeError" class="mt-4 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
+                {{ downgradeError }}
+              </div>
+
+              <!-- Downgrade conflict confirmation (409) -->
+              <div v-if="showDowngradeConfirm && downgradeConflicts.length" class="mt-4 p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <h4 class="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Resource adjustment required</h4>
+                <p class="text-sm text-amber-700 dark:text-amber-400 mb-3">The new plan has lower limits than your current configuration. The following resources will be automatically adjusted:</p>
+                <ul class="space-y-1 text-sm text-amber-700 dark:text-amber-400 mb-4">
+                  <li v-for="c in downgradeConflicts" :key="c.field">
+                    {{ formatConflictField(c.field) }}: {{ formatConflictValue(c.field, c.current) }} &rarr; {{ formatConflictValue(c.field, c.limit) }}
+                  </li>
+                </ul>
+                <div class="flex gap-3">
+                  <button @click="confirmDowngrade" class="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
+                    Confirm Downgrade
+                  </button>
+                  <button @click="cancelDowngrade" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:underline">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="!showDowngradeConfirm" class="mt-4 flex gap-3">
+                <button
+                  @click="handleChangePlan()"
+                  :disabled="!changePlanId || changePlanId === serviceSubscription?.planId"
+                  class="px-4 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {{ serviceSubscription ? 'Confirm Change' : 'Subscribe' }}
+                </button>
+                <button @click="showChangePlan = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:underline">
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <!-- Billing Contact -->
+            <div v-if="serviceSubscription" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Billing Contact</h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                  <input
+                    v-model="billingContactName"
+                    type="text"
+                    placeholder="Billing contact name"
+                    class="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-400"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                  <input
+                    v-model="billingContactEmail"
+                    type="email"
+                    placeholder="billing@example.com"
+                    class="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-400"
+                  />
+                </div>
+              </div>
+              <div class="mt-4">
+                <button
+                  @click="handleUpdateContact"
+                  class="px-4 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700"
+                >
+                  Save Contact
+                </button>
+              </div>
+            </div>
+
+            <!-- Cancel Subscription -->
+            <div v-if="serviceSubscription && serviceSubscription.status === 'active' && !serviceSubscription.plan?.isFree" class="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-900/50 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Cancel Subscription</h3>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Your service will continue until the end of the current billing period, then be suspended.
+              </p>
+              <button
+                @click="handleCancelSubscription"
+                class="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700"
+              >
+                Cancel Subscription
+              </button>
+            </div>
+          </template>
         </div>
 
         <!-- Logs -->
@@ -3005,6 +3583,64 @@ onUnmounted(() => {
             </Transition>
           </Teleport>
 
+          <!-- Resource Usage & Tier Limits -->
+          <div :class="tierPlan ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'" class="border rounded-xl p-5 mb-6">
+            <div class="flex items-center justify-between mb-3">
+              <h4 v-if="tierPlan" class="text-sm font-semibold text-blue-900 dark:text-blue-200">{{ tierPlan.name }} Tier</h4>
+              <h4 v-else class="text-sm font-semibold text-gray-700 dark:text-gray-300">Resource Usage</h4>
+              <button v-if="tierPlan" @click="onTabChange('billing')" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Change Plan</button>
+              <button v-else @click="onTabChange('billing')" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">Upgrade to set limits</button>
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+              <!-- CPU -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span :class="tierPlan ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'">CPU</span>
+                  <span :class="tierPlan ? 'font-medium text-blue-900 dark:text-blue-100' : 'font-medium text-gray-900 dark:text-gray-100'">
+                    {{ configCpuLimit ?? service.cpuLimit ?? '-' }}{{ tierPlan ? ` / ${tierPlan.cpuLimit}` : '' }} cores
+                  </span>
+                </div>
+                <div v-if="tierPlan" class="h-1.5 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full transition-all" :class="tierCpuPercent > 90 ? 'bg-red-500' : tierCpuPercent > 70 ? 'bg-yellow-500' : 'bg-blue-500'" :style="{ width: tierCpuPercent + '%' }" />
+                </div>
+                <div v-else class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-gray-400 dark:bg-gray-500" style="width: 100%" />
+                </div>
+              </div>
+              <!-- Memory -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span :class="tierPlan ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'">Memory</span>
+                  <span :class="tierPlan ? 'font-medium text-blue-900 dark:text-blue-100' : 'font-medium text-gray-900 dark:text-gray-100'">
+                    {{ formatMbForTier(configMemoryLimit ?? service.memoryLimit ?? 0) }}{{ tierPlan ? ` / ${formatMbForTier(tierPlan.memoryLimit)}` : '' }}
+                  </span>
+                </div>
+                <div v-if="tierPlan" class="h-1.5 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full transition-all" :class="tierMemoryPercent > 90 ? 'bg-red-500' : tierMemoryPercent > 70 ? 'bg-yellow-500' : 'bg-blue-500'" :style="{ width: tierMemoryPercent + '%' }" />
+                </div>
+                <div v-else class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-gray-400 dark:bg-gray-500" style="width: 100%" />
+                </div>
+              </div>
+              <!-- Replicas -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span :class="tierPlan ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'">Replicas</span>
+                  <span :class="tierPlan ? 'font-medium text-blue-900 dark:text-blue-100' : 'font-medium text-gray-900 dark:text-gray-100'">
+                    {{ configReplicas }}{{ tierPlan ? ` / ${tierPlan.containerLimit}` : '' }}
+                  </span>
+                </div>
+                <div v-if="tierPlan" class="h-1.5 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full transition-all" :class="tierReplicasPercent > 90 ? 'bg-red-500' : tierReplicasPercent > 70 ? 'bg-yellow-500' : 'bg-blue-500'" :style="{ width: tierReplicasPercent + '%' }" />
+                </div>
+                <div v-else class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-gray-400 dark:bg-gray-500" style="width: 100%" />
+                </div>
+              </div>
+            </div>
+            <p v-if="!tierPlan" class="mt-3 text-xs text-gray-500 dark:text-gray-400">No plan limits applied. Upgrade to a plan to enforce resource limits.</p>
+          </div>
+
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Service Configuration</h3>
@@ -3014,21 +3650,24 @@ onUnmounted(() => {
                 <!-- Replicas -->
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Replicas</label>
-                  <input v-model.number="configReplicas" type="number" min="0" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <input v-model.number="configReplicas" type="number" min="0" :max="tierPlan?.containerLimit ?? 100" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <p v-if="tierPlan" class="mt-1 text-xs text-blue-600 dark:text-blue-400">Plan limit: {{ tierPlan.containerLimit }}</p>
                 </div>
 
                 <!-- CPU Limit -->
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CPU Limit (cores)</label>
-                  <input v-model.number="configCpuLimit" type="number" min="0.1" max="64" step="0.1" :placeholder="String(service.cpuLimit ?? 1)" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <input v-model.number="configCpuLimit" type="number" min="0.01" :max="tierPlan?.cpuLimit ?? 64" step="0.01" :placeholder="String(service.cpuLimit ?? 1)" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Number of CPU cores allocated to each container</p>
+                  <p v-if="tierPlan" class="text-xs text-blue-600 dark:text-blue-400">Plan limit: {{ tierPlan.cpuLimit }} cores</p>
                 </div>
 
                 <!-- Memory Limit -->
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Memory Limit (MB)</label>
-                  <input v-model.number="configMemoryLimit" type="number" min="64" max="131072" step="64" :placeholder="String(service.memoryLimit ?? 1024)" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <input v-model.number="configMemoryLimit" type="number" min="64" :max="tierPlan?.memoryLimit ?? 131072" step="64" :placeholder="String(service.memoryLimit ?? 1024)" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Memory allocated to each container in megabytes</p>
+                  <p v-if="tierPlan" class="text-xs text-blue-600 dark:text-blue-400">Plan limit: {{ formatMbForTier(tierPlan.memoryLimit) }}</p>
                 </div>
 
                 <!-- Restart Condition -->
@@ -3105,7 +3744,7 @@ onUnmounted(() => {
     :title="t('confirmDelete.title', 'Delete Service')"
     :message="t('confirmDelete.message', 'Are you sure you want to delete')"
     :item-name="service?.name || ''"
-    :show-volume-toggle="true"
+    :volumes="(service?.volumes as any[]) ?? []"
     :loading="actionLoading === 'delete'"
     @confirm="confirmDeleteService"
     @cancel="showDeleteModal = false"

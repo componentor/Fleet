@@ -8,6 +8,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { stacks } from './stacks';
 
 export const billingPlans = sqliteTable('billing_plans', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -27,6 +28,10 @@ export const billingPlans = sqliteTable('billing_plans', {
   priceCents: integer('price_cents').notNull(),
   stripeProductId: text('stripe_product_id'),
   stripePriceIds: text('stripe_price_ids', { mode: 'json' }).$default(() => ({})),
+  nameTranslations: text('name_translations', { mode: 'json' }).$default(() => ({})),
+  descriptionTranslations: text('description_translations', { mode: 'json' }).$default(() => ({})),
+  scope: text('scope').default('service'),
+  volumeIncludedGb: integer('volume_included_gb').default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
@@ -47,6 +52,11 @@ export const subscriptions = sqliteTable('subscriptions', {
   currentPeriodStart: integer('current_period_start', { mode: 'timestamp' }),
   currentPeriodEnd: integer('current_period_end', { mode: 'timestamp' }),
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }),
+  serviceId: text('service_id'),
+  stackId: text('stack_id')
+    .references(() => stacks.id, { onDelete: 'set null' }),
+  paymentContactName: text('payment_contact_name'),
+  paymentContactEmail: text('payment_contact_email'),
   billedByAccountId: text('billed_by_account_id')
     .references(() => accounts.id, { onDelete: 'set null' }),
   pastDueSince: integer('past_due_since', { mode: 'timestamp' }),
@@ -56,6 +66,8 @@ export const subscriptions = sqliteTable('subscriptions', {
   index('idx_subscriptions_account_id').on(table.accountId),
   index('idx_subscriptions_status').on(table.status),
   index('idx_subscriptions_past_due_since').on(table.pastDueSince),
+  index('idx_subscriptions_service_id').on(table.serviceId),
+  index('idx_subscriptions_stack_id').on(table.stackId),
 ]);
 
 export const usageRecords = sqliteTable('usage_records', {
@@ -70,9 +82,13 @@ export const usageRecords = sqliteTable('usage_records', {
   memoryMbHours: integer('memory_mb_hours', { mode: 'number' }).default(0),
   storageGb: integer('storage_gb').default(0),
   bandwidthGb: integer('bandwidth_gb').default(0),
+  serviceId: text('service_id'),
+  stackId: text('stack_id'),
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
   index('idx_usage_records_account_id').on(table.accountId),
+  index('idx_usage_records_service_id').on(table.serviceId),
+  index('idx_usage_records_stack_id').on(table.stackId),
 ]);
 
 export const pricingConfig = sqliteTable('pricing_config', {
@@ -112,6 +128,9 @@ export const billingConfig = sqliteTable('billing_config', {
   volumeDeletionEnabled: integer('volume_deletion_enabled', { mode: 'boolean' }).default(true),
   purgeEnabled: integer('purge_enabled', { mode: 'boolean' }).default(true),
   purgeRetentionDays: integer('purge_retention_days').default(30),
+  allowDowngrade: integer('allow_downgrade', { mode: 'boolean' }).default(true),
+  deletionBillingPolicy: text('deletion_billing_policy').default('end_of_period').notNull(),
+  maxFreeServicesPerAccount: integer('max_free_services_per_account'),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
@@ -185,6 +204,10 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   plan: one(billingPlans, {
     fields: [subscriptions.planId],
     references: [billingPlans.id],
+  }),
+  stack: one(stacks, {
+    fields: [subscriptions.stackId],
+    references: [stacks.id],
   }),
 }));
 

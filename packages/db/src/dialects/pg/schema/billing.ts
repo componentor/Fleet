@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { stacks } from './stacks';
 
 export const billingPlans = pgTable('billing_plans', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -32,6 +33,10 @@ export const billingPlans = pgTable('billing_plans', {
   priceCents: integer('price_cents').notNull(),
   stripeProductId: varchar('stripe_product_id'),
   stripePriceIds: jsonb('stripe_price_ids').default({}),
+  nameTranslations: jsonb('name_translations').default({}),
+  descriptionTranslations: jsonb('description_translations').default({}),
+  scope: varchar('scope').default('service'),
+  volumeIncludedGb: integer('volume_included_gb').default(0),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -52,6 +57,11 @@ export const subscriptions = pgTable('subscriptions', {
   currentPeriodStart: timestamp('current_period_start'),
   currentPeriodEnd: timestamp('current_period_end'),
   cancelledAt: timestamp('cancelled_at'),
+  serviceId: uuid('service_id'),
+  stackId: uuid('stack_id')
+    .references(() => stacks.id, { onDelete: 'set null' }),
+  paymentContactName: varchar('payment_contact_name'),
+  paymentContactEmail: varchar('payment_contact_email'),
   billedByAccountId: uuid('billed_by_account_id')
     .references(() => accounts.id, { onDelete: 'set null' }),
   pastDueSince: timestamp('past_due_since'),
@@ -61,6 +71,8 @@ export const subscriptions = pgTable('subscriptions', {
   index('idx_subscriptions_account_id').on(table.accountId),
   index('idx_subscriptions_status').on(table.status),
   index('idx_subscriptions_past_due_since').on(table.pastDueSince),
+  index('idx_subscriptions_service_id').on(table.serviceId),
+  index('idx_subscriptions_stack_id').on(table.stackId),
 ]);
 
 export const usageRecords = pgTable('usage_records', {
@@ -75,9 +87,13 @@ export const usageRecords = pgTable('usage_records', {
   memoryMbHours: bigint('memory_mb_hours', { mode: 'number' }).default(sql`0`),
   storageGb: integer('storage_gb').default(0),
   bandwidthGb: integer('bandwidth_gb').default(0),
+  serviceId: uuid('service_id'),
+  stackId: uuid('stack_id'),
   recordedAt: timestamp('recorded_at').defaultNow(),
 }, (table) => [
   index('idx_usage_records_account_id').on(table.accountId),
+  index('idx_usage_records_service_id').on(table.serviceId),
+  index('idx_usage_records_stack_id').on(table.stackId),
 ]);
 
 export const pricingConfig = pgTable('pricing_config', {
@@ -117,6 +133,9 @@ export const billingConfig = pgTable('billing_config', {
   volumeDeletionEnabled: boolean('volume_deletion_enabled').default(true),
   purgeEnabled: boolean('purge_enabled').default(true),
   purgeRetentionDays: integer('purge_retention_days').default(30),
+  allowDowngrade: boolean('allow_downgrade').default(true),
+  deletionBillingPolicy: varchar('deletion_billing_policy').default('end_of_period').notNull(),
+  maxFreeServicesPerAccount: integer('max_free_services_per_account'),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
@@ -188,6 +207,10 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   plan: one(billingPlans, {
     fields: [subscriptions.planId],
     references: [billingPlans.id],
+  }),
+  stack: one(stacks, {
+    fields: [subscriptions.stackId],
+    references: [stacks.id],
   }),
 }));
 

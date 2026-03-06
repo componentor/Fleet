@@ -32,6 +32,8 @@ import { useApi } from '@/composables/useApi'
 import { useVolumeManager } from '@/composables/useVolumeManager'
 import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
+import TierSelector from '@/components/TierSelector.vue'
+import { useServiceBilling } from '@/composables/useServiceBilling'
 import { useI18n } from 'vue-i18n'
 
 interface GitHubRepo {
@@ -57,6 +59,10 @@ const store = useServicesStore()
 const authStore = useAuthStore()
 const api = useApi()
 const volumeManager = useVolumeManager()
+const { fetchTiers } = useServiceBilling()
+
+// Plan/tier selection (shared across deploy methods)
+const selectedPlanId = ref<string | null>(null)
 
 const deployMethod = ref<'github' | 'docker' | 'upload' | 'registry' | null>(null)
 
@@ -225,6 +231,7 @@ async function executeRegistryDeploy() {
       sourceType: 'registry',
       registryPollEnabled: registryPollEnabled.value,
       registryPollInterval: registryPollInterval.value,
+      planId: selectedPlanId.value || undefined,
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -316,6 +323,7 @@ async function executeUploadDeploy() {
     if (buildVolumesPayload()) formData.append('volumes', JSON.stringify(buildVolumesPayload()))
     if (domain.value) formData.append('domain', domain.value)
     if (selectedRegion.value) formData.append('region', selectedRegion.value)
+    if (selectedPlanId.value) formData.append('planId', selectedPlanId.value)
     formData.append('replicas', String(replicas.value))
 
     await api.upload('/upload/deploy', formData)
@@ -383,6 +391,7 @@ async function executeDockerDeploy() {
       region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
       volumes: buildVolumesPayload(),
+      planId: selectedPlanId.value || undefined,
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -416,6 +425,7 @@ async function executeGithubDeploy() {
       region: selectedRegion.value || undefined,
       envVars: buildEnvVarsPayload(),
       volumes: buildVolumesPayload(),
+      planId: selectedPlanId.value || undefined,
     } as any)
     router.push('/panel/services')
   } catch (err: any) {
@@ -538,6 +548,7 @@ watch(dockerImage, (newImage) => {
 // Handle OAuth return — token is now in URL fragment (#) to prevent server-side leakage
 onMounted(() => {
   fetchRegions()
+  fetchTiers()
   volumeManager.fetchAll()
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const isGithubConnected = hashParams.get('github_connected') || route.query.github_connected
@@ -803,6 +814,12 @@ onMounted(() => {
             </p>
           </div>
 
+          <!-- Service Tier -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <TierSelector v-model="selectedPlanId" />
+          </div>
+
           <!-- DB without volume warning -->
           <div v-if="showDbWarning" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
             <div class="flex items-start gap-2">
@@ -817,7 +834,7 @@ onMounted(() => {
           <div class="pt-2 flex justify-end">
             <button
               type="submit"
-              :disabled="loading || !serviceName || !dockerImage"
+              :disabled="loading || !serviceName || !dockerImage || !selectedPlanId"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
               <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
@@ -1160,11 +1177,17 @@ onMounted(() => {
               </p>
             </div>
 
+            <!-- Service Plan -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+              <TierSelector v-model="selectedPlanId" />
+            </div>
+
             <!-- Deploy Button -->
             <div class="pt-2 flex justify-end">
               <button
                 @click="confirmGithubDeploy"
-                :disabled="loading || !selectedRepo || !ghServiceName"
+                :disabled="loading || !selectedRepo || !ghServiceName || !selectedPlanId"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
                 <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
@@ -1319,10 +1342,16 @@ onMounted(() => {
             </p>
           </div>
 
+          <!-- Service Plan -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <TierSelector v-model="selectedPlanId" />
+          </div>
+
           <div class="pt-2 flex justify-end">
             <button
               @click="confirmUploadDeploy"
-              :disabled="uploadLoading || !uploadServiceName || !uploadFile"
+              :disabled="uploadLoading || !uploadServiceName || !uploadFile || !selectedPlanId"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
               <Loader2 v-if="uploadLoading" class="w-4 h-4 animate-spin" />
@@ -1537,10 +1566,16 @@ onMounted(() => {
             </p>
           </div>
 
+          <!-- Service Plan -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <TierSelector v-model="selectedPlanId" />
+          </div>
+
           <div class="pt-2 flex justify-end">
             <button
               type="submit"
-              :disabled="registryLoading || !registryServiceName || !registryImage"
+              :disabled="registryLoading || !registryServiceName || !registryImage || !selectedPlanId"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
               <Loader2 v-if="registryLoading" class="w-4 h-4 animate-spin" />

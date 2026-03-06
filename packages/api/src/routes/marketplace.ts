@@ -76,6 +76,7 @@ const deploySchema = z.object({
     sizeGb: z.number().int().min(1).max(1000).optional(),
     existingVolumeName: z.string().min(1).optional(),
   })).optional(),
+  planId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
 }).openapi('MarketplaceDeploy');
 
 const createTemplateSchema = z.object({
@@ -287,7 +288,7 @@ marketplace.openapi(deployRoute, (async (c: any) => {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides, volumeGroups } = c.req.valid('json');
+  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides, volumeGroups, planId } = c.req.valid('json');
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
@@ -297,6 +298,7 @@ marketplace.openapi(deployRoute, (async (c: any) => {
       resourceOverrides,
       volumeOverrides,
       volumeGroups,
+      planId,
     });
     return c.json(result, 201);
   } catch (err) {

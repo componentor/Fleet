@@ -12,7 +12,7 @@ import type { AuthTokens, User } from '@fleet/types'
 // --- Composables ---
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const accountStore = useAccountStore()
 const api = useApi()
@@ -26,6 +26,8 @@ interface ResellerPlan {
   id: string
   name: string
   slug: string
+  nameTranslations?: Record<string, string>
+  descriptionTranslations?: Record<string, string>
   priceCents: number
   description: string
 }
@@ -56,7 +58,7 @@ const formError = ref('')
 const submitting = ref(false)
 
 // --- Computed ---
-const accentColor = computed(() => branding.value?.brandPrimaryColor ?? '#6366f1')
+const accentColor = computed(() => branding.value?.brandPrimaryColor ?? '#0284c7')
 
 const accentColorDark = computed(() => {
   // Lighten the accent color slightly for dark mode by blending with white
@@ -375,7 +377,7 @@ onMounted(fetchBranding)
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2">
                           <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                            {{ plan.name }}
+                            {{ plan.nameTranslations?.[locale] || plan.name }}
                           </span>
                           <Check
                             v-if="selectedPlanId === plan.id"

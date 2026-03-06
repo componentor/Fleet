@@ -78,12 +78,17 @@ export const storageVolumes = pgTable('storage_volumes', {
   mountPath: varchar('mount_path'),
   replicaCount: integer('replica_count').default(1),
   status: varchar('status').default('creating').notNull(),
+  serviceId: uuid('service_id'),
+  stackId: uuid('stack_id'),
+  isUnbound: boolean('is_unbound').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   deletedAt: timestamp('deleted_at'),
 }, (table) => [
   index('storage_volumes_account_idx').on(table.accountId),
   index('idx_storage_volumes_deleted_at').on(table.deletedAt),
+  index('idx_storage_volumes_service_id').on(table.serviceId),
+  index('idx_storage_volumes_stack_id').on(table.stackId),
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({

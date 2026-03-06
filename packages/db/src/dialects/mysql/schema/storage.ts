@@ -78,12 +78,17 @@ export const storageVolumes = mysqlTable('storage_volumes', {
   mountPath: varchar('mount_path', { length: 255 }),
   replicaCount: int('replica_count').default(1),
   status: varchar('status', { length: 255 }).default('creating').notNull(),
+  serviceId: varchar('service_id', { length: 36 }),
+  stackId: varchar('stack_id', { length: 36 }),
+  isUnbound: boolean('is_unbound').default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
   deletedAt: timestamp('deleted_at'),
 }, (table) => [
   index('storage_volumes_account_idx').on(table.accountId),
   index('idx_storage_volumes_deleted_at').on(table.deletedAt),
+  index('idx_storage_volumes_service_id').on(table.serviceId),
+  index('idx_storage_volumes_stack_id').on(table.stackId),
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({

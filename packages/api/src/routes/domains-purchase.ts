@@ -8,10 +8,12 @@ import { stripeService } from '../services/stripe.service.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { logger } from '../services/logger.js';
+import { exchangeRateService } from '../services/exchange-rate.service.js';
 import { getAppUrlSync } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const searchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 20, keyPrefix: 'domain-search' });
+const publicSearchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'public-domain-search' });
 
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
 function validateRedirectUrl(url: string): boolean {
@@ -38,19 +40,30 @@ const domainPurchase = new OpenAPIHono<{
   };
 }>();
 
-domainPurchase.use('*', authMiddleware);
-domainPurchase.use('*', tenantMiddleware);
+// Authed sub-router — all routes that require authentication
+const authed = new OpenAPIHono<{
+  Variables: {
+    user: AuthUser;
+    account: AccountContext | null;
+    accountId: string | null;
+  };
+}>();
+
+authed.use('*', authMiddleware);
+authed.use('*', tenantMiddleware);
 
 // ── Schemas ──
 
 const searchQuerySchema = z.object({
   q: z.string().min(1).openapi({ description: 'Domain search query' }),
   tlds: z.string().optional().openapi({ description: 'Comma-separated list of TLDs to filter' }),
+  currency: z.string().length(3).optional().openapi({ description: 'Target currency code (e.g. NOK, EUR)' }),
 });
 
 const checkoutSchema = z.object({
   domain: z.string().min(3).max(253).regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/),
   years: z.number().int().min(1).max(10).default(1),
+  currency: z.string().length(3).optional().openapi({ description: 'Charge in this currency (e.g. NOK, EUR). Defaults to TLD pricing currency.' }),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
 }).openapi('DomainCheckoutRequest');
@@ -100,8 +113,143 @@ const execOutputSchema = z.object({
   output: z.string(),
 }).openapi('ExecOutput');
 
+// ── Shared search handler ──
+
+async function handleDomainSearch(c: any) {
+  const { q: query, tlds: tldsParam, currency: targetCurrency } = c.req.valid('query');
+
+  const trimmed = query.trim().toLowerCase();
+
+  // Extract the SLD (the part before any TLD) — if empty, there's nothing to search
+  const sld = trimmed
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('.')[0]
+    ?.replace(/[^a-z0-9-]/g, '') ?? '';
+
+  if (!sld) {
+    return c.json({ query: trimmed, results: [] });
+  }
+
+  // Only search TLDs we have enabled in domainTldPricing — these are the ones we can actually sell
+  const pricingEntries = await db.query.domainTldPricing.findMany();
+  const enabledTlds = pricingEntries.filter((p: any) => p.enabled).map((p: any) => p.tld as string);
+
+  if (enabledTlds.length === 0) {
+    return c.json({ query: trimmed, results: [] });
+  }
+
+  const tlds = tldsParam
+    ? tldsParam.split(',').map((t: string) => t.trim().toLowerCase()).filter((t: string) => enabledTlds.includes(t))
+    : [];
+
+  const dotIndex = trimmed.indexOf('.');
+  let userTld: string | null = null;
+  if (dotIndex > 0 && dotIndex < trimmed.length - 1) {
+    userTld = trimmed.slice(dotIndex + 1);
+    // Include user's TLD if it's one we support
+    if (userTld && enabledTlds.includes(userTld) && !tlds.includes(userTld)) {
+      tlds.unshift(userTld);
+    }
+    // Fill in the rest of our enabled TLDs as suggestions
+    if (!tldsParam) {
+      for (const d of enabledTlds) {
+        if (!tlds.includes(d)) tlds.push(d);
+      }
+    }
+  } else if (!tldsParam) {
+    // No TLD typed and none specified — search all enabled TLDs
+    tlds.push(...enabledTlds);
+  }
+
+  try {
+    const results = await registrarService.searchDomains(trimmed, tlds);
+
+    // Overlay with our sell prices from domainTldPricing
+    const pricingMap = new Map(pricingEntries.map((p: any) => [p.tld, p]));
+
+    const enriched = results
+      .map((r: any) => {
+        const tld = r.domain.split('.').slice(1).join('.');
+        const pricing = pricingMap.get(tld);
+
+        // Only show TLDs we have pricing for and that are enabled
+        if (!pricing || !pricing.enabled) return null;
+
+        return {
+          ...r,
+          price: {
+            registration: pricing.sellRegistrationPrice / 100,
+            renewal: pricing.sellRenewalPrice / 100,
+            currency: pricing.currency,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    // Convert prices to requested currency if different
+    if (targetCurrency) {
+      const tc = targetCurrency.toUpperCase();
+      for (const r of enriched) {
+        if (r.price && r.price.currency && r.price.currency.toUpperCase() !== tc) {
+          const origCurrency = r.price.currency;
+          r.price.registration = await exchangeRateService.convert(r.price.registration, origCurrency, tc);
+          r.price.renewal = await exchangeRateService.convert(r.price.renewal, origCurrency, tc);
+          r.price.currency = tc;
+        }
+      }
+    }
+
+    // Sort: exact user-typed domain first, then available before taken
+    if (userTld) {
+      const exactDomain = trimmed.includes('.') ? trimmed : null;
+      enriched.sort((a: any, b: any) => {
+        if (exactDomain) {
+          if (a.domain === exactDomain) return -1;
+          if (b.domain === exactDomain) return 1;
+        }
+        // Then sort available domains before taken ones
+        if (a.available && !b.available) return -1;
+        if (!a.available && b.available) return 1;
+        return 0;
+      });
+    }
+
+    return c.json({ query: trimmed, results: enriched });
+  } catch (err) {
+    logger.error({ err }, 'Domain search failed');
+    return c.json(
+      {
+        error: 'Domain search failed',
+        details: undefined,
+      },
+      500,
+    );
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
-// GET /search — search available domains (with TLD pricing overlay)
+// GET /public/search — public domain search (no auth required)
+// ────────────────────────────────────────────────────────────────────────────
+const publicSearchRoute = createRoute({
+  method: 'get',
+  path: '/public/search',
+  tags: ['Domain Purchase'],
+  summary: 'Search available domains (public, no auth)',
+  request: {
+    query: searchQuerySchema,
+  },
+  responses: {
+    200: jsonContent(searchResultSchema, 'Domain search results'),
+    ...standardErrors,
+  },
+  middleware: [publicSearchRateLimit],
+});
+
+domainPurchase.openapi(publicSearchRoute, handleDomainSearch as any);
+
+// ────────────────────────────────────────────────────────────────────────────
+// GET /search — search available domains (authenticated)
 // ────────────────────────────────────────────────────────────────────────────
 const searchRoute = createRoute({
   method: 'get',
@@ -119,56 +267,7 @@ const searchRoute = createRoute({
   middleware: [searchRateLimit],
 });
 
-domainPurchase.openapi(searchRoute, (async (c: any) => {
-  const { q: query, tlds: tldsParam } = c.req.valid('query');
-
-  const tlds = tldsParam
-    ? tldsParam.split(',').map((t: string) => t.trim().toLowerCase())
-    : [];
-
-  try {
-    const results = await registrarService.searchDomains(query.trim(), tlds);
-
-    // Overlay with sell prices from domainTldPricing
-    const pricingEntries = await db.query.domainTldPricing.findMany();
-    const pricingMap = new Map(pricingEntries.map((p: any) => [p.tld, p]));
-
-    const enriched = results
-      .map((r: any) => {
-        const tld = r.domain.split('.').slice(1).join('.');
-        const pricing = pricingMap.get(tld);
-
-        if (pricing) {
-          // Only show TLDs that are enabled
-          if (!pricing.enabled) return null;
-
-          return {
-            ...r,
-            price: {
-              registration: pricing.sellRegistrationPrice / 100,
-              renewal: pricing.sellRenewalPrice / 100,
-              currency: pricing.currency,
-            },
-          };
-        }
-
-        // No pricing configured — show provider price as-is
-        return r;
-      })
-      .filter(Boolean);
-
-    return c.json({ query: query.trim(), results: enriched });
-  } catch (err) {
-    logger.error({ err }, 'Domain search failed');
-    return c.json(
-      {
-        error: 'Domain search failed',
-        details: undefined,
-      },
-      500,
-    );
-  }
-}) as any);
+authed.openapi(searchRoute, handleDomainSearch as any);
 
 // ────────────────────────────────────────────────────────────────────────────
 // POST /checkout — create Stripe checkout session for domain purchase
@@ -189,13 +288,13 @@ const checkoutRoute = createRoute({
   middleware: [requireAdmin],
 });
 
-domainPurchase.openapi(checkoutRoute, (async (c: any) => {
+authed.openapi(checkoutRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { domain, years, successUrl, cancelUrl } = c.req.valid('json');
+  const { domain, years, currency: requestedCurrency, successUrl, cancelUrl } = c.req.valid('json');
 
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
@@ -213,7 +312,14 @@ domainPurchase.openapi(checkoutRoute, (async (c: any) => {
     return c.json({ error: `Domain TLD .${tld} is not available for purchase` }, 400);
   }
 
-  const priceInCents = pricing.sellRegistrationPrice * years;
+  let priceInCents = pricing.sellRegistrationPrice * years;
+  let chargeCurrency = pricing.currency;
+
+  // Convert to requested currency if different
+  if (requestedCurrency && requestedCurrency.toUpperCase() !== pricing.currency.toUpperCase()) {
+    chargeCurrency = requestedCurrency.toUpperCase();
+    priceInCents = await exchangeRateService.convertCents(priceInCents, pricing.currency, chargeCurrency);
+  }
 
   // Get or create Stripe customer
   const account = await db.query.accounts.findFirst({
@@ -238,7 +344,7 @@ domainPurchase.openapi(checkoutRoute, (async (c: any) => {
       stripeCustomerId,
       domain,
       priceInCents,
-      pricing.currency,
+      chargeCurrency,
       years,
       accountId,
       successUrl,
@@ -271,7 +377,7 @@ const registerRoute = createRoute({
   middleware: [requireAdmin],
 });
 
-domainPurchase.openapi(registerRoute, (async (c: any) => {
+authed.openapi(registerRoute, (async (c: any) => {
   const user = c.get('user');
   // Direct registration bypasses Stripe — restrict to super admins only
   if (!user.isSuper) {
@@ -330,7 +436,7 @@ const renewCheckoutRoute = createRoute({
   middleware: [requireAdmin],
 });
 
-domainPurchase.openapi(renewCheckoutRoute, (async (c: any) => {
+authed.openapi(renewCheckoutRoute, (async (c: any) => {
   const accountId = c.get('accountId');
   const { id: registrationId } = c.req.valid('param');
 
@@ -409,7 +515,7 @@ const renewRoute = createRoute({
   middleware: [requireAdmin],
 });
 
-domainPurchase.openapi(renewRoute, (async (c: any) => {
+authed.openapi(renewRoute, (async (c: any) => {
   const user = c.get('user');
   // Direct renewal bypasses Stripe — restrict to super admins only
   if (!user.isSuper) {
@@ -470,7 +576,7 @@ const listRegistrationsRoute = createRoute({
   },
 });
 
-domainPurchase.openapi(listRegistrationsRoute, (async (c: any) => {
+authed.openapi(listRegistrationsRoute, (async (c: any) => {
   const accountId = c.get('accountId');
 
   if (!accountId) {
@@ -480,5 +586,7 @@ domainPurchase.openapi(listRegistrationsRoute, (async (c: any) => {
   const registrations = await registrarService.listRegistrations(accountId);
   return c.json(registrations);
 }) as any);
+
+domainPurchase.route('/', authed);
 
 export default domainPurchase;

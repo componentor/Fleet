@@ -9,7 +9,9 @@ import {
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+function localPlanName(plan: PlanData): string { return plan.nameTranslations?.[locale.value] || plan.name }
+function localPlanDesc(plan: PlanData): string { return plan.descriptionTranslations?.[locale.value] || plan.description || '' }
 const api = useApi()
 const route = useRoute()
 const router = useRouter()
@@ -36,6 +38,8 @@ interface PlanData {
   name: string
   slug: string
   description: string | null
+  nameTranslations?: Record<string, string>
+  descriptionTranslations?: Record<string, string>
   isFree: boolean
   isDefault: boolean
   priceCents: number
@@ -390,8 +394,8 @@ onMounted(() => {
               <span v-if="plan.isDefault" class="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300">
                 {{ t('subAccounts.wizard.popular') }}
               </span>
-              <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ plan.name }}</h4>
-              <p v-if="plan.description" class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ plan.description }}</p>
+              <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ localPlanName(plan) }}</h4>
+              <p v-if="localPlanDesc(plan)" class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ localPlanDesc(plan) }}</p>
               <div class="mt-3">
                 <span class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatPrice(plan.priceCents) }}</span>
                 <span v-if="!plan.isFree" class="text-sm text-gray-500 dark:text-gray-400">{{ cycleSuffix(selectedCycle) }}</span>

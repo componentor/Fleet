@@ -7,7 +7,7 @@ import {
   eq,
 } from '@fleet/db';
 import { insertReturning, upsert } from '@fleet/db';
-import type { BillingModel, BillingCycle, CreateCheckoutInput } from '@fleet/types';
+import type { BillingModel, BillingCycle, CreateCheckoutInput, CreateServiceCheckoutInput } from '@fleet/types';
 import { stripeService } from './stripe.service.js';
 import { logger } from './logger.js';
 import { calculateResellerPricing } from '../routes/reseller.js';
@@ -338,6 +338,106 @@ class StripeSyncService {
     }
 
     throw new Error(`Unknown billing model: ${billingModel}`);
+  }
+
+  /**
+   * Create a Stripe Checkout session for a per-service or per-stack subscription.
+   * Uses inline price_data so it works with any currency.
+   */
+  async createServiceCheckoutSession(
+    input: CreateServiceCheckoutInput & { stripeCustomerId: string },
+  ): Promise<{ url: string }> {
+    const {
+      accountId,
+      serviceId,
+      stackId,
+      planId,
+      billingCycle,
+      currency = 'usd',
+      paymentMethodId,
+      billingContactEmail,
+      billingContactName,
+      stripeCustomerId,
+      successUrl,
+      cancelUrl,
+    } = input;
+
+    const plan = await db.query.billingPlans.findFirst({
+      where: eq(billingPlans.id, planId),
+    });
+    if (!plan) throw new Error('Plan not found');
+    if (plan.isFree) throw new Error('Free plans do not require checkout');
+
+    // Calculate price with cycle multiplier + discount
+    const config = await db.query.billingConfig.findFirst();
+    const cycleDiscounts = (config?.cycleDiscounts ?? {}) as Record<string, { type: string; value: number }>;
+    let amount = Math.round(plan.priceCents * CYCLE_MONTHS[billingCycle]);
+    const cycleDiscount = cycleDiscounts[billingCycle];
+    if (cycleDiscount) {
+      if (cycleDiscount.type === 'percentage') {
+        amount = Math.round(amount * (1 - cycleDiscount.value / 100));
+      } else if (cycleDiscount.type === 'fixed') {
+        amount = Math.max(0, amount - cycleDiscount.value);
+      }
+    }
+
+    // Apply reseller pricing if applicable
+    const resellerPricing = await calculateResellerPricing(accountId, amount);
+    const finalAmount = resellerPricing.finalPrice;
+
+    const metadata: Record<string, string> = {
+      type: 'service_subscription',
+      accountId,
+      planId,
+      billingCycle,
+    };
+    if (serviceId) metadata['fleetServiceId'] = serviceId;
+    if (stackId) metadata['fleetStackId'] = stackId;
+    if (billingContactEmail) metadata['billingContactEmail'] = billingContactEmail;
+    if (billingContactName) metadata['billingContactName'] = billingContactName;
+    if (resellerPricing.discountAmount > 0) metadata['resellerDiscount'] = String(resellerPricing.discountAmount);
+    if (resellerPricing.markupAmount > 0) metadata['resellerMarkup'] = String(resellerPricing.markupAmount);
+
+    const lineItems: import('stripe').Stripe.Checkout.SessionCreateParams.LineItem[] = [{
+      price_data: {
+        currency: currency.toLowerCase(),
+        product_data: {
+          name: plan.name,
+          description: `${billingCycle} service subscription`,
+        },
+        unit_amount: finalAmount,
+        recurring: CYCLE_TO_STRIPE[billingCycle],
+      },
+      quantity: 1,
+    }];
+
+    // Reseller sub-account with Connect
+    if (resellerPricing.resellerConnectId && resellerPricing.markupAmount > 0) {
+      const applicationFeePercent = finalAmount > 0
+        ? Math.round(((finalAmount - resellerPricing.markupAmount) / finalAmount) * 10000) / 100
+        : 100;
+
+      const session = await stripeService.createSubscriptionWithConnect({
+        customerId: stripeCustomerId,
+        lineItems,
+        metadata,
+        successUrl,
+        cancelUrl,
+        connectAccountId: resellerPricing.resellerConnectId,
+        applicationFeePercent,
+      });
+      return { url: session.url! };
+    }
+
+    // Regular checkout (with optional pre-selected payment method)
+    const session = await stripeService.createFlexibleCheckoutSession(
+      stripeCustomerId,
+      lineItems,
+      metadata,
+      successUrl,
+      cancelUrl,
+    );
+    return { url: session.url! };
   }
 
   /**

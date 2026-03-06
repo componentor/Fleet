@@ -240,6 +240,12 @@ const panelRoutes: RouteRecordRaw[] = [
         props: true,
       },
       {
+        path: 'stacks/:stackId',
+        name: 'panel-stack-detail',
+        component: () => import('@/pages/panel/StackDetail.vue'),
+        props: true,
+      },
+      {
         path: 'deploy',
         name: 'panel-deploy',
         component: () => import('@/pages/panel/Deploy.vue'),

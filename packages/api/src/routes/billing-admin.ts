@@ -29,6 +29,7 @@ import { eventService, EventTypes } from '../services/event.service.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
+import { currencyService } from '../services/currency.service.js';
 import { getAppUrl } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
@@ -67,6 +68,8 @@ const createPlanSchema = z.object({
   bandwidthLimit: z.number().int().min(0).optional(),
   maxUsersPerAccount: z.number().int().min(0).optional(),
   priceCents: z.number().int().min(0),
+  nameTranslations: z.record(z.string(), z.string()).optional(),
+  descriptionTranslations: z.record(z.string(), z.string()).optional(),
 }).openapi('CreatePlanRequest');
 
 const pricingSchema = z.object({
@@ -1035,6 +1038,48 @@ billingAdmin.openapi(updateGracePeriodRoute, (async (c: any) => {
   });
 
   return c.json({ message: scheduledDeletionAt ? `Deletion scheduled for ${scheduledDeletionAt}` : 'Scheduled deletion cancelled' });
+}) as any);
+
+// ─── Allowed Currencies ──────────────────────────────────────────────────────
+
+const getAllowedCurrenciesRoute = createRoute({
+  method: 'get',
+  path: '/allowed-currencies',
+  tags: ['Billing Admin'],
+  summary: 'Get allowed currencies',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ currencies: z.array(z.string()) }), 'Allowed currencies'),
+    ...standardErrors,
+  },
+});
+
+billingAdmin.openapi(getAllowedCurrenciesRoute, (async (c: any) => {
+  const currencies = await currencyService.getAllowed();
+  return c.json({ currencies });
+}) as any);
+
+const setAllowedCurrenciesRoute = createRoute({
+  method: 'put',
+  path: '/allowed-currencies',
+  tags: ['Billing Admin'],
+  summary: 'Set allowed currencies',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      currencies: z.array(z.string().length(3)).min(1).openapi({ description: 'Array of 3-letter ISO currency codes' }),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({ currencies: z.array(z.string()) }), 'Updated allowed currencies'),
+    ...standardErrors,
+  },
+});
+
+billingAdmin.openapi(setAllowedCurrenciesRoute, (async (c: any) => {
+  const { currencies } = c.req.valid('json');
+  const result = await currencyService.setAllowed(currencies);
+  return c.json({ currencies: result });
 }) as any);
 
 export default billingAdmin;

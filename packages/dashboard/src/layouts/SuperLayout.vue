@@ -213,15 +213,15 @@ function changeLocale(newLocale: string) {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div :class="['flex items-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'justify-center px-2' : 'px-6']">
+      <div :class="['flex items-center justify-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'px-2' : 'px-6']">
         <RouterLink to="/" :class="['flex items-center', collapsed ? 'justify-center' : 'gap-2']">
           <img v-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
           <svg v-else class="w-8 h-8 shrink-0" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-            <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4f46e5"/></linearGradient></defs>
+            <defs><linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0ea5e9"/><stop offset="100%" stop-color="#0369a1"/></linearGradient></defs>
             <rect width="64" height="64" rx="14" fill="url(#nav-g)"/>
             <text x="32" y="44" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="36" fill="#fff" text-anchor="middle">F</text>
           </svg>
-          <span v-if="!collapsed" class="text-xl font-bold text-primary-600 dark:text-primary-400">{{ brandTitle }}</span>
+          <span v-if="!collapsed" class="text-xl font-medium text-gray-900 dark:text-white truncate">{{ brandTitle }}</span>
         </RouterLink>
       </div>
 
@@ -461,7 +461,7 @@ function changeLocale(newLocale: string) {
 .sidebar-banner-shimmer {
   position: relative;
   overflow: hidden;
-  background: conic-gradient(from var(--shimmer-angle) at var(--shimmer-x) 50%, #c2410c, #ea580c, #f97316, #ea580c, #c2410c);
+  background: conic-gradient(from var(--shimmer-angle) at var(--shimmer-x) 50%, #075985, #0284c7, #0ea5e9, #0284c7, #075985);
   animation: sidebar-rotate 10s linear infinite, sidebar-drift 7s ease-in-out infinite alternate;
 }
 

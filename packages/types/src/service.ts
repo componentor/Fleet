@@ -50,6 +50,7 @@ export interface Service {
   restartMaxAttempts: number;
   restartDelay: string;
   stackId: string | null;
+  planId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -73,6 +74,7 @@ export interface CreateServiceInput {
   updateDelay?: string;
   rollbackOnFailure?: boolean;
   healthCheck?: HealthCheck;
+  planId?: string;
 }
 
 export interface UpdateServiceInput {

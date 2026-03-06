@@ -21,3 +21,5 @@ export * from './status-page';
 export * from './admin-roles';
 export * from './support';
 export * from './self-healing';
+export * from './stacks';
+export * from './analytics';

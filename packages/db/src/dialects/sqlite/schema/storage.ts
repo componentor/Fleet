@@ -73,12 +73,17 @@ export const storageVolumes = sqliteTable('storage_volumes', {
   mountPath: text('mount_path'),
   replicaCount: integer('replica_count').default(1),
   status: text('status').default('creating').notNull(),
+  serviceId: text('service_id'),
+  stackId: text('stack_id'),
+  isUnbound: integer('is_unbound', { mode: 'boolean' }).default(false),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   deletedAt: integer('deleted_at', { mode: 'timestamp' }),
 }, (table) => [
   index('storage_volumes_account_idx').on(table.accountId),
   index('idx_storage_volumes_deleted_at').on(table.deletedAt),
+  index('idx_storage_volumes_service_id').on(table.serviceId),
+  index('idx_storage_volumes_stack_id').on(table.stackId),
 ]);
 
 export const storageVolumesRelations = relations(storageVolumes, ({ one }) => ({

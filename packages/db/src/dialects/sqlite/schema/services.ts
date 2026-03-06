@@ -7,6 +7,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 import { accounts } from './accounts';
+import { billingPlans } from './billing';
 
 export const services = sqliteTable('services', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -53,6 +54,8 @@ export const services = sqliteTable('services', {
   robotsConfig: text('robots_config', { mode: 'json' }),
   nginxConfig: text('nginx_config'),
   stackId: text('stack_id'),
+  planId: text('plan_id')
+    .references(() => billingPlans.id, { onDelete: 'set null' }),
   stoppedAt: integer('stopped_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
@@ -63,6 +66,7 @@ export const services = sqliteTable('services', {
   index('idx_services_stack_id').on(table.stackId),
   index('idx_services_github_autodeploy').on(table.githubRepo, table.githubBranch, table.autoDeploy),
   index('idx_services_deleted_at').on(table.deletedAt),
+  index('idx_services_plan_id').on(table.planId),
 ]);
 
 export const deployments = sqliteTable('deployments', {
@@ -89,6 +93,10 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
   account: one(accounts, {
     fields: [services.accountId],
     references: [accounts.id],
+  }),
+  plan: one(billingPlans, {
+    fields: [services.planId],
+    references: [billingPlans.id],
   }),
   deployments: many(deployments),
 }));

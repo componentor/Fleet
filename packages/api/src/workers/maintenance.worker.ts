@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, uptimeSnapshots, eq, and, lt, lte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning } from '@fleet/db';
+import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, uptimeSnapshots, serviceAnalytics, eq, and, lt, lte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning, getDialect } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -91,6 +91,14 @@ interface UptimeSnapshotData {
   type: 'uptime-snapshot';
 }
 
+interface AnalyticsCollectionData {
+  type: 'analytics-collection';
+}
+
+interface AnalyticsDownsampleData {
+  type: 'analytics-downsample';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -111,7 +119,9 @@ type MaintenanceJobData =
   | LogArchiveCleanupData
   | BackupRetentionCleanupData
   | RegistryPollData
-  | UptimeSnapshotData;
+  | UptimeSnapshotData
+  | AnalyticsCollectionData
+  | AnalyticsDownsampleData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -1362,10 +1372,49 @@ async function executeDataPurge(): Promise<void> {
       .returning({ id: users.id });
     usersPurged = deletedUsers.length;
 
-    const total = volumesPurged + servicesPurged + accountsPurged + usersPurged;
+    // 5. Purge analytics data older than 90 days (chunked to avoid OOM)
+    const analyticsCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    let analyticsPurged = 0;
+    const ANALYTICS_PURGE_CHUNK = 10000;
+    const purgeDialect = getDialect();
+    while (true) {
+      let deletedCount = 0;
+      if (purgeDialect === 'pg') {
+        const result = await db.execute(sql`
+          DELETE FROM "service_analytics"
+          WHERE "id" IN (
+            SELECT "id" FROM "service_analytics"
+            WHERE "recorded_at" < ${analyticsCutoff}
+            LIMIT ${ANALYTICS_PURGE_CHUNK}
+          )
+        `);
+        deletedCount = Number((result as any).rowCount ?? 0);
+      } else if (purgeDialect === 'mysql') {
+        const result = await db.execute(sql`
+          DELETE FROM \`service_analytics\`
+          WHERE \`recorded_at\` < ${analyticsCutoff}
+          LIMIT ${ANALYTICS_PURGE_CHUNK}
+        `);
+        deletedCount = Number((result as any)[0]?.affectedRows ?? 0);
+      } else {
+        const result = await db.execute(sql`
+          DELETE FROM "service_analytics"
+          WHERE "id" IN (
+            SELECT "id" FROM "service_analytics"
+            WHERE "recorded_at" < ${Math.floor(analyticsCutoff.getTime() / 1000)}
+            LIMIT ${ANALYTICS_PURGE_CHUNK}
+          )
+        `);
+        deletedCount = Number((result as any).changes ?? 0);
+      }
+      analyticsPurged += deletedCount;
+      if (deletedCount < ANALYTICS_PURGE_CHUNK) break;
+    }
+
+    const total = volumesPurged + servicesPurged + accountsPurged + usersPurged + analyticsPurged;
     if (total > 0) {
       logger.info(
-        { volumesPurged, servicesPurged, accountsPurged, usersPurged, retentionDays },
+        { volumesPurged, servicesPurged, accountsPurged, usersPurged, analyticsPurged, retentionDays },
         `Data purge completed: ${total} record(s) permanently removed`,
       );
     }
@@ -1982,6 +2031,199 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
     case 'uptime-snapshot':
       await recordUptimeSnapshot();
       break;
+    case 'analytics-collection': {
+      const { analyticsService } = await import('../services/analytics.service.js');
+      await analyticsService.collectAnalytics();
+      break;
+    }
+    case 'analytics-downsample':
+      await executeAnalyticsDownsample();
+      break;
+  }
+}
+
+/**
+ * Downsample analytics data to reduce storage:
+ * - 5m → 1h for data older than 48 hours
+ * - 1h → 1d for data older than 30 days
+ */
+async function executeAnalyticsDownsample(): Promise<void> {
+  const dialect = getDialect();
+
+  try {
+    // Phase 1: Roll 5m data older than 48h into 1h buckets
+    const hourlyThreshold = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await downsampleAndDelete(dialect, '5m', '1h', 3600, hourlyThreshold);
+
+    // Phase 2: Roll 1h data older than 30d into 1d buckets
+    const dailyThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await downsampleAndDelete(dialect, '1h', '1d', 86400, dailyThreshold);
+
+    logger.info('Analytics downsampling completed');
+  } catch (err) {
+    logger.error({ err }, 'Analytics downsampling failed');
+    logToErrorTable({
+      level: 'error',
+      message: `Analytics downsampling failed: ${err instanceof Error ? err.message : String(err)}`,
+      stack: err instanceof Error ? err.stack : null,
+      metadata: { worker: 'maintenance', task: 'analytics-downsample' },
+    });
+  }
+}
+
+async function downsampleAndDelete(
+  dialect: string,
+  sourcePeriod: string,
+  targetPeriod: string,
+  bucketSeconds: number,
+  threshold: Date,
+): Promise<void> {
+  // Check if there's data to downsample
+  const countResult = await db.select({ count: sql<number>`count(*)` })
+    .from(serviceAnalytics)
+    .where(and(
+      eq(serviceAnalytics.period, sourcePeriod),
+      lt(serviceAnalytics.recordedAt, threshold),
+    ));
+
+  const rowCount = Number(countResult[0]?.count ?? 0);
+  if (rowCount === 0) return;
+
+  logger.info({ sourcePeriod, targetPeriod, rowCount }, 'Downsampling analytics data');
+
+  // INSERT aggregated rows using dialect-specific time bucketing
+  if (dialect === 'pg') {
+    await db.execute(sql`
+      INSERT INTO "service_analytics" (
+        "id", "service_id", "account_id", "requests",
+        "requests_2xx", "requests_3xx", "requests_4xx", "requests_5xx",
+        "bytes_in", "bytes_out", "period", "recorded_at"
+      )
+      SELECT
+        gen_random_uuid(),
+        "service_id",
+        "account_id",
+        SUM("requests"),
+        SUM("requests_2xx"),
+        SUM("requests_3xx"),
+        SUM("requests_4xx"),
+        SUM("requests_5xx"),
+        SUM("bytes_in"),
+        SUM("bytes_out"),
+        ${targetPeriod},
+        to_timestamp(floor(extract(epoch from "recorded_at") / ${bucketSeconds}) * ${bucketSeconds})
+      FROM "service_analytics"
+      WHERE "period" = ${sourcePeriod}
+        AND "recorded_at" < ${threshold}
+      GROUP BY "service_id", "account_id",
+        floor(extract(epoch from "recorded_at") / ${bucketSeconds}) * ${bucketSeconds}
+    `);
+  } else if (dialect === 'mysql') {
+    await db.execute(sql`
+      INSERT INTO \`service_analytics\` (
+        \`id\`, \`service_id\`, \`account_id\`, \`requests\`,
+        \`requests_2xx\`, \`requests_3xx\`, \`requests_4xx\`, \`requests_5xx\`,
+        \`bytes_in\`, \`bytes_out\`, \`period\`, \`recorded_at\`
+      )
+      SELECT
+        UUID(),
+        \`service_id\`,
+        \`account_id\`,
+        SUM(\`requests\`),
+        SUM(\`requests_2xx\`),
+        SUM(\`requests_3xx\`),
+        SUM(\`requests_4xx\`),
+        SUM(\`requests_5xx\`),
+        SUM(\`bytes_in\`),
+        SUM(\`bytes_out\`),
+        ${targetPeriod},
+        FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(\`recorded_at\`) / ${bucketSeconds}) * ${bucketSeconds})
+      FROM \`service_analytics\`
+      WHERE \`period\` = ${sourcePeriod}
+        AND \`recorded_at\` < ${threshold}
+      GROUP BY \`service_id\`, \`account_id\`,
+        FLOOR(UNIX_TIMESTAMP(\`recorded_at\`) / ${bucketSeconds}) * ${bucketSeconds}
+    `);
+  } else {
+    // SQLite — recordedAt is unix timestamp integer
+    await db.execute(sql`
+      INSERT INTO "service_analytics" (
+        "id", "service_id", "account_id", "requests",
+        "requests_2xx", "requests_3xx", "requests_4xx", "requests_5xx",
+        "bytes_in", "bytes_out", "period", "recorded_at"
+      )
+      SELECT
+        lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+        "service_id",
+        "account_id",
+        SUM("requests"),
+        SUM("requests_2xx"),
+        SUM("requests_3xx"),
+        SUM("requests_4xx"),
+        SUM("requests_5xx"),
+        SUM("bytes_in"),
+        SUM("bytes_out"),
+        ${targetPeriod},
+        ("recorded_at" / ${bucketSeconds}) * ${bucketSeconds}
+      FROM "service_analytics"
+      WHERE "period" = ${sourcePeriod}
+        AND "recorded_at" < ${Math.floor(threshold.getTime() / 1000)}
+      GROUP BY "service_id", "account_id",
+        ("recorded_at" / ${bucketSeconds}) * ${bucketSeconds}
+    `);
+  }
+
+  // Delete source rows in chunks to avoid long locks
+  await deleteAnalyticsChunked(dialect, sourcePeriod, threshold);
+}
+
+async function deleteAnalyticsChunked(
+  dialect: string,
+  period: string,
+  threshold: Date,
+): Promise<void> {
+  const CHUNK = 10000;
+  let totalDeleted = 0;
+
+  while (true) {
+    let deletedCount = 0;
+
+    if (dialect === 'pg') {
+      const result = await db.execute(sql`
+        DELETE FROM "service_analytics"
+        WHERE "id" IN (
+          SELECT "id" FROM "service_analytics"
+          WHERE "period" = ${period} AND "recorded_at" < ${threshold}
+          LIMIT ${CHUNK}
+        )
+      `);
+      deletedCount = Number((result as any).rowCount ?? 0);
+    } else if (dialect === 'mysql') {
+      const result = await db.execute(sql`
+        DELETE FROM \`service_analytics\`
+        WHERE \`period\` = ${period} AND \`recorded_at\` < ${threshold}
+        LIMIT ${CHUNK}
+      `);
+      deletedCount = Number((result as any)[0]?.affectedRows ?? 0);
+    } else {
+      // SQLite doesn't support LIMIT on DELETE directly, use subquery
+      const result = await db.execute(sql`
+        DELETE FROM "service_analytics"
+        WHERE "id" IN (
+          SELECT "id" FROM "service_analytics"
+          WHERE "period" = ${period} AND "recorded_at" < ${Math.floor(threshold.getTime() / 1000)}
+          LIMIT ${CHUNK}
+        )
+      `);
+      deletedCount = Number((result as any).changes ?? 0);
+    }
+
+    totalDeleted += deletedCount;
+    if (deletedCount < CHUNK) break;
+  }
+
+  if (totalDeleted > 0) {
+    logger.info({ period, totalDeleted }, 'Deleted downsampled analytics source rows');
   }
 }
 

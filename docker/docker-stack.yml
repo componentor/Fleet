@@ -190,6 +190,7 @@ services:
         target: /etc/traefik/dynamic/robots.yml
     networks:
       - fleet_public
+      - fleet_internal
     deploy:
       mode: global
       placement:

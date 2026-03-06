@@ -20,6 +20,7 @@ import {
   eq,
   and,
   isNull,
+  inArray,
   webhookEvents,
   safeTransaction,
 } from '@fleet/db';
@@ -32,6 +33,8 @@ import { orchestrator } from '../services/orchestrator.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { calculateResellerPricing } from './reseller.js';
 import { logger, logToErrorTable } from '../services/logger.js';
+import { exchangeRateService } from '../services/exchange-rate.service.js';
+import { currencyService } from '../services/currency.service.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
@@ -125,6 +128,9 @@ const billingConfigSchema = z.object({
   volumeDeletionEnabled: z.boolean().optional(),
   purgeEnabled: z.boolean().optional(),
   purgeRetentionDays: z.number().int().min(1).optional(),
+  allowDowngrade: z.boolean().optional(),
+  deletionBillingPolicy: z.enum(['immediate', 'end_of_period']).optional(),
+  maxFreeServicesPerAccount: z.number().int().min(0).nullable().optional(),
 }).openapi('BillingConfigRequest');
 
 const slugParamSchema = z.object({
@@ -834,6 +840,9 @@ authed.openapi(getConfigRoute, (async (c: any) => {
     allowedCycles: config?.allowedCycles ?? ['monthly', 'yearly'],
     cycleDiscounts: config?.cycleDiscounts ?? {},
     trialDays: config?.trialDays ?? 0,
+    allowDowngrade: config?.allowDowngrade ?? true,
+    deletionBillingPolicy: config?.deletionBillingPolicy ?? 'end_of_period',
+    maxFreeServicesPerAccount: config?.maxFreeServicesPerAccount ?? null,
     pricingConfig: pricing ? {
       cpuCentsPerHour: pricing.cpuCentsPerHour ?? 0,
       memoryCentsPerGbHour: pricing.memoryCentsPerGbHour ?? 0,
@@ -875,6 +884,8 @@ authed.openapi(updateConfigRoute, (async (c: any) => {
       allowedCycles: data.allowedCycles ?? ['monthly', 'yearly'],
       cycleDiscounts: data.cycleDiscounts ?? {},
       trialDays: data.trialDays ?? 0,
+      allowDowngrade: data.allowDowngrade ?? true,
+      deletionBillingPolicy: data.deletionBillingPolicy ?? 'end_of_period',
     });
     result = created;
   }
@@ -1052,7 +1063,588 @@ authed.openapi(resourceLimitsRoute, (async (c: any) => {
   });
 }) as any);
 
+// ─── Per-service / per-stack billing endpoints ────────────────────────────────
+
+const serviceCheckoutSchema = z.object({
+  serviceId: z.string().optional(),
+  stackId: z.string().optional(),
+  planId: z.string(),
+  billingCycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']),
+  currency: z.string().length(3).optional(),
+  paymentMethodId: z.string().optional(),
+  billingContactEmail: z.string().email().optional(),
+  billingContactName: z.string().optional(),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+}).refine(d => d.serviceId || d.stackId, { message: 'Either serviceId or stackId is required' })
+  .openapi('ServiceCheckoutRequest');
+
+const serviceSubIdParamSchema = z.object({
+  id: z.string().openapi({ description: 'Subscription ID' }),
+});
+
+const serviceIdParamSchema = z.object({
+  serviceId: z.string().openapi({ description: 'Service ID' }),
+});
+
+const changePlanSchema = z.object({
+  planId: z.string(),
+}).openapi('ChangePlanRequest');
+
+const changePaymentMethodSchema = z.object({
+  paymentMethodId: z.string(),
+}).openapi('ChangePaymentMethodRequest');
+
+const updateContactSchema = z.object({
+  billingContactEmail: z.string().email().optional(),
+  billingContactName: z.string().optional(),
+}).openapi('UpdateBillingContactRequest');
+
+// Route definitions
+
+const serviceCheckoutRoute = createRoute({
+  method: 'post',
+  path: '/service-subscriptions/checkout',
+  tags: ['Service Billing'],
+  summary: 'Create a Stripe checkout session for a service/stack subscription',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: { body: jsonBody(serviceCheckoutSchema) },
+  responses: {
+    200: jsonContent(z.object({ url: z.string() }), 'Checkout URL'),
+    ...standardErrors,
+  },
+});
+
+const listServiceSubscriptionsRoute = createRoute({
+  method: 'get',
+  path: '/service-subscriptions',
+  tags: ['Service Billing'],
+  summary: 'List all service/stack subscriptions for this account',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Service subscriptions'),
+    ...standardErrors,
+  },
+});
+
+const getServiceSubscriptionRoute = createRoute({
+  method: 'get',
+  path: '/service-subscriptions/{id}',
+  tags: ['Service Billing'],
+  summary: 'Get a single service subscription',
+  security: bearerSecurity,
+  request: { params: serviceSubIdParamSchema },
+  responses: {
+    200: jsonContent(z.any(), 'Service subscription detail'),
+    ...standardErrors,
+  },
+});
+
+const getSubscriptionForServiceRoute = createRoute({
+  method: 'get',
+  path: '/services/{serviceId}/subscription',
+  tags: ['Service Billing'],
+  summary: 'Get the subscription for a specific service',
+  security: bearerSecurity,
+  request: { params: serviceIdParamSchema },
+  responses: {
+    200: jsonContent(z.any(), 'Subscription for service'),
+    ...standardErrors,
+  },
+});
+
+const changeServicePlanRoute = createRoute({
+  method: 'patch',
+  path: '/service-subscriptions/{id}/plan',
+  tags: ['Service Billing'],
+  summary: 'Change the tier (upgrade/downgrade) of a service subscription',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: { params: serviceSubIdParamSchema, body: jsonBody(changePlanSchema) },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Plan changed'),
+    ...standardErrors,
+  },
+});
+
+const changeServicePaymentMethodRoute = createRoute({
+  method: 'patch',
+  path: '/service-subscriptions/{id}/payment-method',
+  tags: ['Service Billing'],
+  summary: 'Change the payment method for a service subscription',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: { params: serviceSubIdParamSchema, body: jsonBody(changePaymentMethodSchema) },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Payment method changed'),
+    ...standardErrors,
+  },
+});
+
+const updateServiceContactRoute = createRoute({
+  method: 'patch',
+  path: '/service-subscriptions/{id}/contact',
+  tags: ['Service Billing'],
+  summary: 'Update billing contact for a service subscription',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: { params: serviceSubIdParamSchema, body: jsonBody(updateContactSchema) },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Billing contact updated'),
+    ...standardErrors,
+  },
+});
+
+const cancelServiceSubscriptionRoute = createRoute({
+  method: 'delete',
+  path: '/service-subscriptions/{id}',
+  tags: ['Service Billing'],
+  summary: 'Cancel a service subscription at period end',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  request: { params: serviceSubIdParamSchema },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Cancellation confirmed'),
+    ...standardErrors,
+  },
+});
+
+const freeTierUsageRoute = createRoute({
+  method: 'get',
+  path: '/free-tier-usage',
+  tags: ['Service Billing'],
+  summary: 'Get free tier usage for the current account',
+  security: bearerSecurity,
+  middleware: [requireOwner, requireScope('admin')] as const,
+  responses: {
+    200: jsonContent(z.object({ used: z.number(), limit: z.number().nullable() }), 'Free tier usage'),
+    ...standardErrors,
+  },
+});
+
+// Handlers
+
+// POST /service-subscriptions/checkout
+authed.openapi(serviceCheckoutRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const data = c.req.valid('json');
+
+  if (!validateRedirectUrl(data.successUrl) || !validateRedirectUrl(data.cancelUrl)) {
+    return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
+  }
+
+  // Check Stripe is configured before doing anything
+  if (!(await stripeService.isConfigured())) {
+    return c.json({ error: 'Billing is not configured. An administrator must set up Stripe in the admin settings.' }, 503);
+  }
+
+  // Enforce free tier limit per account
+  const selectedPlan = await db.query.billingPlans.findFirst({
+    where: eq(billingPlans.id, data.planId),
+  });
+  if (selectedPlan?.isFree) {
+    const config = await db.query.billingConfig.findFirst();
+    const maxFree = config?.maxFreeServicesPerAccount;
+    if (maxFree != null) {
+      const freePlanIds = (await db.select({ id: billingPlans.id }).from(billingPlans).where(eq(billingPlans.isFree, true))).map(p => p.id);
+      const freeSubCount = await db.select({ count: countSql() }).from(subscriptions)
+        .where(and(
+          eq(subscriptions.accountId, accountId),
+          isNull(subscriptions.cancelledAt),
+          freePlanIds.length > 0 ? inArray(subscriptions.planId, freePlanIds) : undefined,
+        ));
+      const used = Number(freeSubCount[0]?.count ?? 0);
+      if (used >= maxFree) {
+        return c.json({ error: 'Free tier limit reached for this account', maxFree, currentFree: used }, 409);
+      }
+    }
+  }
+
+  // Verify service/stack belongs to this account
+  if (data.serviceId) {
+    const svc = await db.query.services.findFirst({
+      where: and(eq(services.id, data.serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+    });
+    if (!svc) return c.json({ error: 'Service not found' }, 404);
+  }
+
+  // Get or create Stripe customer
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+
+  let stripeCustomerId = account.stripeCustomerId;
+  if (!stripeCustomerId) {
+    const user = c.get('user');
+    const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+    stripeCustomerId = customer.id;
+    await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+  }
+
+  try {
+    const result = await stripeSyncService.createServiceCheckoutSession({
+      accountId,
+      serviceId: data.serviceId,
+      stackId: data.stackId,
+      planId: data.planId,
+      billingCycle: data.billingCycle,
+      currency: data.currency,
+      paymentMethodId: data.paymentMethodId,
+      billingContactEmail: data.billingContactEmail,
+      billingContactName: data.billingContactName,
+      stripeCustomerId,
+      successUrl: data.successUrl,
+      cancelUrl: data.cancelUrl,
+    });
+    return c.json(result);
+  } catch (err) {
+    logger.error({ err }, 'Failed to create service checkout session');
+    logToErrorTable({ level: 'error', message: `Service checkout failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'service-checkout' } });
+    return c.json({ error: 'Checkout failed' }, 400);
+  }
+}) as any);
+
+// GET /service-subscriptions
+authed.openapi(listServiceSubscriptionsRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const subs = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.accountId, accountId),
+      // Service subscriptions have either serviceId or stackId set
+    ),
+    with: { plan: true },
+    orderBy: (s: any, { desc: d }: any) => d(s.createdAt),
+  });
+
+  // Filter to only service/stack subscriptions
+  const serviceSubs = subs.filter((s: any) => s.serviceId || s.stackId);
+  return c.json(serviceSubs);
+}) as any);
+
+// GET /service-subscriptions/:id
+authed.openapi(getServiceSubscriptionRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id } = c.req.valid('param');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.id, id), eq(subscriptions.accountId, accountId)),
+    with: { plan: true },
+  });
+  if (!sub) return c.json({ error: 'Subscription not found' }, 404);
+
+  let stripeData = null;
+  if (sub.stripeSubscriptionId) {
+    try { stripeData = await stripeService.getSubscription(sub.stripeSubscriptionId); } catch { /* Stripe unavailable */ }
+  }
+
+  return c.json({ ...sub, stripeData });
+}) as any);
+
+// GET /services/:serviceId/subscription
+authed.openapi(getSubscriptionForServiceRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { serviceId } = c.req.valid('param');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  // Verify service ownership
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+  });
+  if (!svc) return c.json({ error: 'Service not found' }, 404);
+
+  // Direct service subscription
+  let sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.serviceId, serviceId), eq(subscriptions.accountId, accountId)),
+    with: { plan: true },
+  });
+
+  // Fall back to stack subscription if service belongs to a stack
+  if (!sub && svc.stackId) {
+    sub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.stackId, svc.stackId), eq(subscriptions.accountId, accountId)),
+      with: { plan: true },
+    });
+  }
+
+  // Fall back to account-level subscription (legacy)
+  if (!sub) {
+    sub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.accountId, accountId), isNull(subscriptions.serviceId), isNull(subscriptions.stackId)),
+      with: { plan: true },
+      orderBy: (s: any, { desc: d }: any) => d(s.createdAt),
+    });
+  }
+
+  return c.json(sub ?? null);
+}) as any);
+
+// PATCH /service-subscriptions/:id/plan
+authed.openapi(changeServicePlanRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id } = c.req.valid('param');
+  const { planId } = c.req.valid('json');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.id, id), eq(subscriptions.accountId, accountId)),
+  });
+  if (!sub) return c.json({ error: 'Subscription not found' }, 404);
+  if (!sub.stripeSubscriptionId) return c.json({ error: 'No Stripe subscription to update' }, 400);
+  if (!sub.billingCycle) return c.json({ error: 'Subscription has no billing cycle' }, 400);
+
+  const newPlan = await db.query.billingPlans.findFirst({
+    where: eq(billingPlans.id, planId),
+  });
+  if (!newPlan) return c.json({ error: 'Plan not found' }, 404);
+
+  const config = await db.query.billingConfig.findFirst();
+
+  // ── Downgrade validation ────────────────────────────────────────────────
+  const currentPlan = sub.planId
+    ? await db.query.billingPlans.findFirst({ where: eq(billingPlans.id, sub.planId) })
+    : null;
+
+  if (currentPlan) {
+    const isDowngrade =
+      newPlan.cpuLimit < currentPlan.cpuLimit ||
+      newPlan.memoryLimit < currentPlan.memoryLimit ||
+      newPlan.containerLimit < currentPlan.containerLimit;
+
+    if (isDowngrade && config?.allowDowngrade === false) {
+      return c.json({ error: 'Downgrade is not allowed. You can only upgrade or cancel.' }, 403);
+    }
+
+    // Check if service's current resources exceed new plan limits
+    if (isDowngrade && sub.serviceId) {
+      const svc = await db.query.services.findFirst({
+        where: eq(services.id, sub.serviceId),
+      });
+
+      if (svc) {
+        const conflicts: Array<{ resource: string; current: number; planLimit: number }> = [];
+
+        if (svc.cpuLimit != null && svc.cpuLimit > newPlan.cpuLimit) {
+          conflicts.push({ resource: 'cpuLimit', current: svc.cpuLimit, planLimit: newPlan.cpuLimit });
+        }
+        if (svc.memoryLimit != null && svc.memoryLimit > newPlan.memoryLimit) {
+          conflicts.push({ resource: 'memoryLimit', current: svc.memoryLimit, planLimit: newPlan.memoryLimit });
+        }
+        if (svc.replicas != null && svc.replicas > newPlan.containerLimit) {
+          conflicts.push({ resource: 'replicas', current: svc.replicas, planLimit: newPlan.containerLimit });
+        }
+
+        if (conflicts.length > 0) {
+          const confirm = c.req.query('confirm');
+          if (confirm !== 'true') {
+            return c.json({
+              error: 'Service resources exceed new plan limits',
+              conflicts,
+              hint: 'Add ?confirm=true to auto-adjust service resources to fit the new plan',
+            }, 409);
+          }
+
+          // Auto-adjust service resources to fit new plan limits
+          const adjustments: Record<string, number> = {};
+          const dbUpdates: Record<string, any> = { updatedAt: new Date() };
+
+          for (const conflict of conflicts) {
+            if (conflict.resource === 'cpuLimit') {
+              adjustments.cpuLimit = newPlan.cpuLimit;
+              dbUpdates.cpuLimit = newPlan.cpuLimit;
+            } else if (conflict.resource === 'memoryLimit') {
+              adjustments.memoryLimit = newPlan.memoryLimit;
+              dbUpdates.memoryLimit = newPlan.memoryLimit;
+            } else if (conflict.resource === 'replicas') {
+              adjustments.replicas = newPlan.containerLimit;
+              dbUpdates.replicas = newPlan.containerLimit;
+            }
+          }
+
+          // Update service in DB
+          await db.update(services).set(dbUpdates).where(eq(services.id, sub.serviceId));
+
+          // Update Docker service if deployed
+          if (svc.dockerServiceId) {
+            try {
+              const dockerUpdate: Record<string, any> = {};
+              if (adjustments.cpuLimit != null) dockerUpdate.cpuLimit = adjustments.cpuLimit;
+              if (adjustments.memoryLimit != null) dockerUpdate.memoryLimit = adjustments.memoryLimit;
+              if (adjustments.replicas != null) dockerUpdate.replicas = adjustments.replicas;
+              await orchestrator.updateService(svc.dockerServiceId, dockerUpdate);
+            } catch (orchErr) {
+              logger.error({ err: orchErr }, 'Failed to auto-adjust Docker service resources during downgrade');
+              logToErrorTable({ level: 'error', message: `Failed to auto-adjust Docker service during downgrade: ${orchErr instanceof Error ? orchErr.message : String(orchErr)}`, stack: orchErr instanceof Error ? orchErr.stack : null, metadata: { context: 'billing', operation: 'downgrade-auto-adjust' } });
+              return c.json({ error: 'Failed to adjust service resources for downgrade' }, 500);
+            }
+          }
+
+          logger.info({ serviceId: sub.serviceId, adjustments }, 'Auto-adjusted service resources for plan downgrade');
+        }
+      }
+    }
+  }
+  // ── End downgrade validation ────────────────────────────────────────────
+
+  const cycleDiscounts = (config?.cycleDiscounts ?? {}) as Record<string, { type: string; value: number }>;
+  const CYCLE_MONTHS: Record<string, number> = { daily: 1/30, weekly: 7/30, monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12 };
+  const CYCLE_TO_STRIPE: Record<string, { interval: 'day'|'week'|'month'|'year'; interval_count: number }> = {
+    daily: { interval: 'day', interval_count: 1 }, weekly: { interval: 'week', interval_count: 1 },
+    monthly: { interval: 'month', interval_count: 1 }, quarterly: { interval: 'month', interval_count: 3 },
+    half_yearly: { interval: 'month', interval_count: 6 }, yearly: { interval: 'year', interval_count: 1 },
+  };
+
+  let amount = Math.round(newPlan.priceCents * (CYCLE_MONTHS[sub.billingCycle] ?? 1));
+  const disc = cycleDiscounts[sub.billingCycle];
+  if (disc) {
+    if (disc.type === 'percentage') amount = Math.round(amount * (1 - disc.value / 100));
+    else if (disc.type === 'fixed') amount = Math.max(0, amount - disc.value);
+  }
+
+  try {
+    await stripeService.updateSubscriptionPlan(sub.stripeSubscriptionId, {
+      currency: 'usd',
+      product_data: { name: newPlan.name },
+      unit_amount: amount,
+      recurring: CYCLE_TO_STRIPE[sub.billingCycle],
+    });
+
+    await db.update(subscriptions).set({ planId, updatedAt: new Date() }).where(eq(subscriptions.id, id));
+
+    // Update service plan reference
+    if (sub.serviceId) {
+      await db.update(services).set({ planId, updatedAt: new Date() }).where(eq(services.id, sub.serviceId));
+    }
+
+    return c.json({ message: 'Plan updated' });
+  } catch (err) {
+    logger.error({ err }, 'Failed to change service plan');
+    logToErrorTable({ level: 'error', message: `Service plan change failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'change-service-plan' } });
+    return c.json({ error: 'Failed to change plan' }, 500);
+  }
+}) as any);
+
+// PATCH /service-subscriptions/:id/payment-method
+authed.openapi(changeServicePaymentMethodRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id } = c.req.valid('param');
+  const { paymentMethodId } = c.req.valid('json');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.id, id), eq(subscriptions.accountId, accountId)),
+  });
+  if (!sub) return c.json({ error: 'Subscription not found' }, 404);
+  if (!sub.stripeSubscriptionId) return c.json({ error: 'No Stripe subscription to update' }, 400);
+
+  try {
+    await stripeService.updateSubscriptionPaymentMethod(sub.stripeSubscriptionId, paymentMethodId);
+    return c.json({ message: 'Payment method updated' });
+  } catch (err) {
+    logger.error({ err }, 'Failed to change service payment method');
+    logToErrorTable({ level: 'error', message: `Service payment method change failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'change-service-payment-method' } });
+    return c.json({ error: 'Failed to update payment method' }, 500);
+  }
+}) as any);
+
+// PATCH /service-subscriptions/:id/contact
+authed.openapi(updateServiceContactRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id } = c.req.valid('param');
+  const data = c.req.valid('json');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.id, id), eq(subscriptions.accountId, accountId)),
+  });
+  if (!sub) return c.json({ error: 'Subscription not found' }, 404);
+
+  await db.update(subscriptions).set({
+    paymentContactEmail: data.billingContactEmail ?? sub.paymentContactEmail,
+    paymentContactName: data.billingContactName ?? sub.paymentContactName,
+    updatedAt: new Date(),
+  }).where(eq(subscriptions.id, id));
+
+  return c.json({ message: 'Billing contact updated' });
+}) as any);
+
+// DELETE /service-subscriptions/:id
+authed.openapi(cancelServiceSubscriptionRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id } = c.req.valid('param');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.id, id), eq(subscriptions.accountId, accountId)),
+  });
+  if (!sub) return c.json({ error: 'Subscription not found' }, 404);
+
+  if (sub.stripeSubscriptionId) {
+    try {
+      await stripeService.cancelSubscriptionAtPeriodEnd(sub.stripeSubscriptionId);
+    } catch (err) {
+      logger.error({ err }, 'Failed to cancel service Stripe subscription');
+      logToErrorTable({ level: 'error', message: `Service subscription cancel failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'cancel-service-subscription' } });
+      return c.json({ error: 'Failed to cancel subscription' }, 500);
+    }
+  }
+
+  await db.update(subscriptions)
+    .set({ cancelledAt: new Date(), updatedAt: new Date() })
+    .where(eq(subscriptions.id, id));
+
+  return c.json({ message: 'Service subscription will cancel at end of billing period' });
+}) as any);
+
+// GET /free-tier-usage
+authed.openapi(freeTierUsageRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const config = await db.query.billingConfig.findFirst();
+  const limit = config?.maxFreeServicesPerAccount ?? null;
+
+  const freePlanIds = (await db.select({ id: billingPlans.id }).from(billingPlans).where(eq(billingPlans.isFree, true))).map(p => p.id);
+  let used = 0;
+  if (freePlanIds.length > 0) {
+    const result = await db.select({ count: countSql() }).from(subscriptions)
+      .where(and(
+        eq(subscriptions.accountId, accountId),
+        isNull(subscriptions.cancelledAt),
+        inArray(subscriptions.planId, freePlanIds),
+      ));
+    used = Number(result[0]?.count ?? 0);
+  }
+
+  return c.json({ used, limit });
+}) as any);
+
 // ─── Service suspension helper ────────────────────────────────────────────────
+
+/** Suspend a single service (e.g., after per-service payment failure). */
+async function suspendSingleService(serviceId: string) {
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), isNull(services.deletedAt)),
+  });
+  if (!svc || svc.status !== 'running') return;
+  try {
+    if (svc.dockerServiceId) {
+      await orchestrator.scaleService(svc.dockerServiceId, 0);
+    }
+    await db.update(services)
+      .set({ status: 'suspended', stoppedAt: new Date(), updatedAt: new Date() })
+      .where(eq(services.id, serviceId));
+  } catch (err) {
+    logger.error({ err, serviceId }, 'Failed to suspend service');
+    logToErrorTable({ level: 'error', message: `Failed to suspend service: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'suspend-single-service', serviceId } });
+  }
+}
 
 /** Suspend all running services for an account (e.g., after payment failure). */
 async function suspendAccountServices(accountId: string) {
@@ -1373,8 +1965,55 @@ billing.post('/webhook', async (c) => {
             logToErrorTable({ level: 'error', message: `Failed to activate subdomain claim after payment: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'activate-subdomain-claim', claimId } });
           }
         }
+      } else if (session.metadata?.type === 'service_subscription' && session.customer && session.subscription) {
+        // Per-service/stack subscription checkout completed
+        const accountId = session.metadata.accountId;
+        const serviceId = session.metadata.fleetServiceId ?? null;
+        const stackId = session.metadata.fleetStackId ?? null;
+        const planId = session.metadata.planId ?? null;
+        const billingCycle = session.metadata.billingCycle ?? 'monthly';
+        const contactEmail = session.metadata.billingContactEmail ?? null;
+        const contactName = session.metadata.billingContactName ?? null;
+
+        if (accountId) {
+          await safeTransaction(async (tx) => {
+            // Check for existing active subscription for this service/stack
+            const existingWhere = serviceId
+              ? and(eq(subscriptions.serviceId, serviceId), eq(subscriptions.status, 'active'))
+              : stackId
+                ? and(eq(subscriptions.stackId, stackId), eq(subscriptions.status, 'active'))
+                : null;
+
+            if (existingWhere) {
+              const existingSub = await tx.query.subscriptions.findFirst({ where: existingWhere });
+              if (existingSub) {
+                logger.warn({ accountId, serviceId, stackId, existingSubId: existingSub.id }, 'Blocked duplicate service subscription');
+                return;
+              }
+            }
+
+            await tx.insert(subscriptions).values({
+              accountId,
+              planId,
+              billingModel: 'fixed',
+              billingCycle,
+              stripeSubscriptionId: session.subscription!,
+              stripeCustomerId: session.customer!,
+              serviceId,
+              stackId,
+              paymentContactEmail: contactEmail,
+              paymentContactName: contactName,
+              status: 'active',
+            });
+
+            // Store plan reference on the service for quick lookups
+            if (serviceId && planId) {
+              await tx.update(services).set({ planId, updatedAt: new Date() }).where(eq(services.id, serviceId));
+            }
+          });
+        }
       } else if (session.customer && session.subscription) {
-        // Prefer metadata.accountId (exact match) over stripeCustomerId (ambiguous when parent pays for child)
+        // Legacy account-level subscription checkout
         let account: any = null;
         if (session.metadata?.accountId) {
           account = await db.query.accounts.findFirst({
@@ -1400,6 +2039,8 @@ billing.post('/webhook', async (c) => {
               where: and(
                 eq(subscriptions.accountId, account.id),
                 eq(subscriptions.status, 'active'),
+                isNull(subscriptions.serviceId),
+                isNull(subscriptions.stackId),
               ),
             });
             if (existingSub) {
@@ -1518,60 +2159,83 @@ billing.post('/webhook', async (c) => {
           })
           .where(eq(subscriptions.stripeSubscriptionId, invoice.subscription));
 
-        // Auto-reactivate suspended account on successful payment
+        // Auto-reactivate on successful payment
         const sub = await db.query.subscriptions.findFirst({
           where: eq(subscriptions.stripeSubscriptionId, invoice.subscription),
         });
         if (sub) {
-          const account = await db.query.accounts.findFirst({
-            where: and(eq(accounts.id, sub.accountId), isNull(accounts.deletedAt)),
-          });
-          if (account && account.status === 'suspended') {
-            await db.update(accounts).set({
-              status: 'active',
-              suspendedAt: null,
-              scheduledDeletionAt: null,
-              updatedAt: new Date(),
-            }).where(eq(accounts.id, account.id));
-
-            // Send reactivation email + notification
-            const appUrl = await getAppUrl();
-            const ownerMembers = await db.query.userAccounts.findMany({
-              where: and(eq(userAccounts.accountId, account.id), eq(userAccounts.role, 'owner')),
-              with: { user: true },
+          // Per-service subscription — reactivate only that service
+          if (sub.serviceId) {
+            const svc = await db.query.services.findFirst({
+              where: and(eq(services.id, sub.serviceId), isNull(services.deletedAt)),
             });
-            for (const m of ownerMembers) {
-              if (m.user?.email) {
-                await queueEmail({
-                  templateSlug: 'account-reactivated',
-                  to: m.user.email,
-                  variables: { accountName: account.name ?? 'Your account', dashboardUrl: `${appUrl}/panel` },
-                  accountId: account.id,
-                });
-              }
+            if (svc && svc.status === 'suspended') {
+              await db.update(services).set({ status: 'stopped', updatedAt: new Date() }).where(eq(services.id, svc.id));
+              logger.info({ serviceId: svc.id }, 'Service reactivated after successful payment (set to stopped — user must start manually)');
             }
-
-            try {
-              const { notificationService } = await import('../services/notification.service.js');
-              await notificationService.create(account.id, {
-                type: 'billing',
-                title: 'Account reactivated',
-                message: 'Your payment was received and your account has been reactivated. You can now restart your services.',
-              });
-            } catch { /* notification failure is not critical */ }
-
-            const { eventService, EventTypes } = await import('../services/event.service.js');
-            eventService.log({
-              accountId: account.id,
-              eventType: EventTypes.ACCOUNT_REACTIVATED,
-              description: 'Account reactivated after successful payment',
-              resourceType: 'account',
-              resourceId: account.id,
-              resourceName: account.name ?? undefined,
-              source: 'system',
+          } else if (sub.stackId) {
+            // Per-stack — reactivate suspended services in stack
+            const stackSvcs = await db.query.services.findMany({
+              where: and(eq(services.stackId, sub.stackId), eq(services.status, 'suspended'), isNull(services.deletedAt)),
             });
+            for (const svc of stackSvcs) {
+              await db.update(services).set({ status: 'stopped', updatedAt: new Date() }).where(eq(services.id, svc.id));
+            }
+            if (stackSvcs.length > 0) {
+              logger.info({ stackId: sub.stackId, count: stackSvcs.length }, 'Stack services reactivated after successful payment');
+            }
+          } else {
+            // Legacy account-level — reactivate account
+            const account = await db.query.accounts.findFirst({
+              where: and(eq(accounts.id, sub.accountId), isNull(accounts.deletedAt)),
+            });
+            if (account && account.status === 'suspended') {
+              await db.update(accounts).set({
+                status: 'active',
+                suspendedAt: null,
+                scheduledDeletionAt: null,
+                updatedAt: new Date(),
+              }).where(eq(accounts.id, account.id));
 
-            logger.info({ accountId: account.id }, 'Account auto-reactivated after successful payment');
+              // Send reactivation email + notification
+              const appUrl = await getAppUrl();
+              const ownerMembers = await db.query.userAccounts.findMany({
+                where: and(eq(userAccounts.accountId, account.id), eq(userAccounts.role, 'owner')),
+                with: { user: true },
+              });
+              for (const m of ownerMembers) {
+                if (m.user?.email) {
+                  await queueEmail({
+                    templateSlug: 'account-reactivated',
+                    to: m.user.email,
+                    variables: { accountName: account.name ?? 'Your account', dashboardUrl: `${appUrl}/panel` },
+                    accountId: account.id,
+                  });
+                }
+              }
+
+              try {
+                const { notificationService } = await import('../services/notification.service.js');
+                await notificationService.create(account.id, {
+                  type: 'billing',
+                  title: 'Account reactivated',
+                  message: 'Your payment was received and your account has been reactivated. You can now restart your services.',
+                });
+              } catch { /* notification failure is not critical */ }
+
+              const { eventService, EventTypes } = await import('../services/event.service.js');
+              eventService.log({
+                accountId: account.id,
+                eventType: EventTypes.ACCOUNT_REACTIVATED,
+                description: 'Account reactivated after successful payment',
+                resourceType: 'account',
+                resourceId: account.id,
+                resourceName: account.name ?? undefined,
+                source: 'system',
+              });
+
+              logger.info({ accountId: account.id }, 'Account auto-reactivated after successful payment');
+            }
           }
         }
       }
@@ -1636,9 +2300,10 @@ billing.post('/webhook', async (c) => {
       });
       if (!dbSub) break;
 
+      const isServiceSub = !!(dbSub.serviceId || dbSub.stackId);
+
       if (!invoice.next_payment_attempt) {
-        // Final attempt failed — mark as past_due but don't suspend immediately
-        // Give 7-day grace period
+        // Final attempt failed — mark as past_due
         await db.update(subscriptions)
           .set({
             status: 'past_due',
@@ -1647,18 +2312,22 @@ billing.post('/webhook', async (c) => {
           })
           .where(eq(subscriptions.id, dbSub.id));
 
-        logger.warn({ accountId: dbSub.accountId, subscriptionId: dbSub.id },
-          'Final payment attempt failed — subscription marked past_due (7-day grace period)');
+        const scopeLabel = dbSub.serviceId ? 'service' : dbSub.stackId ? 'stack' : 'account';
+        logger.warn({ accountId: dbSub.accountId, subscriptionId: dbSub.id, scope: scopeLabel },
+          `Final payment attempt failed — ${scopeLabel} subscription marked past_due (7-day grace period)`);
 
         // Create a notification for the account owner
         try {
           const { notifications } = await import('@fleet/db');
+          const msg = isServiceSub
+            ? 'Payment for a service subscription has failed after all retry attempts. Please update the payment method within 7 days to avoid service suspension.'
+            : 'Your payment has failed after all retry attempts. Please update your payment method within 7 days to avoid service suspension.';
           await db.insert(notifications).values({
             id: crypto.randomUUID(),
             accountId: dbSub.accountId,
             type: 'billing',
             title: 'Payment Failed',
-            message: 'Your payment has failed after all retry attempts. Please update your payment method within 7 days to avoid service suspension.',
+            message: msg,
             read: false,
           });
         } catch { /* notification is best-effort */ }
@@ -1733,9 +2402,24 @@ billing.post('/webhook', async (c) => {
           .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
           .where(eq(subscriptions.id, dbSub.id));
 
-        // Suspend services after subscription cancellation
-        await suspendAccountServices(dbSub.accountId);
-        logger.info({ accountId: dbSub.accountId }, 'Subscription cancelled — services suspended');
+        if (dbSub.serviceId) {
+          // Per-service subscription — only suspend that service
+          await suspendSingleService(dbSub.serviceId);
+          logger.info({ serviceId: dbSub.serviceId }, 'Service subscription cancelled — service suspended');
+        } else if (dbSub.stackId) {
+          // Per-stack subscription — suspend all services in the stack
+          const stackServices = await db.query.services.findMany({
+            where: and(eq(services.stackId, dbSub.stackId), eq(services.status, 'running'), isNull(services.deletedAt)),
+          });
+          for (const svc of stackServices) {
+            await suspendSingleService(svc.id);
+          }
+          logger.info({ stackId: dbSub.stackId, count: stackServices.length }, 'Stack subscription cancelled — stack services suspended');
+        } else {
+          // Legacy account-level subscription — suspend all services
+          await suspendAccountServices(dbSub.accountId);
+          logger.info({ accountId: dbSub.accountId }, 'Account subscription cancelled — services suspended');
+        }
       }
 
       // Also check for subdomain claim subscriptions
@@ -1837,21 +2521,53 @@ billing.post('/webhook', async (c) => {
 
 // ── Public routes (no auth required) ──────────────────────────────────────────
 
+const publicCurrenciesRoute = createRoute({
+  method: 'get',
+  path: '/public/currencies',
+  tags: ['Billing'],
+  summary: 'Get allowed currencies (public, no auth)',
+  responses: {
+    200: jsonContent(z.object({ currencies: z.array(z.string()) }), 'Allowed currencies'),
+    ...standardErrors,
+  },
+});
+
+billing.openapi(publicCurrenciesRoute, (async (c: any) => {
+  const currencies = await currencyService.getAllowed();
+  return c.json({ currencies });
+}) as any);
+
 const publicPlansRoute = createRoute({
   method: 'get',
   path: '/public/plans',
   tags: ['Billing'],
   summary: 'List visible billing plans (public, no auth)',
+  request: {
+    query: z.object({
+      currency: z.string().length(3).optional().openapi({ description: 'Target currency code (e.g. NOK, EUR). Converts prices from USD.' }),
+    }),
+  },
   responses: {
     200: jsonContent(z.object({
       plans: z.array(z.any()),
       allowedCycles: z.array(z.string()).optional(),
       trialDays: z.number().optional(),
+      currency: z.string().optional(),
     }), 'Public plans list'),
   },
 });
 
 billing.openapi(publicPlansRoute, (async (c: any) => {
+  const { currency: targetCurrency } = c.req.valid('query');
+
+  // Validate currency against allowed list
+  if (targetCurrency) {
+    const allowed = await currencyService.validateCurrency(targetCurrency);
+    if (!allowed) {
+      return c.json({ error: `Currency ${targetCurrency} is not available` }, 400);
+    }
+  }
+
   const plans = await db.query.billingPlans.findMany({
     where: eq(billingPlans.visible, true),
     orderBy: (p: any, { asc }: any) => asc(p.sortOrder),
@@ -1859,6 +2575,16 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
 
   // Strip sensitive Stripe fields
   const safePlans = plans.map(({ stripeProductId, stripePriceIds, ...rest }: any) => rest);
+
+  // Convert prices if a different currency is requested
+  if (targetCurrency && targetCurrency.toUpperCase() !== 'USD') {
+    const tc = targetCurrency.toUpperCase();
+    for (const plan of safePlans) {
+      if (plan.priceCents != null) {
+        plan.priceCents = await exchangeRateService.convertCents(plan.priceCents, 'USD', tc);
+      }
+    }
+  }
 
   // Include billing config for cycle/trial info
   let allowedCycles: string[] | undefined;
@@ -1873,7 +2599,80 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
     // Billing config may not exist yet
   }
 
-  return c.json({ plans: safePlans, allowedCycles, trialDays });
+  return c.json({ plans: safePlans, allowedCycles, trialDays, currency: targetCurrency?.toUpperCase() ?? 'USD' });
+}) as any);
+
+// ─── Exchange Rate endpoints (admin, on authed sub-router) ────────────────────
+
+const getExchangeRatesRoute = createRoute({
+  method: 'get',
+  path: '/exchange-rates',
+  tags: ['Billing'],
+  summary: 'Get cached exchange rates',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      baseCurrency: z.string(),
+      rates: z.record(z.string(), z.number()),
+      updatedAt: z.string(),
+    }), 'Exchange rates'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(getExchangeRatesRoute, (async (c: any) => {
+  const rates = await exchangeRateService.getRates();
+  return c.json(rates);
+}) as any);
+
+const refreshExchangeRatesRoute = createRoute({
+  method: 'post',
+  path: '/exchange-rates/refresh',
+  tags: ['Billing'],
+  summary: 'Force-fetch fresh exchange rates',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({
+      baseCurrency: z.string(),
+      rates: z.record(z.string(), z.number()),
+      updatedAt: z.string(),
+    }), 'Refreshed exchange rates'),
+    ...standardErrors,
+  },
+  middleware: [requireScope('billing:manage')],
+});
+
+authed.openapi(refreshExchangeRatesRoute, (async (c: any) => {
+  const rates = await exchangeRateService.refreshRates();
+  return c.json(rates);
+}) as any);
+
+const updateExchangeRatesRoute = createRoute({
+  method: 'put',
+  path: '/exchange-rates',
+  tags: ['Billing'],
+  summary: 'Manually override exchange rates',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      rates: z.record(z.string(), z.number()).openapi({ description: 'Currency code to rate mapping (base: USD)' }),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.object({
+      baseCurrency: z.string(),
+      rates: z.record(z.string(), z.number()),
+      updatedAt: z.string(),
+    }), 'Updated exchange rates'),
+    ...standardErrors,
+  },
+  middleware: [requireScope('billing:manage')],
+});
+
+authed.openapi(updateExchangeRatesRoute, (async (c: any) => {
+  const { rates } = c.req.valid('json');
+  const result = await exchangeRateService.setRates(rates);
+  return c.json(result);
 }) as any);
 
 billing.route('/', authed);

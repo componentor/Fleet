@@ -10,13 +10,19 @@ import {
   Package, Info, ChevronDown, Link, Link2, X,
 } from 'lucide-vue-next'
 import DomainPicker from '@/components/DomainPicker.vue'
+import TierSelector from '@/components/TierSelector.vue'
 import { useDomainPicker } from '@/composables/useDomainPicker'
+import { useServiceBilling } from '@/composables/useServiceBilling'
 
 const props = defineProps<{ slug: string }>()
 const { t } = useI18n()
 const api = useApi()
 const router = useRouter()
 const { fetchDomains: fetchAccountDomains } = useDomainPicker()
+const { fetchTiers, freeTier, tiers } = useServiceBilling()
+
+// Plan selection for the stack
+const selectedStackPlanId = ref<string | null>(null)
 
 // ── Step management ──
 const currentStep = ref(1)
@@ -24,7 +30,7 @@ const steps = computed(() => [
   { number: 1, label: t('deployWizard.steps.overview'), icon: Package },
   { number: 2, label: t('deployWizard.steps.configure'), icon: Shield },
   { number: 3, label: t('deployWizard.steps.storage'), icon: HardDrive },
-  { number: 4, label: t('deployWizard.steps.resources'), icon: Cpu },
+  { number: 4, label: 'Plan', icon: Cpu },
   { number: 5, label: t('deployWizard.steps.deploy'), icon: Rocket },
 ])
 
@@ -212,9 +218,8 @@ async function quickDeploy() {
   if (quickDeployVolumeStrategy.value === 'shared' && templateVolumes.value.length >= 2) {
     setAllShared(true)
   }
-  // Skip straight to deploy with default/generated config
-  currentStep.value = 5
-  await executeDeploy()
+  // Skip config steps but stop at plan selection (step 4)
+  currentStep.value = 4
 }
 
 // ── Volume sharing helpers ──
@@ -595,6 +600,7 @@ async function executeDeploy() {
     const result = await api.post<any>('/marketplace/deploy', {
       slug: props.slug,
       config: deployConfig,
+      ...(selectedStackPlanId.value ? { planId: selectedStackPlanId.value } : {}),
       ...(Object.keys(imageOverrides).length > 0 ? { imageOverrides } : {}),
       ...(Object.keys(resourceOverrides).length > 0 ? { resourceOverrides } : {}),
       ...(Object.keys(volOverrides).length > 0 ? { volumeOverrides: volOverrides } : {}),
@@ -651,6 +657,7 @@ onMounted(() => {
   fetchTemplate()
   fetchLimitsAndPricing()
   fetchAccountDomains()
+  fetchTiers()
 })
 
 onUnmounted(() => {
@@ -1266,65 +1273,19 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Step 4: Resources -->
+      <!-- Step 4: Plan Selection -->
       <div v-if="currentStep === 4 && !deployed" class="space-y-6">
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-2">
               <Cpu class="w-5 h-5 text-primary-600 dark:text-primary-400" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.resources.title') }}</h2>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a Plan</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.resources.description') }}</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Select a plan for this stack. Resource limits are determined by your chosen tier.</p>
           </div>
 
-          <div class="p-6 space-y-4">
-            <div v-for="(res, svcName) in serviceResources" :key="svcName" class="p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750">
-              <p class="text-xs font-semibold text-gray-900 dark:text-white mb-3 font-mono">{{ svcName }}</p>
-              <div class="grid grid-cols-3 gap-3">
-                <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('deployWizard.resources.replicas') }}</label>
-                  <input
-                    v-model.number="res.replicas"
-                    type="number"
-                    min="1"
-                    max="100"
-                    class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('deployWizard.resources.cpuMillicores') }}</label>
-                  <input
-                    v-model.number="res.cpuLimit"
-                    type="number"
-                    min="0"
-                    step="100"
-                    :max="resourceLimits?.maxCpuPerContainer || 16000"
-                    :placeholder="t('deployWizard.resources.default')"
-                    class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('deployWizard.resources.memoryMb') }}</label>
-                  <input
-                    v-model.number="res.memoryLimit"
-                    type="number"
-                    min="0"
-                    step="64"
-                    :max="resourceLimits?.maxMemoryPerContainer || 65536"
-                    :placeholder="t('deployWizard.resources.default')"
-                    class="w-full px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <!-- Cost estimate -->
-            <div v-if="estimatedMonthlyCost !== null" class="flex items-center gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
-              <Info class="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-              <p class="text-xs text-blue-700 dark:text-blue-300">
-                {{ t('deployWizard.resources.estimatedCost', { cost: estimatedMonthlyCost.toFixed(2) }) }}
-              </p>
-            </div>
+          <div class="p-6">
+            <TierSelector v-model="selectedStackPlanId" :stack-mode="true" />
           </div>
         </div>
       </div>
@@ -1419,7 +1380,7 @@ onUnmounted(() => {
           <div class="flex justify-center">
             <button
               @click="executeDeploy"
-              :disabled="deploying"
+              :disabled="deploying || !selectedStackPlanId"
               class="flex items-center gap-3 px-8 py-4 rounded-xl bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-base font-semibold transition-all hover:shadow-lg hover:shadow-primary-600/25 active:scale-[0.98]"
             >
               <Rocket class="w-5 h-5" />
