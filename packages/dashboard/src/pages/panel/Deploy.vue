@@ -578,17 +578,32 @@ onMounted(() => {
 
     <!-- Deploy method selection -->
     <div v-if="!deployMethod" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-4xl">
-      <button
-        @click="deployMethod = 'docker'"
-        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600"
+      <RouterLink
+        to="/panel/marketplace"
+        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-green-300 dark:hover:border-green-600"
       >
         <div class="flex items-start gap-4">
-          <div class="w-12 h-12 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30">
-            <FileCode2 class="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          <div class="w-12 h-12 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-green-100 dark:group-hover:bg-green-900/30">
+            <Store class="w-6 h-6 text-green-600 dark:text-green-400" />
           </div>
           <div class="min-w-0">
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.dockerImage') }}</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.dockerImageDesc') }}</p>
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromMarketplace') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromMarketplaceDesc') }}</p>
+          </div>
+        </div>
+      </RouterLink>
+
+      <button
+        @click="deployMethod = 'upload'"
+        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-purple-300 dark:hover:border-purple-600"
+      >
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-purple-100 dark:group-hover:bg-purple-900/30">
+            <FolderUp class="w-6 h-6 text-purple-600 dark:text-purple-400" />
+          </div>
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromUpload') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromUploadDesc') }}</p>
           </div>
         </div>
       </button>
@@ -609,21 +624,6 @@ onMounted(() => {
       </button>
 
       <button
-        @click="deployMethod = 'upload'"
-        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-purple-300 dark:hover:border-purple-600"
-      >
-        <div class="flex items-start gap-4">
-          <div class="w-12 h-12 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-purple-100 dark:group-hover:bg-purple-900/30">
-            <FolderUp class="w-6 h-6 text-purple-600 dark:text-purple-400" />
-          </div>
-          <div class="min-w-0">
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromUpload') }}</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromUploadDesc') }}</p>
-          </div>
-        </div>
-      </button>
-
-      <button
         @click="deployMethod = 'registry'"
         class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-amber-300 dark:hover:border-amber-600"
       >
@@ -638,20 +638,20 @@ onMounted(() => {
         </div>
       </button>
 
-      <RouterLink
-        to="/panel/marketplace"
-        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-green-300 dark:hover:border-green-600"
+      <button
+        @click="deployMethod = 'docker'"
+        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600"
       >
         <div class="flex items-start gap-4">
-          <div class="w-12 h-12 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-green-100 dark:group-hover:bg-green-900/30">
-            <Store class="w-6 h-6 text-green-600 dark:text-green-400" />
+          <div class="w-12 h-12 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30">
+            <FileCode2 class="w-6 h-6 text-blue-600 dark:text-blue-400" />
           </div>
           <div class="min-w-0">
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromMarketplace') }}</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromMarketplaceDesc') }}</p>
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.dockerImage') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.dockerImageDesc') }}</p>
           </div>
         </div>
-      </RouterLink>
+      </button>
     </div>
 
     <!-- Docker image deploy form -->

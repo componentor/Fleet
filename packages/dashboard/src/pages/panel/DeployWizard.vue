@@ -1155,13 +1155,17 @@ onUnmounted(() => {
               <!-- Create New: size input -->
               <div v-if="group.mode === 'create'" class="flex items-center gap-3">
                 <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">{{ t('deployWizard.storage.sizeGb') }}</label>
-                <input
-                  v-model.number="group.sizeGb"
-                  type="number"
-                  min="1"
-                  :max="storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000"
-                  class="w-24 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
+                <div class="flex items-center">
+                  <button type="button" @click="group.sizeGb = Math.max(1, group.sizeGb - 1)" class="px-2 py-1.5 rounded-l-lg border border-r-0 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs hover:bg-gray-100 dark:hover:bg-gray-500">−</button>
+                  <input
+                    v-model.number="group.sizeGb"
+                    type="number"
+                    min="1"
+                    :max="storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000"
+                    class="w-16 px-2.5 py-1.5 border-y border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs text-center focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                  <button type="button" @click="group.sizeGb = Math.min(storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000, group.sizeGb + 1)" class="px-2 py-1.5 rounded-r-lg border border-l-0 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs hover:bg-gray-100 dark:hover:bg-gray-500">+</button>
+                </div>
                 <span class="text-xs text-gray-400">
                   {{ storageQuota ? t('deployWizard.storage.maxAvailable', { amount: Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) }) : '' }}
                 </span>
@@ -1244,13 +1248,17 @@ onUnmounted(() => {
               <!-- Create New: size input -->
               <div v-if="volumeConfigs[vol.name]?.mode === 'create'" class="flex items-center gap-3">
                 <label class="text-xs text-gray-500 dark:text-gray-400 shrink-0">{{ t('deployWizard.storage.sizeGb') }}</label>
-                <input
-                  v-model.number="volumeConfigs[vol.name]!.sizeGb"
-                  type="number"
-                  min="1"
-                  :max="storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000"
-                  class="w-24 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
+                <div class="flex items-center">
+                  <button type="button" @click="volumeConfigs[vol.name]!.sizeGb = Math.max(1, volumeConfigs[vol.name]!.sizeGb - 1)" class="px-2 py-1.5 rounded-l-lg border border-r-0 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs hover:bg-gray-100 dark:hover:bg-gray-500">−</button>
+                  <input
+                    v-model.number="volumeConfigs[vol.name]!.sizeGb"
+                    type="number"
+                    min="1"
+                    :max="storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000"
+                    class="w-16 px-2.5 py-1.5 border-y border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs text-center focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                  <button type="button" @click="volumeConfigs[vol.name]!.sizeGb = Math.min(storageQuota ? Math.max(1, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) : 1000, volumeConfigs[vol.name]!.sizeGb + 1)" class="px-2 py-1.5 rounded-r-lg border border-l-0 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-xs hover:bg-gray-100 dark:hover:bg-gray-500">+</button>
+                </div>
                 <span class="text-xs text-gray-400">
                   {{ storageQuota ? t('deployWizard.storage.maxAvailable', { amount: Math.max(0, Math.floor(storageQuota.limitGb - storageQuota.usedGb)) }) : '' }}
                 </span>
