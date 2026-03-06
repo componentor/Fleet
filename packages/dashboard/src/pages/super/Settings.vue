@@ -5,11 +5,13 @@ import { Settings, Save, RefreshCw, Check, X, Upload, Trash2, Search, Archive, K
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 
 const api = useApi()
 const branding = useBranding()
+const authStore = useAuthStore()
 
 const activeSection = ref('general')
 const loading = ref(true)
@@ -269,7 +271,7 @@ async function streamInstall(url: string): Promise<boolean> {
   orchInstallResult.value = null
   orchInstallStep.value = null
 
-  const token = localStorage.getItem('token') || sessionStorage.getItem('token')
+  const token = authStore.token
   const res = await fetch(`/api/v1${url}`, {
     method: 'POST',
     headers: {
