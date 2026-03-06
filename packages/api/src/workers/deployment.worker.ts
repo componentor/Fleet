@@ -363,6 +363,11 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         image: fullImageTag,
         replicas: svc.replicas ?? 1,
         networkIds,
+        volumes: ((svc.volumes as any[]) ?? []).map((v: any) => ({
+          source: v.source,
+          target: v.target,
+          readonly: v.readonly ?? false,
+        })),
         labels: {
           ...traefikLabels,
           'fleet.account-id': accountId,
