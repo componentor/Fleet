@@ -601,7 +601,7 @@ onUnmounted(() => {
                 <Check v-if="updateState.status === 'completed' || (idx < currentStepIndex && updateState.status !== 'rolling-back' && updateState.status !== 'failed')" class="w-3.5 h-3.5" />
                 <X v-else-if="updateState.status === 'failed' && step.key === updateState.failedAt" class="w-3.5 h-3.5" />
                 <AlertTriangle v-else-if="updateState.status === 'rolling-back'" class="w-3 h-3" />
-                <CompassSpinner v-else-if="idx === currentStepIndex && isActiveState(updateState.status)" size="w-3.5 h-3.5" />
+                <CompassSpinner v-else-if="idx === currentStepIndex && isActiveState(updateState.status)" size="w-6 h-6" />
                 <span v-else>{{ idx + 1 }}</span>
               </div>
               <!-- Label -->
