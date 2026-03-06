@@ -1101,6 +1101,7 @@ billingAdmin.openapi(setAllowedCurrenciesRoute, (async (c: any) => {
 const planPriceSchema = z.object({
   currency: z.string().length(3),
   priceCents: z.number().int().min(0),
+  cycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']).default('monthly'),
 }).openapi('PlanCurrencyPriceRequest');
 
 const planIdParamSchema = z.object({
@@ -1173,6 +1174,7 @@ billingAdmin.openapi(setPlanPricesRoute, (async (c: any) => {
       planId,
       currency: p.currency.toUpperCase(),
       priceCents: p.priceCents,
+      cycle: p.cycle,
     });
     result.push(created);
   }

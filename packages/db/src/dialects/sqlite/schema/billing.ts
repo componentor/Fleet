@@ -200,10 +200,11 @@ export const billingPlanPrices = sqliteTable('billing_plan_prices', {
     .notNull(),
   currency: text('currency').notNull(),
   priceCents: integer('price_cents').notNull(),
+  cycle: text('cycle').notNull().default('monthly'),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 }, (table) => [
-  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+  uniqueIndex('idx_billing_plan_prices_plan_currency_cycle').on(table.planId, table.currency, table.cycle),
 ]);
 
 export const billingPlansRelations = relations(

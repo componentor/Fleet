@@ -205,13 +205,24 @@ class StripeSyncService {
 
       const plan = await db.query.billingPlans.findFirst({
         where: eq(billingPlans.id, planId),
+        with: { prices: true },
       });
       if (!plan) throw new Error('Plan not found');
 
-      // Calculate base price with cycle multiplier + cycle discount
+      // Calculate base price: use per-cycle fixed price if available, else multiplier
       const config = await db.query.billingConfig.findFirst();
       const cycleDiscounts = (config?.cycleDiscounts ?? {}) as Record<string, { type: string; value: number }>;
-      let baseAmount = Math.round(plan.priceCents * CYCLE_MONTHS[billingCycle]);
+      const fixedCyclePrice = (plan as any).prices?.find(
+        (p: any) => p.currency === 'USD' && p.cycle === billingCycle,
+      );
+      let baseAmount: number;
+      if (fixedCyclePrice) {
+        baseAmount = fixedCyclePrice.priceCents;
+      } else if (billingCycle === 'yearly' && plan.yearlyPriceCents != null) {
+        baseAmount = plan.yearlyPriceCents;
+      } else {
+        baseAmount = Math.round(plan.priceCents * CYCLE_MONTHS[billingCycle]);
+      }
       const cycleDiscount = cycleDiscounts[billingCycle];
       if (cycleDiscount) {
         if (cycleDiscount.type === 'percentage') {
@@ -367,14 +378,27 @@ class StripeSyncService {
 
     const plan = await db.query.billingPlans.findFirst({
       where: eq(billingPlans.id, planId),
+      with: { prices: true },
     });
     if (!plan) throw new Error('Plan not found');
     if (plan.isFree) throw new Error('Free plans do not require checkout');
 
-    // Calculate price with cycle multiplier + discount
+    // Calculate price: use per-currency/per-cycle fixed price if available
     const config = await db.query.billingConfig.findFirst();
     const cycleDiscounts = (config?.cycleDiscounts ?? {}) as Record<string, { type: string; value: number }>;
-    let amount = Math.round(plan.priceCents * CYCLE_MONTHS[billingCycle]);
+    const tc = currency.toUpperCase();
+    const fixedCyclePrice = (plan as any).prices?.find(
+      (p: any) => p.currency === tc && p.cycle === billingCycle,
+    );
+    let amount: number;
+    if (fixedCyclePrice) {
+      // Use explicitly configured price for this currency + cycle
+      amount = fixedCyclePrice.priceCents;
+    } else if (billingCycle === 'yearly' && plan.yearlyPriceCents != null) {
+      amount = plan.yearlyPriceCents;
+    } else {
+      amount = Math.round(plan.priceCents * CYCLE_MONTHS[billingCycle]);
+    }
     const cycleDiscount = cycleDiscounts[billingCycle];
     if (cycleDiscount) {
       if (cycleDiscount.type === 'percentage') {

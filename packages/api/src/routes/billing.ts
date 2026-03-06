@@ -2583,26 +2583,41 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
     with: { prices: true },
   });
 
-  // Strip sensitive Stripe fields and prices relation
-  const safePlans = plans.map(({ stripeProductId, stripePriceIds, prices, ...rest }: any) => ({
-    ...rest,
-    _currencyPrices: prices,
-  }));
-
-  // Apply per-currency pricing: use fixed price if set, otherwise convert from USD
+  // Strip sensitive Stripe fields, keep currency prices for cycle lookup
   const tc = targetCurrency?.toUpperCase() ?? 'USD';
-  for (const plan of safePlans) {
-    const fixedPrice = plan._currencyPrices?.find((p: any) => p.currency === tc);
-    if (fixedPrice) {
-      plan.priceCents = fixedPrice.priceCents;
+  const safePlans = [];
+  for (const { stripeProductId, stripePriceIds, prices, ...rest } of plans as any[]) {
+    const plan: any = { ...rest };
+
+    // Build per-cycle price map for the requested currency
+    // { monthly: 500, yearly: 5000, ... } — only cycles that have fixed prices
+    const cyclePrices: Record<string, number> = {};
+    for (const p of (prices ?? [])) {
+      if (p.currency === tc) {
+        cyclePrices[p.cycle || 'monthly'] = p.priceCents;
+      }
+    }
+
+    // Apply fixed monthly price if available for this currency
+    if (cyclePrices.monthly != null) {
+      plan.priceCents = cyclePrices.monthly;
     } else if (tc !== 'USD' && plan.priceCents != null) {
       plan.priceCents = await exchangeRateService.convertCents(plan.priceCents, 'USD', tc);
     }
-    // Convert yearly price if set and not USD
-    if (tc !== 'USD' && plan.yearlyPriceCents != null) {
+
+    // Apply fixed yearly price if available for this currency
+    if (cyclePrices.yearly != null) {
+      plan.yearlyPriceCents = cyclePrices.yearly;
+    } else if (tc !== 'USD' && plan.yearlyPriceCents != null) {
       plan.yearlyPriceCents = await exchangeRateService.convertCents(plan.yearlyPriceCents, 'USD', tc);
     }
-    delete plan._currencyPrices;
+
+    // Include full cycle prices map so frontend can use specific prices per cycle
+    if (Object.keys(cyclePrices).length > 0) {
+      plan.cyclePrices = cyclePrices;
+    }
+
+    safePlans.push(plan);
   }
 
   // Include billing config for cycle/trial info

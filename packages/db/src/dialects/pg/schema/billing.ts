@@ -203,10 +203,11 @@ export const billingPlanPrices = pgTable('billing_plan_prices', {
     .notNull(),
   currency: varchar('currency', { length: 3 }).notNull(),
   priceCents: integer('price_cents').notNull(),
+  cycle: varchar('cycle', { length: 20 }).notNull().default('monthly'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
-  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+  uniqueIndex('idx_billing_plan_prices_plan_currency_cycle').on(table.planId, table.currency, table.cycle),
 ]);
 
 export const billingPlansRelations = relations(

@@ -57,8 +57,19 @@ const planForm = ref({
 
 // ─── Plan Currency Prices ─────────────────────────────────────
 const editingPricesPlanId = ref<string | null>(null)
-const planCurrencyPrices = ref<{ currency: string; priceCents: number }[]>([])
+// Currency prices: each entry = { currency, cycle, priceCents }
+// Grouped by currency in UI, with a column per active cycle
+const planCurrencyPrices = ref<{ currency: string; cycle: string; priceCents: number }[]>([])
 const savingPrices = ref(false)
+
+// Get unique currencies from the prices list
+function getCurrencies(): string[] {
+  const seen = new Set<string>()
+  for (const p of planCurrencyPrices.value) {
+    if (p.currency) seen.add(p.currency)
+  }
+  return [...seen]
+}
 
 async function openCurrencyPrices(plan: any) {
   if (editingPricesPlanId.value === plan.id) {
@@ -68,23 +79,47 @@ async function openCurrencyPrices(plan: any) {
   editingPricesPlanId.value = plan.id
   planCurrencyPrices.value = (plan.prices || []).map((p: any) => ({
     currency: p.currency,
+    cycle: p.cycle || 'monthly',
     priceCents: p.priceCents,
   }))
 }
 
 function addCurrencyPrice() {
-  planCurrencyPrices.value.push({ currency: '', priceCents: 0 })
+  // Add one row per active cycle for the new currency
+  for (const cycle of allowedCycles.value) {
+    planCurrencyPrices.value.push({ currency: '', cycle, priceCents: 0 })
+  }
 }
 
-function removeCurrencyPrice(index: number) {
-  planCurrencyPrices.value.splice(index, 1)
+function removeCurrencyRows(currency: string) {
+  planCurrencyPrices.value = planCurrencyPrices.value.filter(p => p.currency !== currency)
+}
+
+function getPriceForCycle(currency: string, cycle: string): number {
+  const entry = planCurrencyPrices.value.find(p => p.currency === currency && p.cycle === cycle)
+  return entry?.priceCents ?? 0
+}
+
+function setPriceForCycle(currency: string, cycle: string, value: number) {
+  const entry = planCurrencyPrices.value.find(p => p.currency === currency && p.cycle === cycle)
+  if (entry) {
+    entry.priceCents = value
+  } else {
+    planCurrencyPrices.value.push({ currency, cycle, priceCents: value })
+  }
+}
+
+function setCurrencyForGroup(oldCurrency: string, newCurrency: string) {
+  for (const p of planCurrencyPrices.value) {
+    if (p.currency === oldCurrency) p.currency = newCurrency.toUpperCase()
+  }
 }
 
 async function saveCurrencyPrices() {
   if (!editingPricesPlanId.value) return
   savingPrices.value = true
   try {
-    const valid = planCurrencyPrices.value.filter(p => p.currency.length === 3)
+    const valid = planCurrencyPrices.value.filter(p => p.currency.length === 3 && p.priceCents > 0)
     await api.put(`/billing/admin/plans/${editingPricesPlanId.value}/prices`, { prices: valid })
     showSuccess('Currency prices saved')
     const data = await api.get<any[]>('/billing/admin/plans')
@@ -920,12 +955,18 @@ onMounted(() => { fetchAll() })
                       <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Per-currency prices for "{{ plan.name }}"</p>
                       <button @click="addCurrencyPrice" type="button" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">+ Add currency</button>
                     </div>
-                    <p v-if="planCurrencyPrices.length === 0" class="text-xs text-gray-500 dark:text-gray-400">No fixed currency prices — all currencies use exchange rate conversion from USD base price.</p>
-                    <div v-for="(cp, idx) in planCurrencyPrices" :key="idx" class="flex items-center gap-3">
-                      <input v-model="cp.currency" placeholder="EUR" maxlength="3" class="w-20 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      <input v-model.number="cp.priceCents" type="number" min="0" placeholder="cents/mo" class="w-32 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                      <span class="text-xs text-gray-500">= {{ (cp.priceCents / 100).toFixed(2) }} {{ cp.currency.toUpperCase() || '?' }}/mo</span>
-                      <button @click="removeCurrencyPrice(idx)" type="button" class="text-xs text-red-500 hover:underline">Remove</button>
+                    <p v-if="getCurrencies().length === 0" class="text-xs text-gray-500 dark:text-gray-400">No fixed currency prices — all currencies use exchange rate conversion from base price.</p>
+                    <div v-for="cur in getCurrencies()" :key="cur" class="space-y-1">
+                      <div class="flex items-center gap-2">
+                        <input :value="cur" @change="setCurrencyForGroup(cur, ($event.target as HTMLInputElement).value)" placeholder="EUR" maxlength="3" class="w-20 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm uppercase font-medium focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <div v-for="cycle in allowedCycles" :key="cycle" class="flex items-center gap-1">
+                            <label class="text-xs text-gray-500 dark:text-gray-400 w-16 text-right">{{ cycle }}</label>
+                            <input :value="getPriceForCycle(cur, cycle)" @input="setPriceForCycle(cur, cycle, Number(($event.target as HTMLInputElement).value) || 0)" type="number" min="0" placeholder="cents" class="w-24 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          </div>
+                        </div>
+                        <button @click="removeCurrencyRows(cur)" type="button" class="text-xs text-red-500 hover:underline ml-2">Remove</button>
+                      </div>
                     </div>
                     <div class="flex justify-end">
                       <button @click="saveCurrencyPrices" :disabled="savingPrices" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">

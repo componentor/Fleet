@@ -344,6 +344,13 @@
       "when": 1776400000000,
       "tag": "0048_add_resource_boosts",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1776500000000,
+      "tag": "0049_add_yearly_currency_price",
+      "breakpoints": true
     }
   ]
 }
