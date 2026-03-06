@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
-import { Loader2, Save, RotateCcw, Cpu, CreditCard } from 'lucide-vue-next'
+import { Save, RotateCcw, Cpu, CreditCard } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const props = defineProps<{ accountId: string }>()
 const api = useApi()
@@ -197,7 +198,7 @@ onMounted(() => fetchData())
       </div>
 
       <div v-if="loading" class="flex items-center justify-center py-4">
-        <Loader2 class="w-5 h-5 text-amber-600 animate-spin" />
+        <CompassSpinner size="w-5 h-5" color="text-amber-600" />
       </div>
 
       <template v-else>
@@ -233,7 +234,7 @@ onMounted(() => fetchData())
               :disabled="saving"
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
             >
-              <Loader2 v-if="saving" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="saving" size="w-3.5 h-3.5" />
               <Save v-else class="w-3.5 h-3.5" />
               Save
             </button>
@@ -289,7 +290,7 @@ onMounted(() => fetchData())
               :disabled="saving"
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
             >
-              <Loader2 v-if="saving" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="saving" size="w-3.5 h-3.5" />
               <Save v-else class="w-3.5 h-3.5" />
               Save
             </button>

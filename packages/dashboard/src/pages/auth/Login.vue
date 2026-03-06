@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useAuth } from '@/composables/useAuth'
 import { LogIn, Github, Mail, Clock } from 'lucide-vue-next'
 
+const { t } = useI18n()
+const route = useRoute()
 const { login, loading } = useAuth()
 
 const email = ref('')
 const password = ref('')
 const error = ref('')
+const registrationClosedMsg = ref(route.query.registration === 'closed' ? t('onboarding.registrationClosed') : '')
 const rateLimitCountdown = ref(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 
@@ -66,6 +70,14 @@ function loginWithGoogle() {
       <div class="text-center">
         <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ $t('auth.welcomeBack') }}</h2>
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $t('auth.signInToAccount') }}</p>
+      </div>
+
+      <!-- Registration closed notice -->
+      <div
+        v-if="registrationClosedMsg"
+        class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3"
+      >
+        <p class="text-sm text-amber-700 dark:text-amber-300">{{ registrationClosedMsg }}</p>
       </div>
 
       <!-- Error alert -->
@@ -163,7 +175,7 @@ function loginWithGoogle() {
       <!-- Register link -->
       <p class="text-center text-sm text-gray-500 dark:text-gray-400">
         {{ $t('auth.noAccount') }}
-        <RouterLink to="/get-started" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
+        <RouterLink to="/onboarding" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
           {{ $t('auth.createOne') }}
         </RouterLink>
       </p>

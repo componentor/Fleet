@@ -1,7 +1,7 @@
 slug: drone
 name: Drone CI
 description: Container-native continuous integration and delivery platform. Lightweight and powerful CI/CD.
-icon_url: https://www.drone.io/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/drone.png
 category: development
 
 variables:

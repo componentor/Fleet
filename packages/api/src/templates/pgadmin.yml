@@ -1,7 +1,7 @@
 slug: pgadmin
 name: pgAdmin
 description: Feature-rich PostgreSQL administration and management tool with a web-based interface.
-icon_url: https://www.pgadmin.org/static/COMPILED/assets/img/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/pgadmin.png
 category: database
 
 variables:

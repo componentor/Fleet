@@ -65,7 +65,7 @@
     "namePlaceholder": "请输入姓名",
     "signInButton": "登录",
     "signUpButton": "创建账户",
-    "noAccount": "没有账户？",
+    "noAccount": "初来乍到？",
     "hasAccount": "已有账户？",
     "emailNotVerified": "请验证您的邮箱地址",
     "resendVerification": "重新发送验证邮件",
@@ -81,7 +81,7 @@
     "verifyButton": "验证",
     "backToLogin": "返回登录",
     "orContinueWith": "或使用以下方式继续",
-    "welcomeBack": "欢迎回来",
+    "welcomeBack": "欢迎登船",
     "createYourAccount": "创建您的账户",
     "enterCode": "输入验证码",
     "signInWithGithub": "使用 GitHub 登录",
@@ -91,7 +91,7 @@
     "orContinueWithEmail": "或使用邮箱继续",
     "signingIn": "正在登录...",
     "creatingAccount": "正在创建账户...",
-    "createOne": "创建一个",
+    "createOne": "加入船队",
     "getStartedWithSiglar": "立即开始使用 Siglar",
     "createStrongPassword": "创建强密码",
     "passwordMinLength": "至少需要8个字符",
@@ -123,7 +123,7 @@
     "emailVerifiedDesc": "您的邮箱已成功验证。您现在可以登录了。",
     "continueToSignIn": "继续登录",
     "verificationFailed": "验证失败",
-    "signInToAccount": "登录您的账户",
+    "signInToAccount": "登录以开始使用",
     "pleaseEnterBackupCode": "请输入备用恢复码。",
     "pleaseEnter6DigitCode": "请输入您的6位验证码。",
     "codeMustBe6Digits": "验证码必须恰好为6位数字。",
@@ -133,7 +133,7 @@
     "noTokenReceived": "认证失败。未收到令牌。"
   },
   "authLayout": {
-    "tagline": "简单易用的云托管"
+    "tagline": "自信驾驭"
   },
   "notifications": {
     "title": "通知",
@@ -248,7 +248,7 @@
     "goodMorning": "早上好，{name}",
     "goodAfternoon": "下午好，{name}",
     "goodEvening": "晚上好，{name}",
-    "welcomeBack": "欢迎回来，{name}！很高兴见到您。",
+    "welcomeBack": "欢迎回来，{name}！",
     "servicesHealth": "服务健康",
     "allHealthy": "所有系统正常运行",
     "running": "运行中",
@@ -982,6 +982,14 @@
     "deploying": "部署中...",
     "deploy": "部署",
     "deploymentFailed": "部署失败",
+    "dockerfile": {
+      "title": "Dockerfile / Compose",
+      "optional": "（可选）",
+      "hint": "粘贴或上传 Dockerfile 或 docker-compose.yml 来为此服务构建自定义镜像。",
+      "upload": "上传文件",
+      "lines": "行",
+      "clear": "清除"
+    },
     "github": {
       "checkingConnection": "正在检查 GitHub 连接...",
       "connectTitle": "连接 GitHub 账户",
@@ -1005,6 +1013,51 @@
       "failedConnection": "无法检查 GitHub 连接",
       "failedRepos": "无法获取仓库",
       "failedBranches": "无法获取分支"
+    },
+    "fromRegistry": "从镜像仓库部署",
+    "fromRegistryDesc": "从 Docker 镜像仓库部署，支持推送时自动部署",
+    "fromCli": "从 CLI 部署",
+    "fromCliDesc": "使用 Siglar CLI 直接从终端部署",
+    "cli": {
+      "title": "从 CLI 部署",
+      "subtitle": "使用 Siglar CLI 直接从终端部署服务。",
+      "installTitle": "安装 CLI",
+      "loginTitle": "登录您的账户",
+      "loginHint": "或使用 API 密钥：",
+      "initTitle": "初始化项目",
+      "initHint": "这将在项目目录中创建 siglar.yml 配置文件。",
+      "deployTitle": "部署！",
+      "usefulCommands": "常用命令",
+      "cmdList": "列出服务",
+      "cmdLogs": "查看服务日志",
+      "cmdEnv": "设置环境变量",
+      "cmdRedeploy": "重新部署服务",
+      "envTipTitle": "提示：使用 .env 文件跳过登录",
+      "envTipDesc": "将 API 密钥添加到项目的 .env 文件中，CLI 将自动认证 — 无需每次都登录。",
+      "envTipApiKeys": "您可以从以下位置创建长期 API 密钥",
+      "envTipApiKeysLink": "设置 → API 密钥",
+      "manageTitle": "更新现有服务",
+      "manageDesc": "已有运行中的服务？使用以下命令更新，无需重新部署。",
+      "cmdUpdate": "推送更新到现有服务",
+      "cmdScale": "扩缩容服务",
+      "cmdDomain": "绑定自定义域名",
+      "cmdEnvUpdate": "更新环境变量（自动重新部署）",
+      "cmdStop": "停止服务",
+      "cmdStart": "启动已停止的服务"
+    },
+    "fromGit": "从 Git 部署",
+    "fromGitDesc": "从任何 Git 仓库部署 — GitLab、Bitbucket、Gitea 或任何自托管提供商",
+    "git": {
+      "title": "从 Git 仓库部署",
+      "subtitle": "使用 HTTPS URL 从任何 Git 提供商克隆并构建。",
+      "repoUrl": "仓库 URL",
+      "repoUrlPlaceholder": "https://gitlab.com/user/project.git",
+      "repoUrlHint": "任何 Git 仓库的 HTTPS URL。支持 GitLab、Bitbucket、Gitea、Codeberg、Forgejo 和自托管实例。",
+      "branch": "分支",
+      "branchPlaceholder": "main",
+      "accessToken": "访问令牌（用于私有仓库）",
+      "accessTokenHint": "个人访问令牌或部署令牌。仅私有仓库需要。",
+      "providers": "支持 GitLab、Bitbucket、Gitea、Codeberg、Forgejo 及任何 Git 托管服务"
     },
     "fromUpload": "上传项目",
     "fromUploadDesc": "上传项目归档（zip、tar）或文件夹并部署。",
@@ -1830,6 +1883,24 @@
       "noVars": "未找到环境变量",
       "refresh": "刷新",
       "filePath": "/opt/fleet/config/env"
+    },
+    "registration": {
+      "title": "注册管理",
+      "desc": "控制新用户是否可以在平台上注册。",
+      "currentAccounts": "已注册 {count} 个账户",
+      "modeLabel": "注册模式",
+      "modeOpen": "开放",
+      "modeOpenDesc": "任何人都可以创建新账户。",
+      "modeLimited": "限制",
+      "modeLimitedDesc": "允许注册到最大账户数。达到限制时通知管理员。",
+      "modeClosed": "关闭",
+      "modeClosedDesc": "无法创建新账户。现有用户仍可登录。",
+      "maxAccountsLabel": "最大账户数",
+      "maxAccountsHint": "达到此限制后，新注册将被阻止。",
+      "closedMessageLabel": "访客自定义消息",
+      "closedMessagePlaceholder": "我们目前不接受新注册。请稍后再来！",
+      "save": "保存",
+      "saved": "注册设置已保存"
     },
     "billing": {
       "title": "计费配置",
@@ -2817,15 +2888,27 @@
     "errorLog": "错误日志",
     "createdAt": "归档时间"
   },
+  "checkout": {
+    "title": "结账",
+    "subtitle": "继续前请查看您的购物车",
+    "proceed": "去结账",
+    "processing": "处理中...",
+    "checkoutFailed": "结账失败，请重试。",
+    "stripeNotConfigured": "支付处理尚未配置。请联系客服或稍后再试。",
+    "noCheckoutUrl": "无法创建结账会话，请重试。",
+    "skipToDashboard": "跳转到仪表板"
+  },
   "onboarding": {
-    "welcome": "让我们开始吧",
-    "welcomeDesc": "创建您的账户即可开始。只需一分钟。",
+    "welcome": "欢迎登船",
+    "welcomeDesc": "创建您的账户，准备启航。只需一分钟。",
     "createAccount": "创建您的账户",
-    "createAccountDesc": "最后一步，马上就好。",
+    "createAccountDesc": "启航前的最后一步。",
     "createAndContinue": "创建账户并继续",
     "alreadyHaveAccount": "已有账户？",
     "signIn": "登录",
     "registrationFailed": "注册失败，请重试。",
+    "registrationClosed": "我们目前不接受新注册。请稍后再来——我们很期待您的加入！",
+    "registrationClosedTitle": "注册目前已关闭",
     "stepAccount": "账户",
     "stepPlan": "套餐",
     "stepCheckout": "付款",
@@ -2861,13 +2944,19 @@
     "redirectingCheckoutDesc": "您将被带到 Stripe 完成付款。",
     "checkoutFailed": "无法启动支付，请重试。",
     "backToPlans": "返回套餐选择",
-    "welcomeBack": "一切就绪，{name}！",
-    "welcomeBackDesc": "您的账户已准备好。以下是您可以做的事情。",
+    "welcomeGreeting0": "很高兴见到你，{name}！",
+    "welcomeGreeting1": "全员就位，{name}！",
+    "welcomeGreeting2": "准备靠岸，{name}？",
+    "welcomeGreeting3": "欢迎登船，{name}！",
+    "welcomeGreeting4": "一帆风顺，{name}！",
+    "welcomeGreeting5": "准备启动，{name}？",
+    "loading": "正在定位...",
+    "welcomeBackDesc": "您的容器正在等待。继续上次的工作。",
     "yourPlan": "您的套餐",
     "plan": "套餐",
-    "letsGo": "开始吧",
-    "whereToStart": "您想从哪里开始？",
-    "whereToStartDesc": "选择您的第一个操作，或直接前往控制面板。",
+    "letsGo": "启动",
+    "whereToStart": "下一步做什么？",
+    "whereToStartDesc": "选择要部署的内容，或直接前往码头。",
     "deployDocker": "从 Docker Hub 部署",
     "deployDockerDesc": "拉取任何公共镜像并在数秒内部署。",
     "deployGithub": "从 GitHub 部署",
@@ -2877,7 +2966,7 @@
     "registerDomain": "注册域名",
     "registerDomainDesc": "为您的服务获取自定义域名。",
     "domainsSaved": "我们已保存您的域名选择——您可以在域名管理中配置。",
-    "skipToDashboard": "跳至控制面板"
+    "skipToDashboard": "前往码头"
   },
   "subAccounts": {
     "title": "子账户",
@@ -2950,7 +3039,7 @@
       "features": "功能",
       "pricing": "定价",
       "github": "GitHub",
-      "getStarted": "开始使用",
+      "getStarted": "登船",
       "login": "登录"
     },
     "hero": {
@@ -2959,7 +3048,7 @@
       "dockerServices": "Docker 服务",
       "atScale": "大规模运行",
       "subtitle": "Siglar 是一个基于 Docker Swarm 的多租户 PaaS 平台。自托管您自己的 Heroku/Vercel 替代方案，完全掌控您的基础设施。",
-      "getStarted": "开始使用",
+      "getStarted": "登船",
       "viewOnGithub": "在 GitHub 上查看"
     },
     "terminal": {
@@ -3012,6 +3101,7 @@
       }
     },
     "pricing": {
+      "free": "免费",
       "label": "定价",
       "title": "按服务付费",
       "subtitle": "所有账户免费。为您部署的每项服务选择一个等级。",
@@ -3087,7 +3177,7 @@
       "services": "服务",
       "unlimited": "无限",
       "exclVat": "不含增值税",
-      "checkout": "继续结账"
+      "checkout": "去结账"
     },
     "howItWorks": {
       "label": "使用流程",

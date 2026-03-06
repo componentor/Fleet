@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Globe, Plus, Loader2, Trash2, Pencil, X, Check } from 'lucide-vue-next'
+import { Globe, Plus, Trash2, Pencil, X, Check } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -158,7 +159,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
@@ -336,7 +337,7 @@ onMounted(() => {
                 :disabled="saving || (!editingId && !form.domain)"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="saving" size="w-4 h-4" />
                 {{ editingId ? t('common.save') : t('super.sharedDomains.add') }}
               </button>
             </div>

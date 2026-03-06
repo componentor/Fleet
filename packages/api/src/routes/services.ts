@@ -1,10 +1,10 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, billingPlans, subscriptions, billingConfig, accountBillingOverrides, stacks, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
+import { db, services, deployments, oauthProviders, resourceLimits, locationMultipliers, nodes, platformSettings, billingPlans, subscriptions, billingConfig, accountBillingOverrides, stacks, accounts, insertReturning, updateReturning, eq, and, not, isNull, desc } from '@fleet/db';
 import { authMiddleware, requireScope, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { orchestrator } from '../services/orchestrator.js';
-import { getRegistryAuthForImage } from '../services/docker.service.js';
+import { getRegistryAuthForImage, isStatefulImage } from '../services/docker.service.js';
 import { githubService, getGitHubConfig } from '../services/github.service.js';
 import { requireMember } from '../middleware/rbac.js';
 import { requireActiveSubscription } from '../middleware/subscription.js';
@@ -19,6 +19,8 @@ import { processDeploymentInline, type DeploymentJobData } from '../workers/depl
 import { getPlatformDomain } from './settings.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 import { isNginxService, DEFAULT_NGINX_CONFIG } from '../services/runtime.service.js';
+import { stripeService } from '../services/stripe.service.js';
+import { stripeSyncService } from '../services/stripe-sync.service.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -161,6 +163,114 @@ async function enforceResourcePool(
   return null;
 }
 
+/**
+ * Deploy a service that was created with pending_payment status after checkout completes.
+ * Called from the billing webhook when a service subscription checkout is successful.
+ */
+export async function deployPendingService(serviceId: string): Promise<void> {
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), isNull(services.deletedAt)),
+  });
+  if (!svc || svc.status !== 'pending_payment') {
+    logger.warn({ serviceId, status: svc?.status }, 'deployPendingService: service not in pending_payment state');
+    return;
+  }
+
+  const accountId = svc.accountId;
+  await db.update(services).set({ status: 'deploying', updatedAt: new Date() }).where(eq(services.id, serviceId));
+
+  try {
+    const { buildTraefikLabels: buildLabels, ensureIngressRoute: ensureRoute } = await import('../services/traefik.js');
+
+    const primaryTargetPort = (svc.ports as any[])?.[0]?.target ?? 80;
+    const traefikLabels = buildLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort);
+
+    const networkName = `fleet-account-${accountId}`;
+    const networkId = await orchestrator.ensureNetwork(networkName);
+    const networkIds = [networkId];
+    if (svc.domain) {
+      const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
+      networkIds.push(publicNetId);
+    }
+
+    const accountShort = accountId.replace(/-/g, '').substring(0, 12);
+    const swarmServiceName = `fleet-${accountShort}-${svc.name}`.toLowerCase();
+    const storageLimitMb = await getContainerDiskLimit(accountId);
+
+    const ingressPorts = svc.domain
+      ? []
+      : await allocateIngressPorts(
+          ((svc.ports as any[]) ?? []).map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+        );
+
+    const registryAuth = await getRegistryAuthForImage(accountId, svc.image);
+    const result = await orchestrator.createService({
+      name: swarmServiceName,
+      image: svc.image,
+      replicas: svc.replicas ?? 1,
+      env: (svc.env as Record<string, string>) ?? {},
+      ports: ingressPorts,
+      volumes: ((svc.volumes as any[]) ?? []).map((v: any) => ({
+        source: v.source,
+        target: v.target,
+        readonly: v.readonly,
+      })),
+      labels: {
+        ...traefikLabels,
+        'fleet.account-id': accountId,
+        'fleet.service-id': svc.id,
+      },
+      constraints: (svc.placementConstraints as string[]) ?? [],
+      registryAuth,
+      healthCheck: (svc.healthCheck as any) ?? undefined,
+      updateParallelism: (svc as any).updateParallelism ?? 1,
+      updateDelay: (svc as any).updateDelay ?? '10s',
+      rollbackOnFailure: (svc as any).rollbackOnFailure ?? true,
+      cpuLimit: svc.cpuLimit ?? undefined,
+      memoryLimit: svc.memoryLimit ?? undefined,
+      networkIds,
+      storageLimitMb,
+    });
+
+    await ensureRoute(`fleet-account-${accountId}`, swarmServiceName, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort).catch(() => {});
+
+    await db.update(services).set({
+      dockerServiceId: result.id,
+      status: 'deploying',
+      ports: ingressPorts.length > 0 ? ingressPorts : (svc.ports as any[]),
+      updatedAt: new Date(),
+    }).where(eq(services.id, serviceId));
+
+    logger.info({ serviceId, dockerServiceId: result.id }, 'Deployed pending service after checkout');
+  } catch (err) {
+    logger.error({ err, serviceId }, 'Failed to deploy service after checkout');
+    logToErrorTable({ level: 'error', message: `Post-checkout deploy failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'deploy-pending-service', serviceId } });
+    await db.update(services).set({ status: 'stopped', updatedAt: new Date() }).where(eq(services.id, serviceId));
+  }
+}
+
+/**
+ * Deploy all pending_payment services in a stack after checkout completes.
+ */
+export async function deployPendingStack(stackId: string): Promise<void> {
+  const stackServices = await db.query.services.findMany({
+    where: and(eq(services.stackId, stackId), eq(services.status, 'pending_payment'), isNull(services.deletedAt)),
+    columns: { id: true },
+  });
+
+  if (stackServices.length === 0) {
+    logger.warn({ stackId }, 'deployPendingStack: no pending_payment services found');
+    return;
+  }
+
+  logger.info({ stackId, count: stackServices.length }, 'Deploying pending stack services after checkout');
+
+  // Deploy each service sequentially to avoid race conditions on shared resources (networks, ports)
+  for (const svc of stackServices) {
+    await deployPendingService(svc.id);
+  }
+}
+
 const serviceRoutes = new OpenAPIHono<{
   Variables: {
     user: AuthUser;
@@ -226,12 +336,16 @@ const createServiceSchema = z.object({
   autoDeploy: z.boolean().default(false),
   cpuLimit: z.number().min(0.1).max(64).nullable().optional(),
   memoryLimit: z.number().int().min(64).max(131072).nullable().optional(),
-  sourceType: z.enum(['docker', 'github', 'upload', 'marketplace', 'registry']).nullable().optional(),
+  gitUrl: z.string().url().max(500).nullable().optional(),
+  gitBranch: z.string().max(255).nullable().optional(),
+  gitToken: z.string().max(500).nullable().optional(),
+  sourceType: z.enum(['docker', 'github', 'upload', 'marketplace', 'registry', 'git']).nullable().optional(),
   sourcePath: z.string().nullable().optional(),
   tags: z.array(z.string().max(50)).max(20).default([]),
   registryPollEnabled: z.boolean().default(false),
   registryPollInterval: z.number().int().min(60).max(86400).default(300),
   planId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().nullable().optional()),
+  billingCycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']).default('monthly'),
 }).openapi('CreateServiceRequest');
 
 const updateServiceSchema = z.object({
@@ -298,7 +412,7 @@ const serviceIdParamSchema = z.object({
 });
 
 const stackIdParamSchema = z.object({
-  stackId: z.string().uuid().openapi({ description: 'Stack ID' }),
+  stackId: z.string().min(1).openapi({ description: 'Stack ID' }),
 });
 
 const logsQuerySchema = z.object({
@@ -1130,10 +1244,13 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     healthCheck: data.healthCheck ?? null,
     githubRepo: data.githubRepo ?? null,
     githubBranch: data.githubBranch ?? null,
+    gitUrl: data.gitUrl ?? null,
+    gitBranch: data.gitBranch ?? null,
+    gitToken: data.gitToken ?? null,
     autoDeploy: data.autoDeploy,
     cpuLimit: data.cpuLimit ?? null,
     memoryLimit: data.memoryLimit ?? null,
-    sourceType: data.sourceType ?? (data.githubRepo ? 'github' : 'docker'),
+    sourceType: data.sourceType ?? (data.gitUrl ? 'git' : data.githubRepo ? 'github' : 'docker'),
     sourcePath: data.sourcePath ?? null,
     tags: data.tags,
     registryPollEnabled: data.registryPollEnabled,
@@ -1169,6 +1286,64 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       await db.update(services).set({ autoDeploy: false }).where(eq(services.id, svc.id));
       svc.autoDeploy = false;
       webhookWarning = 'GitHub webhook registration failed — auto-deploy has been disabled. Re-enable it in service settings after connecting your GitHub account.';
+    }
+  }
+
+  // ── Paid plan paywall: require checkout before deployment ──
+  if (data.planId) {
+    const plan = await db.query.billingPlans.findFirst({
+      where: eq(billingPlans.id, data.planId),
+    });
+    if (plan && !plan.isFree) {
+      // Set service to pending_payment — deployment happens after checkout completes
+      await db.update(services).set({ status: 'pending_payment', updatedAt: new Date() }).where(eq(services.id, svc.id));
+
+      try {
+        // Get or create Stripe customer for this account
+        const account = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+        });
+        if (!account) {
+          return c.json({ error: 'Account not found' }, 404);
+        }
+
+        let stripeCustomerId = account.stripeCustomerId;
+        if (!stripeCustomerId) {
+          const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+          stripeCustomerId = customer.id;
+          await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+        }
+
+        const origin = c.req.header('origin') || c.req.header('referer')?.replace(/\/[^/]*$/, '') || '';
+        const successUrl = `${origin}/panel/services?checkout=success&serviceId=${svc.id}`;
+        const cancelUrl = `${origin}/panel/services?checkout=cancelled&serviceId=${svc.id}`;
+
+        const checkout = await stripeSyncService.createServiceCheckoutSession({
+          accountId,
+          serviceId: svc.id,
+          planId: data.planId,
+          billingCycle: data.billingCycle,
+          stripeCustomerId,
+          successUrl,
+          cancelUrl,
+        });
+
+        eventService.log({
+          ...eventContext(c),
+          eventType: EventTypes.SERVICE_CREATED,
+          description: `Created service '${data.name}' (pending payment)`,
+          resourceId: svc.id,
+          resourceName: data.name,
+        });
+
+        return c.json({ ...svc, status: 'pending_payment', checkoutUrl: checkout.url }, 201);
+      } catch (err) {
+        logger.error({ err }, 'Failed to create checkout session for paid service');
+        logToErrorTable({ level: 'error', message: `Checkout session creation failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'create-checkout-session' } });
+        // Clean up the service record since checkout failed
+        await db.update(services).set({ deletedAt: new Date(), status: 'stopped' }).where(eq(services.id, svc.id));
+        return c.json({ error: 'Failed to create checkout session. Please try again.' }, 500);
+      }
     }
   }
 
@@ -1863,6 +2038,7 @@ serviceRoutes.openapi(restartServiceRoute, (async (c: any) => {
     const restartAuth = await getRegistryAuthForImage(accountId, svc.image);
     await orchestrator.updateService(svc.dockerServiceId, {
       image: svc.image,
+      updateOrder: isStatefulImage(svc.image) ? 'stop-first' : undefined,
     }, restartAuth);
 
 
@@ -2703,7 +2879,10 @@ serviceRoutes.openapi(restartStackRoute, (async (c: any) => {
 
     try {
       const stackRestartAuth = await getRegistryAuthForImage(accountId, svc.image);
-      await orchestrator.updateService(svc.dockerServiceId, { image: svc.image }, stackRestartAuth);
+      await orchestrator.updateService(svc.dockerServiceId, {
+        image: svc.image,
+        updateOrder: isStatefulImage(svc.image) ? 'stop-first' : undefined,
+      }, stackRestartAuth);
       results.push({ id: svc.id, name: svc.name, success: true });
     } catch (err) {
       logger.error({ err, serviceId: svc.id }, 'Failed to restart stack service');

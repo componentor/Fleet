@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, Trash2, Loader2, Archive } from 'lucide-vue-next'
+import { Download, Trash2, Archive } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 const props = defineProps<{
@@ -99,7 +100,7 @@ onMounted(fetchArchives)
 <template>
   <div>
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <Loader2 class="w-6 h-6 animate-spin text-gray-400" />
+      <CompassSpinner color="text-gray-400" />
     </div>
     <div v-else-if="archives.length === 0" class="text-center py-12">
       <Archive class="w-10 h-10 mx-auto text-gray-400 mb-3" />
@@ -149,7 +150,7 @@ onMounted(fetchArchives)
                     class="p-1.5 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
                     :title="$t('logArchives.download')"
                   >
-                    <Loader2 v-if="downloadingId === archive.id" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="downloadingId === archive.id" size="w-4 h-4" />
                     <Download v-else class="w-4 h-4" />
                   </button>
                   <button
@@ -159,7 +160,7 @@ onMounted(fetchArchives)
                     class="p-1.5 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
                     :title="$t('logArchives.delete')"
                   >
-                    <Loader2 v-if="deletingId === archive.id" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="deletingId === archive.id" size="w-4 h-4" />
                     <Trash2 v-else class="w-4 h-4" />
                   </button>
                 </div>

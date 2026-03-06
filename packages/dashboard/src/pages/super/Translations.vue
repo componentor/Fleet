@@ -3,7 +3,6 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Languages,
-  Loader2,
   Save,
   Trash2,
   Plus,
@@ -14,6 +13,7 @@ import {
   Check,
   X,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -347,7 +347,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading && allLocales.length === 0" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Main two-panel layout -->
@@ -392,7 +392,7 @@ onMounted(() => {
               :disabled="addingLocale || !newLocaleCode.trim() || !newLocaleName.trim()"
               class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="addingLocale" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="addingLocale" size="w-4 h-4" />
               <Check v-else class="w-4 h-4" />
               {{ t('super.translations.addLocale') }}
             </button>
@@ -490,7 +490,7 @@ onMounted(() => {
                     :disabled="deletingLocale"
                     class="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white transition-colors"
                   >
-                    <Loader2 v-if="deletingLocale" class="w-3 h-3 animate-spin inline mr-1" />
+                    <CompassSpinner v-if="deletingLocale" size="w-3 h-3" class="inline mr-1" />
                     {{ t('super.translations.deleteLocale') }}
                   </button>
                   <button
@@ -538,7 +538,7 @@ onMounted(() => {
                       :disabled="translating"
                       class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
                     >
-                      <Loader2 v-if="translating" class="w-4 h-4 animate-spin" />
+                      <CompassSpinner v-if="translating" size="w-4 h-4" />
                       <Wand2 v-else class="w-4 h-4" />
                       {{ t('super.translations.autoTranslate') }}
                     </button>
@@ -571,7 +571,7 @@ onMounted(() => {
                     :disabled="saving || dirtyCount === 0"
                     class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="saving" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                     {{ dirtyCount > 0 ? `${t('super.translations.saveChanges')} (${dirtyCount})` : t('super.translations.saveChanges') }}
                   </button>
@@ -609,7 +609,7 @@ onMounted(() => {
 
           <!-- Loading keys -->
           <div v-if="loadingKeys" class="flex items-center justify-center py-16">
-            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            <CompassSpinner />
           </div>
 
           <!-- Keys table -->

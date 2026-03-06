@@ -3,7 +3,8 @@ import { ref, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useApi } from '@/composables/useApi'
-import { MailCheck, Loader2, CheckCircle, XCircle } from 'lucide-vue-next'
+import { MailCheck, CheckCircle, XCircle } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const route = useRoute()
 const api = useApi()
@@ -44,7 +45,7 @@ onMounted(() => {
       </div>
 
       <div v-if="loading" class="flex flex-col items-center gap-4 py-8">
-        <Loader2 class="w-10 h-10 text-primary-600 dark:text-primary-400 animate-spin" />
+        <CompassSpinner size="w-10 h-10" />
         <p class="text-sm text-gray-500 dark:text-gray-400">Verifying your new email address...</p>
       </div>
 

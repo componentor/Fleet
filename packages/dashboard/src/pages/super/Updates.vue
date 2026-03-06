@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, RefreshCw, Loader2, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal, XCircle, X, ChevronDown, ChevronUp, Settings } from 'lucide-vue-next'
+import { Download, RefreshCw, Check, AlertTriangle, RotateCcw, Database, Sprout, Terminal, XCircle, X, ChevronDown, ChevronUp, Settings } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { updateVersion, versionInfo } from '@/composables/useVersionInfo'
 
@@ -474,7 +475,7 @@ onUnmounted(() => {
           :disabled="rollingBack"
           class="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-600 text-amber-700 dark:text-amber-300 text-sm font-medium transition-colors hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
         >
-          <Loader2 v-if="rollingBack" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="rollingBack" size="w-4 h-4" />
           <RotateCcw v-else class="w-4 h-4" />
           {{ t('updates.rollbackTo', { version: updateState.rollbackTarget || '' }) }}
         </button>
@@ -483,7 +484,7 @@ onUnmounted(() => {
           :disabled="checking"
           class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
         >
-          <Loader2 v-if="checking" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="checking" size="w-4 h-4" />
           <RefreshCw v-else class="w-4 h-4" />
           {{ checking ? t('updates.checking') : t('updates.checkForUpdates') }}
         </button>
@@ -491,7 +492,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="space-y-6">
@@ -527,7 +528,7 @@ onUnmounted(() => {
           updateState.status === 'completed' ? 'bg-green-50 dark:bg-green-900/20' :
           'bg-blue-50 dark:bg-blue-900/20'
         ">
-          <Loader2 v-if="isActiveState(updateState.status)" class="w-5 h-5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+          <CompassSpinner v-if="isActiveState(updateState.status)" size="w-5 h-5" color="text-blue-600 dark:text-blue-400" class="shrink-0" />
           <AlertTriangle v-else-if="updateState.status === 'failed'" class="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
           <Check v-else-if="updateState.status === 'completed'" class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
           <div class="min-w-0 flex-1">
@@ -563,7 +564,7 @@ onUnmounted(() => {
                 ? 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30'
                 : 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'"
             >
-              <Loader2 v-if="resetting" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="resetting" size="w-3.5 h-3.5" />
               <XCircle v-else class="w-3.5 h-3.5" />
               {{ t('updates.reset') }}
             </button>
@@ -600,7 +601,7 @@ onUnmounted(() => {
                 <Check v-if="updateState.status === 'completed' || (idx < currentStepIndex && updateState.status !== 'rolling-back' && updateState.status !== 'failed')" class="w-3.5 h-3.5" />
                 <X v-else-if="updateState.status === 'failed' && step.key === updateState.failedAt" class="w-3.5 h-3.5" />
                 <AlertTriangle v-else-if="updateState.status === 'rolling-back'" class="w-3 h-3" />
-                <Loader2 v-else-if="idx === currentStepIndex && isActiveState(updateState.status)" class="w-3.5 h-3.5 animate-spin" />
+                <CompassSpinner v-else-if="idx === currentStepIndex && isActiveState(updateState.status)" size="w-3.5 h-3.5" />
                 <span v-else>{{ idx + 1 }}</span>
               </div>
               <!-- Label -->
@@ -653,7 +654,7 @@ onUnmounted(() => {
         <div class="px-6 py-5 bg-amber-50 dark:bg-amber-900/10">
           <div class="flex items-center gap-4">
             <div class="shrink-0">
-              <Loader2 class="w-6 h-6 text-amber-600 dark:text-amber-400 animate-spin" />
+              <CompassSpinner color="text-amber-600 dark:text-amber-400" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="text-sm font-semibold text-amber-700 dark:text-amber-300">
@@ -693,7 +694,7 @@ onUnmounted(() => {
               :disabled="updating"
               class="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
             >
-              <Loader2 v-if="updating" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="updating" size="w-4 h-4" />
               <Download v-else class="w-4 h-4" />
               {{ t('updates.updateNow') }}
             </button>
@@ -767,7 +768,7 @@ onUnmounted(() => {
                 :disabled="migrating"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
               >
-                <Loader2 v-if="migrating" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="migrating" size="w-4 h-4" />
                 <Database v-else class="w-4 h-4" />
                 {{ t('updates.runMigrations') }}
               </button>
@@ -776,7 +777,7 @@ onUnmounted(() => {
                 :disabled="seeding"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
               >
-                <Loader2 v-if="seeding" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="seeding" size="w-4 h-4" />
                 <Sprout v-else class="w-4 h-4" />
                 {{ t('updates.runSeeders') }}
               </button>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Loader2, X } from 'lucide-vue-next'
+import { Plus, X } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import type { VolumeInfo, StorageQuota } from '@/composables/useVolumeManager'
 
 const props = defineProps<{
@@ -158,7 +159,7 @@ watch(
               :disabled="createLoading || !newName || !!nameError"
               class="ml-auto px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
             >
-              <Loader2 v-if="createLoading" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="createLoading" size="w-3.5 h-3.5" />
               <template v-else>{{ $t('deploy.create') || 'Create' }}</template>
             </button>
           </div>

@@ -3,9 +3,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Network, Plus, Loader2, Unlink, ArrowLeft, ArrowRight,
+  Network, Plus, Unlink, ArrowLeft, ArrowRight,
   Check, CreditCard, UserCircle, Cpu, HardDrive, Box, MemoryStick,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 
@@ -376,7 +377,7 @@ onMounted(() => {
           </div>
 
           <div v-if="plansLoading" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+            <CompassSpinner color="text-primary-600" />
           </div>
 
           <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -435,7 +436,7 @@ onMounted(() => {
           <p class="text-sm text-gray-500 dark:text-gray-400 mb-5">{{ t('subAccounts.wizard.billingDesc') }}</p>
 
           <div v-if="parentCheckLoading" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+            <CompassSpinner color="text-primary-600" />
           </div>
 
           <div v-else class="space-y-3 max-w-lg">
@@ -532,7 +533,7 @@ onMounted(() => {
               {{ t('subAccounts.wizard.back') }}
             </button>
             <button @click="submitWizard" :disabled="creating" class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="creating" size="w-4 h-4" />
               <Check v-else class="w-4 h-4" />
               {{ creating ? t('subAccounts.wizard.creating') : t('subAccounts.wizard.createButton') }}
             </button>
@@ -543,7 +544,7 @@ onMounted(() => {
 
     <!-- ─── Tree view ─── -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>
@@ -591,7 +592,7 @@ onMounted(() => {
                   :disabled="releasingId === child.account.id"
                   class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
                 >
-                  <Loader2 v-if="releasingId === child.account.id" class="w-3 h-3 animate-spin" />
+                  <CompassSpinner v-if="releasingId === child.account.id" size="w-3 h-3" />
                   <Unlink v-else class="w-3 h-3" />
                   {{ t('subAccounts.release') }}
                 </button>
@@ -621,7 +622,7 @@ onMounted(() => {
                     :disabled="releasingId === grandchild.account.id"
                     class="flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
                   >
-                    <Loader2 v-if="releasingId === grandchild.account.id" class="w-3 h-3 animate-spin" />
+                    <CompassSpinner v-if="releasingId === grandchild.account.id" size="w-3 h-3" />
                     <Unlink v-else class="w-3 h-3" />
                     {{ t('subAccounts.release') }}
                   </button>

@@ -1,7 +1,7 @@
 slug: ollama
 name: Ollama
 description: Run large language models locally. Supports Llama, Mistral, CodeLlama, and many more open-source models.
-icon_url: https://ollama.com/public/ollama.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/ollama.png
 category: ai
 
 variables:

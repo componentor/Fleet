@@ -6,7 +6,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useAccountStore } from '@/stores/account'
 import { useApi } from '@/composables/useApi'
 import { useTheme } from '@/composables/useTheme'
-import { UserPlus, Loader2, AlertCircle, Sun, Moon, Check } from 'lucide-vue-next'
+import { UserPlus, AlertCircle, Sun, Moon, Check } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import type { AuthTokens, User } from '@fleet/types'
 
 // --- Composables ---
@@ -188,7 +189,7 @@ onMounted(fetchBranding)
 
     <!-- Loading state -->
     <div v-if="pageLoading" class="relative z-10 flex flex-col items-center gap-4 animate-fade-in-up">
-      <Loader2 class="w-8 h-8 text-gray-400 dark:text-gray-500 animate-spin" />
+      <CompassSpinner size="w-8 h-8" color="text-gray-400 dark:text-gray-500" />
       <p class="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
     </div>
 
@@ -406,7 +407,7 @@ onMounted(fetchBranding)
                 }"
                 :class="!canSubmit ? 'bg-gray-400 dark:bg-gray-600' : 'hover:brightness-90'"
               >
-                <Loader2 v-if="submitting" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="submitting" size="w-4 h-4" />
                 <UserPlus v-else class="w-4 h-4" />
                 <span v-if="submitting">Creating account...</span>
                 <span v-else>Create Account</span>

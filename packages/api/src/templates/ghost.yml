@@ -1,7 +1,7 @@
 slug: ghost
 name: Ghost
 description: Professional publishing platform for bloggers and journalists. Includes Ghost and MySQL database.
-icon_url: https://ghost.org/images/logos/ghost-logo-orb.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/ghost.png
 category: cms
 
 variables:

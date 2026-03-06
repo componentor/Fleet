@@ -175,6 +175,54 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
           imageTag,
         });
       }
+    } else if (svc.gitUrl) {
+      // Generic Git build flow (GitLab, Bitbucket, Gitea, self-hosted, etc.)
+      await setProgressStep(deploymentId, 'cloning');
+      const branch = svc.gitBranch || 'main';
+
+      // Build clone URL with optional token auth
+      let cloneUrl = svc.gitUrl;
+      if (svc.gitToken) {
+        try {
+          const url = new URL(svc.gitUrl);
+          url.username = 'oauth2';
+          url.password = svc.gitToken;
+          cloneUrl = url.toString();
+        } catch {
+          // Not a valid URL for token injection — use as-is
+        }
+      }
+
+      let generatedDockerfile: string | undefined;
+      let dockerfile: string | undefined;
+      try {
+        const detection = await buildService.detectDockerfile(cloneUrl, branch);
+        if (detection.dockerfiles.length > 0) {
+          dockerfile = detection.dockerfiles[0];
+        } else {
+          const { detectRuntime } = await import('../services/runtime.service.js');
+          const runtimeResult = await detectRuntime(detection.allFiles, null, svc.nginxConfig);
+          if (runtimeResult) {
+            generatedDockerfile = runtimeResult.dockerfile;
+            await db.update(services)
+              .set({ dockerfile: runtimeResult.dockerfile })
+              .where(eq(services.id, svc.id));
+            logger.info({ serviceId: svc.id, runtime: runtimeResult.runtime }, 'Auto-detected runtime for Git deploy');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, serviceId: svc.id }, 'Failed to detect Dockerfiles — will try default Dockerfile');
+      }
+
+      await setProgressStep(deploymentId, 'building');
+      buildInfo = await buildService.buildImage({
+        serviceId: svc.id,
+        cloneUrl,
+        branch,
+        dockerfile,
+        imageTag,
+        generatedDockerfile,
+      });
     } else {
       // GitHub build flow
       await setProgressStep(deploymentId, 'cloning');

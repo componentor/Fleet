@@ -12,14 +12,18 @@ const authRoutes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
-    path: '/get-started',
-    name: 'get-started',
+    path: '/onboarding',
+    name: 'onboarding',
     component: () => import('@/pages/auth/GetStarted.vue'),
     meta: { public: true },
   },
   {
     path: '/register',
-    redirect: '/get-started',
+    redirect: '/onboarding',
+  },
+  {
+    path: '/get-started',
+    redirect: '/onboarding',
   },
   {
     path: '/auth/callback',
@@ -56,6 +60,11 @@ const authRoutes: RouteRecordRaw[] = [
     name: 'verify-email-change',
     component: () => import('@/pages/auth/VerifyEmailChange.vue'),
     meta: { public: true },
+  },
+  {
+    path: '/checkout',
+    name: 'checkout',
+    component: () => import('@/pages/auth/Checkout.vue'),
   },
   {
     path: '/r/:slug',
@@ -360,6 +369,11 @@ const panelRoutes: RouteRecordRaw[] = [
         name: 'panel-support-detail',
         component: () => import('@/pages/panel/SupportDetail.vue'),
         props: true,
+      },
+      {
+        path: 'compass-test',
+        name: 'panel-compass-test',
+        component: () => import('@/pages/panel/CompassTest.vue'),
       },
     ],
   },

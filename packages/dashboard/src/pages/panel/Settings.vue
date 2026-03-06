@@ -2,7 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Settings, Save, AlertTriangle, Loader2, Calendar, ShieldX, Package, Plus, Trash2, Github } from 'lucide-vue-next'
+import { Settings, Save, AlertTriangle, Calendar, ShieldX, Package, Plus, Trash2, Github } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 import { useRole } from '@/composables/useRole'
@@ -201,7 +202,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="space-y-8 max-w-2xl">
@@ -227,7 +228,7 @@ onMounted(() => {
               :disabled="revoking"
               class="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="revoking" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="revoking" size="w-4 h-4" />
               <ShieldX v-else class="w-4 h-4" />
               {{ revoking ? $t('common.loading') : $t('settings.cancelDeletion') }}
             </button>
@@ -263,7 +264,7 @@ onMounted(() => {
           </div>
           <div v-if="canAdmin" class="pt-2 flex justify-end">
             <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="saving" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ saving ? $t('common.saving') : $t('settings.saveChanges') }}
             </button>
@@ -309,7 +310,7 @@ onMounted(() => {
                 :disabled="addingReg || !newRegRegistry || !newRegUsername || !newRegPassword"
                 class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="addingReg" class="w-3.5 h-3.5 animate-spin" />
+                <CompassSpinner v-if="addingReg" size="w-3.5 h-3.5" />
                 <Plus v-else class="w-3.5 h-3.5" />
                 Add Credential
               </button>
@@ -318,7 +319,7 @@ onMounted(() => {
                 :disabled="connectingGithub"
                 class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="connectingGithub" class="w-3.5 h-3.5 animate-spin" />
+                <CompassSpinner v-if="connectingGithub" size="w-3.5 h-3.5" />
                 <Github v-else class="w-3.5 h-3.5" />
                 Connect GitHub Packages
               </button>
@@ -400,7 +401,7 @@ onMounted(() => {
                   :disabled="deleting || !deletePassword"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="deleting" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="deleting" size="w-4 h-4" />
                   {{ deleting ? $t('common.loading') : $t('settings.confirmDeletion') }}
                 </button>
                 <button @click="showDeleteConfirm = false; deletePassword = ''" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700">

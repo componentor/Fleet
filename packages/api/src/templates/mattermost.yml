@@ -1,7 +1,7 @@
 slug: mattermost
 name: Mattermost
 description: Open-source Slack alternative for team messaging and collaboration. Includes PostgreSQL.
-icon_url: https://mattermost.com/wp-content/uploads/2022/02/favicon.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/mattermost.png
 category: productivity
 
 variables:

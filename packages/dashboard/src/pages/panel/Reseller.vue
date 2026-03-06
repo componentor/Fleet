@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import {
   Store,
-  Loader2,
   CreditCard,
   Percent,
   DollarSign,
@@ -29,6 +28,7 @@ import {
   LayoutDashboard,
   RefreshCw,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 
@@ -407,7 +407,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>
@@ -476,7 +476,7 @@ onMounted(() => {
                 :disabled="applying"
                 class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="applying" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="applying" size="w-4 h-4" />
                 <Send v-else class="w-4 h-4" />
                 {{ applying ? 'Submitting...' : 'Submit Application' }}
               </button>
@@ -630,7 +630,7 @@ onMounted(() => {
                   :disabled="openingDashboard"
                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
                 >
-                  <Loader2 v-if="openingDashboard" class="w-3.5 h-3.5 animate-spin" />
+                  <CompassSpinner v-if="openingDashboard" size="w-3.5 h-3.5" />
                   <LayoutDashboard v-else class="w-3.5 h-3.5" />
                   Stripe Dashboard
                   <ExternalLink class="w-3 h-3" />
@@ -653,7 +653,7 @@ onMounted(() => {
                     :disabled="connectingStripe"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="connectingStripe" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="connectingStripe" size="w-4 h-4" />
                     <ExternalLink v-else class="w-4 h-4" />
                     {{ connectingStripe ? 'Connecting...' : 'Connect Stripe Account' }}
                   </button>
@@ -689,7 +689,7 @@ onMounted(() => {
                     :disabled="connectingStripe"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="connectingStripe" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="connectingStripe" size="w-4 h-4" />
                     <ExternalLink v-else class="w-4 h-4" />
                     {{ connectingStripe ? 'Opening...' : 'Continue Onboarding' }}
                   </button>
@@ -891,7 +891,7 @@ onMounted(() => {
                     :disabled="savingMarkup"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="savingMarkup" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingMarkup" size="w-4 h-4" />
                     {{ savingMarkup ? 'Saving...' : 'Save Markup' }}
                   </button>
                 </div>
@@ -1055,7 +1055,7 @@ onMounted(() => {
                             @click="verifyDomain"
                             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
                           >
-                            <Loader2 v-if="verifyingDomain" class="w-3.5 h-3.5 animate-spin" />
+                            <CompassSpinner v-if="verifyingDomain" size="w-3.5 h-3.5" />
                             <CheckCircle v-else class="w-3.5 h-3.5" />
                             Verify Domain
                           </button>
@@ -1074,7 +1074,7 @@ onMounted(() => {
                     :disabled="savingBranding"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="savingBranding" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingBranding" size="w-4 h-4" />
                     {{ savingBranding ? 'Saving...' : 'Save Branding' }}
                   </button>
                   <a
@@ -1161,7 +1161,7 @@ onMounted(() => {
                         :disabled="togglingSubAccount === sub.id"
                         class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
                       >
-                        <Loader2 v-if="togglingSubAccount === sub.id" class="w-3.5 h-3.5 animate-spin inline" />
+                        <CompassSpinner v-if="togglingSubAccount === sub.id" size="w-3.5 h-3.5" class="inline" />
                         <template v-else>Disable Reselling</template>
                       </button>
                       <button
@@ -1170,7 +1170,7 @@ onMounted(() => {
                         :disabled="togglingSubAccount === sub.id"
                         class="text-xs font-medium text-green-600 dark:text-green-400 hover:underline disabled:opacity-50"
                       >
-                        <Loader2 v-if="togglingSubAccount === sub.id" class="w-3.5 h-3.5 animate-spin inline" />
+                        <CompassSpinner v-if="togglingSubAccount === sub.id" size="w-3.5 h-3.5" class="inline" />
                         <template v-else>Enable Reselling</template>
                       </button>
                     </td>

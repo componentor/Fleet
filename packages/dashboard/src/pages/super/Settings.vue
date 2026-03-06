@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, Loader2, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft, Wrench, Database, AlertTriangle, HardDrive, Variable, Eye, EyeOff, Pencil, RotateCw } from 'lucide-vue-next'
+import { Settings, Save, RefreshCw, Check, X, Upload, Trash2, Search, Archive, KeyRound, Github, Plus, Languages, Bot, Server, ArrowRightLeft, Wrench, Database, AlertTriangle, HardDrive, Variable, Eye, EyeOff, Pencil, RotateCw, ShieldCheck, Users } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 
@@ -35,6 +36,7 @@ const sections = [
   { id: 'database', label: () => t('super.settings.database.title') },
   { id: 'environment', label: () => t('super.settings.env.title') },
   { id: 'robots', label: () => t('super.settings.robots.title') },
+  { id: 'registration', label: () => t('super.settings.registration.title') },
 ]
 
 // General settings
@@ -231,6 +233,13 @@ const robotsEnabled = ref(true)
 const robotsContent = ref('')
 const savingRobots = ref(false)
 
+// Registration gating
+const regMode = ref<'open' | 'closed' | 'limited'>('open')
+const regMaxAccounts = ref(0)
+const regClosedMessage = ref('')
+const regCurrentAccounts = ref(0)
+const savingRegistration = ref(false)
+
 // Orchestrator
 const orchDefault = ref<'swarm' | 'kubernetes'>('swarm')
 const orchAvailable = ref<string[]>([])
@@ -251,6 +260,73 @@ const orchInstallingDocker = ref(false)
 const orchInstallingDockerAgents = ref(false)
 const orchInstallLogs = ref<string[]>([])
 const orchInstallResult = ref<{ success: boolean; message: string } | null>(null)
+const orchInstallStep = ref<{ current: number; total: number; name: string } | null>(null)
+const logContainerRef = ref<HTMLElement | null>(null)
+
+/** Stream an install endpoint via SSE and update logs/step/result in real-time */
+async function streamInstall(url: string): Promise<boolean> {
+  orchInstallLogs.value = []
+  orchInstallResult.value = null
+  orchInstallStep.value = null
+
+  const token = localStorage.getItem('token') || sessionStorage.getItem('token')
+  const res = await fetch(`/api/v1${url}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: '{}',
+  })
+
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => ({}))
+    orchInstallResult.value = { success: false, message: body.error || `HTTP ${res.status}` }
+    return false
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let success = false
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    // Parse SSE events from buffer
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? '' // keep incomplete line in buffer
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const event = JSON.parse(line.slice(6))
+        if (event.type === 'log') {
+          orchInstallLogs.value.push(event.message)
+          // Auto-scroll log container to bottom
+          nextTick(() => {
+            if (logContainerRef.value) logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight
+          })
+        } else if (event.type === 'step') {
+          orchInstallStep.value = { current: event.current, total: event.total, name: event.name }
+        } else if (event.type === 'done') {
+          success = event.success
+          orchInstallResult.value = {
+            success: event.success,
+            message: event.success
+              ? t('super.settings.orchestrator.installSuccess')
+              : (event.error || t('super.settings.orchestrator.installFailed')),
+          }
+          orchInstallStep.value = null
+        }
+      } catch { /* skip malformed events */ }
+    }
+  }
+
+  return success
+}
 
 // k3s status
 const k3sStatus = ref<{ installed: boolean; running: boolean; joinToken: string | null; serverUrl: string | null; nodeCount: number; readyNodes: number } | null>(null)
@@ -1207,18 +1283,9 @@ async function migrateServiceOrchestrator() {
 
 async function installK3sServer() {
   orchInstallingK3s.value = true
-  orchInstallLogs.value = []
-  orchInstallResult.value = null
   try {
-    const result = await api.post<any>('/settings/orchestrator/install-k3s', {})
-    orchInstallLogs.value = result.logs ?? []
-    orchInstallResult.value = {
-      success: result.success,
-      message: result.success ? t('super.settings.orchestrator.installSuccess') : (result.error || t('super.settings.orchestrator.installFailed')),
-    }
-    if (result.success) await fetchOrchestrator()
-  } catch (err: any) {
-    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+    const ok = await streamInstall('/settings/orchestrator/install-k3s')
+    if (ok) await fetchOrchestrator()
   } finally {
     orchInstallingK3s.value = false
   }
@@ -1226,18 +1293,9 @@ async function installK3sServer() {
 
 async function installK3sAgents() {
   orchInstallingK3sAgents.value = true
-  orchInstallResult.value = null
   try {
-    const result = await api.post<any>('/settings/orchestrator/install-k3s-agents', {})
-    orchInstallResult.value = {
-      success: result.success !== false,
-      message: result.success !== false
-        ? t('super.settings.orchestrator.installSuccess')
-        : (result.error || t('super.settings.orchestrator.installFailed')),
-    }
-    if (result.success !== false) await fetchOrchestrator()
-  } catch (err: any) {
-    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+    const ok = await streamInstall('/settings/orchestrator/install-k3s-agents')
+    if (ok) await fetchOrchestrator()
   } finally {
     orchInstallingK3sAgents.value = false
   }
@@ -1245,18 +1303,9 @@ async function installK3sAgents() {
 
 async function installDockerServer() {
   orchInstallingDocker.value = true
-  orchInstallLogs.value = []
-  orchInstallResult.value = null
   try {
-    const result = await api.post<any>('/settings/orchestrator/install-docker', {})
-    orchInstallLogs.value = result.logs ?? []
-    orchInstallResult.value = {
-      success: result.success,
-      message: result.success ? t('super.settings.orchestrator.installSuccess') : (result.error || t('super.settings.orchestrator.installFailed')),
-    }
-    if (result.success) await fetchOrchestrator()
-  } catch (err: any) {
-    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+    const ok = await streamInstall('/settings/orchestrator/install-docker')
+    if (ok) await fetchOrchestrator()
   } finally {
     orchInstallingDocker.value = false
   }
@@ -1264,18 +1313,9 @@ async function installDockerServer() {
 
 async function installDockerAgents() {
   orchInstallingDockerAgents.value = true
-  orchInstallResult.value = null
   try {
-    const result = await api.post<any>('/settings/orchestrator/install-docker-agents', {})
-    orchInstallResult.value = {
-      success: result.success !== false,
-      message: result.success !== false
-        ? t('super.settings.orchestrator.installSuccess')
-        : (result.error || t('super.settings.orchestrator.installFailed')),
-    }
-    if (result.success !== false) await fetchOrchestrator()
-  } catch (err: any) {
-    orchInstallResult.value = { success: false, message: err?.body?.error || t('super.settings.orchestrator.installFailed') }
+    const ok = await streamInstall('/settings/orchestrator/install-docker-agents')
+    if (ok) await fetchOrchestrator()
   } finally {
     orchInstallingDockerAgents.value = false
   }
@@ -1308,6 +1348,36 @@ async function saveRobotsConfig() {
   }
 }
 
+// ── Registration Gating ──
+async function fetchRegistration() {
+  try {
+    const data = await api.get<any>('/settings/registration')
+    regMode.value = data.mode ?? 'open'
+    regMaxAccounts.value = data.maxAccounts ?? 0
+    regClosedMessage.value = data.closedMessage ?? ''
+    regCurrentAccounts.value = data.currentAccounts ?? 0
+  } catch {
+    // Not configured yet
+  }
+}
+
+async function saveRegistration() {
+  savingRegistration.value = true
+  try {
+    await api.patch('/settings/registration', {
+      mode: regMode.value,
+      maxAccounts: regMaxAccounts.value,
+      closedMessage: regClosedMessage.value,
+    })
+    success.value = t('super.settings.registration.saved')
+    await fetchRegistration()
+  } catch (err: any) {
+    error.value = err?.message || String(err)
+  } finally {
+    savingRegistration.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchStripe()
@@ -1327,6 +1397,7 @@ onMounted(() => {
   fetchDatabaseStatus()
   fetchEnvironment()
   fetchRobotsConfig()
+  fetchRegistration()
 })
 </script>
 
@@ -1338,7 +1409,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="flex flex-col lg:flex-row gap-6">
@@ -1383,7 +1454,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformDomain" type="text" placeholder="fleet.example.com" @keydown.enter="saveGeneralField('platform:domain', platformDomain)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:domain', platformDomain)" :disabled="savingField === 'general:platform:domain'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'general:platform:domain'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'general:platform:domain'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1393,7 +1464,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" @keydown.enter="saveGeneralField('platform:url', platformUrl)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:url', platformUrl)" :disabled="savingField === 'general:platform:url'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'general:platform:url'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'general:platform:url'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1403,7 +1474,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" @keydown.enter="saveGeneralField('platform:supportEmail', supportEmail)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveGeneralField('platform:supportEmail', supportEmail)" :disabled="savingField === 'general:platform:supportEmail'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'general:platform:supportEmail'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'general:platform:supportEmail'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1419,7 +1490,7 @@ onMounted(() => {
                   <div class="flex items-center gap-2 max-w-xs">
                     <input v-model="maxServicesPerAccount" type="number" min="1" max="10000" @keydown.enter="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                     <button @click="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" :disabled="savingField === 'general:limits:maxServicesPerAccount'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                      <Loader2 v-if="savingField === 'general:limits:maxServicesPerAccount'" class="w-4 h-4 animate-spin" />
+                      <CompassSpinner v-if="savingField === 'general:limits:maxServicesPerAccount'" size="w-4 h-4" />
                       <Save v-else class="w-4 h-4" />
                     </button>
                   </div>
@@ -1430,7 +1501,7 @@ onMounted(() => {
                   <div class="flex items-center gap-2 max-w-xs">
                     <input v-model="maxTotalReplicasPerAccount" type="number" min="1" max="100000" @keydown.enter="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                     <button @click="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" :disabled="savingField === 'general:limits:maxTotalReplicasPerAccount'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                      <Loader2 v-if="savingField === 'general:limits:maxTotalReplicasPerAccount'" class="w-4 h-4 animate-spin" />
+                      <CompassSpinner v-if="savingField === 'general:limits:maxTotalReplicasPerAccount'" size="w-4 h-4" />
                       <Save v-else class="w-4 h-4" />
                     </button>
                   </div>
@@ -1456,7 +1527,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="githubClientId" type="text" placeholder="Ov23li..." @keydown.enter="saveGitHubField('clientId', githubClientId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveGitHubField('clientId', githubClientId)" :disabled="savingField === 'github:clientId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'github:clientId'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'github:clientId'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1466,7 +1537,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="githubClientSecret" type="password" :placeholder="githubClientSecretHint || 'Enter client secret'" @keydown.enter="saveGitHubField('clientSecret', githubClientSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveGitHubField('clientSecret', githubClientSecret)" :disabled="savingField === 'github:clientSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'github:clientSecret'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'github:clientSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1476,7 +1547,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="githubWebhookSecret" type="password" :placeholder="githubWebhookSecretHint || 'Enter webhook secret'" @keydown.enter="saveGitHubField('webhookSecret', githubWebhookSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveGitHubField('webhookSecret', githubWebhookSecret)" :disabled="savingField === 'github:webhookSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'github:webhookSecret'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'github:webhookSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1501,7 +1572,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" @keydown.enter="saveGoogleField('clientId', googleClientId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveGoogleField('clientId', googleClientId)" :disabled="savingField === 'google:clientId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'google:clientId'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'google:clientId'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1511,7 +1582,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="googleClientSecret" type="password" :placeholder="googleClientSecretHint || 'Enter client secret'" @keydown.enter="saveGoogleField('clientSecret', googleClientSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveGoogleField('clientSecret', googleClientSecret)" :disabled="savingField === 'google:clientSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'google:clientSecret'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'google:clientSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1536,7 +1607,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." @keydown.enter="saveStripeField('publishableKey', stripePublishableKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveStripeField('publishableKey', stripePublishableKey)" :disabled="savingField === 'stripe:publishableKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'stripe:publishableKey'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'stripe:publishableKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1546,7 +1617,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="stripeSecretKey" type="password" :placeholder="stripeSecretKeyHint || 'sk_live_...'" @keydown.enter="saveStripeField('secretKey', stripeSecretKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveStripeField('secretKey', stripeSecretKey)" :disabled="savingField === 'stripe:secretKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'stripe:secretKey'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'stripe:secretKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1556,7 +1627,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="stripeWebhookSecret" type="password" :placeholder="stripeWebhookSecretHint || 'whsec_...'" @keydown.enter="saveStripeField('webhookSecret', stripeWebhookSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveStripeField('webhookSecret', stripeWebhookSecret)" :disabled="savingField === 'stripe:webhookSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'stripe:webhookSecret'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'stripe:webhookSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1580,7 +1651,7 @@ onMounted(() => {
               </div>
               <div class="flex items-center gap-3">
                 <button @click="testStripeConnection" :disabled="stripeTestLoading || !stripeConfigured" class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
-                  <Loader2 v-if="stripeTestLoading" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="stripeTestLoading" size="w-4 h-4" />
                   <RefreshCw v-else class="w-4 h-4" />
                   Test Connection
                 </button>
@@ -1622,7 +1693,7 @@ onMounted(() => {
                   <option value="resend">Resend</option>
                 </select>
                 <button @click="saveEmailField('provider', emailProvider)" :disabled="savingField === 'email:provider'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'email:provider'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'email:provider'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1634,7 +1705,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpHost" type="text" placeholder="smtp.example.com" @keydown.enter="saveEmailField('smtpHost', smtpHost)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpHost', smtpHost)" :disabled="savingField === 'email:smtpHost'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:smtpHost'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:smtpHost'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1644,7 +1715,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model.number="smtpPort" type="number" placeholder="587" @keydown.enter="saveEmailField('smtpPort', smtpPort)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpPort', smtpPort)" :disabled="savingField === 'email:smtpPort'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:smtpPort'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:smtpPort'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1654,7 +1725,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpUser" type="text" placeholder="your-username" @keydown.enter="saveEmailField('smtpUser', smtpUser)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpUser', smtpUser)" :disabled="savingField === 'email:smtpUser'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:smtpUser'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:smtpUser'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1664,7 +1735,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpPass" type="password" :placeholder="smtpPassHint || 'Enter new password to update'" @keydown.enter="saveEmailField('smtpPass', smtpPass)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpPass', smtpPass)" :disabled="savingField === 'email:smtpPass'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:smtpPass'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:smtpPass'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1674,7 +1745,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('smtpFrom', smtpFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('smtpFrom', smtpFrom)" :disabled="savingField === 'email:smtpFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:smtpFrom'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:smtpFrom'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1687,7 +1758,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="resendApiKey" type="password" :placeholder="resendApiKeyHint || 're_...'" @keydown.enter="saveEmailField('resendApiKey', resendApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                   <button @click="saveEmailField('resendApiKey', resendApiKey)" :disabled="savingField === 'email:resendApiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:resendApiKey'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:resendApiKey'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1697,7 +1768,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="resendFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('resendFrom', resendFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                   <button @click="saveEmailField('resendFrom', resendFrom)" :disabled="savingField === 'email:resendFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                    <Loader2 v-if="savingField === 'email:resendFrom'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="savingField === 'email:resendFrom'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
                 </div>
@@ -1709,7 +1780,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="emailTestTo" type="email" placeholder="test@example.com" @keydown.enter="testEmailSend" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="testEmailSend" :disabled="emailTestLoading || !emailTestTo" class="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
-                  <Loader2 v-if="emailTestLoading" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="emailTestLoading" size="w-4 h-4" />
                   <RefreshCw v-else class="w-4 h-4" />
                   Send Test
                 </button>
@@ -1748,7 +1819,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" @keydown.enter="saveRegistrarField('resellerId', registrarResellerId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveRegistrarField('resellerId', registrarResellerId)" :disabled="savingField === 'registrar:resellerId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'registrar:resellerId'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'registrar:resellerId'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1759,7 +1830,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiKey" type="password" :placeholder="registrarApiKeyHint || 'Enter API key'" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'registrar:apiKey'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'registrar:apiKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1771,7 +1842,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiKey" type="text" placeholder="Your Name.com username" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
                 <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'registrar:apiKey'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'registrar:apiKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1782,7 +1853,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiSecret" type="password" :placeholder="registrarApiSecretHint || 'Enter API token'" @keydown.enter="saveRegistrarField('apiSecret', registrarApiSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
                 <button @click="saveRegistrarField('apiSecret', registrarApiSecret)" :disabled="savingField === 'registrar:apiSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
-                  <Loader2 v-if="savingField === 'registrar:apiSecret'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'registrar:apiSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -1801,7 +1872,7 @@ onMounted(() => {
                 :disabled="testingConnection"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
               >
-                <Loader2 v-if="testingConnection" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="testingConnection" size="w-4 h-4" />
                 <RefreshCw v-else class="w-4 h-4" />
                 {{ $t('super.settings.testConnection') }}
               </button>
@@ -1829,14 +1900,14 @@ onMounted(() => {
               :disabled="syncing"
               class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
             >
-              <Loader2 v-if="syncing" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="syncing" size="w-3.5 h-3.5" />
               <RefreshCw v-else class="w-3.5 h-3.5" />
               {{ $t('super.settings.syncFromProvider') }}
             </button>
           </div>
 
           <div v-if="pricingLoading" class="p-8 flex items-center justify-center">
-            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            <CompassSpinner />
           </div>
 
           <div v-else-if="pricingEntries.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
@@ -2094,7 +2165,7 @@ onMounted(() => {
 
             <div class="pt-2 flex justify-end">
               <button type="submit" :disabled="savingBranding" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="savingBranding" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingBranding" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingBranding ? $t('common.saving') : $t('common.save') }}
               </button>
@@ -2152,12 +2223,12 @@ onMounted(() => {
 
             <div class="pt-2 flex items-center gap-3">
               <button type="submit" :disabled="savingLogArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="savingLogArchive" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingLogArchive" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingLogArchive ? $t('common.saving') : $t('common.save') }}
               </button>
               <button type="button" @click="triggerArchiveNow" :disabled="triggeringArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
-                <Loader2 v-if="triggeringArchive" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="triggeringArchive" size="w-4 h-4" />
                 <RefreshCw v-else class="w-4 h-4" />
                 {{ $t('super.settings.logArchiveRunNow') }}
               </button>
@@ -2190,7 +2261,7 @@ onMounted(() => {
             </div>
             <div class="pt-2">
               <button type="submit" :disabled="savingBackupDefaults" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="savingBackupDefaults" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingBackupDefaults" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingBackupDefaults ? $t('common.saving') : $t('common.save') }}
               </button>
@@ -2216,7 +2287,7 @@ onMounted(() => {
                   :disabled="checkingRegistryHealth"
                   class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
                 >
-                  <Loader2 v-if="checkingRegistryHealth" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="checkingRegistryHealth" size="w-4 h-4" />
                   <RefreshCw v-else class="w-4 h-4" />
                   {{ t('super.settings.registry.checkHealth') }}
                 </button>
@@ -2257,7 +2328,7 @@ onMounted(() => {
                   :disabled="repairingRegistry"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="repairingRegistry" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="repairingRegistry" size="w-4 h-4" />
                   <Wrench v-else class="w-4 h-4" />
                   {{ repairingRegistry ? t('super.settings.registry.repairing') : t('super.settings.registry.repair') }}
                 </button>
@@ -2268,7 +2339,7 @@ onMounted(() => {
               </div>
             </div>
             <div v-else-if="checkingRegistryHealth" class="flex items-center justify-center py-6">
-              <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+              <CompassSpinner size="w-5 h-5" color="text-gray-400" />
             </div>
           </div>
         </div>
@@ -2319,7 +2390,7 @@ onMounted(() => {
                   :disabled="addingCred || !newCredRegistry || !newCredUsername || !newCredPassword"
                   class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="addingCred" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="addingCred" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                   {{ addingCred ? 'Adding...' : 'Add' }}
                 </button>
@@ -2341,14 +2412,14 @@ onMounted(() => {
                 :disabled="connectingGithub"
                 class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="connectingGithub" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="connectingGithub" size="w-4 h-4" />
                 Connect
               </button>
             </div>
 
             <!-- Existing credentials -->
             <div v-if="loadingCreds" class="flex items-center justify-center py-6">
-              <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+              <CompassSpinner size="w-5 h-5" color="text-gray-400" />
             </div>
             <div v-else-if="registryCreds.length > 0" class="space-y-2">
               <div
@@ -2405,7 +2476,7 @@ onMounted(() => {
                 :disabled="savingSupport"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="savingSupport" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingSupport" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 Save
               </button>
@@ -2462,7 +2533,7 @@ onMounted(() => {
                   :disabled="!deeplApiKey || savingField === 'translation:deeplApiKey'"
                   class="p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
                 >
-                  <Loader2 v-if="savingField === 'translation:deeplApiKey'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'translation:deeplApiKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -2495,7 +2566,7 @@ onMounted(() => {
                   :disabled="!claudeApiKey || savingField === 'translation:claudeApiKey'"
                   class="p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
                 >
-                  <Loader2 v-if="savingField === 'translation:claudeApiKey'" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingField === 'translation:claudeApiKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
               </div>
@@ -2512,7 +2583,7 @@ onMounted(() => {
                 :disabled="(translationProvider === 'deepl' && !deeplConfigured) || (translationProvider === 'claude' && !claudeConfigured) || testingTranslation"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
               >
-                <Loader2 v-if="testingTranslation" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="testingTranslation" size="w-4 h-4" />
                 <RefreshCw v-else class="w-4 h-4" />
                 {{ t('super.settings.testConnection') }} ({{ translationProvider === 'deepl' ? 'DeepL' : 'Claude' }})
               </button>
@@ -2618,7 +2689,7 @@ onMounted(() => {
                 :disabled="savingSelfHealing"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="savingSelfHealing" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingSelfHealing" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ t('common.save') }}
               </button>
@@ -2627,7 +2698,7 @@ onMounted(() => {
                 :disabled="(!shAnthropicConfigured && !shAnthropicApiKey) || testingSelfHealing"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
               >
-                <Loader2 v-if="testingSelfHealing" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="testingSelfHealing" size="w-4 h-4" />
                 <RefreshCw v-else class="w-4 h-4" />
                 {{ t('super.settings.testConnection') }}
               </button>
@@ -2652,7 +2723,7 @@ onMounted(() => {
           </div>
 
           <div v-if="orchLoading" class="p-6 flex justify-center">
-            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            <CompassSpinner />
           </div>
 
           <div v-else class="p-6 space-y-6">
@@ -2718,7 +2789,7 @@ onMounted(() => {
                   <Check v-if="orchDefault === 'kubernetes'" class="w-4 h-4" />
                   Kubernetes
                 </button>
-                <Loader2 v-if="orchSaving" class="w-4 h-4 animate-spin text-gray-400" />
+                <CompassSpinner v-if="orchSaving" size="w-4 h-4" color="text-gray-400" />
               </div>
             </div>
 
@@ -2751,7 +2822,7 @@ onMounted(() => {
                   :disabled="orchMigrating || !orchMigrateServiceId"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="orchMigrating" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="orchMigrating" size="w-4 h-4" />
                   <ArrowRightLeft v-else class="w-4 h-4" />
                   {{ t('super.settings.orchestrator.migrate') }}
                 </button>
@@ -2775,7 +2846,7 @@ onMounted(() => {
                     :disabled="orchInstallingK3s"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="orchInstallingK3s" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="orchInstallingK3s" size="w-4 h-4" />
                     <Server v-else class="w-4 h-4" />
                     {{ orchInstallingK3s ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installK3sServer') }}
                   </button>
@@ -2787,7 +2858,7 @@ onMounted(() => {
                     :disabled="orchInstallingK3sAgents || orchInstallingK3s"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                   >
-                    <Loader2 v-if="orchInstallingK3sAgents" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="orchInstallingK3sAgents" size="w-4 h-4" />
                     <Server v-else class="w-4 h-4" />
                     {{ orchInstallingK3sAgents ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installK3sAgents') }}
                   </button>
@@ -2807,7 +2878,7 @@ onMounted(() => {
                     :disabled="orchInstallingDocker"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="orchInstallingDocker" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="orchInstallingDocker" size="w-4 h-4" />
                     <Server v-else class="w-4 h-4" />
                     {{ orchInstallingDocker ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installDockerServer') }}
                   </button>
@@ -2819,7 +2890,7 @@ onMounted(() => {
                     :disabled="orchInstallingDockerAgents || orchInstallingDocker"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                   >
-                    <Loader2 v-if="orchInstallingDockerAgents" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="orchInstallingDockerAgents" size="w-4 h-4" />
                     <Server v-else class="w-4 h-4" />
                     {{ orchInstallingDockerAgents ? t('super.settings.orchestrator.installing') : t('super.settings.orchestrator.installDockerAgents') }}
                   </button>
@@ -2856,14 +2927,14 @@ onMounted(() => {
                     :disabled="orchInstallingK3s"
                     class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
                   >
-                    <Loader2 v-if="orchInstallingK3s" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="orchInstallingK3s" size="w-4 h-4" />
                     <Server v-else class="w-4 h-4" />
                     Install k3s Server
                   </button>
                 </div>
               </div>
               <div v-else-if="k3sStatusLoading" class="mb-3 flex items-center gap-2 text-xs text-gray-400">
-                <Loader2 class="w-3 h-3 animate-spin" />
+                <CompassSpinner size="w-3 h-3" />
                 Checking k3s status...
               </div>
 
@@ -2873,7 +2944,7 @@ onMounted(() => {
                   :disabled="orchInstallingK3sAgents || (!k3sStatus?.joinToken && !k3sStatusLoading)"
                   class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                 >
-                  <Loader2 v-if="orchInstallingK3sAgents" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="orchInstallingK3sAgents" size="w-4 h-4" />
                   k3s Agents
                 </button>
                 <button
@@ -2881,19 +2952,34 @@ onMounted(() => {
                   :disabled="orchInstallingDockerAgents"
                   class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                 >
-                  <Loader2 v-if="orchInstallingDockerAgents" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="orchInstallingDockerAgents" size="w-4 h-4" />
                   Docker Workers
                 </button>
               </div>
             </div>
 
-            <!-- Install logs / result -->
-            <div v-if="orchInstallLogs.length > 0" class="pt-4 border-t border-gray-200 dark:border-gray-700">
-              <div class="bg-gray-900 rounded-lg p-4 max-h-48 overflow-y-auto font-mono text-xs text-gray-300">
-                <div v-for="(log, i) in orchInstallLogs" :key="i" class="py-0.5">{{ log }}</div>
+            <!-- Step progress -->
+            <div v-if="orchInstallStep" class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ orchInstallStep.name }}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ orchInstallStep.current }}/{{ orchInstallStep.total }}</span>
+              </div>
+              <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div
+                  class="bg-primary-600 h-2 rounded-full transition-all duration-500"
+                  :style="{ width: `${(orchInstallStep.current / orchInstallStep.total) * 100}%` }"
+                ></div>
               </div>
             </div>
 
+            <!-- Install logs -->
+            <div v-if="orchInstallLogs.length > 0" class="pt-4" :class="{ 'border-t border-gray-200 dark:border-gray-700': !orchInstallStep }">
+              <div ref="logContainerRef" class="bg-gray-900 rounded-lg p-4 max-h-64 overflow-y-auto font-mono text-xs text-gray-300 scroll-smooth">
+                <div v-for="(log, i) in orchInstallLogs" :key="i" class="py-0.5 leading-relaxed" :class="log.startsWith('Fatal error:') || log.startsWith('Error:') ? 'text-red-400' : log.startsWith('Warning:') ? 'text-yellow-400' : ''">{{ log }}</div>
+              </div>
+            </div>
+
+            <!-- Result banner -->
             <div v-if="orchInstallResult" class="mt-3 p-3 rounded-lg border" :class="orchInstallResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
               <p class="text-sm" :class="orchInstallResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'">
                 {{ orchInstallResult.message }}
@@ -2913,7 +2999,7 @@ onMounted(() => {
           </div>
 
           <div v-if="dbLoading" class="p-6 flex justify-center">
-            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            <CompassSpinner />
           </div>
 
           <div v-else-if="dbStatus" class="p-6 space-y-6">
@@ -2975,7 +3061,7 @@ onMounted(() => {
                   :disabled="dbRepinning || !dbRepinTarget || dbRepinTarget === dbStatus.pinnedNode"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="dbRepinning" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="dbRepinning" size="w-4 h-4" />
                   <ArrowRightLeft v-else class="w-4 h-4" />
                   {{ t('super.settings.database.repinAction') }}
                 </button>
@@ -3036,7 +3122,7 @@ onMounted(() => {
                   :disabled="dbMigrating || !dbMigrateCluster || !dbMigrateConfirm"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="dbMigrating" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="dbMigrating" size="w-4 h-4" />
                   <ArrowRightLeft v-else class="w-4 h-4" />
                   {{ dbMigrating ? t('super.settings.database.migrating') : t('super.settings.database.migrateToNfs') }}
                 </button>
@@ -3085,7 +3171,7 @@ onMounted(() => {
                   :disabled="dbMigrating || !dbMigrateLocalNode || !dbMigrateConfirm"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="dbMigrating" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="dbMigrating" size="w-4 h-4" />
                   <ArrowRightLeft v-else class="w-4 h-4" />
                   {{ dbMigrating ? t('super.settings.database.migrating') : t('super.settings.database.migrateToLocal') }}
                 </button>
@@ -3147,7 +3233,7 @@ onMounted(() => {
                     :disabled="envRestarting"
                     class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="envRestarting" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="envRestarting" size="w-3.5 h-3.5" />
                     <RotateCw v-else class="w-3.5 h-3.5" />
                     {{ t('super.settings.env.restartServices') }}
                   </button>
@@ -3186,7 +3272,7 @@ onMounted(() => {
                     :disabled="envSaving || !envNewKey || !envNewValue"
                     class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="envSaving" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="envSaving" size="w-3.5 h-3.5" />
                     <Save v-else class="w-3.5 h-3.5" />
                     {{ t('super.settings.env.save') }}
                   </button>
@@ -3201,7 +3287,7 @@ onMounted(() => {
             </div>
 
             <div v-if="envLoading" class="p-6 flex justify-center">
-              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+              <CompassSpinner />
             </div>
 
             <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -3282,7 +3368,7 @@ onMounted(() => {
                       :disabled="envSaving || !envEditValue"
                       class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                     >
-                      <Loader2 v-if="envSaving" class="w-3.5 h-3.5 animate-spin" />
+                      <CompassSpinner v-if="envSaving" size="w-3.5 h-3.5" />
                       <Save v-else class="w-3.5 h-3.5" />
                     </button>
                     <button
@@ -3352,9 +3438,98 @@ onMounted(() => {
                   :disabled="savingRobots"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="savingRobots" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="savingRobots" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                   {{ t('super.settings.robots.save') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Registration Gating -->
+        <div v-if="activeSection === 'registration'" class="space-y-4">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div class="flex items-center gap-2">
+                <ShieldCheck class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('super.settings.registration.title') }}</h2>
+              </div>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.registration.desc') }}</p>
+            </div>
+
+            <div class="p-6 space-y-5">
+              <!-- Current account count -->
+              <div class="flex items-center gap-2 px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                <Users class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                <span class="text-sm text-gray-600 dark:text-gray-300">
+                  {{ t('super.settings.registration.currentAccounts', { count: regCurrentAccounts }) }}
+                </span>
+              </div>
+
+              <!-- Mode selector -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{{ t('super.settings.registration.modeLabel') }}</label>
+                <div class="space-y-2">
+                  <label class="flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors"
+                    :class="regMode === 'open' ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'">
+                    <input v-model="regMode" type="radio" value="open" class="mt-0.5 text-primary-600 focus:ring-primary-500" />
+                    <div>
+                      <span class="text-sm font-medium text-gray-900 dark:text-white">{{ t('super.settings.registration.modeOpen') }}</span>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('super.settings.registration.modeOpenDesc') }}</p>
+                    </div>
+                  </label>
+                  <label class="flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors"
+                    :class="regMode === 'limited' ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'">
+                    <input v-model="regMode" type="radio" value="limited" class="mt-0.5 text-primary-600 focus:ring-primary-500" />
+                    <div>
+                      <span class="text-sm font-medium text-gray-900 dark:text-white">{{ t('super.settings.registration.modeLimited') }}</span>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('super.settings.registration.modeLimitedDesc') }}</p>
+                    </div>
+                  </label>
+                  <label class="flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-colors"
+                    :class="regMode === 'closed' ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'">
+                    <input v-model="regMode" type="radio" value="closed" class="mt-0.5 text-primary-600 focus:ring-primary-500" />
+                    <div>
+                      <span class="text-sm font-medium text-gray-900 dark:text-white">{{ t('super.settings.registration.modeClosed') }}</span>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('super.settings.registration.modeClosedDesc') }}</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Max accounts (only for limited mode) -->
+              <div v-if="regMode === 'limited'">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('super.settings.registration.maxAccountsLabel') }}</label>
+                <input
+                  v-model.number="regMaxAccounts"
+                  type="number"
+                  min="1"
+                  class="w-48 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ t('super.settings.registration.maxAccountsHint') }}</p>
+              </div>
+
+              <!-- Custom closed message -->
+              <div v-if="regMode !== 'open'">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t('super.settings.registration.closedMessageLabel') }}</label>
+                <textarea
+                  v-model="regClosedMessage"
+                  rows="3"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  :placeholder="t('super.settings.registration.closedMessagePlaceholder')"
+                />
+              </div>
+
+              <div class="flex justify-end">
+                <button
+                  @click="saveRegistration"
+                  :disabled="savingRegistration"
+                  class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  <CompassSpinner v-if="savingRegistration" size="w-4 h-4" />
+                  <Save v-else class="w-4 h-4" />
+                  {{ t('super.settings.registration.save') }}
                 </button>
               </div>
             </div>

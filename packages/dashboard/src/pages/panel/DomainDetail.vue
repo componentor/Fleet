@@ -2,7 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Loader2, Shield, Edit2, X as XIcon, AlertTriangle, Copy, Check, ShieldCheck } from 'lucide-vue-next'
+import { ArrowLeft, Globe, Plus, Trash2, CheckCircle2, Clock, Shield, Edit2, X as XIcon, AlertTriangle, Copy, Check, ShieldCheck } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 const route = useRoute()
@@ -220,7 +221,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else-if="zone">
@@ -269,7 +270,7 @@ onMounted(() => {
               :disabled="verifying"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="verifying" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="verifying" size="w-4 h-4" />
               <ShieldCheck v-else class="w-4 h-4" />
               {{ t('domainDetail.verifyDomain') }}
             </button>

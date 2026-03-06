@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { stream } from 'hono/streaming';
 import { z } from '@hono/zod-openapi';
-import { db, platformSettings, storageClusters, eq } from '@fleet/db';
+import { db, platformSettings, storageClusters, accounts, eq, isNull, countSql } from '@fleet/db';
 import { storageManager } from '../services/storage/storage-manager.js';
 import { dockerService } from '../services/docker.service.js';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
@@ -1633,178 +1634,269 @@ settings.get('/orchestrator/k3s-status', authMiddleware, requireAdmin as any, (a
   return c.json({ installed, running, nodeCount, readyNodes, joinToken, serverUrl, logs });
 }) as any);
 
-// POST /settings/orchestrator/install-k3s — install k3s server on the local node
+// POST /settings/orchestrator/install-k3s — install k3s server on the local node (streaming)
 settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, (async (c: any) => {
-  const logs: string[] = [];
-  try {
-    const user = c.get('user') as AuthUser;
-    if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-    // Step 1: Install k3s server
-    logs.push('Installing k3s server...');
-    const installResult = await orchestrator.runOnLocalHost(
-      'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server ' +
-        '--flannel-backend=none ' +
-        '--disable-network-policy ' +
-        '--disable=traefik ' +
-        '--disable=servicelb ' +
-        '--write-kubeconfig-mode=644" sh -',
-      { timeoutMs: 300000 },
-    );
-    if (installResult.exitCode !== 0) {
-      logs.push(`k3s install failed (exit ${installResult.exitCode}): ${installResult.stdout}`);
-      return c.json({ success: false, logs }, 500);
-    }
-    logs.push('k3s server installed');
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
 
-    // Step 2: Wait for kubeconfig
-    logs.push('Waiting for kubeconfig...');
-    const waitResult = await orchestrator.runOnLocalHost(
-      'for i in $(seq 1 30); do [ -f /etc/rancher/k3s/k3s.yaml ] && echo "READY" && break; sleep 2; done',
-      { timeoutMs: 90000 },
-    );
-    if (!(waitResult.stdout ?? '').includes('READY')) {
-      logs.push('Timed out waiting for kubeconfig');
-      return c.json({ success: false, logs }, 500);
-    }
-    logs.push('kubeconfig ready');
+  return stream(c, async (s) => {
+    const allLogs: string[] = [];
 
-    // Step 3: Install Cilium CNI
-    logs.push('Installing Cilium CNI...');
-    const ciliumResult = await orchestrator.runOnLocalHost(
-      'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; ' +
-      'if ! command -v cilium >/dev/null 2>&1; then ' +
-        'CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt); ' +
-        'curl -L --fail --remote-name-all ' +
-          '"https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz" 2>/dev/null; ' +
-        'tar xzf cilium-linux-amd64.tar.gz -C /usr/local/bin 2>/dev/null; ' +
-        'rm -f cilium-linux-amd64.tar.gz; ' +
-      'fi; ' +
-      'cilium install --set kubeProxyReplacement=true 2>&1; ' +
-      'cilium status --wait --wait-duration 120s 2>&1 || true',
-      { timeoutMs: 300000 },
-    );
-    logs.push(`Cilium: ${(ciliumResult.stdout ?? '').slice(-200)}`);
+    // Helper: send a log line to the client
+    const log = async (msg: string) => {
+      allLogs.push(msg);
+      await s.write(`data: ${JSON.stringify({ type: 'log', message: msg })}\n\n`);
+    };
 
-    // Step 4: Read join token
-    const tokenResult = await orchestrator.runOnLocalHost(
-      'cat /var/lib/rancher/k3s/server/node-token 2>/dev/null',
-      { timeoutMs: 10000 },
-    );
-    const joinToken = (tokenResult.stdout ?? '').trim();
+    // Helper: send step progress (step number, total, description)
+    const step = async (current: number, total: number, name: string) => {
+      await s.write(`data: ${JSON.stringify({ type: 'step', current, total, name })}\n\n`);
+      await log(name);
+    };
 
-    // Detect server IP for join URL
-    const ipResult = await orchestrator.runOnLocalHost(
-      "ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'",
-      { timeoutMs: 10000 },
-    );
-    const serverIp = (ipResult.stdout ?? '').trim();
-    const serverUrl = serverIp ? `https://${serverIp}:6443` : '';
-
-    // Step 5: Store join token + URL in platformSettings
-    if (joinToken) {
-      await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
-        .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } });
-    }
-    if (serverUrl) {
-      await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
-        .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } });
-    }
-
-    // Step 6: Reload orchestrator so K8s becomes available
-    await reloadOrchestrators();
-    logs.push('Orchestrator reloaded — Kubernetes is now available');
-
-    return c.json({ success: true, logs, joinToken: joinToken || null, serverUrl: serverUrl || null });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : null;
-    logs.push(`Error: ${message}`);
-    logger.error({ err, logs }, 'k3s install failed');
-    logToErrorTable({ level: 'error', message: `k3s install failed: ${message}`, stack: stack ?? null, metadata: { context: 'orchestrator', operation: 'install-k3s', logs } });
-    return c.json({ success: false, logs, error: message }, 500);
-  }
-}) as any);
-
-// POST /settings/orchestrator/install-k3s-agents — install k3s agent on all worker nodes
-settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin as any, (async (c: any) => {
-  try {
-    const user = c.get('user') as AuthUser;
-    if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
-
-    // Read join token and server URL — try DB first, then env vars, then host file
-    let joinToken = '';
-    let serverUrl = '';
-
-    const tokenRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:joinToken') });
-    if (tokenRow?.value) {
-      try { joinToken = decrypt(tokenRow.value as string); } catch { joinToken = tokenRow.value as string; }
-    }
-    const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
-    if (urlRow?.value) serverUrl = urlRow.value as string;
-
-    // Fallback: check env vars (set by install.sh via env_file)
-    if (!joinToken && process.env['K3S_TOKEN']) joinToken = process.env['K3S_TOKEN'];
-    if (!serverUrl && process.env['K3S_URL']) serverUrl = process.env['K3S_URL'];
-
-    // Fallback: try reading from host file via each available orchestrator backend
-    if (!joinToken || !serverUrl) {
-      const backends: OrchestratorType[] = ['swarm', 'kubernetes'];
-      for (const backend of backends) {
-        if (joinToken && serverUrl) break;
-        try {
-          const orch = getOrchestrator(backend);
-          if (!orch) continue;
-
-          if (!joinToken) {
-            const tokenResult = await orch.runOnLocalHost('cat /var/lib/rancher/k3s/server/node-token 2>/dev/null', { timeoutMs: 10000 });
-            const t = (tokenResult.stdout ?? '').trim();
-            if (t) joinToken = t;
-          }
-
-          if (!serverUrl) {
-            const ipResult = await orch.runOnLocalHost("ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'", { timeoutMs: 10000 });
-            const ip = (ipResult.stdout ?? '').trim();
-            if (ip) serverUrl = `https://${ip}:6443`;
-          }
-        } catch {
-          // This backend can't run host commands — try the next one
+    // Helper: run a host command and stream its output
+    const run = async (cmd: string, opts?: { timeoutMs?: number }) => {
+      const result = await orchestrator.runOnLocalHost(cmd, opts);
+      // Stream each line of output
+      const output = (result.stdout ?? '').trim();
+      if (output) {
+        for (const line of output.split('\n').slice(-50)) { // Last 50 lines to avoid flooding
+          const clean = line.replace(/[\x00-\x08\x0e-\x1f]/g, '').trim();
+          if (clean) await log(`  ${clean}`);
         }
       }
+      return result;
+    };
+
+    // Helper: send final result
+    const done = async (success: boolean, error?: string, data?: Record<string, unknown>) => {
+      await s.write(`data: ${JSON.stringify({ type: 'done', success, error, ...data })}\n\n`);
+      if (!success) {
+        logger.error({ error, logs: allLogs }, 'k3s install failed');
+        logToErrorTable({
+          level: 'error',
+          message: `k3s install failed: ${error}`,
+          stack: null,
+          metadata: { context: 'orchestrator', operation: 'install-k3s', logs: allLogs },
+        });
+      }
+    };
+
+    const TOTAL_STEPS = 6;
+
+    try {
+      // Step 1: Install k3s server
+      await step(1, TOTAL_STEPS, 'Installing k3s server...');
+      const installResult = await run(
+        'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server ' +
+          '--flannel-backend=none ' +
+          '--disable-network-policy ' +
+          '--disable=traefik ' +
+          '--disable=servicelb ' +
+          '--write-kubeconfig-mode=644" sh -',
+        { timeoutMs: 300000 },
+      );
+      if (installResult.exitCode !== 0) {
+        await done(false, `k3s install failed with exit code ${installResult.exitCode}`);
+        return;
+      }
+      await log('k3s server installed successfully');
+
+      // Step 2: Wait for kubeconfig
+      await step(2, TOTAL_STEPS, 'Waiting for kubeconfig...');
+      const waitResult = await run(
+        'for i in $(seq 1 30); do [ -f /etc/rancher/k3s/k3s.yaml ] && echo "READY" && break; sleep 2; done',
+        { timeoutMs: 90000 },
+      );
+      if (!(waitResult.stdout ?? '').includes('READY')) {
+        await done(false, 'Timed out waiting for kubeconfig at /etc/rancher/k3s/k3s.yaml');
+        return;
+      }
+      await log('kubeconfig is ready');
+
+      // Step 3: Install Cilium CNI
+      await step(3, TOTAL_STEPS, 'Installing Cilium CNI (this may take a few minutes)...');
+      const ciliumResult = await run(
+        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; ' +
+        'if ! command -v cilium >/dev/null 2>&1; then ' +
+          'CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt); ' +
+          'curl -L --fail --remote-name-all ' +
+            '"https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz" 2>/dev/null; ' +
+          'tar xzf cilium-linux-amd64.tar.gz -C /usr/local/bin 2>/dev/null; ' +
+          'rm -f cilium-linux-amd64.tar.gz; ' +
+        'fi; ' +
+        'cilium install --set kubeProxyReplacement=true 2>&1; ' +
+        'cilium status --wait --wait-duration 120s 2>&1 || true',
+        { timeoutMs: 300000 },
+      );
+      if (ciliumResult.exitCode !== 0) {
+        await log(`Warning: Cilium install returned exit code ${ciliumResult.exitCode} — cluster may still work`);
+      }
+
+      // Step 4: Read join token + detect server IP
+      await step(4, TOTAL_STEPS, 'Collecting cluster join credentials...');
+      const tokenResult = await orchestrator.runOnLocalHost(
+        'cat /var/lib/rancher/k3s/server/node-token 2>/dev/null',
+        { timeoutMs: 10000 },
+      );
+      const joinToken = (tokenResult.stdout ?? '').trim();
+      if (joinToken) {
+        await log('Join token retrieved');
+      } else {
+        await log('Warning: Could not read join token from /var/lib/rancher/k3s/server/node-token');
+      }
+
+      const ipResult = await orchestrator.runOnLocalHost(
+        "ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'",
+        { timeoutMs: 10000 },
+      );
+      const serverIp = (ipResult.stdout ?? '').trim();
+      const serverUrl = serverIp ? `https://${serverIp}:6443` : '';
+      if (serverUrl) {
+        await log(`Server URL: ${serverUrl}`);
+      }
+
+      // Step 5: Persist credentials
+      await step(5, TOTAL_STEPS, 'Saving cluster configuration...');
+      if (joinToken) {
+        await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+          .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } });
+        await log('Join token saved to database');
+      }
+      if (serverUrl) {
+        await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+          .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } });
+        await log('Server URL saved to database');
+      }
+
+      // Step 6: Reload orchestrator
+      await step(6, TOTAL_STEPS, 'Reloading orchestrator...');
+      await reloadOrchestrators();
+      await log('Orchestrator reloaded — Kubernetes is now available');
+
+      await done(true, undefined, { joinToken: joinToken || null, serverUrl: serverUrl || null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await log(`Fatal error: ${message}`);
+      await done(false, message);
     }
+  });
+}) as any);
 
-    // Persist discovered token/URL to DB for future requests
-    if (joinToken && !tokenRow?.value) {
-      await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
-        .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } })
-        .catch(() => {});
+// POST /settings/orchestrator/install-k3s-agents — install k3s agent on all worker nodes (streaming)
+settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin as any, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
+
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  return stream(c, async (s) => {
+    const allLogs: string[] = [];
+    const log = async (msg: string) => { allLogs.push(msg); await s.write(`data: ${JSON.stringify({ type: 'log', message: msg })}\n\n`); };
+    const step = async (current: number, total: number, name: string) => { await s.write(`data: ${JSON.stringify({ type: 'step', current, total, name })}\n\n`); await log(name); };
+    const done = async (success: boolean, error?: string, data?: Record<string, unknown>) => {
+      await s.write(`data: ${JSON.stringify({ type: 'done', success, error, ...data })}\n\n`);
+      if (!success) { logger.error({ error, logs: allLogs }, 'k3s agent install failed'); logToErrorTable({ level: 'error', message: `k3s agent install failed: ${error}`, stack: null, metadata: { context: 'orchestrator', operation: 'install-k3s-agents', logs: allLogs } }); }
+    };
+
+    const TOTAL = 3;
+    try {
+      // Step 1: Resolve join credentials
+      await step(1, TOTAL, 'Resolving k3s join credentials...');
+      let joinToken = '';
+      let serverUrl = '';
+
+      const tokenRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:joinToken') });
+      if (tokenRow?.value) {
+        try { joinToken = decrypt(tokenRow.value as string); } catch { joinToken = tokenRow.value as string; }
+      }
+      const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
+      if (urlRow?.value) serverUrl = urlRow.value as string;
+
+      if (!joinToken && process.env['K3S_TOKEN']) joinToken = process.env['K3S_TOKEN'];
+      if (!serverUrl && process.env['K3S_URL']) serverUrl = process.env['K3S_URL'];
+
+      // Fallback: try reading from host
+      if (!joinToken || !serverUrl) {
+        await log('Credentials not in DB/env — trying host filesystem...');
+        const backends: OrchestratorType[] = ['swarm', 'kubernetes'];
+        for (const backend of backends) {
+          if (joinToken && serverUrl) break;
+          try {
+            const orch = getOrchestrator(backend);
+            if (!orch) continue;
+            if (!joinToken) {
+              const tokenResult = await orch.runOnLocalHost('cat /var/lib/rancher/k3s/server/node-token 2>/dev/null', { timeoutMs: 10000 });
+              const t = (tokenResult.stdout ?? '').trim();
+              if (t) joinToken = t;
+            }
+            if (!serverUrl) {
+              const ipResult = await orch.runOnLocalHost("ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'", { timeoutMs: 10000 });
+              const ip = (ipResult.stdout ?? '').trim();
+              if (ip) serverUrl = `https://${ip}:6443`;
+            }
+          } catch { /* try next backend */ }
+        }
+      }
+
+      // Persist to DB for future
+      if (joinToken && !tokenRow?.value) {
+        await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+          .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } }).catch(() => {});
+      }
+      if (serverUrl && !urlRow?.value) {
+        await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+          .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } }).catch(() => {});
+      }
+
+      if (!joinToken || !serverUrl) {
+        await done(false, 'k3s join token or server URL not available. Install k3s server first.');
+        return;
+      }
+
+      await log(`Join token: ${joinToken.slice(0, 12)}...`);
+      await log(`Server URL: ${serverUrl}`);
+
+      // Step 2: Install on all worker nodes
+      await step(2, TOTAL, 'Installing k3s agent on all worker nodes...');
+      const escapedToken = joinToken.replace(/'/g, "'\\''");
+      const escapedUrl = serverUrl.replace(/'/g, "'\\''");
+
+      const result = await orchestrator.runOnAllNodes(
+        `if command -v k3s >/dev/null 2>&1; then echo "k3s already installed"; ` +
+        `else curl -sfL https://get.k3s.io | K3S_URL='${escapedUrl}' K3S_TOKEN='${escapedToken}' sh - 2>&1; fi`,
+        { timeoutMs: 300000 },
+      );
+
+      // Stream per-node results
+      if (Array.isArray(result)) {
+        for (const r of result) {
+          const output = (r.stdout ?? r.output ?? '').trim();
+          const nodeId = r.nodeId ?? r.node ?? 'unknown';
+          await log(`Node ${nodeId}: exit=${r.exitCode ?? r.exit ?? '?'}`);
+          if (output) for (const line of output.split('\n').slice(-10)) { const c = line.trim(); if (c) await log(`  ${c}`); }
+        }
+      } else if (typeof result === 'object') {
+        await log(JSON.stringify(result, null, 2));
+      }
+
+      // Step 3: Verify
+      await step(3, TOTAL, 'Verifying agent installations...');
+      await log('k3s agents installation complete');
+
+      await done(true, undefined, { result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await log(`Fatal error: ${message}`);
+      await done(false, message);
     }
-    if (serverUrl && !urlRow?.value) {
-      await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
-        .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } })
-        .catch(() => {});
-    }
-
-    if (!joinToken || !serverUrl) {
-      return c.json({ error: 'k3s join token or server URL not available. Install k3s server first.' }, 400);
-    }
-
-    const escapedToken = joinToken.replace(/'/g, "'\\''");
-    const escapedUrl = serverUrl.replace(/'/g, "'\\''");
-
-    const result = await orchestrator.runOnAllNodes(
-      `if command -v k3s >/dev/null 2>&1; then echo "k3s already installed"; ` +
-      `else curl -sfL https://get.k3s.io | K3S_URL='${escapedUrl}' K3S_TOKEN='${escapedToken}' sh - 2>&1; fi`,
-      { timeoutMs: 300000 },
-    );
-
-    return c.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error({ err }, 'k3s agent install failed');
-    logToErrorTable({ level: 'error', message: `k3s agent install failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'orchestrator', operation: 'install-k3s-agents' } });
-    return c.json({ success: false, error: message }, 500);
-  }
+  });
 }) as any);
 
 // GET /settings/orchestrator/docker-status — check Docker + Swarm state
@@ -1846,125 +1938,173 @@ settings.get('/orchestrator/docker-status', authMiddleware, requireAdmin as any,
   return c.json({ installed, swarmActive, role, nodeCount, joinToken });
 }) as any);
 
-// POST /settings/orchestrator/install-docker — install Docker and init Swarm on the local node
+// POST /settings/orchestrator/install-docker — install Docker and init Swarm on the local node (streaming)
 settings.post('/orchestrator/install-docker', authMiddleware, requireAdmin as any, (async (c: any) => {
   const user = c.get('user') as AuthUser;
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  const logs: string[] = [];
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
 
-  try {
-    // Step 1: Install Docker
-    logs.push('Installing Docker...');
-    const installResult = await orchestrator.runOnLocalHost(
-      'if command -v docker >/dev/null 2>&1; then echo "Docker already installed"; ' +
-      'else curl -fsSL https://get.docker.com | sh 2>&1; fi; ' +
-      'systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null',
-      { timeoutMs: 300000 },
-    );
-    logs.push(installResult.stdout?.slice(-300) ?? '');
-    if (installResult.exitCode !== 0) {
-      logs.push(`Docker install failed (exit ${installResult.exitCode})`);
-      return c.json({ success: false, logs }, 500);
+  return stream(c, async (s) => {
+    const allLogs: string[] = [];
+    const log = async (msg: string) => { allLogs.push(msg); await s.write(`data: ${JSON.stringify({ type: 'log', message: msg })}\n\n`); };
+    const step = async (current: number, total: number, name: string) => { await s.write(`data: ${JSON.stringify({ type: 'step', current, total, name })}\n\n`); await log(name); };
+    const run = async (cmd: string, opts?: { timeoutMs?: number }) => {
+      const result = await orchestrator.runOnLocalHost(cmd, opts);
+      const output = (result.stdout ?? '').trim();
+      if (output) for (const line of output.split('\n').slice(-50)) { const clean = line.replace(/[\x00-\x08\x0e-\x1f]/g, '').trim(); if (clean) await log(`  ${clean}`); }
+      return result;
+    };
+    const done = async (success: boolean, error?: string) => {
+      await s.write(`data: ${JSON.stringify({ type: 'done', success, error })}\n\n`);
+      if (!success) { logger.error({ error, logs: allLogs }, 'Docker install failed'); logToErrorTable({ level: 'error', message: `Docker install failed: ${error}`, stack: null, metadata: { context: 'orchestrator', operation: 'install-docker', logs: allLogs } }); }
+    };
+
+    const TOTAL = 4;
+    try {
+      await step(1, TOTAL, 'Installing Docker...');
+      const installResult = await run(
+        'if command -v docker >/dev/null 2>&1; then echo "Docker already installed"; ' +
+        'else curl -fsSL https://get.docker.com | sh 2>&1; fi; ' +
+        'systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null',
+        { timeoutMs: 300000 },
+      );
+      if (installResult.exitCode !== 0) { await done(false, `Docker install failed with exit code ${installResult.exitCode}`); return; }
+      await log('Docker installed successfully');
+
+      await step(2, TOTAL, 'Initializing Docker Swarm...');
+      const swarmResult = await run(
+        'if docker info 2>/dev/null | grep -q "Swarm: active"; then echo "Swarm already active"; ' +
+        "else ADDR=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'); " +
+        'docker swarm init --advertise-addr "$ADDR" 2>&1; fi',
+        { timeoutMs: 60000 },
+      );
+      if (swarmResult.exitCode !== 0) { await done(false, `Swarm init failed with exit code ${swarmResult.exitCode}`); return; }
+      await log('Swarm initialized');
+
+      await step(3, TOTAL, 'Creating overlay networks...');
+      await run(
+        'docker network create --driver overlay --attachable fleet_public 2>/dev/null || true; ' +
+        'docker network create --driver overlay --attachable fleet_internal 2>/dev/null || true',
+        { timeoutMs: 30000 },
+      );
+      await log('Networks created');
+
+      await step(4, TOTAL, 'Reloading orchestrator...');
+      await reloadOrchestrators();
+      await log('Orchestrator reloaded — Docker Swarm is now available');
+
+      await done(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await log(`Fatal error: ${message}`);
+      await done(false, message);
     }
-    logs.push('Docker installed');
-
-    // Step 2: Initialize Swarm
-    logs.push('Initializing Docker Swarm...');
-    const swarmResult = await orchestrator.runOnLocalHost(
-      'if docker info 2>/dev/null | grep -q "Swarm: active"; then echo "Swarm already active"; ' +
-      "else ADDR=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'); " +
-      'docker swarm init --advertise-addr "$ADDR" 2>&1; fi',
-      { timeoutMs: 60000 },
-    );
-    logs.push(swarmResult.stdout?.slice(-300) ?? '');
-    logs.push('Swarm initialized');
-
-    // Step 3: Create overlay networks
-    logs.push('Creating overlay networks...');
-    await orchestrator.runOnLocalHost(
-      'docker network create --driver overlay --attachable fleet_public 2>/dev/null || true; ' +
-      'docker network create --driver overlay --attachable fleet_internal 2>/dev/null || true',
-      { timeoutMs: 30000 },
-    );
-    logs.push('Networks created');
-
-    // Step 4: Reload orchestrator
-    await reloadOrchestrators();
-    logs.push('Orchestrator reloaded — Docker Swarm is now available');
-
-    return c.json({ success: true, logs });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logs.push(`Error: ${message}`);
-    logToErrorTable({ level: 'error', message: `Docker install failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'orchestrator', operation: 'install-docker' } });
-    return c.json({ success: false, logs, error: message }, 500);
-  }
+  });
 }) as any);
 
-// POST /settings/orchestrator/install-docker-agents — install Docker on all worker nodes and join Swarm
+// POST /settings/orchestrator/install-docker-agents — install Docker on all worker nodes and join Swarm (streaming)
 settings.post('/orchestrator/install-docker-agents', authMiddleware, requireAdmin as any, (async (c: any) => {
   const user = c.get('user') as AuthUser;
   if (!user.isSuper) return c.json({ error: 'Super admin required' }, 403);
 
-  // Get Swarm join token
-  let joinToken = '';
-  let managerAddr = '';
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
 
-  if (isSwarmAvailable()) {
-    try {
-      const swarm = getOrchestrator('swarm');
-      const tokens = await swarm.getJoinToken();
-      joinToken = tokens.worker;
-      const info = await swarm.getClusterInfo();
-      // Extract manager advertise addr
-      const nodes = await swarm.listNodes();
-      const manager = (Array.isArray(nodes) ? nodes : []).find((n: any) =>
-        n.Spec?.Role === 'manager' || n.ManagerStatus?.Leader,
-      );
-      managerAddr = manager?.ManagerStatus?.Addr ?? manager?.Status?.Addr ?? '';
-    } catch { /* fallback below */ }
-  }
+  return stream(c, async (s) => {
+    const allLogs: string[] = [];
+    const log = async (msg: string) => { allLogs.push(msg); await s.write(`data: ${JSON.stringify({ type: 'log', message: msg })}\n\n`); };
+    const step = async (current: number, total: number, name: string) => { await s.write(`data: ${JSON.stringify({ type: 'step', current, total, name })}\n\n`); await log(name); };
+    const done = async (success: boolean, error?: string, data?: Record<string, unknown>) => {
+      await s.write(`data: ${JSON.stringify({ type: 'done', success, error, ...data })}\n\n`);
+      if (!success) { logger.error({ error, logs: allLogs }, 'Docker agent install failed'); logToErrorTable({ level: 'error', message: `Docker agent install failed: ${error}`, stack: null, metadata: { context: 'orchestrator', operation: 'install-docker-agents', logs: allLogs } }); }
+    };
 
-  if (!joinToken || !managerAddr) {
+    const TOTAL = 3;
     try {
-      const result = await orchestrator.runOnLocalHost(
-        'docker swarm join-token worker -q 2>/dev/null; echo "---"; ' +
-        "ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'",
-        { timeoutMs: 15000 },
+      // Step 1: Resolve Swarm join credentials
+      await step(1, TOTAL, 'Resolving Swarm join credentials...');
+      let joinToken = '';
+      let managerAddr = '';
+
+      if (isSwarmAvailable()) {
+        try {
+          const swarm = getOrchestrator('swarm');
+          const tokens = await swarm.getJoinToken();
+          joinToken = tokens.worker;
+          const nodes = await swarm.listNodes();
+          const manager = (Array.isArray(nodes) ? nodes : []).find((n: any) =>
+            n.Spec?.Role === 'manager' || n.ManagerStatus?.Leader,
+          );
+          managerAddr = manager?.ManagerStatus?.Addr ?? manager?.Status?.Addr ?? '';
+        } catch { /* fallback below */ }
+      }
+
+      if (!joinToken || !managerAddr) {
+        await log('Swarm API unavailable — reading from host...');
+        try {
+          const result = await orchestrator.runOnLocalHost(
+            'docker swarm join-token worker -q 2>/dev/null; echo "---"; ' +
+            "ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'",
+            { timeoutMs: 15000 },
+          );
+          const parts = (result.stdout ?? '').split('---');
+          joinToken = (parts[0] ?? '').trim();
+          const ip = (parts[1] ?? '').trim();
+          managerAddr = ip ? `${ip}:2377` : '';
+        } catch {
+          await done(false, 'Could not retrieve Swarm join token. Ensure Docker Swarm is initialized.');
+          return;
+        }
+      }
+
+      if (!joinToken || !managerAddr) {
+        await done(false, 'Swarm join token or manager address not available. Install Docker + Swarm first.');
+        return;
+      }
+
+      await log(`Join token: ${joinToken.slice(0, 12)}...`);
+      await log(`Manager address: ${managerAddr}`);
+
+      // Step 2: Install on all nodes
+      await step(2, TOTAL, 'Installing Docker and joining Swarm on all worker nodes...');
+      const escapedToken = joinToken.replace(/'/g, "'\\''");
+      const escapedAddr = managerAddr.replace(/'/g, "'\\''");
+
+      const result = await orchestrator.runOnAllNodes(
+        'if command -v docker >/dev/null 2>&1; then echo "Docker already installed"; ' +
+        'else curl -fsSL https://get.docker.com | sh 2>&1; ' +
+        'systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; fi; ' +
+        `if docker info 2>/dev/null | grep -q "Swarm: active"; then echo "Already in swarm"; ` +
+        `else docker swarm join --token '${escapedToken}' '${escapedAddr}' 2>&1; fi`,
+        { timeoutMs: 300000 },
       );
-      const parts = (result.stdout ?? '').split('---');
-      joinToken = (parts[0] ?? '').trim();
-      const ip = (parts[1] ?? '').trim();
-      managerAddr = ip ? `${ip}:2377` : '';
-    } catch {
-      return c.json({ error: 'Could not retrieve Swarm join token. Ensure Docker Swarm is initialized.' }, 400);
+
+      if (Array.isArray(result)) {
+        for (const r of result) {
+          const output = (r.stdout ?? r.output ?? '').trim();
+          const nodeId = r.nodeId ?? r.node ?? 'unknown';
+          await log(`Node ${nodeId}: exit=${r.exitCode ?? r.exit ?? '?'}`);
+          if (output) for (const line of output.split('\n').slice(-10)) { const cl = line.trim(); if (cl) await log(`  ${cl}`); }
+        }
+      } else if (typeof result === 'object') {
+        await log(JSON.stringify(result, null, 2));
+      }
+
+      // Step 3: Done
+      await step(3, TOTAL, 'Verifying installations...');
+      await log('Docker agent installation complete on all nodes');
+
+      await done(true, undefined, { result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await log(`Fatal error: ${message}`);
+      await done(false, message);
     }
-  }
-
-  if (!joinToken || !managerAddr) {
-    return c.json({ error: 'Swarm join token or manager address not available. Install Docker + Swarm first.' }, 400);
-  }
-
-  try {
-    const escapedToken = joinToken.replace(/'/g, "'\\''");
-    const escapedAddr = managerAddr.replace(/'/g, "'\\''");
-
-    const result = await orchestrator.runOnAllNodes(
-      'if command -v docker >/dev/null 2>&1; then echo "Docker already installed"; ' +
-      'else curl -fsSL https://get.docker.com | sh 2>&1; ' +
-      'systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; fi; ' +
-      `if docker info 2>/dev/null | grep -q "Swarm: active"; then echo "Already in swarm"; ` +
-      `else docker swarm join --token '${escapedToken}' '${escapedAddr}' 2>&1; fi`,
-      { timeoutMs: 300000 },
-    );
-
-    return c.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logToErrorTable({ level: 'error', message: `Docker agent install failed: ${message}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'orchestrator', operation: 'install-docker-agents' } });
-    return c.json({ success: false, error: message }, 500);
-  }
+  });
 }) as any);
 
 // GET /settings/orchestrator/monitoring-status — check K8s monitoring health
@@ -3165,6 +3305,87 @@ settings.openapi(updateRobotsRoute, (async (c: any) => {
   await invalidateCache('GET:/settings/*');
 
   return c.json(updated);
+}) as any);
+
+// ── Registration Gating ─────────────────────────────────────────────────────
+
+const registrationSettingsSchema = z.object({
+  mode: z.enum(['open', 'closed', 'limited']).optional(),
+  maxAccounts: z.number().int().min(0).optional(),
+  closedMessage: z.string().max(500).optional(),
+});
+
+const getRegistrationRoute = createRoute({
+  method: 'get',
+  path: '/registration',
+  tags: ['Settings'],
+  summary: 'Get registration gating settings (super admin only)',
+  security: bearerSecurity,
+  middleware: [requireAdmin] as const,
+  responses: {
+    200: jsonContent(z.object({
+      mode: z.string(),
+      maxAccounts: z.number(),
+      closedMessage: z.string(),
+      currentAccounts: z.number(),
+    }), 'Registration settings'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(getRegistrationRoute, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user?.isSuper) return c.json({ error: 'Forbidden' }, 403);
+
+  const mode = (await getSetting('registration:mode') as string) ?? 'open';
+  const maxAccounts = parseInt(String(await getSetting('registration:maxAccounts') ?? '0'), 10);
+  const closedMessage = (await getSetting('registration:closedMessage') as string) ?? '';
+
+  const countResult = await db.select({ count: countSql() }).from(accounts).where(isNull(accounts.deletedAt));
+  const count = countResult[0]?.count ?? 0;
+
+  return c.json({ mode, maxAccounts, closedMessage, currentAccounts: count });
+}) as any);
+
+const updateRegistrationRoute = createRoute({
+  method: 'patch',
+  path: '/registration',
+  tags: ['Settings'],
+  summary: 'Update registration gating settings (super admin only)',
+  security: bearerSecurity,
+  middleware: [settingsRateLimit, requireAdmin] as const,
+  request: {
+    body: jsonBody(registrationSettingsSchema),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Registration settings updated'),
+    ...standardErrors,
+  },
+});
+
+settings.openapi(updateRegistrationRoute, (async (c: any) => {
+  const user = c.get('user') as AuthUser;
+  if (!user?.isSuper) return c.json({ error: 'Forbidden' }, 403);
+
+  const data = c.req.valid('json');
+
+  if (data.mode !== undefined) {
+    await upsertSetting('registration:mode', data.mode);
+    // If reopening, clear the limit-reached notification flag
+    if (data.mode === 'open') {
+      await upsertSetting('registration:limitNotified', null);
+    }
+  }
+  if (data.maxAccounts !== undefined) {
+    await upsertSetting('registration:maxAccounts', String(data.maxAccounts));
+    // Clear notification flag when limit is changed
+    await upsertSetting('registration:limitNotified', null);
+  }
+  if (data.closedMessage !== undefined) {
+    await upsertSetting('registration:closedMessage', data.closedMessage);
+  }
+
+  return c.json({ message: 'Registration settings updated' });
 }) as any);
 
 export default settings;

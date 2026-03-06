@@ -3,10 +3,13 @@ import { z } from '@hono/zod-openapi';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { templateService } from '../services/template.service.js';
+import { stripeService } from '../services/stripe.service.js';
+import { stripeSyncService } from '../services/stripe-sync.service.js';
 import { requireMember, requireAdmin } from '../middleware/rbac.js';
 import { cache } from '../middleware/cache.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
+import { db, accounts, billingPlans, services, eq, and, isNull } from '@fleet/db';
 import {
   jsonBody,
   jsonContent,
@@ -77,6 +80,7 @@ const deploySchema = z.object({
     existingVolumeName: z.string().min(1).optional(),
   })).optional(),
   planId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
+  billingCycle: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']).default('monthly'),
 }).openapi('MarketplaceDeploy');
 
 const createTemplateSchema = z.object({
@@ -283,12 +287,22 @@ const deployRoute = createRoute({
 
 marketplace.openapi(deployRoute, (async (c: any) => {
   const accountId = c.get('accountId');
+  const user = c.get('user');
 
   if (!accountId) {
     return c.json({ error: 'Account context required' }, 400);
   }
 
-  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides, volumeGroups, planId } = c.req.valid('json');
+  const { slug, config, composeOverride, imageOverrides, domainOverrides, resourceOverrides, volumeOverrides, volumeGroups, planId, billingCycle } = c.req.valid('json');
+
+  // Check if the selected plan is paid — if so, skip Docker deployment until checkout completes
+  let isPaidPlan = false;
+  if (planId) {
+    const plan = await db.query.billingPlans.findFirst({
+      where: eq(billingPlans.id, planId),
+    });
+    if (plan && !plan.isFree) isPaidPlan = true;
+  }
 
   try {
     const result = await templateService.deployTemplate(slug, accountId, config, {
@@ -299,7 +313,52 @@ marketplace.openapi(deployRoute, (async (c: any) => {
       volumeOverrides,
       volumeGroups,
       planId,
+      skipDeploy: isPaidPlan,
     });
+
+    // If paid plan, create a Stripe Checkout session for the stack
+    if (isPaidPlan) {
+      try {
+        const account = await db.query.accounts.findFirst({
+          where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+        });
+        if (!account) {
+          return c.json({ error: 'Account not found' }, 404);
+        }
+
+        let stripeCustomerId = account.stripeCustomerId;
+        if (!stripeCustomerId) {
+          const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+          stripeCustomerId = customer.id;
+          await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+        }
+
+        const origin = c.req.header('origin') || c.req.header('referer')?.replace(/\/[^/]*$/, '') || '';
+        const successUrl = `${origin}/panel/services?checkout=success&stackId=${result.stackId}`;
+        const cancelUrl = `${origin}/panel/services?checkout=cancelled&stackId=${result.stackId}`;
+
+        const checkout = await stripeSyncService.createServiceCheckoutSession({
+          accountId,
+          stackId: result.stackId,
+          planId: planId!,
+          billingCycle,
+          stripeCustomerId,
+          successUrl,
+          cancelUrl,
+        });
+
+        return c.json({ ...result, checkoutUrl: checkout.url }, 201);
+      } catch (err) {
+        logger.error({ err }, 'Failed to create checkout session for marketplace deploy');
+        logToErrorTable({ level: 'error', message: `Marketplace checkout session failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'marketplace', operation: 'create-checkout-session' } });
+        // Clean up: soft-delete the created services
+        for (const svc of result.services) {
+          await db.update(services).set({ deletedAt: new Date(), status: 'stopped' }).where(eq(services.id, svc.id));
+        }
+        return c.json({ error: 'Failed to create checkout session. Please try again.' }, 500);
+      }
+    }
+
     return c.json(result, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : '';

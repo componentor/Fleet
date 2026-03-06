@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { db, appTemplates, services, deployments, storageVolumes, stacks, billingPlans, accountBillingOverrides, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
 import { orchestrator } from './orchestrator.js';
-import { getRegistryAuthForImage } from './docker.service.js';
+import { getRegistryAuthForImage, isStatefulImage } from './docker.service.js';
 import { storageManager } from './storage/storage-manager.js';
 import { buildTraefikLabels, ensureIngressRoute } from './traefik.js';
 import { logger } from './logger.js';
@@ -32,6 +32,7 @@ export interface TemplateServiceDefinition {
   domain?: string;
   user?: string;
   resources?: { cpuLimit?: number; memoryLimit?: number };
+  updateOrder?: 'start-first' | 'stop-first';
 }
 
 export interface ParsedTemplate {
@@ -132,6 +133,7 @@ export class TemplateService {
           cpuLimit: typeof res['cpu_limit'] === 'number' ? res['cpu_limit'] : undefined,
           memoryLimit: typeof res['memory_limit'] === 'number' ? res['memory_limit'] : undefined,
         } : undefined,
+        updateOrder: s['update_order'] as 'start-first' | 'stop-first' | undefined,
       };
     });
 
@@ -262,6 +264,7 @@ export class TemplateService {
         existingVolumeName?: string;
       }>;
       planId?: string;
+      skipDeploy?: boolean;
     },
   ): Promise<{
     services: Array<{ id: string; name: string; dockerServiceId: string | null }>;
@@ -523,7 +526,7 @@ export class TemplateService {
         volumes: resolvedVolumes,
         domain: resolvedDomain || null,
         sslEnabled: true,
-        status: 'deploying',
+        status: options?.skipDeploy ? 'pending_payment' : 'deploying',
         stackId,
         sourceType: 'marketplace',
         cpuLimit,
@@ -535,80 +538,83 @@ export class TemplateService {
         throw new Error(`Failed to create service record for ${svcDef.name}`);
       }
 
-      // Deploy to Docker Swarm
+      // Deploy to Docker Swarm (skip if waiting for payment)
       let dockerServiceId: string | null = null;
-      try {
-        const swarmName = serviceNameMap[svcDef.name]!;
-
-        // Port management: domain services use Traefik, others get auto-allocated ports
-        const svcPorts = svcDef.ports ?? [];
-        const ingressPorts = resolvedDomain
-          ? []
-          : await orchestrator.allocateIngressPorts(
-              svcPorts.map((p) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
-            );
-
-        // Build Traefik routing labels for domain services
-        const primaryPort = svcDef.ports?.[0]?.target ?? 80;
-        const traefikLabels = buildTraefikLabels(swarmName, resolvedDomain, true, primaryPort);
-
-        const templateAuth = await getRegistryAuthForImage(accountId, image);
-        const result = await orchestrator.createService({
-          name: swarmName,
-          image,
-          replicas,
-          env: resolvedEnv,
-          ports: ingressPorts,
-          volumes: resolvedVolumes,
-          labels: {
-            'fleet.account-id': accountId,
-            'fleet.service-id': svc.id,
-            'fleet.template': slug,
-            'fleet.stack-id': stackId,
-            'com.docker.compose.project': stackNamespace,
-            'com.docker.compose.service': svcDef.name,
-            ...traefikLabels,
-          },
-          constraints: [],
-          networkIds: resolvedDomain ? [networkId, publicNetId] : [networkId],
-          updateParallelism: 1,
-          updateDelay: '10s',
-          rollbackOnFailure: true,
-          ...(svcDef.user ? { user: svcDef.user } : {}),
-          registryAuth: templateAuth,
-        });
-
-        dockerServiceId = result.id;
-
-        await ensureIngressRoute(`fleet-account-${accountId}`, swarmName, resolvedDomain, true, primaryPort).catch(() => {});
-
-        await db
-          .update(services)
-          .set({
-            dockerServiceId,
-            status: 'deploying',
-            ports: ingressPorts.length > 0 ? ingressPorts : svcPorts,
-            updatedAt: new Date(),
-          })
-          .where(eq(services.id, svc.id));
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error({ err, service: svcDef.name }, `Failed to deploy template service ${svcDef.name}`);
-        await db
-          .update(services)
-          .set({ status: 'failed', updatedAt: new Date() })
-          .where(eq(services.id, svc.id));
-        // Create a deployment record so the error is visible in the UI
+      if (!options?.skipDeploy) {
         try {
-          await db.insert(deployments).values({
-            serviceId: svc.id,
-            status: 'failed',
-            log: errMsg,
-            imageTag: image,
-            trigger: 'template',
-            completedAt: new Date(),
+          const swarmName = serviceNameMap[svcDef.name]!;
+
+          // Port management: domain services use Traefik, others get auto-allocated ports
+          const svcPorts = svcDef.ports ?? [];
+          const ingressPorts = resolvedDomain
+            ? []
+            : await orchestrator.allocateIngressPorts(
+                svcPorts.map((p) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+              );
+
+          // Build Traefik routing labels for domain services
+          const primaryPort = svcDef.ports?.[0]?.target ?? 80;
+          const traefikLabels = buildTraefikLabels(swarmName, resolvedDomain, true, primaryPort);
+
+          const templateAuth = await getRegistryAuthForImage(accountId, image);
+          const result = await orchestrator.createService({
+            name: swarmName,
+            image,
+            replicas,
+            env: resolvedEnv,
+            ports: ingressPorts,
+            volumes: resolvedVolumes,
+            labels: {
+              'fleet.account-id': accountId,
+              'fleet.service-id': svc.id,
+              'fleet.template': slug,
+              'fleet.stack-id': stackId,
+              'com.docker.compose.project': stackNamespace,
+              'com.docker.compose.service': svcDef.name,
+              ...traefikLabels,
+            },
+            constraints: [],
+            networkIds: resolvedDomain ? [networkId, publicNetId] : [networkId],
+            updateParallelism: 1,
+            updateDelay: '10s',
+            rollbackOnFailure: true,
+            updateOrder: svcDef.updateOrder ?? (isStatefulImage(image) ? 'stop-first' : 'start-first'),
+            ...(svcDef.user ? { user: svcDef.user } : {}),
+            registryAuth: templateAuth,
           });
-        } catch { /* best-effort */ }
+
+          dockerServiceId = result.id;
+
+          await ensureIngressRoute(`fleet-account-${accountId}`, swarmName, resolvedDomain, true, primaryPort).catch(() => {});
+
+          await db
+            .update(services)
+            .set({
+              dockerServiceId,
+              status: 'deploying',
+              ports: ingressPorts.length > 0 ? ingressPorts : svcPorts,
+              updatedAt: new Date(),
+            })
+            .where(eq(services.id, svc.id));
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.error({ err, service: svcDef.name }, `Failed to deploy template service ${svcDef.name}`);
+          await db
+            .update(services)
+            .set({ status: 'failed', updatedAt: new Date() })
+            .where(eq(services.id, svc.id));
+          // Create a deployment record so the error is visible in the UI
+          try {
+            await db.insert(deployments).values({
+              serviceId: svc.id,
+              status: 'failed',
+              log: errMsg,
+              imageTag: image,
+              trigger: 'template',
+              completedAt: new Date(),
+            });
+          } catch { /* best-effort */ }
+        }
       }
 
       createdServices.push({

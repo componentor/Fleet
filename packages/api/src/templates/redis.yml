@@ -1,7 +1,7 @@
 slug: redis
 name: Redis
 description: In-memory data store used as database, cache, and message broker.
-icon_url: https://redis.io/images/redis-white.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/redis.png
 category: database
 
 variables:

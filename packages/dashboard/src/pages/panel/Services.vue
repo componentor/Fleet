@@ -2,7 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Box, Plus, ArrowRight, Loader2, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, RotateCw, Trash2, Tag } from 'lucide-vue-next'
+import { Box, Plus, ArrowRight, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, RotateCw, Trash2, Tag } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import ConfirmDeleteModal from '@/components/ConfirmDeleteModal.vue'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
@@ -332,7 +333,7 @@ onUnmounted(() => {
 
     <!-- Loading state -->
     <div v-if="store.loading && store.services.length === 0" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Empty state -->
@@ -387,7 +388,7 @@ onUnmounted(() => {
               class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors disabled:opacity-50"
               :title="$t('services.startAll', 'Start all')"
             >
-              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="stackActionLoading === group.stackId" size="w-3.5 h-3.5" />
               <Play v-else class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">{{ $t('services.startAll', 'Start all') }}</span>
             </button>
@@ -398,7 +399,7 @@ onUnmounted(() => {
               class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors disabled:opacity-50"
               :title="$t('services.stopAll', 'Stop all')"
             >
-              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="stackActionLoading === group.stackId" size="w-3.5 h-3.5" />
               <Square v-else class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">{{ $t('services.stopAll', 'Stop all') }}</span>
             </button>
@@ -409,7 +410,7 @@ onUnmounted(() => {
               class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
               :title="$t('services.cancelDeploy', 'Cancel deploy')"
             >
-              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="stackActionLoading === group.stackId" size="w-3.5 h-3.5" />
               <XCircle v-else class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">{{ $t('services.cancelDeploy', 'Cancel deploy') }}</span>
             </button>
@@ -419,7 +420,7 @@ onUnmounted(() => {
               class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-50"
               :title="$t('services.restartAll', 'Restart all')"
             >
-              <Loader2 v-if="stackActionLoading === group.stackId" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="stackActionLoading === group.stackId" size="w-3.5 h-3.5" />
               <RotateCw v-else class="w-3.5 h-3.5" />
               <span class="hidden sm:inline">{{ $t('services.restartAll', 'Restart all') }}</span>
             </button>

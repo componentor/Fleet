@@ -15,13 +15,13 @@ import {
   ChevronRight,
   Save,
   X,
-  Loader2,
   RefreshCw,
   Archive,
   File as FileIcon,
   Terminal,
   Copy,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useAccountStore } from '@/stores/account'
 import { usePlatformDomain } from '@/composables/usePlatformDomain'
@@ -440,7 +440,7 @@ onMounted(() => {
                 :disabled="saving"
                 class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="saving" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ saving ? t('fileExplorer.saving') : t('fileExplorer.saveFile') }}
               </button>
@@ -674,14 +674,14 @@ onMounted(() => {
       <!-- Upload progress -->
       <div v-if="uploading && uploadProgress" class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
         <div class="flex items-center gap-2">
-          <Loader2 class="w-4 h-4 text-blue-500 animate-spin" />
+          <CompassSpinner size="w-4 h-4" color="text-blue-500" />
           <p class="text-sm text-blue-700 dark:text-blue-300">{{ t('fileExplorer.uploadingFiles') }} ({{ uploadProgress }})</p>
         </div>
       </div>
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner />
     </div>
 
     <!-- Empty -->
@@ -818,7 +818,7 @@ onMounted(() => {
           :disabled="rebuilding"
           class="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
         >
-          <Loader2 v-if="rebuilding" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="rebuilding" size="w-4 h-4" />
           <RefreshCw v-else class="w-4 h-4" />
           {{ rebuilding ? t('fileExplorer.rebuilding') : t('fileExplorer.rebuild') }}
         </button>

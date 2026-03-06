@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Store, Plus, Pencil, Trash2, Package, RefreshCw, Loader2, X } from 'lucide-vue-next'
+import { Store, Plus, Pencil, Trash2, Package, RefreshCw, X } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -210,7 +211,7 @@ onMounted(() => {
     </Teleport>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Template grid -->

@@ -22,6 +22,7 @@ export interface CreateServiceOptions {
   updateParallelism: number;
   updateDelay: string;
   rollbackOnFailure: boolean;
+  updateOrder?: 'start-first' | 'stop-first';
   networkId?: string;
   networkIds?: string[];
   readOnly?: boolean;

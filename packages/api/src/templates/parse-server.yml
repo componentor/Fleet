@@ -1,7 +1,7 @@
 slug: parse-server
 name: Parse Server
 description: Open-source backend framework with dashboard, REST & GraphQL APIs, and push notifications.
-icon_url: https://parseplatform.org/img/logo.svg
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/parse.png
 category: cms
 
 variables:

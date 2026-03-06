@@ -2,7 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { CreditCard, Box, HardDrive, Loader2, ExternalLink, Calendar, Gauge, Cpu, MemoryStick, Wifi, AlertTriangle, Trash2, Star, Plus } from 'lucide-vue-next'
+import { CreditCard, Box, HardDrive, ExternalLink, Calendar, Gauge, Cpu, MemoryStick, Wifi, AlertTriangle, Trash2, Star, Plus } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import { useToast } from '@/composables/useToast'
@@ -110,7 +111,7 @@ onMounted(() => { fetchAll() })
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>

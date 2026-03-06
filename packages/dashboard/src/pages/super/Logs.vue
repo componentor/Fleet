@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
-import { ScrollText, RefreshCw, Search, Loader2, Copy, Check, X } from 'lucide-vue-next'
+import { ScrollText, RefreshCw, Search, Copy, Check, X } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -214,7 +215,7 @@ onUnmounted(() => {
           :disabled="loading"
           class="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
-          <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="loading" size="w-4 h-4" />
           <RefreshCw v-else class="w-4 h-4" />
           Refresh
         </button>

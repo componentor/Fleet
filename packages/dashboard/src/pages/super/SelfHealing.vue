@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   Bot,
-  Loader2,
   Send,
   Terminal as TerminalIcon,
   Trash2,
@@ -18,6 +17,7 @@ import {
   GitBranch,
   X,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
 
@@ -281,7 +281,7 @@ onUnmounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>
@@ -332,7 +332,7 @@ onUnmounted(() => {
                   :disabled="creating || !prompt.trim() || notConfigured"
                   class="self-end flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="creating" size="w-4 h-4" />
                   <Send v-else class="w-4 h-4" />
                   {{ t('super.settings.selfHealing.sendJob') }}
                 </button>
@@ -361,7 +361,7 @@ onUnmounted(() => {
               >
                 <!-- Status icon -->
                 <div class="shrink-0">
-                  <Loader2 v-if="statusIcon(job.status) === 'spinner'" class="w-5 h-5 text-blue-500 animate-spin" />
+                  <CompassSpinner v-if="statusIcon(job.status) === 'spinner'" size="w-5 h-5" color="text-blue-500" />
                   <CheckCircle v-else-if="statusIcon(job.status) === 'check'" class="w-5 h-5 text-green-500" />
                   <XCircle v-else-if="statusIcon(job.status) === 'error'" class="w-5 h-5 text-red-500" />
                   <GitBranch v-else-if="statusIcon(job.status) === 'branch'" class="w-5 h-5 text-indigo-500" />

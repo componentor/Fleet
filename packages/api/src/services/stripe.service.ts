@@ -279,6 +279,56 @@ export class StripeService {
   }
 
   /**
+   * Create a Stripe Checkout session for multiple domain registrations in one payment.
+   */
+  async createBulkDomainCheckoutSession(
+    customerId: string,
+    domains: Array<{ domain: string; amountCents: number; currency: string; years: number }>,
+    accountId: string,
+    successUrl: string,
+    cancelUrl: string,
+  ): Promise<Stripe.Checkout.Session> {
+    const taxEnabled = await isStripeTaxEnabled();
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = domains.map((d) => ({
+      price_data: {
+        currency: d.currency.toLowerCase(),
+        product_data: {
+          name: `Domain Registration: ${d.domain}`,
+          description: `${d.years} year${d.years > 1 ? 's' : ''}`,
+          tax_code: taxEnabled ? 'txcd_10103001' : undefined,
+        },
+        unit_amount: d.amountCents,
+      },
+      quantity: 1,
+    }));
+
+    // Store per-domain info in metadata (Stripe metadata values are strings, max 500 chars)
+    const metadata: Record<string, string> = {
+      type: 'bulk_domain_registration',
+      accountId,
+      domains: JSON.stringify(domains.map((d) => ({ domain: d.domain, years: d.years }))),
+    };
+
+    return (await getStripe()).checkout.sessions.create({
+      customer: customerId,
+      mode: 'payment',
+      payment_intent_data: {
+        capture_method: 'manual',
+      },
+      line_items: lineItems,
+      metadata,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
+      ...(taxEnabled && {
+        automatic_tax: { enabled: true },
+      }),
+    });
+  }
+
+  /**
    * Create a Stripe Checkout session with flexible line items.
    */
   async createFlexibleCheckoutSession(

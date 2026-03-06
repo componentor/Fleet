@@ -10,7 +10,6 @@ import {
   Github,
   Mail,
   UserPlus,
-  Loader2,
   Check,
   ArrowRight,
   Package,
@@ -20,6 +19,7 @@ import {
   Moon,
   ShoppingCart,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useCart } from '@/composables/useCart'
 import { useCurrency } from '@/composables/useCurrency'
 import CartDrawer from '@/components/landing/CartDrawer.vue'
@@ -34,6 +34,10 @@ const { brandTitle, logoSrc } = useBranding()
 const cart = useCart()
 const { formatCurrency, selectedCurrency } = useCurrency()
 const cartOpen = ref(false)
+
+// ── Registration gate ────────────────────────────────────────────────────────
+const registrationClosed = ref(false)
+const registrationMessage = ref('')
 
 // ── Wizard state ──────────────────────────────────────────────────────────────
 
@@ -67,12 +71,38 @@ const steps = computed(() => [
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
+  // Check registration status
+  try {
+    const res = await fetch('/api/v1/auth/registration-status')
+    if (res.ok) {
+      const data = await res.json()
+      if (!data.open) {
+        registrationClosed.value = true
+        registrationMessage.value = data.message || t('onboarding.registrationClosed')
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Handle OAuth redirect with registration=closed
+  if (route.query.registration === 'closed') {
+    registrationClosed.value = true
+    registrationMessage.value = t('onboarding.registrationClosed')
+  }
+
   // Initialize auth state
   if (!authStore.initialized) await authStore.init()
   if (authStore.isAuthenticated) {
     await accountStore.fetchAccounts()
-    // Already logged in — go straight to welcome/start
-    currentStep.value = 'welcome'
+    const isNewUser = sessionStorage.getItem('fleet_just_logged_in') === '1'
+    if (isNewUser) {
+      currentStep.value = 'start'
+      return
+    }
+    if (cart.count.value > 0) {
+      router.replace('/checkout')
+    } else {
+      router.replace('/panel')
+    }
     return
   }
 
@@ -88,7 +118,7 @@ async function handleRegister() {
     await authStore.register({ name: name.value, email: email.value, password: password.value })
     await accountStore.fetchAccounts()
     sessionStorage.setItem('fleet_just_logged_in', '1')
-    currentStep.value = 'welcome'
+    goToStart()
   } catch (e: any) {
     error.value = e?.body?.error ?? e?.body?.message ?? t('onboarding.registrationFailed')
   } finally {
@@ -98,12 +128,12 @@ async function handleRegister() {
 
 function registerWithGithub() {
   // Store wizard return URL so OAuth callback can redirect back
-  sessionStorage.setItem('fleet_onboarding_return', '/get-started')
+  sessionStorage.setItem('fleet_onboarding_return', '/onboarding')
   window.location.href = '/api/v1/auth/github'
 }
 
 function registerWithGoogle() {
-  sessionStorage.setItem('fleet_onboarding_return', '/get-started')
+  sessionStorage.setItem('fleet_onboarding_return', '/onboarding')
   window.location.href = '/api/v1/auth/google'
 }
 
@@ -124,16 +154,12 @@ function navigateTo(path: string) {
   router.push(path)
 }
 
-// Welcome step auto-advance
-watch(currentStep, (step) => {
-  if (step === 'welcome') {
-    setTimeout(() => {
-      if (currentStep.value === 'welcome') {
-        goToStart()
-      }
-    }, 5000)
-  }
-})
+// Random nautical welcome greeting (picked once per visit)
+const welcomeGreetingIndex = Math.floor(Math.random() * 6)
+const welcomeGreeting = computed(() =>
+  t(`onboarding.welcomeGreeting${welcomeGreetingIndex}`, { name: authStore.user?.name?.split(' ')[0] || '' })
+)
+
 </script>
 
 <template>
@@ -241,10 +267,34 @@ watch(currentStep, (step) => {
 
     <CartDrawer :open="cartOpen" @close="cartOpen = false" />
 
+    <!-- ═══ Registration Closed ═══ -->
+    <div
+      v-if="registrationClosed && currentStep === 'account'"
+      class="w-full max-w-md relative z-10 animate-slide-up-fade"
+    >
+      <div class="bg-white dark:bg-gray-800 shadow-xl rounded-2xl border border-gray-200 dark:border-gray-700 p-8 text-center space-y-5">
+        <div class="mx-auto w-16 h-16 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+          <svg class="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+        </div>
+        <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">{{ $t('onboarding.registrationClosedTitle') }}</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{{ registrationMessage }}</p>
+        <div class="pt-2">
+          <router-link
+            to="/login"
+            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+          >
+            {{ $t('onboarding.alreadyHaveAccount') }}
+          </router-link>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ Step 1: Account Creation ═══ -->
     <Transition name="wizard" mode="out-in">
       <div
-        v-if="currentStep === 'account'"
+        v-if="currentStep === 'account' && !registrationClosed"
         key="account"
         class="w-full max-w-md relative z-10 animate-slide-up-fade"
       >
@@ -333,7 +383,7 @@ watch(currentStep, (step) => {
                 :disabled="loading"
                 class="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="loading" size="w-4 h-4" />
                 <UserPlus v-else class="w-4 h-4" />
                 <span v-if="loading">{{ $t('auth.creatingAccount') }}</span>
                 <span v-else>{{ $t('onboarding.createAndContinue') }}</span>
@@ -343,7 +393,7 @@ watch(currentStep, (step) => {
             <!-- Login link -->
             <p class="text-center text-sm text-gray-500 dark:text-gray-400">
               {{ $t('onboarding.alreadyHaveAccount') }}
-              <router-link to="/login?redirect=/get-started" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
+              <router-link to="/login?redirect=/onboarding" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">
                 {{ $t('onboarding.signIn') }}
               </router-link>
             </p>
@@ -366,7 +416,7 @@ watch(currentStep, (step) => {
           </div>
 
           <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            {{ $t('onboarding.welcomeBack', { name: authStore.user?.name?.split(' ')[0] || '' }) }}
+            {{ welcomeGreeting }}
           </h2>
           <p class="text-gray-500 dark:text-gray-400 mb-8">{{ $t('onboarding.welcomeBackDesc') }}</p>
 
@@ -407,7 +457,7 @@ watch(currentStep, (step) => {
               <div class="space-y-1">
                 <div v-for="item in cart.items.value" :key="item.domain" class="flex items-center justify-between text-sm">
                   <span class="text-primary-600 dark:text-primary-400 font-mono">{{ item.domain }}</span>
-                  <span class="text-primary-500 dark:text-primary-400 font-medium">${{ item.price.toFixed(2) }}/yr</span>
+                  <span class="text-primary-500 dark:text-primary-400 font-medium">{{ formatCurrency(item.price, item.currency || selectedCurrency) }}/yr</span>
                 </div>
               </div>
             </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { LayoutDashboard, Users, Server, Activity, Loader2, ArrowRight, AlertTriangle, Bug, Download, ArrowUpCircle } from 'lucide-vue-next'
+import { LayoutDashboard, Users, Server, Activity, ArrowRight, AlertTriangle, Bug, Download, ArrowUpCircle } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -106,7 +107,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>

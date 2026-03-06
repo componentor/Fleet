@@ -3,7 +3,8 @@ import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useApi } from '@/composables/useApi'
-import { Mail, ArrowLeft, Loader2 } from 'lucide-vue-next'
+import { Mail, ArrowLeft } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const api = useApi()
 
@@ -64,7 +65,7 @@ async function handleSubmit() {
           :disabled="loading"
           class="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="loading" size="w-4 h-4" />
           <Mail v-else class="w-4 h-4" />
           <span v-if="loading">{{ $t('auth.sending') }}</span>
           <span v-else>{{ $t('auth.sendResetLink') }}</span>

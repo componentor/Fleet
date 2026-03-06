@@ -2,9 +2,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
-  Rocket, Github, Loader2, Plus, X, Globe, RefreshCw,
+  Rocket, Github, Plus, X, Globe, RefreshCw,
   AlertTriangle, ExternalLink, Lock, KeyRound, Info, HardDrive,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useVolumeManager } from '@/composables/useVolumeManager'
@@ -329,7 +330,7 @@ const repoName = computed(() => repoParam.value.split('/')[1] || '')
 
     <!-- Loading -->
     <div v-if="loading" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 flex flex-col items-center justify-center">
-      <Loader2 class="w-8 h-8 text-primary-500 animate-spin mb-4" />
+      <CompassSpinner size="w-8 h-8" color="text-primary-500" class="mb-4" />
       <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('deployGh.fetchingRepo') }}</p>
     </div>
 
@@ -621,7 +622,7 @@ const repoName = computed(() => repoParam.value.split('/')[1] || '')
               :disabled="!canDeploy"
               class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="deploying" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="deploying" size="w-4 h-4" />
               <Rocket v-else class="w-4 h-4" />
               {{ deploying ? $t('deploy.deploying') : $t('deploy.deploy') }}
             </button>

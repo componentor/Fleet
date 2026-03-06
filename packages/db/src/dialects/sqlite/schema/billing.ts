@@ -132,6 +132,7 @@ export const billingConfig = sqliteTable('billing_config', {
   allowDowngrade: integer('allow_downgrade', { mode: 'boolean' }).default(true),
   deletionBillingPolicy: text('deletion_billing_policy').default('end_of_period').notNull(),
   maxFreeServicesPerAccount: integer('max_free_services_per_account'),
+  domainMaxYears: integer('domain_max_years').default(10),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 

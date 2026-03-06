@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, domainRegistrations, domainTldPricing, domainTldCurrencyPrices, accounts, eq, and, isNull } from '@fleet/db';
+import { db, domainRegistrations, domainTldPricing, domainTldCurrencyPrices, accounts, billingConfig, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { registrarService } from '../services/registrar.service.js';
@@ -13,6 +13,16 @@ import { getAppUrlSync } from '../services/platform.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 
 const searchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 20, keyPrefix: 'domain-search' });
+
+/** Get the configured max registration years (default 10). */
+async function getDomainMaxYears(): Promise<number> {
+  try {
+    const config = await db.query.billingConfig.findFirst();
+    return (config as any)?.domainMaxYears ?? 10;
+  } catch {
+    return 10;
+  }
+}
 const publicSearchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 10, keyPrefix: 'public-domain-search' });
 
 /** Validate that a redirect URL belongs to the app's origin (prevents open redirects via Stripe). */
@@ -322,6 +332,12 @@ authed.openapi(checkoutRoute, (async (c: any) => {
 
   const { domain, years, currency: requestedCurrency, successUrl, cancelUrl } = c.req.valid('json');
 
+  // Validate max years against billing config
+  const maxYears = await getDomainMaxYears();
+  if (years > maxYears) {
+    return c.json({ error: `Maximum registration period is ${maxYears} year${maxYears !== 1 ? 's' : ''}` }, 400);
+  }
+
   // Validate redirect URLs against APP_URL to prevent open redirects
   if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
     return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
@@ -380,6 +396,115 @@ authed.openapi(checkoutRoute, (async (c: any) => {
     return c.json({ url: session.url });
   } catch (err: any) {
     logger.error({ err, domain, accountId, priceInCents }, 'Domain checkout failed');
+    return c.json({ error: err?.message || 'Failed to create checkout session' }, 500);
+  }
+}) as any);
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /bulk-checkout — create Stripe checkout session for multiple domains
+// ────────────────────────────────────────────────────────────────────────────
+const bulkCheckoutSchema = z.object({
+  domains: z.array(z.object({
+    domain: z.string().min(3).max(253).regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/),
+    years: z.number().int().min(1).max(10).default(1),
+  })).min(1).max(20),
+  currency: z.string().length(3).optional().openapi({ description: 'Charge in this currency. Defaults to TLD pricing currency.' }),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+}).openapi('BulkDomainCheckoutRequest');
+
+const bulkCheckoutRoute = createRoute({
+  method: 'post',
+  path: '/bulk-checkout',
+  tags: ['Domain Purchase'],
+  summary: 'Create Stripe checkout session for multiple domain registrations',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(bulkCheckoutSchema),
+  },
+  responses: {
+    200: jsonContent(checkoutResponseSchema, 'Checkout session URL'),
+    ...standardErrors,
+  },
+});
+
+authed.openapi(bulkCheckoutRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) {
+    return c.json({ error: 'Account context required' }, 400);
+  }
+
+  const { domains, currency: requestedCurrency, successUrl, cancelUrl } = c.req.valid('json');
+
+  if (!validateRedirectUrl(successUrl) || !validateRedirectUrl(cancelUrl)) {
+    return c.json({ error: 'Invalid redirect URL: must match application origin' }, 400);
+  }
+
+  // Validate max years against billing config
+  const maxYears = await getDomainMaxYears();
+  for (const item of domains) {
+    if (item.years > maxYears) {
+      return c.json({ error: `Maximum registration period is ${maxYears} year${maxYears !== 1 ? 's' : ''}` }, 400);
+    }
+  }
+
+  // Resolve pricing for each domain
+  const lineItems: Array<{ domain: string; amountCents: number; currency: string; years: number }> = [];
+  for (const item of domains) {
+    const tld = item.domain.split('.').slice(1).join('.').toLowerCase();
+    const pricing = await db.query.domainTldPricing.findFirst({
+      where: eq(domainTldPricing.tld, tld),
+    });
+
+    if (!pricing || !pricing.enabled) {
+      return c.json({ error: `Domain TLD .${tld} is not available for purchase` }, 400);
+    }
+
+    let priceInCents = pricing.sellRegistrationPrice * item.years;
+    let chargeCurrency = pricing.currency;
+
+    if (requestedCurrency && requestedCurrency.toUpperCase() !== pricing.currency.toUpperCase()) {
+      chargeCurrency = requestedCurrency.toUpperCase();
+      priceInCents = await exchangeRateService.convertCents(priceInCents, pricing.currency, chargeCurrency);
+    }
+
+    lineItems.push({ domain: item.domain, amountCents: priceInCents, currency: chargeCurrency, years: item.years });
+  }
+
+  // Ensure all line items use the same currency (Stripe requirement)
+  const currencies = new Set(lineItems.map(li => li.currency.toUpperCase()));
+  if (currencies.size > 1) {
+    return c.json({ error: 'All domains must use the same currency for a single checkout' }, 400);
+  }
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, accountId), isNull(accounts.deletedAt)),
+  });
+
+  if (!account) {
+    return c.json({ error: 'Account not found' }, 404);
+  }
+
+  try {
+    let stripeCustomerId = account.stripeCustomerId;
+    if (!stripeCustomerId) {
+      const user = c.get('user');
+      const customer = await stripeService.createCustomer(user.email, account.name ?? user.email);
+      stripeCustomerId = customer.id;
+      await db.update(accounts).set({ stripeCustomerId, updatedAt: new Date() }).where(eq(accounts.id, accountId));
+    }
+
+    const session = await stripeService.createBulkDomainCheckoutSession(
+      stripeCustomerId,
+      lineItems,
+      accountId,
+      successUrl,
+      cancelUrl,
+    );
+
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    logger.error({ err, domains, accountId }, 'Bulk domain checkout failed');
     return c.json({ error: err?.message || 'Failed to create checkout session' }, 500);
   }
 }) as any);

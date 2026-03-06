@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { FileText, RefreshCw, Search, Loader2, X } from 'lucide-vue-next'
+import { FileText, RefreshCw, Search, X } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -180,7 +181,7 @@ onUnmounted(() => {
           :disabled="loading"
           class="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 transition-colors"
         >
-          <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="loading" size="w-4 h-4" />
           <RefreshCw v-else class="w-4 h-4" />
           Refresh
         </button>
@@ -190,7 +191,7 @@ onUnmounted(() => {
     <!-- Log entries -->
     <div class="w-full h-[calc(100vh-280px)] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-950 text-xs font-mono">
       <div v-if="loading && !logEntries.length" class="flex items-center justify-center h-full text-gray-400">
-        <Loader2 class="w-5 h-5 animate-spin mr-2" />
+        <CompassSpinner size="w-5 h-5" class="mr-2" />
         Loading logs...
       </div>
       <div v-else-if="!filteredLogs.length" class="flex items-center justify-center h-full text-gray-500">

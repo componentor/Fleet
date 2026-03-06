@@ -2,7 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { LifeBuoy, Plus, Loader2, X, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { LifeBuoy, Plus, X, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 interface Ticket {
@@ -241,7 +242,7 @@ onMounted(() => {
             :disabled="creating || !newTicket.subject.trim() || !newTicket.body.trim()"
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
-            <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="creating" size="w-4 h-4" />
             <Plus v-else class="w-4 h-4" />
             {{ creating ? t('support.panel.creating') : t('support.panel.submitTicket') }}
           </button>
@@ -258,7 +259,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Ticket List -->

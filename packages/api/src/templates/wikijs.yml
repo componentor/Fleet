@@ -1,7 +1,7 @@
 slug: wikijs
 name: Wiki.js
 description: Powerful open-source wiki with markdown support, Git sync, and beautiful UI. Includes PostgreSQL.
-icon_url: https://js.wiki/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/wiki-js.png
 category: productivity
 
 variables:

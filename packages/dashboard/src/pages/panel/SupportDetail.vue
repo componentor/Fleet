@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, computed } from 'vue'
-import { ArrowLeft, Send, Loader2, Lock, Unlock, Bold, Italic, Heading, Link, List, Code, Quote, Eye } from 'lucide-vue-next'
+import { ArrowLeft, Send, Lock, Unlock, Bold, Italic, Heading, Link, List, Code, Quote, Eye } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
@@ -248,7 +249,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Error (when no ticket loaded) -->
@@ -289,7 +290,7 @@ onMounted(() => {
             :disabled="toggling"
             class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
           >
-            <Loader2 v-if="toggling" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="toggling" size="w-4 h-4" />
             <Unlock v-else class="w-4 h-4" />
             {{ t('support.panel.reopenTicket') }}
           </button>
@@ -299,7 +300,7 @@ onMounted(() => {
             :disabled="toggling"
             class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
           >
-            <Loader2 v-if="toggling" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="toggling" size="w-4 h-4" />
             <Lock v-else class="w-4 h-4" />
             {{ t('support.panel.closeTicket') }}
           </button>
@@ -417,7 +418,7 @@ onMounted(() => {
                 :disabled="sending || !replyBody.trim()"
                 class="px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
               >
-                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="sending" size="w-4 h-4" />
                 <Send v-else class="w-4 h-4" />
                 {{ t('support.panel.send') }}
               </button>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { SquareTerminal, Loader2 } from 'lucide-vue-next'
+import { SquareTerminal } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
@@ -114,7 +115,7 @@ onMounted(async () => {
             {{ service.name }}
           </option>
         </select>
-        <Loader2 v-if="loading" class="w-5 h-5 text-primary-600 dark:text-primary-400 animate-spin shrink-0" />
+        <CompassSpinner v-if="loading" size="w-5 h-5" class="shrink-0" />
       </div>
     </div>
 

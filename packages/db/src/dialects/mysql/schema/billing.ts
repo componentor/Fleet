@@ -135,6 +135,7 @@ export const billingConfig = mysqlTable('billing_config', {
   allowDowngrade: boolean('allow_downgrade').default(true),
   deletionBillingPolicy: varchar('deletion_billing_policy', { length: 20 }).default('end_of_period').notNull(),
   maxFreeServicesPerAccount: int('max_free_services_per_account'),
+  domainMaxYears: int('domain_max_years').default(10),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

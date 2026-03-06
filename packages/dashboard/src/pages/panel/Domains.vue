@@ -2,14 +2,17 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Globe, Plus, Search, Loader2, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink, Share2, Settings2 } from 'lucide-vue-next'
+import { Globe, Plus, Search, Trash2, ShoppingCart, Link, ArrowLeft, Check, Copy, ShieldCheck, Clock, ExternalLink, Share2, Settings2 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
+import { useCurrency } from '@/composables/useCurrency'
 
 const { t } = useI18n()
 const router = useRouter()
 const api = useApi()
 const { canWrite } = useRole()
+const { selectedCurrency, formatCurrency } = useCurrency()
 
 type Tab = 'my-domains' | 'add-domain'
 type AddMode = null | 'buy' | 'byod' | 'subdomain'
@@ -122,7 +125,7 @@ async function searchDomains() {
   searching.value = true
   error.value = ''
   try {
-    const data = await api.get<any>(`/domains/search?q=${encodeURIComponent(searchQuery.value.trim())}`)
+    const data = await api.get<any>(`/domains/search?q=${encodeURIComponent(searchQuery.value.trim())}&currency=${selectedCurrency.value}`)
     searchResults.value = data.results ?? []
     buyStep.value = 'results'
   } catch (err: any) {
@@ -350,8 +353,8 @@ function formatDate(ts: any) {
   return d.toLocaleDateString()
 }
 
-function formatPrice(price: number): string {
-  return `$${price.toFixed(2)}`
+function formatPrice(price: number, currency?: string): string {
+  return formatCurrency(price, currency)
 }
 
 function goToDomainDetail(d: any) {
@@ -425,7 +428,7 @@ onMounted(() => {
     <!-- My Domains Tab -->
     <div v-if="activeTab === 'my-domains'">
       <div v-if="loading" class="flex items-center justify-center py-20">
-        <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+        <CompassSpinner size="w-8 h-8" />
       </div>
 
       <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
@@ -593,7 +596,7 @@ onMounted(() => {
                 :placeholder="t('domains.searchPlaceholder')"
                 class="w-full pl-10 pr-10 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
               />
-              <Loader2 v-if="searching" class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-500 animate-spin" />
+              <CompassSpinner v-if="searching" size="w-4 h-4" color="text-primary-500" class="absolute right-3.5 top-1/2 -translate-y-1/2" />
             </div>
 
             <!-- Results -->
@@ -623,7 +626,7 @@ onMounted(() => {
                 </div>
                 <div class="flex items-center gap-4">
                   <span v-if="result.price" class="text-sm font-semibold text-gray-900 dark:text-white">
-                    {{ t('domains.pricePerYear', { price: formatPrice(result.price.registration) }) }}
+                    {{ t('domains.pricePerYear', { price: formatPrice(result.price.registration, result.price.currency) }) }}
                   </span>
                   <button
                     v-if="result.available"
@@ -631,7 +634,7 @@ onMounted(() => {
                     :disabled="purchasing"
                     class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
                   >
-                    <Loader2 v-if="purchasing" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="purchasing" size="w-3.5 h-3.5" />
                     <ShoppingCart v-else class="w-3.5 h-3.5" />
                     {{ t('domains.buy') }}
                   </button>
@@ -673,7 +676,7 @@ onMounted(() => {
 
         <!-- Loading -->
         <div v-else-if="loadingSubdomains" class="flex items-center justify-center py-20">
-          <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+          <CompassSpinner size="w-8 h-8" />
         </div>
 
         <!-- No available domains -->
@@ -745,7 +748,7 @@ onMounted(() => {
                   :disabled="claimingSubdomain || !subdomainInput.trim()"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="claimingSubdomain" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="claimingSubdomain" size="w-4 h-4" />
                   {{ t('domains.claimSubdomainBtn') }}
                 </button>
               </div>
@@ -779,7 +782,7 @@ onMounted(() => {
             </div>
             <div class="flex justify-end">
               <button type="submit" :disabled="byodAdding || !byodDomain.trim()" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="byodAdding" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="byodAdding" size="w-4 h-4" />
                 {{ t('domains.continue') }}
               </button>
             </div>
@@ -827,7 +830,7 @@ onMounted(() => {
                 :disabled="verifying"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="verifying" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="verifying" size="w-4 h-4" />
                 <ShieldCheck v-else class="w-4 h-4" />
                 {{ t('domains.verifyDomain') }}
               </button>

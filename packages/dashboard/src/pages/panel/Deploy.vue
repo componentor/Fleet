@@ -3,10 +3,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   Rocket,
+  Ship,
   Github,
   FileCode2,
   Store,
-  Loader2,
   Plus,
   X,
   Search,
@@ -25,7 +25,11 @@ import {
   Package,
   Copy,
   RefreshCw,
+  Terminal,
+  ChevronDown,
+  FileUp,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
@@ -59,12 +63,13 @@ const store = useServicesStore()
 const authStore = useAuthStore()
 const api = useApi()
 const volumeManager = useVolumeManager()
+const windowOrigin = computed(() => window.location.origin)
 const { fetchTiers } = useServiceBilling()
 
 // Plan/tier selection (shared across deploy methods)
 const selectedPlanId = ref<string | null>(null)
 
-const deployMethod = ref<'github' | 'docker' | 'upload' | 'registry' | null>(null)
+const deployMethod = ref<'github' | 'docker' | 'upload' | 'registry' | 'cli' | 'git' | null>(null)
 
 // Region selection (shared across all deploy methods)
 const regions = ref<Array<{ key: string; label: string; nodeCount: number }>>([])
@@ -83,6 +88,29 @@ const replicas = ref(1)
 const domain = ref('')
 const loading = ref(false)
 const error = ref('')
+
+// Dockerfile / Compose editor
+const dockerfileExpanded = ref(false)
+const dockerfileContent = ref('')
+const dockerfileType = ref<'dockerfile' | 'compose'>('dockerfile')
+
+function handleDockerfileUpload(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    dockerfileContent.value = (e.target?.result as string) ?? ''
+    // Auto-detect type from filename
+    const name = file.name.toLowerCase()
+    if (name.includes('compose') || name.endsWith('.yml') || name.endsWith('.yaml')) {
+      dockerfileType.value = 'compose'
+    } else {
+      dockerfileType.value = 'dockerfile'
+    }
+    dockerfileExpanded.value = true
+  }
+  reader.readAsText(file)
+}
 
 // Validation
 const validationErrors = ref<Record<string, string>>({})
@@ -180,7 +208,30 @@ const registryPollInterval = ref(300)
 const registryLoading = ref(false)
 const availableRegistries = ref<Array<{ registry: string; username: string; scope: 'platform' | 'account' }>>([])
 const selectedRegistry = ref<string>('')
+const customRegistryUrl = ref('')
 const webhookUrl = ref('')
+
+const commonRegistries = [
+  { value: '', label: 'Docker Hub (public)', placeholder: 'nginx' },
+  { value: 'docker.io', label: 'Docker Hub (authenticated)', placeholder: 'org/app' },
+  { value: 'ghcr.io', label: 'GitHub Container Registry', placeholder: 'owner/app' },
+  { value: 'registry.gitlab.com', label: 'GitLab Container Registry', placeholder: 'group/project' },
+  { value: 'quay.io', label: 'Quay.io (Red Hat)', placeholder: 'org/app' },
+  { value: 'gcr.io', label: 'Google Container Registry', placeholder: 'project-id/app' },
+  { value: 'public.ecr.aws', label: 'Amazon ECR Public', placeholder: 'alias/app' },
+  { value: 'lscr.io', label: 'LinuxServer.io', placeholder: 'linuxserver/app' },
+  { value: '__custom__', label: 'Custom registry…', placeholder: 'org/app' },
+]
+
+const activeRegistryPlaceholder = computed(() => {
+  if (selectedRegistry.value === '__custom__') return 'org/app'
+  return commonRegistries.find(r => r.value === selectedRegistry.value)?.placeholder ?? 'org/app'
+})
+
+const effectiveRegistry = computed(() => {
+  if (selectedRegistry.value === '__custom__') return customRegistryUrl.value.replace(/\/+$/, '')
+  return selectedRegistry.value
+})
 
 async function fetchAvailableRegistries() {
   try {
@@ -195,7 +246,7 @@ function generateWebhookUrl(serviceId: string) {
 }
 
 const fullRegistryImage = computed(() => {
-  const reg = selectedRegistry.value
+  const reg = effectiveRegistry.value
   const img = registryImage.value
   const tag = registryTag.value || 'latest'
   if (!img) return ''
@@ -205,6 +256,7 @@ const fullRegistryImage = computed(() => {
 
 function confirmRegistryDeploy() {
   if (!registryServiceName.value || !registryImage.value) return
+  if (selectedRegistry.value === '__custom__' && !customRegistryUrl.value.trim()) return
   validationErrors.value = {}
   const nameErr = validateServiceName(registryServiceName.value)
   if (nameErr) { validationErrors.value.registryServiceName = nameErr; return }
@@ -220,7 +272,7 @@ async function executeRegistryDeploy() {
   registryLoading.value = true
   error.value = ''
   try {
-    await store.createService({
+    const result = await store.createService({
       name: registryServiceName.value,
       image: fullRegistryImage.value,
       replicas: replicas.value,
@@ -233,11 +285,66 @@ async function executeRegistryDeploy() {
       registryPollInterval: registryPollInterval.value,
       planId: selectedPlanId.value || undefined,
     } as any)
+    if ((result as any)?.checkoutUrl) {
+      window.location.href = (result as any).checkoutUrl
+      return
+    }
     router.push('/panel/services')
   } catch (err: any) {
     error.value = err?.body?.error || err?.message || 'Deployment failed'
   } finally {
     registryLoading.value = false
+  }
+}
+
+// Git form state
+const gitUrl = ref('')
+const gitBranch = ref('main')
+const gitToken = ref('')
+const gitServiceName = ref('')
+const gitLoading = ref(false)
+
+function confirmGitDeploy() {
+  if (!gitServiceName.value || !gitUrl.value) return
+  validationErrors.value = {}
+  const nameErr = validateServiceName(gitServiceName.value)
+  if (nameErr) { validationErrors.value.gitServiceName = nameErr; return }
+  const domErr = validateDomain(domain.value)
+  if (domErr) { validationErrors.value.domain = domErr; return }
+  try { new URL(gitUrl.value) } catch { validationErrors.value.gitUrl = 'Must be a valid HTTPS URL'; return }
+  openConfirmModal(
+    { name: gitServiceName.value, repo: gitUrl.value, domain: domain.value, method: 'Git' },
+    executeGitDeploy,
+  )
+}
+
+async function executeGitDeploy() {
+  gitLoading.value = true
+  error.value = ''
+  try {
+    const result = await store.createService({
+      name: gitServiceName.value,
+      image: 'git-build-placeholder',
+      sourceType: 'git',
+      gitUrl: gitUrl.value,
+      gitBranch: gitBranch.value || 'main',
+      gitToken: gitToken.value || undefined,
+      replicas: replicas.value,
+      domain: domain.value || undefined,
+      region: selectedRegion.value || undefined,
+      envVars: buildEnvVarsPayload(),
+      volumes: buildVolumesPayload(),
+      planId: selectedPlanId.value || undefined,
+    } as any)
+    if ((result as any)?.checkoutUrl) {
+      window.location.href = (result as any).checkoutUrl
+      return
+    }
+    router.push('/panel/services')
+  } catch (err: any) {
+    error.value = err?.body?.error || err?.message || t('deploy.deploymentFailed')
+  } finally {
+    gitLoading.value = false
   }
 }
 
@@ -326,7 +433,11 @@ async function executeUploadDeploy() {
     if (selectedPlanId.value) formData.append('planId', selectedPlanId.value)
     formData.append('replicas', String(replicas.value))
 
-    await api.upload('/upload/deploy', formData)
+    const result = await api.upload('/upload/deploy', formData)
+    if ((result as any)?.checkoutUrl) {
+      window.location.href = (result as any).checkoutUrl
+      return
+    }
     router.push('/panel/services')
   } catch (err: any) {
     error.value = err?.body?.error || err?.message || t('deploy.deploymentFailed')
@@ -374,18 +485,26 @@ function validateDockerForm(): boolean {
 function confirmDockerDeploy() {
   if (!validateDockerForm()) return
   openConfirmModal(
-    { name: serviceName.value, image: dockerImage.value, domain: domain.value, method: 'Docker Image' },
+    { name: serviceName.value, image: fullDockerImage.value, domain: domain.value, method: 'Docker Image' },
     executeDockerDeploy,
   )
 }
+
+const fullDockerImage = computed(() => {
+  const reg = effectiveRegistry.value
+  const img = dockerImage.value
+  if (!img) return ''
+  if (reg && reg !== 'docker.io') return `${reg}/${img}`
+  return img
+})
 
 async function executeDockerDeploy() {
   loading.value = true
   error.value = ''
   try {
-    await store.createService({
+    const result = await store.createService({
       name: serviceName.value,
-      image: dockerImage.value,
+      image: fullDockerImage.value,
       replicas: replicas.value,
       domain: domain.value || undefined,
       region: selectedRegion.value || undefined,
@@ -393,6 +512,18 @@ async function executeDockerDeploy() {
       volumes: buildVolumesPayload(),
       planId: selectedPlanId.value || undefined,
     } as any)
+    // Save Dockerfile/Compose content if provided
+    if (dockerfileContent.value.trim() && (result as any)?.id) {
+      try {
+        await api.put(`/services/${(result as any).id}/dockerfile`, { content: dockerfileContent.value })
+      } catch {
+        // Non-fatal — service is created, Dockerfile can be added later
+      }
+    }
+    if ((result as any)?.checkoutUrl) {
+      window.location.href = (result as any).checkoutUrl
+      return
+    }
     router.push('/panel/services')
   } catch (err: any) {
     error.value = err?.body?.error || err?.message || t('deploy.deploymentFailed')
@@ -416,7 +547,7 @@ async function executeGithubDeploy() {
   loading.value = true
   error.value = ''
   try {
-    await store.createService({
+    const result = await store.createService({
       name: ghServiceName.value,
       image: 'ghcr.io/placeholder',
       githubRepo: selectedRepo.value!.fullName,
@@ -427,6 +558,10 @@ async function executeGithubDeploy() {
       volumes: buildVolumesPayload(),
       planId: selectedPlanId.value || undefined,
     } as any)
+    if ((result as any)?.checkoutUrl) {
+      window.location.href = (result as any).checkoutUrl
+      return
+    }
     router.push('/panel/services')
   } catch (err: any) {
     error.value = err?.body?.error || err?.message || t('deploy.deploymentFailed')
@@ -528,7 +663,7 @@ watch(
         checkGithubStatus()
       }
     }
-    if (method === 'registry') {
+    if (method === 'registry' || method === 'docker') {
       fetchAvailableRegistries()
     }
     // Reset volumes when switching deploy method
@@ -565,7 +700,7 @@ onMounted(() => {
 <template>
   <div>
     <div class="flex items-center gap-3 mb-8">
-      <Rocket class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+      <Ship class="w-7 h-7 text-primary-600 dark:text-primary-400" />
       <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('deploy.title') }}</h1>
     </div>
 
@@ -624,6 +759,21 @@ onMounted(() => {
       </button>
 
       <button
+        @click="deployMethod = 'git'"
+        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-orange-300 dark:hover:border-orange-600"
+      >
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-lg bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-orange-100 dark:group-hover:bg-orange-900/30">
+            <GitBranch class="w-6 h-6 text-orange-600 dark:text-orange-400" />
+          </div>
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromGit', 'Deploy from Git') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromGitDesc', 'Deploy from any Git repository — GitLab, Bitbucket, Gitea, or any self-hosted provider') }}</p>
+          </div>
+        </div>
+      </button>
+
+      <button
         @click="deployMethod = 'registry'"
         class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-amber-300 dark:hover:border-amber-600"
       >
@@ -632,8 +782,8 @@ onMounted(() => {
             <Package class="w-6 h-6 text-amber-600 dark:text-amber-400" />
           </div>
           <div class="min-w-0">
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">From Registry</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">Deploy from a Docker registry with auto-deploy on push</p>
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromRegistry', 'From Registry') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromRegistryDesc', 'Deploy from a Docker registry with auto-deploy on push') }}</p>
           </div>
         </div>
       </button>
@@ -649,6 +799,21 @@ onMounted(() => {
           <div class="min-w-0">
             <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.dockerImage') }}</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.dockerImageDesc') }}</p>
+          </div>
+        </div>
+      </button>
+
+      <button
+        @click="deployMethod = 'cli'"
+        class="group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-emerald-300 dark:hover:border-emerald-600"
+      >
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center shrink-0 transition-colors group-hover:bg-emerald-100 dark:group-hover:bg-emerald-900/30">
+            <Terminal class="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.fromCli', 'Deploy from CLI') }}</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{{ $t('deploy.fromCliDesc', 'Deploy directly from your terminal using the Siglar CLI') }}</p>
           </div>
         </div>
       </button>
@@ -682,6 +847,36 @@ onMounted(() => {
             />
             <p v-if="validationErrors.serviceName" class="mt-1 text-xs text-red-500">{{ validationErrors.serviceName }}</p>
           </div>
+          <!-- Registry selector -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.registry', 'Registry') }}</label>
+            <select
+              v-model="selectedRegistry"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            >
+              <optgroup :label="$t('deploy.commonRegistries', 'Common registries')">
+                <option v-for="reg in commonRegistries" :key="reg.value" :value="reg.value">{{ reg.label }}</option>
+              </optgroup>
+              <optgroup v-if="availableRegistries.filter(r => !commonRegistries.some(c => c.value === r.registry)).length > 0" :label="$t('deploy.authenticatedRegistries', 'Authenticated registries')">
+                <option v-for="reg in availableRegistries.filter(r => !commonRegistries.some(c => c.value === r.registry))" :key="reg.registry" :value="reg.registry">
+                  {{ reg.registry }} ({{ reg.scope === 'account' ? 'your credential' : 'platform' }})
+                </option>
+              </optgroup>
+            </select>
+          </div>
+
+          <!-- Custom registry URL -->
+          <div v-if="selectedRegistry === '__custom__'">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.customRegistryUrl', 'Registry URL') }}</label>
+            <input
+              v-model="customRegistryUrl"
+              type="text"
+              placeholder="registry.example.com"
+              required
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+            />
+          </div>
+
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
               >{{ $t('deploy.dockerImage') }}</label
@@ -689,7 +884,7 @@ onMounted(() => {
             <input
               v-model="dockerImage"
               type="text"
-              placeholder="nginx:latest"
+              :placeholder="activeRegistryPlaceholder + ':latest'"
               required
               :class="['w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono', validationErrors.dockerImage ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600']"
             />
@@ -778,6 +973,66 @@ onMounted(() => {
             </p>
           </div>
 
+          <!-- Dockerfile / Compose (optional) -->
+          <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              @click="dockerfileExpanded = !dockerfileExpanded"
+              class="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+            >
+              <span class="inline-flex items-center gap-2">
+                <FileCode2 class="w-4 h-4" />
+                {{ $t('deploy.dockerfile.title', 'Dockerfile / Compose') }}
+                <span class="text-xs text-gray-400 dark:text-gray-500 font-normal">{{ $t('deploy.dockerfile.optional', '(optional)') }}</span>
+              </span>
+              <ChevronDown :class="['w-4 h-4 text-gray-400 transition-transform', dockerfileExpanded ? 'rotate-180' : '']" />
+            </button>
+            <div v-if="dockerfileExpanded" class="px-4 pb-4 space-y-3 border-t border-gray-200 dark:border-gray-700 pt-3">
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ $t('deploy.dockerfile.hint', 'Paste or upload a Dockerfile or docker-compose.yml to build a custom image for this service.') }}</p>
+
+              <!-- Type toggle + upload -->
+              <div class="flex items-center justify-between">
+                <div class="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                  <button
+                    type="button"
+                    @click="dockerfileType = 'dockerfile'"
+                    :class="['px-3 py-1.5 text-xs font-medium transition-colors', dockerfileType === 'dockerfile' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600']"
+                  >Dockerfile</button>
+                  <button
+                    type="button"
+                    @click="dockerfileType = 'compose'"
+                    :class="['px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 dark:border-gray-600', dockerfileType === 'compose' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600']"
+                  >Compose</button>
+                </div>
+                <label class="inline-flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 cursor-pointer">
+                  <FileUp class="w-3.5 h-3.5" />
+                  {{ $t('deploy.dockerfile.upload', 'Upload file') }}
+                  <input type="file" accept=".dockerfile,Dockerfile,.yml,.yaml,.txt" class="hidden" @change="handleDockerfileUpload" />
+                </label>
+              </div>
+
+              <!-- Editor -->
+              <textarea
+                v-model="dockerfileContent"
+                :placeholder="dockerfileType === 'dockerfile' ? 'FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install\nCMD [&quot;node&quot;, &quot;index.js&quot;]' : 'version: &quot;3.8&quot;\nservices:\n  app:\n    build: .\n    ports:\n      - &quot;3000:3000&quot;'"
+                rows="10"
+                class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-900 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono leading-relaxed resize-y"
+                spellcheck="false"
+              ></textarea>
+
+              <div v-if="dockerfileContent.trim()" class="flex items-center justify-between">
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ dockerfileContent.split('\n').length }} {{ $t('deploy.dockerfile.lines', 'lines') }}
+                </p>
+                <button
+                  type="button"
+                  @click="dockerfileContent = ''"
+                  class="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                >{{ $t('deploy.dockerfile.clear', 'Clear') }}</button>
+              </div>
+            </div>
+          </div>
+
           <!-- Persistent Storage -->
           <div>
             <div class="flex items-center justify-between mb-2">
@@ -834,10 +1089,10 @@ onMounted(() => {
           <div class="pt-2 flex justify-end">
             <button
               type="submit"
-              :disabled="loading || !serviceName || !dockerImage || !selectedPlanId"
+              :disabled="loading || !serviceName || !dockerImage || !selectedPlanId || (selectedRegistry === '__custom__' && !customRegistryUrl.trim())"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="loading" size="w-4 h-4" />
               <Rocket v-else class="w-4 h-4" />
               {{ loading ? $t('deploy.deploying') : $t('deploy.deploy') }}
             </button>
@@ -860,7 +1115,7 @@ onMounted(() => {
         v-if="githubStep === 'checking'"
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 flex flex-col items-center justify-center"
       >
-        <Loader2 class="w-8 h-8 text-primary-500 animate-spin mb-4" />
+        <CompassSpinner size="w-8 h-8" color="text-primary-500" class="mb-4" />
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('deploy.github.checkingConnection') }}</p>
       </div>
 
@@ -919,7 +1174,7 @@ onMounted(() => {
 
           <!-- Loading state -->
           <div v-if="reposLoading" class="p-12 flex flex-col items-center justify-center">
-            <Loader2 class="w-6 h-6 text-primary-500 animate-spin mb-3" />
+            <CompassSpinner color="text-primary-500" class="mb-3" />
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('deploy.github.loadingRepos') }}</p>
           </div>
 
@@ -1051,7 +1306,7 @@ onMounted(() => {
                 </span>
               </label>
               <div v-if="branchesLoading" class="flex items-center gap-2 py-2">
-                <Loader2 class="w-4 h-4 text-primary-500 animate-spin" />
+                <CompassSpinner size="w-4 h-4" color="text-primary-500" />
                 <span class="text-sm text-gray-500 dark:text-gray-400">{{ $t('deploy.github.loadingBranches') }}</span>
               </div>
               <select
@@ -1190,7 +1445,7 @@ onMounted(() => {
                 :disabled="loading || !selectedRepo || !ghServiceName || !selectedPlanId"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="loading" size="w-4 h-4" />
                 <Rocket v-else class="w-4 h-4" />
                 {{ loading ? $t('deploy.deploying') : $t('deploy.deploy') }}
               </button>
@@ -1354,7 +1609,7 @@ onMounted(() => {
               :disabled="uploadLoading || !uploadServiceName || !uploadFile || !selectedPlanId"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="uploadLoading" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="uploadLoading" size="w-4 h-4" />
               <Rocket v-else class="w-4 h-4" />
               {{ uploadLoading ? $t('deploy.uploading') : $t('deploy.deploy') }}
             </button>
@@ -1372,7 +1627,7 @@ onMounted(() => {
       </button>
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Deploy from Registry</h2>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('deploy.fromRegistry', 'From Registry') }}</h2>
         </div>
         <form @submit.prevent="confirmRegistryDeploy" class="p-6 space-y-5">
           <!-- Service Name -->
@@ -1395,13 +1650,29 @@ onMounted(() => {
               v-model="selectedRegistry"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             >
-              <option value="">Docker Hub (public)</option>
-              <option value="docker.io">Docker Hub (authenticated)</option>
-              <option v-for="reg in availableRegistries.filter(r => r.registry !== 'docker.io')" :key="reg.registry" :value="reg.registry">
-                {{ reg.registry }} ({{ reg.scope === 'account' ? 'your credential' : 'platform' }})
-              </option>
+              <optgroup label="Common registries">
+                <option v-for="reg in commonRegistries" :key="reg.value" :value="reg.value">{{ reg.label }}</option>
+              </optgroup>
+              <optgroup v-if="availableRegistries.filter(r => !commonRegistries.some(c => c.value === r.registry)).length > 0" label="Authenticated registries">
+                <option v-for="reg in availableRegistries.filter(r => !commonRegistries.some(c => c.value === r.registry))" :key="reg.registry" :value="reg.registry">
+                  {{ reg.registry }} ({{ reg.scope === 'account' ? 'your credential' : 'platform' }})
+                </option>
+              </optgroup>
             </select>
             <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Select a registry or leave as Docker Hub for public images</p>
+          </div>
+
+          <!-- Custom registry URL -->
+          <div v-if="selectedRegistry === '__custom__'">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Registry URL</label>
+            <input
+              v-model="customRegistryUrl"
+              type="text"
+              placeholder="registry.example.com"
+              required
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+            />
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Enter your private registry hostname (e.g. registry.example.com)</p>
           </div>
 
           <!-- Image name & tag -->
@@ -1411,7 +1682,7 @@ onMounted(() => {
               <input
                 v-model="registryImage"
                 type="text"
-                :placeholder="selectedRegistry ? 'org/app' : 'nginx'"
+                :placeholder="activeRegistryPlaceholder"
                 required
                 class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
               />
@@ -1575,15 +1846,380 @@ onMounted(() => {
           <div class="pt-2 flex justify-end">
             <button
               type="submit"
-              :disabled="registryLoading || !registryServiceName || !registryImage || !selectedPlanId"
+              :disabled="registryLoading || !registryServiceName || !registryImage || !selectedPlanId || (selectedRegistry === '__custom__' && !customRegistryUrl.trim())"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="registryLoading" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="registryLoading" size="w-4 h-4" />
               <Rocket v-else class="w-4 h-4" />
               {{ registryLoading ? $t('deploy.deploying') : $t('deploy.deploy') }}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- CLI deploy info -->
+    <!-- Git deploy form -->
+    <div v-if="deployMethod === 'git'" class="max-w-2xl">
+      <button
+        @click="deployMethod = null; error = ''"
+        class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors"
+      >
+        &larr; {{ $t('deploy.backToOptions') }}
+      </button>
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('deploy.git.title', 'Deploy from Git Repository') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('deploy.git.subtitle', 'Clone and build from any Git provider using an HTTPS URL.') }}</p>
+        </div>
+        <form @submit.prevent="confirmGitDeploy" class="p-6 space-y-5">
+          <!-- Service Name -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.serviceName') }}</label>
+            <input
+              v-model="gitServiceName"
+              type="text"
+              placeholder="my-app"
+              required
+              :class="['w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm', validationErrors.gitServiceName ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600']"
+            />
+            <p v-if="validationErrors.gitServiceName" class="mt-1 text-xs text-red-500">{{ validationErrors.gitServiceName }}</p>
+          </div>
+
+          <!-- Git URL -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.git.repoUrl', 'Repository URL') }}</label>
+            <input
+              v-model="gitUrl"
+              type="url"
+              :placeholder="$t('deploy.git.repoUrlPlaceholder', 'https://gitlab.com/user/project.git')"
+              required
+              :class="['w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono', validationErrors.gitUrl ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600']"
+            />
+            <p v-if="validationErrors.gitUrl" class="mt-1 text-xs text-red-500">{{ validationErrors.gitUrl }}</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ $t('deploy.git.repoUrlHint', 'HTTPS URL to any Git repository. Supports GitLab, Bitbucket, Gitea, Codeberg, Forgejo, and self-hosted instances.') }}</p>
+          </div>
+
+          <!-- Branch -->
+          <div class="grid grid-cols-2 gap-5">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.git.branch', 'Branch') }}</label>
+              <input
+                v-model="gitBranch"
+                type="text"
+                :placeholder="$t('deploy.git.branchPlaceholder', 'main')"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.replicas') }}</label>
+              <input
+                v-model.number="replicas"
+                type="number"
+                min="1"
+                max="100"
+                class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
+          </div>
+
+          <!-- Access Token -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <span class="inline-flex items-center gap-1.5">
+                <Lock class="w-3.5 h-3.5" />
+                {{ $t('deploy.git.accessToken', 'Access Token (for private repos)') }}
+              </span>
+            </label>
+            <input
+              v-model="gitToken"
+              type="password"
+              placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+            />
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ $t('deploy.git.accessTokenHint', 'Personal access token or deploy token. Only needed for private repositories.') }}</p>
+          </div>
+
+          <!-- Domain -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('deploy.domainOptional') }}</label>
+            <DomainPicker
+              :model-value="domain"
+              @update:model-value="domain = $event"
+              placeholder="app.example.com"
+            />
+          </div>
+
+          <!-- Region Selector -->
+          <div v-if="regions.length > 0">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <span class="inline-flex items-center gap-1.5">
+                <MapPin class="w-3.5 h-3.5" />
+                Region
+              </span>
+            </label>
+            <select
+              v-model="selectedRegion"
+              class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            >
+              <option :value="null">Auto (any region)</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'node' : 'nodes' }})</option>
+            </select>
+          </div>
+
+          <!-- Environment Variables -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ $t('deploy.envVars') }}</label>
+              <button
+                type="button"
+                @click="addEnvVar"
+                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+              >
+                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
+              </button>
+            </div>
+            <div v-for="(env, i) in envVars" :key="i" class="flex items-center gap-2 mb-2">
+              <input
+                v-model="env.key"
+                type="text"
+                :placeholder="$t('deploy.keyPlaceholder')"
+                class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              />
+              <input
+                v-model="env.value"
+                type="text"
+                :placeholder="$t('deploy.valuePlaceholder')"
+                class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
+              />
+              <button
+                type="button"
+                @click="removeEnvVar(i)"
+                class="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <p v-if="envVars.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noEnvVars') }}</p>
+          </div>
+
+          <!-- Persistent Storage -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <span class="inline-flex items-center gap-1.5">
+                  <HardDrive class="w-3.5 h-3.5" />
+                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
+                </span>
+              </label>
+              <button
+                type="button"
+                @click="addDeployVolume"
+                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+              >
+                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
+              </button>
+            </div>
+            <div v-if="deployVolumes.length > 0" class="space-y-2">
+              <InlineVolumeCreator
+                v-for="(vol, i) in deployVolumes"
+                :key="i"
+                :model-value="vol"
+                :account-volumes="volumeManager.accountVolumes.value"
+                :storage-quota="volumeManager.storageQuota.value"
+                :create-loading="volumeManager.createLoading.value"
+                :suggested-name="gitServiceName ? volumeManager.suggestedVolumeName(gitServiceName) : undefined"
+                @update:model-value="deployVolumes[i] = $event"
+                @remove="removeDeployVolume(i)"
+                @create-volume="handleDeployVolumeCreated(i, $event)"
+              />
+            </div>
+            <p v-if="deployVolumes.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noVolumes') || 'No volumes configured' }}</p>
+          </div>
+
+          <!-- Plan/Tier -->
+          <TierSelector v-model="selectedPlanId" />
+
+          <!-- Supported providers hint -->
+          <div class="flex items-start gap-2 p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800">
+            <GitBranch class="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+            <p class="text-xs text-orange-700 dark:text-orange-300">{{ $t('deploy.git.providers', 'Works with GitLab, Bitbucket, Gitea, Codeberg, Forgejo, and any Git host') }}</p>
+          </div>
+
+          <button
+            type="submit"
+            :disabled="gitLoading || !gitServiceName || !gitUrl"
+            class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <CompassSpinner v-if="gitLoading" size="w-5 h-5" />
+            <Rocket v-else class="w-5 h-5" />
+            {{ gitLoading ? $t('deploy.deploying') : $t('deploy.deployService') }}
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div v-if="deployMethod === 'cli'" class="max-w-2xl">
+      <button
+        @click="deployMethod = null; error = ''"
+        class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 mb-6 transition-colors"
+      >
+        &larr; {{ $t('deploy.backToOptions') }}
+      </button>
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.title', 'Deploy from CLI') }}</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ $t('deploy.cli.subtitle', 'Use the Siglar CLI to deploy services directly from your terminal.') }}</p>
+        </div>
+        <div class="p-6 space-y-6">
+          <!-- Step 1: Install -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">1</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.installTitle', 'Install the CLI') }}</h3>
+            </div>
+            <div class="relative group">
+              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>npm install -g siglar</code></pre>
+              <button
+                @click="copyToClipboard('npm install -g siglar')"
+                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Copy class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 2: Login -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">2</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.loginTitle', 'Log in to your account') }}</h3>
+            </div>
+            <div class="relative group">
+              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>siglar login --url {{ windowOrigin }}</code></pre>
+              <button
+                @click="copyToClipboard(`siglar login --url ${windowOrigin}`)"
+                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Copy class="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ $t('deploy.cli.loginHint', 'Or use an API key:') }} <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono">siglar login --api-key YOUR_KEY --url {{ windowOrigin }}</code></p>
+
+            <!-- .env tip -->
+            <div class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+              <p class="text-xs font-medium text-amber-800 dark:text-amber-200 mb-1.5">{{ $t('deploy.cli.envTipTitle', 'Tip: Skip login with a .env file') }}</p>
+              <p class="text-xs text-amber-700 dark:text-amber-300 mb-2">{{ $t('deploy.cli.envTipDesc', 'Add an API key to your project\'s .env file so the CLI authenticates automatically — no need to run login each time.') }}</p>
+              <div class="relative group">
+                <pre class="px-3 py-2 rounded-md bg-gray-900 text-gray-100 text-xs font-mono overflow-x-auto"><code>SIGLAR_API_KEY=your_api_key_here
+SIGLAR_URL={{ windowOrigin }}</code></pre>
+                <button
+                  @click="copyToClipboard(`SIGLAR_API_KEY=your_api_key_here\nSIGLAR_URL=${windowOrigin}`)"
+                  class="absolute top-1.5 right-1.5 p-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Copy class="w-3 h-3" />
+                </button>
+              </div>
+              <p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">
+                {{ $t('deploy.cli.envTipApiKeys', 'You can create a long-lived API key from') }}
+                <RouterLink to="/panel/api-keys" class="underline hover:no-underline font-medium">{{ $t('deploy.cli.envTipApiKeysLink', 'Settings → API Keys') }}</RouterLink>.
+              </p>
+            </div>
+          </div>
+
+          <!-- Step 3: Init -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">3</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.initTitle', 'Initialize your project') }}</h3>
+            </div>
+            <div class="relative group">
+              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>cd my-project
+siglar init</code></pre>
+              <button
+                @click="copyToClipboard('cd my-project\nsiglar init')"
+                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Copy class="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ $t('deploy.cli.initHint', 'This creates a siglar.yml config in your project directory.') }}</p>
+          </div>
+
+          <!-- Step 4: Deploy -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">4</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.deployTitle', 'Deploy!') }}</h3>
+            </div>
+            <div class="relative group">
+              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>siglar deploy</code></pre>
+              <button
+                @click="copyToClipboard('siglar deploy')"
+                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Copy class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Helpful commands -->
+          <div class="border-t border-gray-200 dark:border-gray-700 pt-5">
+            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ $t('deploy.cli.usefulCommands', 'Useful commands') }}</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar services</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdList', 'List your services') }}</p>
+              </div>
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar logs &lt;name&gt;</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdLogs', 'View service logs') }}</p>
+              </div>
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar env set KEY=val</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdEnv', 'Set environment variables') }}</p>
+              </div>
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar redeploy &lt;name&gt;</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdRedeploy', 'Redeploy a service') }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Managing existing services -->
+          <div class="border-t border-gray-200 dark:border-gray-700 pt-5">
+            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ $t('deploy.cli.manageTitle', 'Updating existing services') }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ $t('deploy.cli.manageDesc', 'Already have a running service? Use these commands to update it without redeploying from scratch.') }}</p>
+            <div class="space-y-2">
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar deploy --service &lt;name&gt;</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdUpdate', 'Push an update to an existing service') }}</p>
+              </div>
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar scale &lt;name&gt; --replicas 3</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdScale', 'Scale a service up or down') }}</p>
+              </div>
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar domain set &lt;name&gt; app.example.com</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdDomain', 'Attach a custom domain') }}</p>
+              </div>
+              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar env set &lt;name&gt; KEY=val KEY2=val2</code>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdEnvUpdate', 'Update environment variables (auto-redeploys)') }}</p>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                  <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar stop &lt;name&gt;</code>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdStop', 'Stop a service') }}</p>
+                </div>
+                <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                  <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar start &lt;name&gt;</code>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdStart', 'Start a stopped service') }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1627,7 +2263,7 @@ onMounted(() => {
 
             <!-- Preview warnings -->
             <div v-if="previewLoading" class="flex items-center gap-2 py-2 text-xs text-gray-400">
-              <Loader2 class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner size="w-3.5 h-3.5" />
               Checking configuration...
             </div>
             <div v-else-if="previewData?.warnings?.length" class="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 p-3 space-y-1.5">

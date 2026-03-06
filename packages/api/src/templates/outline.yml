@@ -1,7 +1,7 @@
 slug: outline
 name: Outline
 description: Modern team wiki and knowledge base. Beautiful, fast, and collaborative. Includes PostgreSQL and Redis.
-icon_url: https://app.getoutline.com/favicon-32x32.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/outline.png
 category: productivity
 
 variables:
