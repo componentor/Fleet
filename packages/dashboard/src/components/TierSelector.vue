@@ -46,7 +46,10 @@ function isFreeTierDisabled(tier: ServiceTier): boolean {
 }
 
 const filteredTiers = computed(() => {
-  let list = props.stackMode ? tiers.value.filter(t => t.scope === 'stack') : tiers.value.filter(t => t.scope === 'service')
+  const targetScope = props.stackMode ? 'stack' : 'service'
+  let list = tiers.value.filter(t => t.scope === targetScope)
+  // Fallback: show all plans if none match the requested scope
+  if (list.length === 0) list = [...tiers.value]
   if (props.currentPlan && !allowDowngrade.value) {
     list = list.filter(t => !isDowngrade(t))
   }
