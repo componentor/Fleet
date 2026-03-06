@@ -16,7 +16,7 @@ import { decrypt } from '../services/crypto.service.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
 
-// ── fleet.json manifest schema ───────────────────────────────────────────────
+// ── siglar.json manifest schema ───────────────────────────────────────────────
 const fleetManifestSchema = z.object({
   name: z.string().max(100).optional(),
   description: z.string().max(500).optional(),
@@ -809,7 +809,7 @@ const getManifestRoute = createRoute({
   method: 'get',
   path: '/github/manifest',
   tags: ['Deployments'],
-  summary: 'Fetch fleet.json from a GitHub repo',
+  summary: 'Fetch siglar.json from a GitHub repo',
   security: bearerSecurity,
   request: {
     query: manifestQuerySchema,
@@ -866,44 +866,44 @@ authenticatedRoutes.openapi(getManifestRoute, (async (c: any) => {
     }
   }
 
-  // Fetch fleet.json from the repo
+  // Fetch siglar.json from the repo
   try {
-    const rawUrl = `https://raw.githubusercontent.com/${repo}/${targetBranch}/fleet.json`;
+    const rawUrl = `https://raw.githubusercontent.com/${repo}/${targetBranch}/siglar.json`;
     const headers: Record<string, string> = { 'User-Agent': 'Fleet-Deploy' };
     if (githubToken) headers['Authorization'] = `Bearer ${githubToken}`;
 
     const res = await fetch(rawUrl, { headers, signal: AbortSignal.timeout(10_000) });
 
     if (!res.ok) {
-      // No fleet.json — that's fine, return null manifest with repo info
+      // No siglar.json — that's fine, return null manifest with repo info
       return c.json({ manifest: null, branch: targetBranch, repo });
     }
 
     const text = await res.text();
     // Guard against absurdly large manifests
     if (text.length > 50_000) {
-      return c.json({ error: 'fleet.json too large (max 50 KB)' }, 400);
+      return c.json({ error: 'siglar.json too large (max 50 KB)' }, 400);
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
-      return c.json({ error: 'fleet.json contains invalid JSON' }, 400);
+      return c.json({ error: 'siglar.json contains invalid JSON' }, 400);
     }
 
     const result = fleetManifestSchema.safeParse(parsed);
     if (!result.success) {
       return c.json({
-        error: 'fleet.json validation failed',
+        error: 'siglar.json validation failed',
         details: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
       }, 400);
     }
 
     return c.json({ manifest: result.data, branch: targetBranch, repo });
   } catch (err) {
-    logger.error({ err, repo }, 'Failed to fetch fleet.json');
-    logToErrorTable({ level: 'warn', message: `fleet.json fetch failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'fleet-json-fetch' } });
+    logger.error({ err, repo }, 'Failed to fetch siglar.json');
+    logToErrorTable({ level: 'warn', message: `siglar.json fetch failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'deployments', operation: 'fleet-json-fetch' } });
     return c.json({ manifest: null, branch: targetBranch, repo });
   }
 }) as any);

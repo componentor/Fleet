@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import { promises as dns } from 'node:dns';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
@@ -25,6 +27,7 @@ import { stripeService } from '../services/stripe.service.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { hash } from 'argon2';
 import { logger } from '../services/logger.js';
+import { notificationService } from '../services/notification.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { generateTokens } from './auth.js';
@@ -218,6 +221,15 @@ authed.openapi(getStatusRoute, (async (c: any) => {
     canApply = canApply && !!parentReseller?.canSubAccountResell && (config?.allowSubAccountReselling ?? false);
   }
 
+  // Get platform host for CNAME instructions
+  const appUrl = await getAppUrl();
+  let platformHost: string;
+  try {
+    platformHost = new URL(appUrl).hostname;
+  } catch {
+    platformHost = appUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  }
+
   return c.json({
     isReseller: resellerAccount?.status === 'active',
     resellerAccount: resellerAccount ?? null,
@@ -228,6 +240,7 @@ authed.openapi(getStatusRoute, (async (c: any) => {
     } : { enabled: false, approvalMode: 'manual', allowSubAccountReselling: false },
     canApply,
     pendingApplication: pendingApp ?? null,
+    platformHost,
   });
 }) as any);
 
@@ -294,6 +307,12 @@ authed.openapi(applyRoute, (async (c: any) => {
       status: 'approved',
       reviewedAt: new Date(),
       reviewNote: 'Auto-approved',
+    });
+
+    await notificationService.create(accountId, {
+      type: 'reseller',
+      title: 'Reseller Application Approved',
+      message: 'Your reseller application has been approved. You can now access reseller features.',
     });
 
     logger.info({ accountId, userId: user.userId }, 'Reseller auto-approved');
@@ -473,7 +492,15 @@ authed.openapi(patchBrandingRoute, (async (c: any) => {
 
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
   if (data.signupSlug !== undefined) updateData['signupSlug'] = data.signupSlug;
-  if (data.customDomain !== undefined) updateData['customDomain'] = data.customDomain || null;
+  if (data.customDomain !== undefined) {
+    const newDomain = data.customDomain || null;
+    updateData['customDomain'] = newDomain;
+    // Reset verification when domain changes
+    if (newDomain !== resellerAccount.customDomain) {
+      updateData['customDomainVerified'] = false;
+      updateData['customDomainToken'] = newDomain ? `fleet-verify-${crypto.randomUUID().replace(/-/g, '')}` : null;
+    }
+  }
   if (data.brandName !== undefined) updateData['brandName'] = data.brandName || null;
   if (data.brandLogoUrl !== undefined) updateData['brandLogoUrl'] = data.brandLogoUrl || null;
   if (data.brandPrimaryColor !== undefined) updateData['brandPrimaryColor'] = data.brandPrimaryColor || null;
@@ -482,6 +509,71 @@ authed.openapi(patchBrandingRoute, (async (c: any) => {
   const [updated] = await updateReturning(resellerAccounts, updateData, eq(resellerAccounts.id, resellerAccount.id));
 
   return c.json({ message: 'Branding updated', resellerAccount: updated });
+}) as any);
+
+// POST /verify-domain — verify custom domain ownership via TXT record
+const verifyDomainRoute = createRoute({
+  method: 'post',
+  path: '/verify-domain',
+  tags: ['Reseller'],
+  summary: 'Verify custom domain ownership via DNS TXT record',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Domain verification result'),
+    ...standardErrors,
+  },
+  middleware: [requireOwner, rateLimiter({ windowMs: 60_000, max: 10, keyPrefix: 'reseller-verify-domain' })],
+});
+
+authed.openapi(verifyDomainRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const resellerAccount = await db.query.resellerAccounts.findFirst({
+    where: and(eq(resellerAccounts.accountId, accountId), eq(resellerAccounts.status, 'active')),
+  });
+  if (!resellerAccount) {
+    return c.json({ error: 'Not a reseller' }, 403);
+  }
+
+  if (!resellerAccount.customDomain || !resellerAccount.customDomainToken) {
+    return c.json({ error: 'No custom domain configured' }, 400);
+  }
+
+  if (resellerAccount.customDomainVerified) {
+    return c.json({ verified: true, message: 'Domain already verified' });
+  }
+
+  try {
+    const records = await dns.resolveTxt(resellerAccount.customDomain);
+    const flat = records.flat();
+    const found = flat.some(r => r.trim() === resellerAccount.customDomainToken);
+
+    if (found) {
+      await db.update(resellerAccounts)
+        .set({ customDomainVerified: true, updatedAt: new Date() })
+        .where(eq(resellerAccounts.id, resellerAccount.id));
+
+      logger.info({ accountId, domain: resellerAccount.customDomain }, 'Reseller custom domain verified');
+      return c.json({ verified: true, message: 'Domain verified successfully' });
+    }
+
+    return c.json({
+      verified: false,
+      message: 'TXT record not found. Please add the verification record and try again.',
+      expected: resellerAccount.customDomainToken,
+    });
+  } catch (err: any) {
+    if (err.code === 'ENOTFOUND' || err.code === 'ENODATA') {
+      return c.json({
+        verified: false,
+        message: 'No TXT records found for this domain. Please add the verification record.',
+        expected: resellerAccount.customDomainToken,
+      });
+    }
+    logger.error({ err, domain: resellerAccount.customDomain }, 'DNS lookup failed during domain verification');
+    return c.json({ error: 'DNS lookup failed. Please try again later.' }, 500);
+  }
 }) as any);
 
 // POST /connect — start Stripe Connect onboarding
@@ -1094,6 +1186,14 @@ admin.openapi(approveApplicationRoute, (async (c: any) => {
     .set({ status: 'approved', reviewedBy: user.userId, reviewedAt: new Date() })
     .where(eq(resellerApplications.id, appId));
 
+  await notificationService.create(app.accountId, {
+    type: 'reseller',
+    title: 'Reseller Application Approved',
+    message: 'Your reseller application has been approved. You can now access reseller features.',
+    resourceType: 'reseller_application',
+    resourceId: appId,
+  });
+
   logger.info({ appId, accountId: app.accountId, approvedBy: user.userId }, 'Reseller application approved');
   return c.json({ message: 'Application approved', resellerAccount });
 }) as any);
@@ -1141,6 +1241,18 @@ admin.openapi(rejectApplicationRoute, (async (c: any) => {
       reviewNote: data.note ?? null,
     })
     .where(eq(resellerApplications.id, appId));
+
+  const rejectMessage = data.note
+    ? `Your reseller application has been declined. Reason: ${data.note}`
+    : 'Your reseller application has been declined. Contact support for more information.';
+
+  await notificationService.create(app.accountId, {
+    type: 'reseller',
+    title: 'Reseller Application Declined',
+    message: rejectMessage,
+    resourceType: 'reseller_application',
+    resourceId: appId,
+  });
 
   logger.info({ appId, accountId: app.accountId, rejectedBy: user.userId }, 'Reseller application rejected');
   return c.json({ message: 'Application rejected' });
@@ -1360,7 +1472,7 @@ reseller.openapi(getBrandingByDomainRoute, (async (c: any) => {
     with: { account: { columns: { id: true, name: true } } },
   });
 
-  if (!resellerAccount) {
+  if (!resellerAccount || !resellerAccount.customDomainVerified) {
     return c.json({ found: false });
   }
 

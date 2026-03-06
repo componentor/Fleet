@@ -15,10 +15,10 @@ export type {
 
 // ── SDK-specific types ──
 
-export interface FleetClientOptions {
-  /** API key (starts with `fleet_`). Required for authentication. */
+export interface SiglarClientOptions {
+  /** API key. Required for authentication. */
   apiKey: string;
-  /** Base URL of the Fleet API, e.g. `https://yourfleet.com/api/v1` */
+  /** Base URL of the Siglar API, e.g. `https://yoursiglar.com/api/v1` */
   baseUrl: string;
   /** Optional account ID. API keys auto-resolve their account, but this can override it. */
   accountId?: string;

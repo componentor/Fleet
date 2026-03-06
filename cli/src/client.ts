@@ -42,7 +42,7 @@ export async function apiRequest<T = any>(
       body: body ? JSON.stringify(body) : undefined,
     })
   } catch (err) {
-    throw new Error(`Could not connect to Fleet API at ${config.apiUrl}`)
+    throw new Error(`Could not connect to Siglar API at ${config.apiUrl}`)
   }
 
   // Handle 401 — attempt token refresh (only for JWT auth, not API keys)
@@ -58,11 +58,11 @@ export async function apiRequest<T = any>(
           body: body ? JSON.stringify(body) : undefined,
         })
       } catch (err) {
-        throw new Error(`Could not connect to Fleet API at ${config.apiUrl}`)
+        throw new Error(`Could not connect to Siglar API at ${config.apiUrl}`)
       }
     } else {
       clearConfig()
-      throw new Error('Session expired. Please log in again with: fleet login')
+      throw new Error('Session expired. Please log in again with: siglar login')
     }
   }
 
@@ -121,7 +121,7 @@ export function requireAuth(): void {
   const config = loadConfig()
   if (!config.accessToken && !config.apiKey) {
     console.error(chalk.red('Error: You are not logged in.'))
-    console.error(chalk.yellow('Run: fleet login'))
+    console.error(chalk.yellow('Run: siglar login'))
     process.exit(1)
   }
 }

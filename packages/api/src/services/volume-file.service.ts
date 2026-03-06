@@ -2,6 +2,7 @@ import Dockerode from 'dockerode';
 import { Readable, PassThrough } from 'node:stream';
 import { resolve, posix } from 'node:path';
 import { logger } from './logger.js';
+import { storageManager } from './storage/storage-manager.js';
 
 const MAX_FILE_READ_SIZE = 10 * 1024 * 1024; // 10 MB
 const MOUNT_PATH = '/vol';
@@ -43,6 +44,22 @@ export class VolumeFileService {
 
   // ── Container lifecycle ───────────────────────────────────────────────
 
+  /**
+   * Resolve the bind mount string for a volume. For host-level storage
+   * providers (e.g. GlusterFS FUSE), we bind-mount the host path directly.
+   * Otherwise we use the Docker named volume.
+   */
+  private resolveBindString(volumeName: string, readOnly: boolean): string {
+    const roSuffix = readOnly ? ':ro' : '';
+    try {
+      if (storageManager.volumes.isReady() && storageManager.volumes.getHostMountPath) {
+        const hostPath = storageManager.volumes.getHostMountPath(volumeName);
+        if (hostPath) return `${hostPath}:${MOUNT_PATH}${roSuffix}`;
+      }
+    } catch { /* storage not initialized — fall back to named volume */ }
+    return `${volumeName}:${MOUNT_PATH}${roSuffix}`;
+  }
+
   /** Create a temporary container, run fn, then remove. */
   private async withContainer<T>(
     volumeName: string,
@@ -53,7 +70,7 @@ export class VolumeFileService {
       Image: CONTAINER_IMAGE,
       Cmd: ['sleep', '30'],
       HostConfig: {
-        Binds: [`${volumeName}:${MOUNT_PATH}${readOnly ? ':ro' : ''}`],
+        Binds: [this.resolveBindString(volumeName, readOnly)],
         NetworkMode: 'none',
       },
     });
@@ -78,7 +95,7 @@ export class VolumeFileService {
       Image: CONTAINER_IMAGE,
       Cmd: ['sleep', '120'],
       HostConfig: {
-        Binds: [`${volumeName}:${MOUNT_PATH}${readOnly ? ':ro' : ''}`],
+        Binds: [this.resolveBindString(volumeName, readOnly)],
         NetworkMode: 'none',
       },
     });

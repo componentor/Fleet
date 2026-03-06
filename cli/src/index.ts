@@ -21,8 +21,8 @@ import { joinCommand } from './commands/join.js'
 import { statusCommand } from './commands/status.js'
 
 program
-  .name('fleet')
-  .description('Fleet CLI — manage your hosting platform')
+  .name('siglar')
+  .description('Siglar CLI — manage your hosting platform')
   .version('0.1.0')
 
 // Auth commands

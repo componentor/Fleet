@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Users, Search, UserCog, Loader2 } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Users, Search, UserCog, Loader2, ChevronRight } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { useAccountStore } from '@/stores/account'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+const router = useRouter()
 const api = useApi()
 const authStore = useAuthStore()
 const accountStore = useAccountStore()
@@ -123,20 +125,29 @@ onMounted(() => {
             <tr
               v-for="account in filteredAccounts"
               :key="account.id"
-              class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+              class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors cursor-pointer"
+              @click="router.push({ name: 'super-account-detail', params: { id: account.id } })"
             >
-              <td class="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ account.name }}</td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium text-gray-900 dark:text-white">{{ account.name }}</span>
+                  <span v-if="account.status === 'suspended'" class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">Suspended</span>
+                </div>
+              </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono">{{ account.slug }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ account.parentId ? account.path?.split('/').slice(-2, -1)[0] || 'Yes' : '--' }}</td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatDate(account.createdAt) }}</td>
-              <td class="px-6 py-4 text-right">
-                <button
-                  @click="impersonate(account.id)"
-                  class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-                >
-                  <UserCog class="w-3.5 h-3.5" />
-                  {{ $t('super.accounts.impersonate') }}
-                </button>
+              <td class="px-6 py-4 text-right" @click.stop>
+                <div class="flex items-center justify-end gap-2">
+                  <button
+                    @click="impersonate(account.id)"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                  >
+                    <UserCog class="w-3.5 h-3.5" />
+                    {{ $t('super.accounts.impersonate') }}
+                  </button>
+                  <ChevronRight class="w-4 h-4 text-gray-400" />
+                </div>
               </td>
             </tr>
           </tbody>

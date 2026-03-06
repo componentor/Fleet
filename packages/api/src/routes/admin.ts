@@ -1,7 +1,7 @@
 import { stream } from 'hono/streaming';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, accounts, users, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, desc, gte, lte } from '@fleet/db';
+import { db, accounts, users, userAccounts, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, accountBillingOverrides, resourceLimits, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, isNotNull, desc, gte, lte } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission, requireSuperAdmin } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
@@ -212,6 +212,116 @@ adminRoutes.openapi(listAccountsRoute, (async (c: any) => {
       totalPages: Math.ceil((total?.count ?? 0) / limit),
     },
   });
+}) as any);
+
+// GET /accounts/:id — single account detail with related data
+const getAccountDetailRoute = createRoute({
+  method: 'get',
+  path: '/accounts/{id}',
+  tags: ['Admin'],
+  summary: 'Get single account with services, users, billing overrides',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Account detail'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(getAccountDetailRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, id), isNull(accounts.deletedAt)),
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+
+  // Fetch related data in parallel
+  const [accountUserLinks, accountServices, billingOverride, resourceLimit, [serviceCount], [userCount]] = await Promise.all([
+    db.query.userAccounts.findMany({
+      where: eq(userAccounts.accountId, id),
+      with: {
+        user: {
+          columns: { id: true, name: true, email: true, createdAt: true },
+        },
+      },
+      columns: { role: true },
+      limit: 50,
+    }),
+    db.query.services.findMany({
+      where: and(eq(services.accountId, id), isNull(services.deletedAt)),
+      columns: { id: true, name: true, image: true, status: true, cpuLimit: true, memoryLimit: true, replicas: true, createdAt: true, updatedAt: true },
+      orderBy: (s: any, { desc: d }: any) => d(s.updatedAt),
+      limit: 100,
+    }),
+    db.query.accountBillingOverrides.findFirst({
+      where: eq(accountBillingOverrides.accountId, id),
+    }),
+    db.query.resourceLimits.findFirst({
+      where: eq(resourceLimits.accountId, id),
+    }),
+    db.select({ count: countSql() }).from(services).where(and(eq(services.accountId, id), isNull(services.deletedAt))),
+    db.select({ count: countSql() }).from(userAccounts).where(eq(userAccounts.accountId, id)),
+  ]);
+
+  // Flatten user links into user objects with role
+  const accountUsers = accountUserLinks.map((link: any) => ({
+    ...link.user,
+    role: link.role ?? 'member',
+  }));
+
+  // Strip sensitive fields
+  const { stripeCustomerId: _s, stripeConnectAccountId: _sc, ...safeAccount } = account as any;
+
+  return c.json({
+    ...safeAccount,
+    users: accountUsers,
+    services: accountServices.map(({ ...svc }: any) => { delete svc.env; return svc; }),
+    billingOverride: billingOverride ?? null,
+    resourceLimit: resourceLimit ?? null,
+    serviceCount: serviceCount?.count ?? 0,
+    userCount: userCount?.count ?? 0,
+  });
+}) as any);
+
+// PATCH /accounts/:id — update account fields (name, status, currency)
+const updateAccountRoute = createRoute({
+  method: 'patch',
+  path: '/accounts/{id}',
+  tags: ['Admin'],
+  summary: 'Update account details',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(z.object({
+      name: z.string().min(1).max(255).optional(),
+      currency: z.string().length(3).optional(),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated account'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(updateAccountRoute, (async (c: any) => {
+  const { id } = c.req.valid('param');
+  const body = c.req.valid('json');
+
+  const account = await db.query.accounts.findFirst({
+    where: and(eq(accounts.id, id), isNull(accounts.deletedAt)),
+  });
+  if (!account) return c.json({ error: 'Account not found' }, 404);
+
+  const updateFields: Record<string, any> = { updatedAt: new Date() };
+  if (body.name !== undefined) updateFields.name = body.name;
+  if (body.currency !== undefined) updateFields.currency = body.currency.toUpperCase();
+
+  const [updated] = await updateReturning(accounts, updateFields, eq(accounts.id, id));
+  const { stripeCustomerId: _s, stripeConnectAccountId: _sc, ...safe } = updated as any;
+  return c.json(safe);
 }) as any);
 
 // GET /users — list all users

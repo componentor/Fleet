@@ -1,11 +1,11 @@
-import { FleetApiError } from './errors.js';
+import { SiglarApiError } from './errors.js';
 import { ServiceResource } from './resources/services.js';
 import { DeploymentResource } from './resources/deployments.js';
 import { DnsZoneResource, DnsRecordResource } from './resources/dns.js';
 import { DomainResource } from './resources/domains.js';
-import type { FleetClientOptions, RequestFn } from './types.js';
+import type { SiglarClientOptions, RequestFn } from './types.js';
 
-export class FleetClient {
+export class SiglarClient {
   readonly services: ServiceResource;
   readonly deployments: DeploymentResource;
   readonly dns: { zones: DnsZoneResource; records: DnsRecordResource };
@@ -16,7 +16,7 @@ export class FleetClient {
   private readonly accountId?: string;
   private readonly _fetch: typeof globalThis.fetch;
 
-  constructor(options: FleetClientOptions) {
+  constructor(options: SiglarClientOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.accountId = options.accountId;
@@ -32,7 +32,7 @@ export class FleetClient {
     this.domains = new DomainResource(req);
   }
 
-  /** Make an authenticated request to the Fleet API. */
+  /** Make an authenticated request to the Siglar API. */
   async request<T = unknown>(
     method: string,
     path: string,
@@ -71,7 +71,7 @@ export class FleetClient {
         // response body wasn't JSON
       }
 
-      throw new FleetApiError(response.status, message, errorBody, code);
+      throw new SiglarApiError(response.status, message, errorBody, code);
     }
 
     if (response.status === 204) {

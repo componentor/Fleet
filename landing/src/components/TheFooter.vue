@@ -10,7 +10,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
-            <span class="text-lg font-bold text-gray-900 dark:text-white">Fleet</span>
+            <span class="text-lg font-bold text-gray-900 dark:text-white">Siglar</span>
           </div>
           <p class="text-sm text-surface-500">{{ $t('footer.builtWith') }}</p>
         </div>

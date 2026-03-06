@@ -6,7 +6,7 @@
   },
   "type": "module",
   "bin": {
-    "fleet": "./dist/index.js"
+    "siglar": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",

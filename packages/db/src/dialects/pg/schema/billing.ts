@@ -298,6 +298,8 @@ export const resellerAccounts = pgTable('reseller_accounts', {
   canSubAccountResell: boolean('can_sub_account_resell').default(false),
   signupSlug: varchar('signup_slug').unique(),
   customDomain: varchar('custom_domain'),
+  customDomainVerified: boolean('custom_domain_verified').default(false),
+  customDomainToken: varchar('custom_domain_token'),
   brandName: varchar('brand_name'),
   brandLogoUrl: varchar('brand_logo_url'),
   brandPrimaryColor: varchar('brand_primary_color'),

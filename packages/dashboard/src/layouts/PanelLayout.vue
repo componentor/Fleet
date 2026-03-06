@@ -210,10 +210,31 @@ function handleSwitchAccount(id: string) {
 }
 
 const customLocales = ref<{ code: string; name: string }[]>([])
+const localeOpen = ref(false)
+
+const locales = [
+  { code: 'en', label: 'English', flagSvg: '<svg width="100%" height="100%" viewBox="0 0 60 30" preserveAspectRatio="none"><rect width="60" height="30" fill="#012169"/><path d="m0 0 60 30M60 0 0 30" stroke="#fff" stroke-width="6"/><path d="m0 0 60 30M60 0 0 30" stroke="#C8102E" stroke-width="2"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></svg>' },
+  { code: 'nb', label: 'Norsk', flagSvg: '<svg width="100%" height="100%" viewBox="0 0 22 16" preserveAspectRatio="none"><rect width="22" height="16" fill="#BA0C2F"/><path d="M8 0v16M0 8h22" stroke="#fff" stroke-width="4"/><path d="M8 0v16M0 8h22" stroke="#002868" stroke-width="2"/></svg>' },
+  { code: 'de', label: 'Deutsch', flagSvg: '<svg width="100%" height="100%" viewBox="0 0 5 3" preserveAspectRatio="none"><rect width="5" height="1" fill="#000"/><rect y="1" width="5" height="1" fill="#D00"/><rect y="2" width="5" height="1" fill="#FFCE00"/></svg>' },
+  { code: 'zh', label: '中文', flagSvg: '<svg width="100%" height="100%" viewBox="0 0 30 20" preserveAspectRatio="none"><rect width="30" height="20" fill="#DE2910"/><polygon fill="#FFDE00" points="5,1 6,3.5 8.5,3.5 6.5,5.2 7.3,7.7 5,6 2.7,7.7 3.5,5.2 1.5,3.5 4,3.5"/></svg>' },
+]
+
+const allLocales = computed(() => {
+  const base = [...locales]
+  for (const cl of customLocales.value) {
+    if (!base.find(l => l.code === cl.code)) {
+      base.push({ code: cl.code, label: cl.name, flagSvg: '' })
+    }
+  }
+  return base
+})
+
+const currentLocale = computed(() => allLocales.value.find(l => l.code === locale.value) || locales[0]!)
 
 function changeLocale(newLocale: string) {
   locale.value = newLocale
   localStorage.setItem('fleet_locale', newLocale)
+  localeOpen.value = false
 }
 </script>
 
@@ -393,17 +414,34 @@ function changeLocale(newLocale: string) {
 
         <div class="flex items-center gap-2 ml-auto mr-2">
           <!-- Language selector -->
-          <select
-            :value="locale"
-            @change="changeLocale(($event.target as HTMLSelectElement).value)"
-            class="px-1 sm:px-2 py-1.5 rounded-lg text-xs sm:text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          >
-            <option value="en">EN</option>
-            <option value="nb">NO</option>
-            <option value="de">DE</option>
-            <option value="zh">中文</option>
-            <option v-for="cl in customLocales" :key="cl.code" :value="cl.code">{{ cl.name }}</option>
-          </select>
+          <div class="relative">
+            <button
+              @click="localeOpen = !localeOpen"
+              class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs sm:text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+            >
+              <span v-if="currentLocale.flagSvg" class="inline-block w-5 h-3.5 rounded-sm overflow-hidden shrink-0" v-html="currentLocale.flagSvg"></span>
+              <span>{{ currentLocale.label }}</span>
+              <ChevronDown class="w-3 h-3 shrink-0" />
+            </button>
+            <div v-if="localeOpen" class="fixed inset-0 z-40" @click="localeOpen = false" />
+            <div v-if="localeOpen" class="absolute right-0 mt-1 w-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+              <button
+                v-for="loc in allLocales"
+                :key="loc.code"
+                @click="changeLocale(loc.code)"
+                :class="[
+                  'flex items-center gap-2 w-full px-3 py-1.5 text-sm transition-colors',
+                  loc.code === locale
+                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700',
+                ]"
+              >
+                <span v-if="loc.flagSvg" class="inline-block w-5 h-3.5 rounded-sm overflow-hidden shrink-0" v-html="loc.flagSvg"></span>
+                <span v-else class="inline-block w-5 h-3.5 shrink-0"></span>
+                <span>{{ loc.label }}</span>
+              </button>
+            </div>
+          </div>
 
           <!-- Theme toggle -->
           <button

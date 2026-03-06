@@ -19,7 +19,6 @@ const vars = computed(() => {
 const navLinks = computed<NavLink[]>(() => {
   const links: NavLink[] = [
     { label: t('landing.nav.home'), href: '/', routerLink: true },
-    { label: 'Docs', href: '/docs', routerLink: true },
     { label: t('landing.footer.privacy'), href: '/privacy', routerLink: true },
   ]
   if (brandGithubUrl.value) {

@@ -93,6 +93,12 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/Accounts.vue'),
       },
       {
+        path: 'accounts/:id',
+        name: 'super-account-detail',
+        component: () => import('@/pages/super/AccountDetail.vue'),
+        props: true,
+      },
+      {
         path: 'users',
         name: 'super-users',
         component: () => import('@/pages/super/Users.vue'),

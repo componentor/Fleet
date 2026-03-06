@@ -1,7 +1,7 @@
 {
-  "name": "@fleet/sdk",
+  "name": "@siglar/sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for the Fleet hosting platform API",
+  "description": "TypeScript SDK for the Siglar hosting platform API",
   "type": "module",
   "exports": {
     ".": {
@@ -28,6 +28,7 @@
     "@fleet/types": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.19.11",
     "tsup": "^8.0.0",
     "typescript": "^5.7.3"
   },

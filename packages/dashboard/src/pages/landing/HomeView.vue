@@ -11,7 +11,7 @@ import { useCart } from '@/composables/useCart'
 import { useCurrency } from '@/composables/useCurrency'
 
 const { t, locale } = useI18n()
-const { brandGithubUrl, logoSrc } = useBranding()
+const { brandGithubUrl, brandTitle, logoSrc } = useBranding()
 const cart = useCart()
 const { selectedCurrency, allowedCurrencies, bcp47, fetchAllowed, formatCurrency, formatCents } = useCurrency()
 
@@ -256,22 +256,22 @@ const trustSignals = computed(() => [
 
 <template>
   <div class="min-h-screen bg-white dark:bg-surface-950 text-surface-700 dark:text-surface-200">
-    <LandingNavbar :nav-links="navLinks" :cart-count="cart.count.value" @open-cart="cartOpen = true" />
+    <LandingNavbar :nav-links="navLinks" :cart-count="cart.count.value" dark-hero @open-cart="cartOpen = true" />
 
     <CartDrawer :open="cartOpen" @close="cartOpen = false" />
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- HERO — Domain search first                                        -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <section class="relative pt-32 pb-28 sm:pt-40 sm:pb-36">
+    <section class="relative pt-32 pb-28 sm:pt-40 sm:pb-36 bg-gradient-to-br from-slate-800 via-blue-900 to-slate-800 dark:from-surface-950 dark:via-blue-950/80 dark:to-surface-950">
       <!-- Background gradients -->
       <div class="pointer-events-none absolute inset-0 overflow-hidden">
-        <div class="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-primary-600/10 dark:bg-primary-600/20 blur-[128px]"></div>
-        <div class="absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full bg-primary-800/10 dark:bg-primary-800/20 blur-[128px]"></div>
-        <div class="absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary-700/5 dark:bg-primary-700/10 blur-[128px]"></div>
+        <div class="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-blue-500/15 dark:bg-primary-600/20 blur-[128px]"></div>
+        <div class="absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full bg-cyan-500/10 dark:bg-primary-800/20 blur-[128px]"></div>
+        <div class="absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-400/10 dark:bg-primary-700/10 blur-[128px]"></div>
       </div>
 
-      <div class="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,90,31,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,90,31,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"></div>
+      <div class="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"></div>
 
       <!-- Wave transition — "How It Works" color rising into hero -->
       <div class="pointer-events-none absolute bottom-0 left-0 right-0 z-10">
@@ -281,34 +281,37 @@ const trustSignals = computed(() => [
       </div>
 
       <div class="relative mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8">
-        <img v-if="logoSrc()" :src="logoSrc()!" alt="" class="mx-auto mb-6 h-14 w-auto object-contain" />
-        <div v-else class="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700">
-          <svg class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+        <div class="mx-auto mb-6 flex items-center justify-center gap-3">
+          <img v-if="logoSrc()" :src="logoSrc()!" alt="" class="h-14 w-auto object-contain" />
+          <div v-else class="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm dark:bg-white/5">
+            <svg class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <span class="text-3xl font-medium text-white sm:text-4xl">{{ brandTitle }} {{ t('landing.domainSearch.brandHosting', 'Hosting') }}</span>
         </div>
-        <h1 class="mx-auto max-w-5xl text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white sm:text-5xl lg:text-6xl">
+        <h1 class="mx-auto max-w-5xl text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
           <span class="block">{{ t('landing.domainSearch.heroTitle', 'Find Your Perfect') }}</span>
           <span class="animate-gradient bg-[length:200%_auto] bg-gradient-to-r from-primary-500 via-cyan-400 to-primary-500 dark:from-primary-400 dark:via-cyan-300 dark:to-primary-400 bg-clip-text text-transparent">
             {{ t('landing.domainSearch.heroHighlight', 'Domain Name') }}
           </span>
         </h1>
 
-        <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-surface-500 dark:text-surface-400 sm:text-xl">
+        <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-blue-100/70 sm:text-xl">
           {{ t('landing.domainSearch.heroSubtitle', 'Search, register, and host your website — all in one place.') }}
         </p>
 
         <!-- Domain search bar -->
         <div class="mx-auto mt-10 max-w-2xl">
-          <div class="flex rounded-2xl border-2 border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-xl shadow-surface-200/50 dark:shadow-black/30 transition-all focus-within:border-primary-500 focus-within:shadow-primary-500/20 min-w-0">
-            <div class="flex items-center pl-4 sm:pl-5 text-surface-400 shrink-0">
+          <div class="flex rounded-2xl border-2 border-white/20 bg-white/10 backdrop-blur-xl shadow-xl shadow-black/20 transition-all focus-within:border-primary-400 focus-within:bg-white/15 focus-within:shadow-primary-500/20 min-w-0">
+            <div class="flex items-center pl-4 sm:pl-5 text-white/50 shrink-0">
               <Globe class="w-5 h-5" />
             </div>
             <input
               v-model="searchQuery"
               type="text"
               :placeholder="t('landing.domainSearch.placeholder', 'Enter your domain name...')"
-              class="flex-1 min-w-0 bg-transparent px-3 sm:px-4 py-4 text-base sm:text-lg text-gray-900 dark:text-white placeholder-surface-400 outline-none"
+              class="flex-1 min-w-0 bg-transparent px-3 sm:px-4 py-4 text-base sm:text-lg text-white placeholder-white/40 outline-none"
             />
             <button
               @click="searchDomains"
@@ -322,12 +325,12 @@ const trustSignals = computed(() => [
 
           <!-- TLD pills -->
           <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-            <span class="text-xs text-surface-400 dark:text-surface-500">{{ t('landing.domainSearch.popular', 'Popular:') }}</span>
+            <span class="text-xs text-white/40">{{ t('landing.domainSearch.popular', 'Popular:') }}</span>
             <button
               v-for="tld in ['.com', '.net', '.org', '.io', '.dev']"
               :key="tld"
               @click="searchQuery = (searchQuery.replace(/\.[a-z]+$/i, '') || searchQuery) + tld"
-              class="rounded-full border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 px-3 py-1 text-xs font-medium text-surface-600 dark:text-surface-400 transition-colors hover:border-primary-300 dark:hover:border-primary-700 hover:text-primary-600 dark:hover:text-primary-400"
+              class="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-white/60 transition-colors hover:border-primary-400/50 hover:text-primary-300 hover:bg-white/10"
             >
               {{ tld }}
             </button>
@@ -337,37 +340,37 @@ const trustSignals = computed(() => [
         <!-- Search results -->
         <div v-if="searching" class="mx-auto mt-8 max-w-2xl">
           <div class="flex items-center justify-center gap-3 py-8">
-            <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
-            <span class="text-sm text-surface-500 dark:text-surface-400">{{ t('landing.domainSearch.searching', 'Searching available domains...') }}</span>
+            <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary-400 border-t-transparent"></div>
+            <span class="text-sm text-white/60">{{ t('landing.domainSearch.searching', 'Searching available domains...') }}</span>
           </div>
         </div>
 
         <div v-else-if="searched && searchResults.length > 0" class="mx-auto mt-8 max-w-2xl">
-          <div class="overflow-hidden rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/80 shadow-lg">
+          <div class="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-lg">
             <div
               v-for="(result, idx) in searchResults.slice(0, 6)"
               :key="result.domain"
               :class="[
                 'flex items-center gap-4 px-6 py-4 transition-colors',
-                idx > 0 ? 'border-t border-surface-100 dark:border-surface-800' : '',
-                result.available ? 'hover:bg-surface-50 dark:hover:bg-surface-800/50' : 'opacity-60',
+                idx > 0 ? 'border-t border-white/5' : '',
+                result.available ? 'hover:bg-white/5' : 'opacity-60',
               ]"
             >
               <div class="flex-1 text-left">
-                <span class="text-base font-semibold text-gray-900 dark:text-white">{{ result.domain }}</span>
+                <span class="text-base font-semibold text-white">{{ result.domain }}</span>
               </div>
-              <div v-if="result.available" class="flex items-center gap-1 text-green-600 dark:text-green-400">
+              <div v-if="result.available" class="flex items-center gap-1 text-green-400">
                 <Check class="w-4 h-4" />
                 <span class="text-xs font-medium">{{ t('landing.domainSearch.available', 'Available') }}</span>
               </div>
-              <div v-else class="flex items-center gap-1 text-surface-400">
+              <div v-else class="flex items-center gap-1 text-white/40">
                 <X class="w-4 h-4" />
                 <span class="text-xs font-medium">{{ t('landing.domainSearch.taken', 'Taken') }}</span>
               </div>
               <div v-if="result.available && result.price" class="text-right">
-                <span class="text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(result) }}</span>
-                <span class="text-xs text-surface-400"> / {{ t('landing.domainSearch.yr', 'yr') }}</span>
-                <p class="text-[10px] text-surface-400">{{ t('landing.cart.exclVat', 'Excl. VAT') }}</p>
+                <span class="text-sm font-bold text-white">{{ formatPrice(result) }}</span>
+                <span class="text-xs text-white/40"> / {{ t('landing.domainSearch.yr', 'yr') }}</span>
+                <p class="text-[10px] text-white/40">{{ t('landing.cart.exclVat', 'Excl. VAT') }}</p>
               </div>
               <button
                 v-if="result.available"
@@ -387,8 +390,8 @@ const trustSignals = computed(() => [
         </div>
 
         <div v-else-if="searched && searchResults.length === 0" class="mx-auto mt-8 max-w-2xl">
-          <div class="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900/80 px-6 py-8 text-center">
-            <p class="text-sm text-surface-500 dark:text-surface-400">
+          <div class="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl px-6 py-8 text-center">
+            <p class="text-sm text-white/60">
               {{ t('landing.domainSearch.noResults', 'No domains found. Try a different search term.') }}
             </p>
           </div>
@@ -396,7 +399,7 @@ const trustSignals = computed(() => [
 
         <!-- Scroll indicator -->
         <div class="mt-12 flex justify-center">
-          <a href="#how-it-works" class="animate-bounce text-surface-400 dark:text-surface-500 hover:text-primary-500 transition-colors">
+          <a href="#how-it-works" class="animate-bounce text-white/30 hover:text-white/60 transition-colors">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
             </svg>
