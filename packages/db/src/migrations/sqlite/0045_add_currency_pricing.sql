@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS "billing_plan_prices" (
+  "id" text PRIMARY KEY,
+  "plan_id" text NOT NULL REFERENCES "billing_plans"("id") ON DELETE CASCADE,
+  "currency" text NOT NULL,
+  "price_cents" integer NOT NULL,
+  "created_at" integer DEFAULT (unixepoch()),
+  "updated_at" integer DEFAULT (unixepoch())
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_billing_plan_prices_plan_currency" ON "billing_plan_prices" ("plan_id", "currency");
+
+CREATE TABLE IF NOT EXISTS "domain_tld_currency_prices" (
+  "id" text PRIMARY KEY,
+  "tld_pricing_id" text NOT NULL REFERENCES "domain_tld_pricing"("id") ON DELETE CASCADE,
+  "currency" text NOT NULL,
+  "sell_registration_price" integer NOT NULL,
+  "sell_renewal_price" integer NOT NULL,
+  "created_at" integer DEFAULT (unixepoch()),
+  "updated_at" integer DEFAULT (unixepoch())
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_tld_currency_prices_tld_currency" ON "domain_tld_currency_prices" ("tld_pricing_id", "currency");

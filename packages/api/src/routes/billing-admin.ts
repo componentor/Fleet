@@ -4,6 +4,7 @@ import {
   db,
   accounts,
   billingPlans,
+  billingPlanPrices,
   pricingConfig,
   locationMultipliers,
   billingConfig,
@@ -472,6 +473,7 @@ const createMeteredPricesRoute = createRoute({
 billingAdmin.openapi(listPlansRoute, (async (c: any) => {
   const plans = await db.query.billingPlans.findMany({
     orderBy: (p: any, { asc }: any) => asc(p.sortOrder),
+    with: { prices: true },
   });
   return c.json(plans);
 }) as any);
@@ -1080,6 +1082,111 @@ billingAdmin.openapi(setAllowedCurrenciesRoute, (async (c: any) => {
   const { currencies } = c.req.valid('json');
   const result = await currencyService.setAllowed(currencies);
   return c.json({ currencies: result });
+}) as any);
+
+// ─── Plan Currency Prices ────────────────────────────────────────────────────
+
+const planPriceSchema = z.object({
+  currency: z.string().length(3),
+  priceCents: z.number().int().min(0),
+}).openapi('PlanCurrencyPriceRequest');
+
+const planIdParamSchema = z.object({
+  planId: z.string().openapi({ description: 'Plan ID' }),
+});
+
+const planPriceIdParamSchema = z.object({
+  planId: z.string().openapi({ description: 'Plan ID' }),
+  priceId: z.string().openapi({ description: 'Price ID' }),
+});
+
+// GET /plans/:planId/prices — list currency prices for a plan
+const listPlanPricesRoute = createRoute({
+  method: 'get',
+  path: '/plans/{planId}/prices',
+  tags: ['Billing Admin'],
+  summary: 'List per-currency prices for a plan',
+  security: bearerSecurity,
+  request: { params: planIdParamSchema },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Currency prices'),
+    ...standardErrors,
+  },
+});
+
+billingAdmin.openapi(listPlanPricesRoute, (async (c: any) => {
+  const { planId } = c.req.valid('param');
+  const prices = await db.query.billingPlanPrices.findMany({
+    where: eq(billingPlanPrices.planId, planId),
+  });
+  return c.json(prices);
+}) as any);
+
+// PUT /plans/:planId/prices — set all currency prices for a plan (replaces existing)
+const setPlanPricesRoute = createRoute({
+  method: 'put',
+  path: '/plans/{planId}/prices',
+  tags: ['Billing Admin'],
+  summary: 'Set per-currency prices for a plan (replaces all)',
+  security: bearerSecurity,
+  request: {
+    params: planIdParamSchema,
+    body: jsonBody(z.object({
+      prices: z.array(planPriceSchema),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Updated currency prices'),
+    ...standardErrors,
+  },
+});
+
+billingAdmin.openapi(setPlanPricesRoute, (async (c: any) => {
+  const { planId } = c.req.valid('param');
+  const { prices } = c.req.valid('json');
+
+  // Verify plan exists
+  const plan = await db.query.billingPlans.findFirst({
+    where: eq(billingPlans.id, planId),
+  });
+  if (!plan) return c.json({ error: 'Plan not found' }, 404);
+
+  // Delete existing prices
+  await db.delete(billingPlanPrices).where(eq(billingPlanPrices.planId, planId));
+
+  // Insert new prices
+  const result = [];
+  for (const p of prices) {
+    const [created] = await insertReturning(billingPlanPrices, {
+      planId,
+      currency: p.currency.toUpperCase(),
+      priceCents: p.priceCents,
+    });
+    result.push(created);
+  }
+
+  return c.json(result);
+}) as any);
+
+// DELETE /plans/:planId/prices/:priceId — remove a single currency price
+const deletePlanPriceRoute = createRoute({
+  method: 'delete',
+  path: '/plans/{planId}/prices/{priceId}',
+  tags: ['Billing Admin'],
+  summary: 'Remove a per-currency price',
+  security: bearerSecurity,
+  request: { params: planPriceIdParamSchema },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Price removed'),
+    ...standardErrors,
+  },
+});
+
+billingAdmin.openapi(deletePlanPriceRoute, (async (c: any) => {
+  const { priceId } = c.req.valid('param');
+  const [deleted] = await deleteReturning(billingPlanPrices, eq(billingPlanPrices.id, priceId));
+  if (!deleted) return c.json({ error: 'Price not found' }, 404);
+  return c.json({ message: 'Currency price removed' });
 }) as any);
 
 export default billingAdmin;

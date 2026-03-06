@@ -65,6 +65,15 @@ export interface BillingPlan {
   updatedAt: Date;
 }
 
+export interface BillingPlanPrice {
+  id: string;
+  planId: string;
+  currency: string;
+  priceCents: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Subscription {
   id: string;
   accountId: string;

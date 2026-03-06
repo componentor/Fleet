@@ -102,6 +102,51 @@ const pricingEntries = ref<any[]>([])
 const pricingLoading = ref(false)
 const syncing = ref(false)
 const pricingSearch = ref('')
+
+// TLD currency prices
+const editingTldPricesId = ref<string | null>(null)
+const tldCurrencyPrices = ref<{ currency: string; sellRegistrationPrice: number; sellRenewalPrice: number }[]>([])
+const savingTldPrices = ref(false)
+
+async function openTldCurrencyPrices(entry: any) {
+  if (editingTldPricesId.value === entry.id) {
+    editingTldPricesId.value = null
+    return
+  }
+  editingTldPricesId.value = entry.id
+  try {
+    const prices = await api.get<any[]>(`/domain-pricing/${entry.id}/prices`)
+    tldCurrencyPrices.value = prices.map((p: any) => ({
+      currency: p.currency,
+      sellRegistrationPrice: p.sellRegistrationPrice,
+      sellRenewalPrice: p.sellRenewalPrice,
+    }))
+  } catch {
+    tldCurrencyPrices.value = []
+  }
+}
+
+function addTldCurrencyPrice() {
+  tldCurrencyPrices.value.push({ currency: '', sellRegistrationPrice: 0, sellRenewalPrice: 0 })
+}
+
+function removeTldCurrencyPrice(index: number) {
+  tldCurrencyPrices.value.splice(index, 1)
+}
+
+async function saveTldCurrencyPrices() {
+  if (!editingTldPricesId.value) return
+  savingTldPrices.value = true
+  try {
+    const valid = tldCurrencyPrices.value.filter(p => p.currency.length === 3)
+    await api.put(`/domain-pricing/${editingTldPricesId.value}/prices`, { prices: valid })
+    success.value = 'TLD currency prices saved'
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save TLD currency prices'
+  } finally {
+    savingTldPrices.value = false
+  }
+}
 const filteredPricingEntries = computed(() => {
   const q = pricingSearch.value.toLowerCase().replace(/^\./, '')
   if (!q) return pricingEntries.value
@@ -1818,7 +1863,8 @@ onMounted(() => {
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                  <tr v-for="entry in filteredPricingEntries" :key="entry.id" class="hover:bg-gray-50 dark:hover:bg-gray-750">
+                  <template v-for="entry in filteredPricingEntries" :key="entry.id">
+                  <tr class="hover:bg-gray-50 dark:hover:bg-gray-750">
                     <!-- TLD -->
                     <td class="px-3 py-2 font-mono font-medium text-gray-900 dark:text-white">.{{ entry.tld }}</td>
 
@@ -1906,14 +1952,53 @@ onMounted(() => {
 
                     <!-- Save -->
                     <td class="px-3 py-2 text-right">
-                      <button
-                        @click="updatePricingEntry(entry)"
-                        class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                      >
-                        {{ $t('common.save') }}
-                      </button>
+                      <div class="flex items-center justify-end gap-2">
+                        <button
+                          @click="openTldCurrencyPrices(entry)"
+                          class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                        >
+                          {{ editingTldPricesId === entry.id ? 'Close' : 'Prices' }}
+                        </button>
+                        <button
+                          @click="updatePricingEntry(entry)"
+                          class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                        >
+                          {{ $t('common.save') }}
+                        </button>
+                      </div>
                     </td>
                   </tr>
+                  <!-- TLD currency prices editor row -->
+                  <tr v-if="editingTldPricesId === entry.id" class="bg-gray-50 dark:bg-gray-750">
+                    <td :colspan="12" class="px-3 py-4">
+                      <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                          <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Per-currency sell prices for .{{ entry.tld }}</p>
+                          <button @click="addTldCurrencyPrice" type="button" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">+ Add currency</button>
+                        </div>
+                        <p v-if="tldCurrencyPrices.length === 0" class="text-xs text-gray-500 dark:text-gray-400">No fixed currency prices — other currencies use exchange rate conversion from {{ entry.currency }} base price.</p>
+                        <div v-for="(cp, idx) in tldCurrencyPrices" :key="idx" class="flex items-center gap-3">
+                          <input v-model="cp.currency" placeholder="EUR" maxlength="3" class="w-20 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          <div class="flex items-center gap-1.5">
+                            <span class="text-xs text-gray-500">Reg:</span>
+                            <input v-model.number="cp.sellRegistrationPrice" type="number" min="0" class="w-24 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          </div>
+                          <div class="flex items-center gap-1.5">
+                            <span class="text-xs text-gray-500">Ren:</span>
+                            <input v-model.number="cp.sellRenewalPrice" type="number" min="0" class="w-24 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                          </div>
+                          <span class="text-xs text-gray-500">= {{ (cp.sellRegistrationPrice / 100).toFixed(2) }} / {{ (cp.sellRenewalPrice / 100).toFixed(2) }} {{ cp.currency.toUpperCase() || '?' }}</span>
+                          <button @click="removeTldCurrencyPrice(idx)" type="button" class="text-xs text-red-500 hover:underline">Remove</button>
+                        </div>
+                        <div class="flex justify-end">
+                          <button @click="saveTldCurrencyPrices" :disabled="savingTldPrices" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
+                            {{ savingTldPrices ? 'Saving...' : 'Save prices' }}
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  </template>
                 </tbody>
               </table>
             </div>

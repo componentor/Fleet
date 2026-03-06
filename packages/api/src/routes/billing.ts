@@ -4,6 +4,7 @@ import {
   db,
   accounts,
   billingPlans,
+  billingPlanPrices,
   subscriptions,
   usageRecords,
   services,
@@ -2571,19 +2572,25 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
   const plans = await db.query.billingPlans.findMany({
     where: eq(billingPlans.visible, true),
     orderBy: (p: any, { asc }: any) => asc(p.sortOrder),
+    with: { prices: true },
   });
 
-  // Strip sensitive Stripe fields
-  const safePlans = plans.map(({ stripeProductId, stripePriceIds, ...rest }: any) => rest);
+  // Strip sensitive Stripe fields and prices relation
+  const safePlans = plans.map(({ stripeProductId, stripePriceIds, prices, ...rest }: any) => ({
+    ...rest,
+    _currencyPrices: prices,
+  }));
 
-  // Convert prices if a different currency is requested
-  if (targetCurrency && targetCurrency.toUpperCase() !== 'USD') {
-    const tc = targetCurrency.toUpperCase();
-    for (const plan of safePlans) {
-      if (plan.priceCents != null) {
-        plan.priceCents = await exchangeRateService.convertCents(plan.priceCents, 'USD', tc);
-      }
+  // Apply per-currency pricing: use fixed price if set, otherwise convert from USD
+  const tc = targetCurrency?.toUpperCase() ?? 'USD';
+  for (const plan of safePlans) {
+    const fixedPrice = plan._currencyPrices?.find((p: any) => p.currency === tc);
+    if (fixedPrice) {
+      plan.priceCents = fixedPrice.priceCents;
+    } else if (tc !== 'USD' && plan.priceCents != null) {
+      plan.priceCents = await exchangeRateService.convertCents(plan.priceCents, 'USD', tc);
     }
+    delete plan._currencyPrices;
   }
 
   // Include billing config for cycle/trial info
@@ -2599,7 +2606,7 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
     // Billing config may not exist yet
   }
 
-  return c.json({ plans: safePlans, allowedCycles, trialDays, currency: targetCurrency?.toUpperCase() ?? 'USD' });
+  return c.json({ plans: safePlans, allowedCycles, trialDays, currency: tc });
 }) as any);
 
 // ─── Exchange Rate endpoints (admin, on authed sub-router) ────────────────────

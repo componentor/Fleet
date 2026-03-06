@@ -55,6 +55,47 @@ const planForm = ref({
   descriptionTranslations: {} as Record<string, string>,
 })
 
+// ─── Plan Currency Prices ─────────────────────────────────────
+const editingPricesPlanId = ref<string | null>(null)
+const planCurrencyPrices = ref<{ currency: string; priceCents: number }[]>([])
+const savingPrices = ref(false)
+
+async function openCurrencyPrices(plan: any) {
+  if (editingPricesPlanId.value === plan.id) {
+    editingPricesPlanId.value = null
+    return
+  }
+  editingPricesPlanId.value = plan.id
+  planCurrencyPrices.value = (plan.prices || []).map((p: any) => ({
+    currency: p.currency,
+    priceCents: p.priceCents,
+  }))
+}
+
+function addCurrencyPrice() {
+  planCurrencyPrices.value.push({ currency: '', priceCents: 0 })
+}
+
+function removeCurrencyPrice(index: number) {
+  planCurrencyPrices.value.splice(index, 1)
+}
+
+async function saveCurrencyPrices() {
+  if (!editingPricesPlanId.value) return
+  savingPrices.value = true
+  try {
+    const valid = planCurrencyPrices.value.filter(p => p.currency.length === 3)
+    await api.put(`/billing/admin/plans/${editingPricesPlanId.value}/prices`, { prices: valid })
+    showSuccess('Currency prices saved')
+    const data = await api.get<any[]>('/billing/admin/plans')
+    plans.value = data
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save currency prices'
+  } finally {
+    savingPrices.value = false
+  }
+}
+
 // ─── Usage Pricing ───────────────────────────────────────────
 const pricing = ref({
   cpuCentsPerHour: 0, memoryCentsPerGbHour: 0,
@@ -730,7 +771,8 @@ onMounted(() => { fetchAll() })
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-              <tr v-for="plan in plans" :key="plan.id" :class="!plan.visible ? 'opacity-50' : ''">
+              <template v-for="plan in plans" :key="plan.id">
+              <tr :class="!plan.visible ? 'opacity-50' : ''">
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium whitespace-nowrap">
                   {{ plan.name }}
                   <span v-if="plan.isFree" class="ml-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded">{{ t('super.billing.free') }}</span>
@@ -748,11 +790,39 @@ onMounted(() => { fetchAll() })
                 <td class="px-6 py-4">
                   <div class="flex items-center gap-2">
                     <button @click="openPlanForm(plan)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ t('common.edit') }}</button>
+                    <button @click="openCurrencyPrices(plan)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">
+                      {{ editingPricesPlanId === plan.id ? 'Close' : 'Prices' }}
+                      <span v-if="plan.prices?.length" class="text-gray-400">({{ plan.prices.length }})</span>
+                    </button>
                     <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">{{ t('super.billing.sync') }}</button>
                     <button @click="deletePlan(plan.id)" class="text-xs text-red-600 dark:text-red-400 hover:underline">{{ t('super.billing.hide') }}</button>
                   </div>
                 </td>
               </tr>
+              <!-- Currency prices editor row -->
+              <tr v-if="editingPricesPlanId === plan.id" class="bg-gray-50 dark:bg-gray-750">
+                <td colspan="7" class="px-6 py-4">
+                  <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                      <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Per-currency prices for "{{ plan.name }}"</p>
+                      <button @click="addCurrencyPrice" type="button" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">+ Add currency</button>
+                    </div>
+                    <p v-if="planCurrencyPrices.length === 0" class="text-xs text-gray-500 dark:text-gray-400">No fixed currency prices — all currencies use exchange rate conversion from USD base price.</p>
+                    <div v-for="(cp, idx) in planCurrencyPrices" :key="idx" class="flex items-center gap-3">
+                      <input v-model="cp.currency" placeholder="EUR" maxlength="3" class="w-20 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      <input v-model.number="cp.priceCents" type="number" min="0" placeholder="cents/mo" class="w-32 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                      <span class="text-xs text-gray-500">= {{ (cp.priceCents / 100).toFixed(2) }} {{ cp.currency.toUpperCase() || '?' }}/mo</span>
+                      <button @click="removeCurrencyPrice(idx)" type="button" class="text-xs text-red-500 hover:underline">Remove</button>
+                    </div>
+                    <div class="flex justify-end">
+                      <button @click="saveCurrencyPrices" :disabled="savingPrices" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
+                        {{ savingPrices ? 'Saving...' : 'Save prices' }}
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
           <div v-else class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('super.billing.noPlans') }}</div>
