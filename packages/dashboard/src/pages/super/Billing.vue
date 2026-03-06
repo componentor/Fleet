@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown, X } from 'lucide-vue-next'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -40,6 +40,11 @@ const allowDowngrade = ref(true)
 const deletionBillingPolicy = ref<'immediate' | 'end_of_period'>('end_of_period')
 const maxFreeServicesPerAccount = ref<number | null>(null)
 const savingTierPolicies = ref(false)
+
+// ─── Allowed Currencies ─────────────────────────────────────
+const allowedCurrenciesList = ref<string[]>([])
+const newCurrency = ref('')
+const savingCurrencies = ref(false)
 
 // ─── Service Tiers ──────────────────────────────────────────
 const plans = ref<any[]>([])
@@ -283,7 +288,7 @@ function formatCents(cents: number): string {
 async function fetchAll() {
   loading.value = true
   try {
-    const [configData, plansData, pricingData, locData, limitsData, subsData, overridesData] = await Promise.all([
+    const [configData, plansData, pricingData, locData, limitsData, subsData, overridesData, currenciesData] = await Promise.all([
       api.get<any>('/billing/config'),
       api.get<any[]>('/billing/admin/plans'),
       api.get<any>('/billing/admin/pricing'),
@@ -291,6 +296,7 @@ async function fetchAll() {
       api.get<any>('/billing/admin/resource-limits'),
       api.get<any[]>('/billing/admin/subscriptions'),
       api.get<any[]>('/billing/admin/account-overrides'),
+      api.get<{ currencies: string[] }>('/billing/admin/allowed-currencies').catch(() => ({ currencies: [] })),
     ])
 
     billingModel.value = configData.billingModel ?? 'fixed'
@@ -310,6 +316,8 @@ async function fetchAll() {
     allowDowngrade.value = configData.allowDowngrade ?? true
     deletionBillingPolicy.value = configData.deletionBillingPolicy ?? 'end_of_period'
     maxFreeServicesPerAccount.value = configData.maxFreeServicesPerAccount ?? null
+
+    allowedCurrenciesList.value = currenciesData.currencies ?? []
 
     plans.value = plansData
     pricing.value = { ...pricing.value, ...pricingData }
@@ -380,6 +388,34 @@ async function saveTierPolicies() {
     error.value = err?.body?.error || 'Failed to save tier policies'
   } finally {
     savingTierPolicies.value = false
+  }
+}
+
+function addCurrency() {
+  const code = newCurrency.value.toUpperCase().trim()
+  if (code.length !== 3 || allowedCurrenciesList.value.includes(code)) return
+  allowedCurrenciesList.value.push(code)
+  newCurrency.value = ''
+}
+
+function removeCurrencyFromList(code: string) {
+  if (allowedCurrenciesList.value.length <= 1) return
+  allowedCurrenciesList.value = allowedCurrenciesList.value.filter(c => c !== code)
+}
+
+async function saveCurrenciesConfig() {
+  savingCurrencies.value = true
+  error.value = ''
+  try {
+    const result = await api.put<{ currencies: string[] }>('/billing/admin/allowed-currencies', {
+      currencies: allowedCurrenciesList.value,
+    })
+    allowedCurrenciesList.value = result.currencies
+    showSuccess('Allowed currencies saved')
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save currencies'
+  } finally {
+    savingCurrencies.value = false
   }
 }
 
@@ -637,6 +673,55 @@ onMounted(() => { fetchAll() })
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- Section: Allowed Currencies -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-2">
+            <DollarSign class="w-5 h-5 text-green-500" />
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Allowed Currencies</h2>
+          </div>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure which currencies customers can pay in. Prices will be converted using exchange rates unless a fixed per-currency price is set.</p>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="flex flex-wrap gap-2">
+            <span
+              v-for="cur in allowedCurrenciesList"
+              :key="cur"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              {{ cur }}
+              <button
+                v-if="allowedCurrenciesList.length > 1"
+                @click="removeCurrencyFromList(cur)"
+                class="text-gray-400 hover:text-red-500 transition-colors"
+              >
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </span>
+          </div>
+          <div class="flex items-center gap-2 max-w-xs">
+            <input
+              v-model="newCurrency"
+              type="text"
+              placeholder="e.g. EUR"
+              maxlength="3"
+              @keydown.enter="addCurrency"
+              class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <button @click="addCurrency" :disabled="newCurrency.trim().length !== 3" class="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors">
+              <Plus class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="flex justify-end">
+            <button @click="saveCurrenciesConfig" :disabled="savingCurrencies || allowedCurrenciesList.length === 0" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <Loader2 v-if="savingCurrencies" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              {{ savingCurrencies ? 'Saving...' : 'Save Currencies' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Section: Data Lifecycle -->

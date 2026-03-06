@@ -85,10 +85,11 @@ export class StripeService {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
       ...(taxEnabled && {
         automatic_tax: { enabled: true },
-        customer_update: { address: 'auto' },
-        billing_address_collection: 'required',
       }),
     });
   }
@@ -196,10 +197,11 @@ export class StripeService {
       metadata,
       success_url: successUrl,
       cancel_url: cancelUrl,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
       ...(taxEnabled && {
         automatic_tax: { enabled: true },
-        customer_update: { address: 'auto' },
-        billing_address_collection: 'required',
       }),
     });
   }
@@ -296,10 +298,11 @@ export class StripeService {
       success_url: successUrl,
       cancel_url: cancelUrl,
       subscription_data: mode === 'subscription' ? { metadata } : undefined,
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
       ...(taxEnabled && {
         automatic_tax: { enabled: true },
-        customer_update: { address: 'auto' },
-        billing_address_collection: 'required',
       }),
     });
   }
@@ -521,13 +524,14 @@ export class StripeService {
           destination: params.connectAccountId,
         },
       },
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
       ...(taxEnabled && {
         automatic_tax: {
           enabled: true,
           liability: { type: 'account' as const, account: params.connectAccountId },
         },
-        customer_update: { address: 'auto' },
-        billing_address_collection: 'required',
       }),
     });
   }
@@ -566,13 +570,14 @@ export class StripeService {
           },
         }),
       },
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto' },
+      phone_number_collection: { enabled: true },
       ...(taxEnabled && {
         automatic_tax: {
           enabled: true,
           liability: { type: 'account' as const, account: params.connectAccountId },
         },
-        customer_update: { address: 'auto' },
-        billing_address_collection: 'required',
       }),
     });
   }
