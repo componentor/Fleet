@@ -775,7 +775,7 @@ onMounted(() => { fetchAll() })
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Yearly Price (cents)</label>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t('super.billing.yearlyPrice') }}</label>
                 <input v-model.number="planForm.yearlyPriceCents" type="number" min="0" :placeholder="`Auto: ${planForm.priceCents * 12}`" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                 <p class="text-xs text-gray-400 mt-0.5">Leave empty = monthly × 12</p>
               </div>
