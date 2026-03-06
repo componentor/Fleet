@@ -164,6 +164,7 @@ async function handleDomainSearch(c: any) {
 
   try {
     const results = await registrarService.searchDomains(trimmed, tlds);
+    logger.debug({ query: trimmed, tldCount: tlds.length, resultCount: results.length }, 'Domain search raw results');
 
     // Overlay with our sell prices from domainTldPricing
     const pricingMap = new Map(pricingEntries.map((p: any) => [p.tld, p]));

@@ -44,22 +44,22 @@ const locales = [
   {
     code: 'en',
     label: 'English',
-    flagSvg: '<svg viewBox="0 0 60 30"><rect width="60" height="30" fill="#012169"/><path d="m0 0 60 30M60 0 0 30" stroke="#fff" stroke-width="6"/><path d="m0 0 60 30M60 0 0 30" stroke="#C8102E" stroke-width="2"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></svg>',
+    flagSvg: '<svg width="100%" height="100%" viewBox="0 0 60 30" preserveAspectRatio="none"><rect width="60" height="30" fill="#012169"/><path d="m0 0 60 30M60 0 0 30" stroke="#fff" stroke-width="6"/><path d="m0 0 60 30M60 0 0 30" stroke="#C8102E" stroke-width="2"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></svg>',
   },
   {
     code: 'nb',
     label: 'Norsk',
-    flagSvg: '<svg viewBox="0 0 22 16"><rect width="22" height="16" fill="#BA0C2F"/><path d="M8 0v16M0 8h22" stroke="#fff" stroke-width="4"/><path d="M8 0v16M0 8h22" stroke="#002868" stroke-width="2"/></svg>',
+    flagSvg: '<svg width="100%" height="100%" viewBox="0 0 22 16" preserveAspectRatio="none"><rect width="22" height="16" fill="#BA0C2F"/><path d="M8 0v16M0 8h22" stroke="#fff" stroke-width="4"/><path d="M8 0v16M0 8h22" stroke="#002868" stroke-width="2"/></svg>',
   },
   {
     code: 'de',
     label: 'Deutsch',
-    flagSvg: '<svg viewBox="0 0 5 3"><rect width="5" height="1" fill="#000"/><rect y="1" width="5" height="1" fill="#D00"/><rect y="2" width="5" height="1" fill="#FFCE00"/></svg>',
+    flagSvg: '<svg width="100%" height="100%" viewBox="0 0 5 3" preserveAspectRatio="none"><rect width="5" height="1" fill="#000"/><rect y="1" width="5" height="1" fill="#D00"/><rect y="2" width="5" height="1" fill="#FFCE00"/></svg>',
   },
   {
     code: 'zh',
     label: '中文',
-    flagSvg: '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#DE2910"/><polygon fill="#FFDE00" points="5,1 6,3.5 8.5,3.5 6.5,5.2 7.3,7.7 5,6 2.7,7.7 3.5,5.2 1.5,3.5 4,3.5"/></svg>',
+    flagSvg: '<svg width="100%" height="100%" viewBox="0 0 30 20" preserveAspectRatio="none"><rect width="30" height="20" fill="#DE2910"/><polygon fill="#FFDE00" points="5,1 6,3.5 8.5,3.5 6.5,5.2 7.3,7.7 5,6 2.7,7.7 3.5,5.2 1.5,3.5 4,3.5"/></svg>',
   },
 ]
 
@@ -101,8 +101,8 @@ onUnmounted(() => {
     :class="[
       'fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b pt-[env(safe-area-inset-top)]',
       isScrolled
-        ? 'bg-white/80 dark:bg-surface-950/80 backdrop-blur-xl border-surface-200 dark:border-surface-800/50'
-        : 'bg-transparent border-transparent',
+        ? 'bg-white/60 dark:bg-surface-950/60 backdrop-blur-xl border-surface-200/50 dark:border-surface-800/50 nav-scrolled'
+        : 'bg-transparent border-transparent nav-transparent',
     ]"
   >
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -120,7 +120,7 @@ onUnmounted(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <span class="text-xl font-medium text-gray-900 dark:text-white">{{ brandTitle }}</span>
+          <span :class="['text-xl font-medium transition-colors', isScrolled ? 'text-gray-900 dark:text-white' : 'text-white']">{{ brandTitle }}</span>
         </router-link>
 
         <!-- Desktop nav links -->
@@ -129,7 +129,7 @@ onUnmounted(() => {
             <router-link
               v-if="link.routerLink"
               :to="link.href"
-              class="text-sm font-medium text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
+              :class="['text-sm font-medium transition-colors', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
             >
               {{ link.label }}
             </router-link>
@@ -138,7 +138,7 @@ onUnmounted(() => {
               :href="link.href"
               :target="link.external ? '_blank' : undefined"
               :rel="link.external ? 'noopener noreferrer' : undefined"
-              class="text-sm font-medium text-surface-500 dark:text-surface-400 transition-colors hover:text-gray-900 dark:hover:text-white"
+              :class="['text-sm font-medium transition-colors', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
             >
               {{ link.label }}
             </a>
@@ -147,7 +147,7 @@ onUnmounted(() => {
           <div v-if="showLocaleSwitcher" ref="localeRef" class="relative">
             <button
               @click.stop="localeOpen = !localeOpen"
-              class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors cursor-pointer"
+              :class="['flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800' : 'text-white/70 hover:text-white hover:bg-white/10']"
             >
               <span class="inline-block w-5 h-3.5 rounded-sm overflow-hidden shrink-0" v-html="currentLocale.flagSvg"></span>
               <span>{{ currentLocale.label }}</span>
@@ -191,7 +191,7 @@ onUnmounted(() => {
           <button
             v-if="cartCount > 0"
             @click="emit('open-cart')"
-            class="relative p-2 rounded-lg text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors cursor-pointer"
+            :class="['relative p-2 rounded-lg transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800' : 'text-white/70 hover:text-white hover:bg-white/10']"
             :title="$t('landing.cart.title', 'Cart')"
           >
             <ShoppingBasket class="w-5 h-5" />
@@ -200,7 +200,7 @@ onUnmounted(() => {
           <!-- Theme toggle -->
           <button
             @click="toggle"
-            class="p-2 rounded-lg text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors cursor-pointer"
+            :class="['p-2 rounded-lg transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800' : 'text-white/70 hover:text-white hover:bg-white/10']"
             :title="`Theme: ${theme}`"
           >
             <svg v-if="theme === 'light'" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -227,7 +227,7 @@ onUnmounted(() => {
             </router-link>
             <router-link
               to="/login"
-              class="rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-semibold text-surface-600 dark:text-surface-300 transition-all hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white -ml-4"
+              :class="['rounded-lg border px-4 py-2 text-sm font-semibold transition-all -ml-4', isScrolled ? 'border-surface-300 dark:border-surface-700 text-surface-600 dark:text-surface-300 hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white' : 'border-white/30 text-white/80 hover:border-white/50 hover:text-white']"
             >
               {{ $t('landing.nav.login') }}
             </router-link>
@@ -239,14 +239,14 @@ onUnmounted(() => {
           <button
             v-if="cartCount > 0"
             @click="emit('open-cart')"
-            class="relative inline-flex items-center justify-center rounded-lg p-2 text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
+            :class="['relative inline-flex items-center justify-center rounded-lg p-2 transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
           >
             <ShoppingBasket class="w-5 h-5" />
             <span class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary-600 text-[10px] leading-none font-bold text-white">{{ cartCount }}</span>
           </button>
           <button
             @click="toggle"
-            class="inline-flex items-center justify-center rounded-lg p-2 text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
+            :class="['inline-flex items-center justify-center rounded-lg p-2 transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
             :title="`Theme: ${theme}`"
           >
             <svg v-if="theme === 'light'" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -257,7 +257,7 @@ onUnmounted(() => {
             </svg>
           </button>
           <button
-            class="inline-flex items-center justify-center rounded-lg p-2 text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white cursor-pointer"
+            :class="['inline-flex items-center justify-center rounded-lg p-2 cursor-pointer transition-colors', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
             @click.stop="mobileMenuOpen = !mobileMenuOpen"
           >
             <svg v-if="!mobileMenuOpen" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

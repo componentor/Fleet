@@ -90,30 +90,45 @@ export class NamecomProvider implements RegistrarProvider {
 
     const effectiveTlds = tlds.length > 0 ? tlds : ['com', 'net', 'org', 'io', 'dev'];
 
-    const domainNames = effectiveTlds.map((tld) => `${cleaned}.${tld}`);
+    // Name.com checkAvailability supports max 50 domains per request
+    const BATCH_SIZE = 50;
+    const allResults: DomainSearchResult[] = [];
 
-    const data = await this.request<{
-      results: Array<{
-        domainName: string;
-        purchasable: boolean;
-        premium: boolean;
-        purchasePrice?: number;
-        renewalPrice?: number;
-      }>;
-    }>('POST', '/domains:checkAvailability', { domainNames });
+    for (let i = 0; i < effectiveTlds.length; i += BATCH_SIZE) {
+      const batch = effectiveTlds.slice(i, i + BATCH_SIZE);
+      const domainNames = batch.map((tld) => `${cleaned}.${tld}`);
 
-    return (data.results ?? []).map((r) => ({
-      domain: r.domainName,
-      available: r.purchasable,
-      premium: r.premium ?? false,
-      price: r.purchasePrice != null
-        ? {
-            registration: r.purchasePrice,
-            renewal: r.renewalPrice ?? r.purchasePrice,
-            currency: 'USD',
-          }
-        : null,
-    }));
+      try {
+        const data = await this.request<{
+          results: Array<{
+            domainName: string;
+            purchasable: boolean;
+            premium: boolean;
+            purchasePrice?: number;
+            renewalPrice?: number;
+          }>;
+        }>('POST', '/domains:checkAvailability', { domainNames });
+
+        for (const r of (data.results ?? [])) {
+          allResults.push({
+            domain: r.domainName,
+            available: r.purchasable,
+            premium: r.premium ?? false,
+            price: r.purchasePrice != null
+              ? {
+                  registration: r.purchasePrice,
+                  renewal: r.renewalPrice ?? r.purchasePrice,
+                  currency: 'USD',
+                }
+              : null,
+          });
+        }
+      } catch (err) {
+        logger.warn({ err, batch }, 'Name.com search batch failed, skipping');
+      }
+    }
+
+    return allResults;
   }
 
   async checkAvailability(domain: string): Promise<DomainSearchResult> {
