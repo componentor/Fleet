@@ -217,11 +217,12 @@ async function handleDomainSearch(c: any) {
 
     return c.json({ query: trimmed, results: enriched });
   } catch (err) {
-    logger.error({ err }, 'Domain search failed');
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err, message }, 'Domain search failed');
     return c.json(
       {
         error: 'Domain search failed',
-        details: undefined,
+        details: message,
       },
       500,
     );

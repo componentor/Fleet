@@ -27,7 +27,7 @@ const { brandTitle, logoSrc, brandGithubUrl } = useBranding()
         </div>
 
         <!-- Links -->
-        <div class="flex items-center gap-8">
+        <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 md:gap-8">
           <a
             v-if="brandGithubUrl"
             :href="brandGithubUrl"
