@@ -16,9 +16,9 @@ export interface ProjectConfig {
   apiUrl?: string
 }
 
-const CONFIG_DIR = join(homedir(), '.fleet')
+const CONFIG_DIR = join(homedir(), '.siglar')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
-const PROJECT_CONFIG_NAME = '.fleet.json'
+const PROJECT_CONFIG_NAME = '.siglar.json'
 
 const DEFAULT_CONFIG: FleetConfig = {
   apiUrl: 'http://localhost:3000',
@@ -61,7 +61,7 @@ export function getAccountId(): string | undefined {
 }
 
 /**
- * Walk up from CWD to find a .fleet.json project config file.
+ * Walk up from CWD to find a .siglar.json project config file.
  */
 export function loadProjectConfig(): ProjectConfig | null {
   let dir = process.cwd()
@@ -85,7 +85,7 @@ export function loadProjectConfig(): ProjectConfig | null {
 }
 
 /**
- * Write a .fleet.json project config file in the given directory.
+ * Write a .siglar.json project config file in the given directory.
  */
 export function writeProjectConfig(dir: string, config: ProjectConfig): void {
   const configPath = join(dir, PROJECT_CONFIG_NAME)

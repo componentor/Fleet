@@ -164,7 +164,7 @@ onUnmounted(() => {
                 {{ $t('docs.installCli') }}
               </p>
               <div class="mt-4">
-                <CodeBlock code="npm install -g @fleet/cli" />
+                <CodeBlock code="npm install -g siglar" />
               </div>
             </div>
 
@@ -175,19 +175,19 @@ onUnmounted(() => {
                 {{ $t('docs.initCluster') }}
               </p>
               <div class="mt-4">
-                <CodeBlock code="fleet init --domain panel.example.com --email admin@example.com" />
+                <CodeBlock code="siglar init --domain panel.example.com --email admin@example.com" />
               </div>
               <p class="mt-4 text-surface-500 dark:text-surface-400">
                 {{ $t('docs.loginCli') }}
               </p>
               <div class="mt-4">
-                <CodeBlock :code="`fleet login --api-url https://panel.example.com`" />
+                <CodeBlock :code="`siglar login --api-url https://panel.example.com`" />
               </div>
               <p class="mt-4 text-surface-500 dark:text-surface-400">
                 {{ $t('docs.deployFirst') }}
               </p>
               <div class="mt-4">
-                <CodeBlock :code="`fleet deploy --name my-app --image node:20`" />
+                <CodeBlock :code="`siglar deploy --name my-app --image node:20`" />
               </div>
               <p class="mt-4 text-surface-500 dark:text-surface-400">
                 {{ $t('docs.deployDone') }}
@@ -905,7 +905,7 @@ onUnmounted(() => {
               <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">{{ $t('docs.quickStart') }}</h3>
               <p class="mt-2 text-sm text-surface-500 dark:text-surface-400">{{ $t('docs.addToReadme') }}</p>
               <div class="mt-3">
-                <CodeBlock :code="`[![Deploy on Fleet](https://your-landing-site.com/deploy-button.svg)](https://your-dashboard.com/deploy/gh?repo=owner/repo)`" />
+                <CodeBlock :code="`[![Deploy on Siglar](https://your-landing-site.com/deploy-button.svg)](https://your-dashboard.com/deploy/gh?repo=owner/repo)`" />
               </div>
               <p class="mt-3 text-sm text-surface-500 dark:text-surface-400">
                 {{ $t('docs.replaceUrls', { landingSite: 'your-landing-site.com', dashboard: 'your-dashboard.com' }) }}
@@ -952,7 +952,7 @@ onUnmounted(() => {
               <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">{{ $t('docs.howItWorks') }}</h3>
               <ol class="mt-3 space-y-2 text-sm text-surface-600 dark:text-surface-300 list-decimal pl-5">
                 <li>{{ $t('docs.howStep1') }}</li>
-                <li>{{ $t('docs.howStep2', { file: 'fleet.json' }) }}</li>
+                <li>{{ $t('docs.howStep2', { file: 'siglar.json' }) }}</li>
                 <li>{{ $t('docs.howStep3') }}</li>
                 <li>{{ $t('docs.howStep4') }}</li>
               </ol>
@@ -971,11 +971,11 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- fleet.json Reference -->
+            <!-- siglar.json Reference -->
             <div id="fleet-json" data-section="fleet-json" class="mt-12">
               <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('docs.fleetJsonTitle') }}</h2>
               <p class="mt-4 text-surface-600 dark:text-surface-300">
-                {{ $t('docs.fleetJsonDesc', { file: 'fleet.json' }) }}
+                {{ $t('docs.fleetJsonDesc', { file: 'siglar.json' }) }}
               </p>
 
               <h3 class="mt-8 text-lg font-semibold text-gray-900 dark:text-white">{{ $t('docs.fullExample') }}</h3>
@@ -1206,7 +1206,7 @@ onUnmounted(() => {
                 </li>
                 <li class="flex items-start gap-3">
                   <svg class="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                  <span>{{ $t('docs.bestPracticeNo1', { code: 'fleet.json' }) }}</span>
+                  <span>{{ $t('docs.bestPracticeNo1', { code: 'siglar.json' }) }}</span>
                 </li>
               </ul>
             </div>

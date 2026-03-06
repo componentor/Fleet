@@ -76,7 +76,7 @@ export const statusCommand = new Command('status')
       console.error(
         chalk.red('Failed to get cluster status. Is Docker Swarm initialized?'),
       )
-      console.error(chalk.yellow('Run: fleet init'))
+      console.error(chalk.yellow('Run: siglar init'))
       process.exit(1)
     }
   })

@@ -263,7 +263,7 @@ const trustSignals = computed(() => [
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- HERO — Domain search first                                        -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <section class="relative pt-32 pb-28 sm:pt-40 sm:pb-36 bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 dark:from-surface-950 dark:via-blue-950/80 dark:to-surface-950">
+    <section class="relative pt-32 pb-28 sm:pt-40 sm:pb-36 bg-gradient-to-br from-slate-800 via-blue-900 to-slate-800 dark:from-surface-950 dark:via-blue-950/80 dark:to-surface-950">
       <!-- Background gradients -->
       <div class="pointer-events-none absolute inset-0 overflow-hidden">
         <div class="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-blue-500/15 dark:bg-primary-600/20 blur-[128px]"></div>

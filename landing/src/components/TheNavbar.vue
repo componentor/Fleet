@@ -73,7 +73,7 @@ onUnmounted(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <span class="text-xl font-bold text-gray-900 dark:text-white">Fleet</span>
+          <span class="text-xl font-bold text-gray-900 dark:text-white">Siglar</span>
         </router-link>
 
         <!-- Desktop nav links -->
