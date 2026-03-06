@@ -134,28 +134,34 @@ export async function calculateResellerPricing(accountId: string, basePriceCents
   }
 
   const discount = await getEffectiveDiscount(resellerInfo.reseller);
+
   const discountAmount = calculateDiscount(basePriceCents, discount.type, discount.percent, discount.fixed);
   const discountedPrice = basePriceCents - discountAmount;
 
-  let markupAmount = 0;
-  let resellerConnectId: string | null = null;
-
-  // Sub-accounts pay the reseller's markup; resellers themselves do not
+  // Sub-accounts: reseller adds markup on top of their discounted (wholesale) price.
+  // The final price can never be less than the discounted price (reseller's cost).
   if (resellerInfo.isSubAccount && resellerInfo.reseller.connectOnboarded && resellerInfo.reseller.stripeConnectId) {
-    markupAmount = calculateMarkup(
+    const markupAmount = calculateMarkup(
       discountedPrice,
       resellerInfo.reseller.markupType,
       resellerInfo.reseller.markupPercent,
       resellerInfo.reseller.markupFixed,
     );
-    resellerConnectId = resellerInfo.reseller.stripeConnectId;
+    const finalPrice = discountedPrice + markupAmount;
+    return {
+      finalPrice,
+      discountAmount,
+      markupAmount,
+      resellerConnectId: resellerInfo.reseller.stripeConnectId,
+    };
   }
 
+  // Reseller's own account gets the discount (wholesale price)
   return {
-    finalPrice: discountedPrice + markupAmount,
+    finalPrice: discountedPrice,
     discountAmount,
-    markupAmount,
-    resellerConnectId,
+    markupAmount: 0,
+    resellerConnectId: null,
   };
 }
 
@@ -642,8 +648,6 @@ authed.openapi(getEarningsRoute, (async (c: any) => {
   let estimatedMonthlyRevenueCents = 0;
   const subAccountEarnings: { id: string; name: string; status: string; hasSubscription: boolean; monthlyRevenueCents: number }[] = [];
 
-  const discount = await getEffectiveDiscount(resellerAccount);
-
   for (const sub of subAccountsList) {
     const subscription = await db.query.subscriptions.findFirst({
       where: and(eq2(subscriptionsTable.accountId, sub.id), eq2(subscriptionsTable.status, 'active')),
@@ -653,6 +657,9 @@ authed.openapi(getEarningsRoute, (async (c: any) => {
     if (subscription?.plan) {
       activeSubscriptions++;
       const planPrice = (subscription.plan as any).priceCents ?? 0;
+      // Reseller earns the markup on top of their discounted (wholesale) price.
+      // The discounted price is the platform's share.
+      const discount = await getEffectiveDiscount(resellerAccount);
       const discountAmount = calculateDiscount(planPrice, discount.type, discount.percent, discount.fixed);
       const discountedPrice = planPrice - discountAmount;
       const markupAmount = calculateMarkup(

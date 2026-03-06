@@ -159,6 +159,7 @@ const stripeSettingsSchema = z.object({
   publishableKey: z.string().min(1).optional(),
   secretKey: z.string().min(1).optional(),
   webhookSecret: z.string().min(1).optional(),
+  taxEnabled: z.boolean().optional(),
 });
 
 const emailSettingsSchema = z.object({
@@ -678,12 +679,14 @@ settings.openapi(getStripeRoute, (async (c: any) => {
   const publishableKey = await getSetting('stripe:publishableKey');
   const secretKey = await getSetting('stripe:secretKey');
   const webhookSecret = await getSetting('stripe:webhookSecret');
+  const taxEnabled = await getSetting('stripe:taxEnabled');
 
   return c.json({
     configured: !!(publishableKey && secretKey),
     publishableKey: (publishableKey as string) || '',
     secretKeyHint: maskSecret(secretKey),
     webhookSecretHint: maskSecret(webhookSecret),
+    taxEnabled: taxEnabled === 'true' || taxEnabled === true,
   });
 }) as any);
 
@@ -705,6 +708,9 @@ settings.openapi(updateStripeRoute, (async (c: any) => {
   }
   if (data.webhookSecret) {
     await upsertSetting('stripe:webhookSecret', encrypt(data.webhookSecret));
+  }
+  if (data.taxEnabled !== undefined) {
+    await upsertSetting('stripe:taxEnabled', String(data.taxEnabled));
   }
 
   await invalidateCache('GET:/settings/*');

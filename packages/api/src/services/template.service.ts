@@ -3,7 +3,7 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
-import { db, appTemplates, services, deployments, storageVolumes, stacks, billingPlans, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
+import { db, appTemplates, services, deployments, storageVolumes, stacks, billingPlans, accountBillingOverrides, insertReturning, updateReturning, deleteReturning, eq, and, or, isNull } from '@fleet/db';
 import { orchestrator } from './orchestrator.js';
 import { getRegistryAuthForImage } from './docker.service.js';
 import { storageManager } from './storage/storage-manager.js';
@@ -297,6 +297,22 @@ export class TemplateService {
       if (plan) {
         planCpuLimit = plan.cpuLimit;
         planMemoryLimit = plan.memoryLimit;
+        // Apply per-account overrides
+        if (accountId) {
+          const billingOverride = await db.query.accountBillingOverrides.findFirst({
+            where: eq(accountBillingOverrides.accountId, accountId),
+          });
+          if (billingOverride) {
+            // Free tier: direct replacement
+            if (plan.isFree) {
+              if (billingOverride.freeTierCpuLimit != null) planCpuLimit = billingOverride.freeTierCpuLimit;
+              if (billingOverride.freeTierMemoryLimit != null) planMemoryLimit = billingOverride.freeTierMemoryLimit;
+            }
+            // Boost: all tiers, only increases
+            if (billingOverride.boostCpuLimit != null) planCpuLimit = Math.max(planCpuLimit!, billingOverride.boostCpuLimit);
+            if (billingOverride.boostMemoryLimit != null) planMemoryLimit = Math.max(planMemoryLimit!, billingOverride.boostMemoryLimit);
+          }
+        }
       }
     }
 

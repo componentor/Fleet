@@ -18,7 +18,6 @@ export interface ServiceTier {
   storageLimit: number
   bandwidthLimit: number | null
   volumeIncludedGb: number
-  scope: 'service' | 'stack'
   isFree: boolean
   isDefault: boolean
   sortOrder: number

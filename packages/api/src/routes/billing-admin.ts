@@ -69,7 +69,8 @@ const createPlanSchema = z.object({
   bandwidthLimit: z.number().int().min(0).optional(),
   maxUsersPerAccount: z.number().int().min(0).optional(),
   priceCents: z.number().int().min(0),
-  scope: z.enum(['service', 'stack']).default('service'),
+  yearlyPriceCents: z.number().int().min(0).nullable().optional(),
+  scope: z.enum(['service', 'stack']).default('stack'),
   volumeIncludedGb: z.number().int().min(0).default(0),
   nameTranslations: z.record(z.string(), z.string()).optional(),
   descriptionTranslations: z.record(z.string(), z.string()).optional(),
@@ -116,6 +117,15 @@ const overrideSchema = z.object({
   storageCentsPerGbMonthOverride: z.number().int().min(0).nullable().optional(),
   bandwidthCentsPerGbOverride: z.number().int().min(0).nullable().optional(),
   containerCentsPerHourOverride: z.number().int().min(0).nullable().optional(),
+  maxFreeServices: z.number().int().min(0).nullable().optional(),
+  freeTierCpuLimit: z.number().int().min(0).nullable().optional(),
+  freeTierMemoryLimit: z.number().int().min(0).nullable().optional(),
+  freeTierContainerLimit: z.number().int().min(0).nullable().optional(),
+  freeTierStorageLimit: z.number().int().min(0).nullable().optional(),
+  boostCpuLimit: z.number().int().min(0).nullable().optional(),
+  boostMemoryLimit: z.number().int().min(0).nullable().optional(),
+  boostContainerLimit: z.number().int().min(0).nullable().optional(),
+  boostStorageLimit: z.number().int().min(0).nullable().optional(),
 }).openapi('AccountBillingOverrideRequest');
 
 const idParamSchema = z.object({

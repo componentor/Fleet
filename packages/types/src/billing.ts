@@ -55,6 +55,7 @@ export interface BillingPlan {
   storageLimit: number;
   bandwidthLimit: number | null;
   priceCents: number;
+  yearlyPriceCents: number | null;
   stripeProductId: string | null;
   stripePriceIds: Record<string, string>;
   nameTranslations: Record<string, string>;

@@ -1248,7 +1248,11 @@ authed.openapi(serviceCheckoutRoute, (async (c: any) => {
   });
   if (selectedPlan?.isFree) {
     const config = await db.query.billingConfig.findFirst();
-    const maxFree = config?.maxFreeServicesPerAccount;
+    const override = await db.query.accountBillingOverrides.findFirst({
+      where: eq(accountBillingOverrides.accountId, accountId),
+    });
+    // Per-account override takes priority over global setting
+    const maxFree = override?.maxFreeServices ?? config?.maxFreeServicesPerAccount;
     if (maxFree != null) {
       const freePlanIds = (await db.select({ id: billingPlans.id }).from(billingPlans).where(eq(billingPlans.isFree, true))).map(p => p.id);
       const freeSubCount = await db.select({ count: countSql() }).from(subscriptions)
@@ -1609,7 +1613,11 @@ authed.openapi(freeTierUsageRoute, (async (c: any) => {
   if (!accountId) return c.json({ error: 'Account context required' }, 400);
 
   const config = await db.query.billingConfig.findFirst();
-  const limit = config?.maxFreeServicesPerAccount ?? null;
+  const override = await db.query.accountBillingOverrides.findFirst({
+    where: eq(accountBillingOverrides.accountId, accountId),
+  });
+  // Per-account override takes priority over global setting
+  const limit = override?.maxFreeServices ?? config?.maxFreeServicesPerAccount ?? null;
 
   const freePlanIds = (await db.select({ id: billingPlans.id }).from(billingPlans).where(eq(billingPlans.isFree, true))).map(p => p.id);
   let used = 0;
@@ -2589,6 +2597,10 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
       plan.priceCents = fixedPrice.priceCents;
     } else if (tc !== 'USD' && plan.priceCents != null) {
       plan.priceCents = await exchangeRateService.convertCents(plan.priceCents, 'USD', tc);
+    }
+    // Convert yearly price if set and not USD
+    if (tc !== 'USD' && plan.yearlyPriceCents != null) {
+      plan.yearlyPriceCents = await exchangeRateService.convertCents(plan.yearlyPriceCents, 'USD', tc);
     }
     delete plan._currencyPrices;
   }

@@ -122,7 +122,7 @@ async function handleChangePlan(opts?: { confirm?: boolean }) {
   // No existing subscription — create a new one via checkout
   if (!serviceSubscription.value) {
     const url = await serviceBilling.createCheckout({
-      serviceId,
+      stackId: service.value?.stackId ?? undefined,
       planId: changePlanId.value,
       billingCycle: 'monthly',
     })

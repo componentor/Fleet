@@ -50,7 +50,7 @@ const planForm = ref({
   isDefault: false, isFree: false, visible: true,
   cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
   storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
-  priceCents: 0, volumeIncludedGb: 0, scope: 'service' as 'service' | 'stack',
+  priceCents: 0, yearlyPriceCents: null as number | null, volumeIncludedGb: 0,
   nameTranslations: {} as Record<string, string>,
   descriptionTranslations: {} as Record<string, string>,
 })
@@ -128,6 +128,63 @@ const subs = ref<any[]>([])
 
 // ─── Account Overrides ───────────────────────────────────────
 const overrides = ref<any[]>([])
+const editingOverrideId = ref<string | null>(null)
+const overrideForm = ref({
+  maxFreeServices: null as number | null,
+  freeTierCpuLimit: null as number | null,
+  freeTierMemoryLimit: null as number | null,
+  freeTierContainerLimit: null as number | null,
+  freeTierStorageLimit: null as number | null,
+  boostCpuLimit: null as number | null,
+  boostMemoryLimit: null as number | null,
+  boostContainerLimit: null as number | null,
+  boostStorageLimit: null as number | null,
+})
+const savingOverride = ref(false)
+
+function editOverride(o: any) {
+  if (editingOverrideId.value === o.accountId) {
+    editingOverrideId.value = null
+    return
+  }
+  editingOverrideId.value = o.accountId
+  overrideForm.value = {
+    maxFreeServices: o.maxFreeServices ?? null,
+    freeTierCpuLimit: o.freeTierCpuLimit ?? null,
+    freeTierMemoryLimit: o.freeTierMemoryLimit ?? null,
+    freeTierContainerLimit: o.freeTierContainerLimit ?? null,
+    freeTierStorageLimit: o.freeTierStorageLimit ?? null,
+    boostCpuLimit: o.boostCpuLimit ?? null,
+    boostMemoryLimit: o.boostMemoryLimit ?? null,
+    boostContainerLimit: o.boostContainerLimit ?? null,
+    boostStorageLimit: o.boostStorageLimit ?? null,
+  }
+}
+
+async function saveOverride(accountId: string) {
+  savingOverride.value = true
+  try {
+    await api.patch(`/billing/admin/account-overrides/${accountId}`, {
+      maxFreeServices: overrideForm.value.maxFreeServices || null,
+      freeTierCpuLimit: overrideForm.value.freeTierCpuLimit || null,
+      freeTierMemoryLimit: overrideForm.value.freeTierMemoryLimit || null,
+      freeTierContainerLimit: overrideForm.value.freeTierContainerLimit || null,
+      freeTierStorageLimit: overrideForm.value.freeTierStorageLimit || null,
+      boostCpuLimit: overrideForm.value.boostCpuLimit || null,
+      boostMemoryLimit: overrideForm.value.boostMemoryLimit || null,
+      boostContainerLimit: overrideForm.value.boostContainerLimit || null,
+      boostStorageLimit: overrideForm.value.boostStorageLimit || null,
+    })
+    showSuccess('Account override saved')
+    const data = await api.get<any[]>('/billing/admin/account-overrides')
+    overrides.value = data
+    editingOverrideId.value = null
+  } catch (err: any) {
+    error.value = err?.body?.error || 'Failed to save override'
+  } finally {
+    savingOverride.value = false
+  }
+}
 
 const allCycles = [
   { id: 'daily', label: 'Daily' },
@@ -177,7 +234,7 @@ function openPlanForm(plan?: any) {
       isDefault: false, isFree: false, visible: true,
       cpuLimit: 1000, memoryLimit: 512, containerLimit: 5,
       storageLimit: 10, bandwidthLimit: 0, maxUsersPerAccount: 0,
-      priceCents: 0, volumeIncludedGb: 0, scope: 'service',
+      priceCents: 0, yearlyPriceCents: null, volumeIncludedGb: 0,
       nameTranslations: {}, descriptionTranslations: {},
     }
   }
@@ -295,10 +352,14 @@ async function savePlan() {
   saving.value = true
   error.value = ''
   try {
+    const payload = {
+      ...planForm.value,
+      yearlyPriceCents: planForm.value.yearlyPriceCents || null,
+    }
     if (editingPlan.value) {
-      await api.patch(`/billing/admin/plans/${editingPlan.value.id}`, planForm.value)
+      await api.patch(`/billing/admin/plans/${editingPlan.value.id}`, payload)
     } else {
-      await api.post('/billing/admin/plans', planForm.value)
+      await api.post('/billing/admin/plans', payload)
     }
     showPlanForm.value = false
     showSuccess('Plan saved')
@@ -314,22 +375,19 @@ async function savePlan() {
 async function movePlan(index: number, direction: -1 | 1) {
   const target = index + direction
   if (target < 0 || target >= plans.value.length) return
-  const a = plans.value[index]
-  const b = plans.value[target]
-  // Swap sortOrder values
-  const tmpSort = a.sortOrder
-  a.sortOrder = b.sortOrder
-  b.sortOrder = tmpSort
   // Swap in array
-  plans.value[index] = b
-  plans.value[target] = a
-  plans.value = [...plans.value]
-  // Persist both
+  const arr = [...plans.value]
+  ;[arr[index], arr[target]] = [arr[target], arr[index]]
+  // Assign sequential sortOrder based on new positions
+  for (let i = 0; i < arr.length; i++) {
+    arr[i].sortOrder = i
+  }
+  plans.value = arr
+  // Persist all updated sort orders
   try {
-    await Promise.all([
-      api.patch(`/billing/admin/plans/${a.id}`, { sortOrder: a.sortOrder }),
-      api.patch(`/billing/admin/plans/${b.id}`, { sortOrder: b.sortOrder }),
-    ])
+    await Promise.all(
+      arr.map((p, i) => api.patch(`/billing/admin/plans/${p.id}`, { sortOrder: i }))
+    )
   } catch {
     // Reload on error
     const data = await api.get<any[]>('/billing/admin/plans')
@@ -348,13 +406,23 @@ async function deletePlan(id: string) {
   }
 }
 
+const syncStatus = ref<Record<string, 'syncing' | 'ok' | 'error'>>({})
+
 async function syncPlan(id: string) {
   syncing.value = true
+  syncStatus.value[id] = 'syncing'
   try {
     await api.post(`/billing/admin/plans/${id}/sync-stripe`, {})
+    syncStatus.value[id] = 'ok'
     showSuccess('Plan synced to Stripe')
+    // Refresh to get updated stripeProductId
+    const data = await api.get<any[]>('/billing/admin/plans')
+    plans.value = data
+    setTimeout(() => { delete syncStatus.value[id] }, 3000)
   } catch (err: any) {
+    syncStatus.value[id] = 'error'
     error.value = err?.body?.error || 'Stripe sync failed'
+    setTimeout(() => { delete syncStatus.value[id] }, 5000)
   } finally {
     syncing.value = false
   }
@@ -707,11 +775,9 @@ onMounted(() => { fetchAll() })
                 <input v-model.number="planForm.priceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Scope</label>
-                <select v-model="planForm.scope" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-                  <option value="service">Per Service</option>
-                  <option value="stack">Per Stack</option>
-                </select>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Yearly Price (cents)</label>
+                <input v-model.number="planForm.yearlyPriceCents" type="number" min="0" :placeholder="`Auto: ${planForm.priceCents * 12}`" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                <p class="text-xs text-gray-400 mt-0.5">Leave empty = monthly × 12</p>
               </div>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
@@ -817,7 +883,11 @@ onMounted(() => { fetchAll() })
                   </div>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-mono whitespace-nowrap">{{ plan.slug }}</td>
-                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">{{ formatCents(plan.priceCents) }}/mo</td>
+                <td class="px-6 py-4 text-sm text-gray-900 dark:text-white whitespace-nowrap">
+                  {{ formatCents(plan.priceCents) }}/mo
+                  <span v-if="plan.yearlyPriceCents != null" class="text-gray-500 dark:text-gray-400 ml-1">· {{ formatCents(plan.yearlyPriceCents) }}/yr</span>
+                  <span v-else class="text-gray-400 dark:text-gray-500 ml-1">· {{ formatCents(plan.priceCents * 12) }}/yr</span>
+                </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.cpuLimit }}mc / {{ plan.memoryLimit }}MB / {{ plan.containerLimit }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ plan.maxUsersPerAccount ? plan.maxUsersPerAccount : '∞' }}</td>
                 <td class="px-6 py-4">
@@ -832,7 +902,12 @@ onMounted(() => { fetchAll() })
                       {{ editingPricesPlanId === plan.id ? 'Close' : 'Prices' }}
                       <span v-if="plan.prices?.length" class="text-gray-400">({{ plan.prices.length }})</span>
                     </button>
-                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">{{ t('super.billing.sync') }}</button>
+                    <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs hover:underline" :class="syncStatus[plan.id] === 'ok' ? 'text-green-600 dark:text-green-400' : syncStatus[plan.id] === 'error' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'">
+                      <template v-if="syncStatus[plan.id] === 'syncing'"><Loader2 class="w-3 h-3 animate-spin inline" /> Syncing...</template>
+                      <template v-else-if="syncStatus[plan.id] === 'ok'">Synced!</template>
+                      <template v-else-if="syncStatus[plan.id] === 'error'">Failed</template>
+                      <template v-else>{{ t('super.billing.sync') }}</template>
+                    </button>
                     <button @click="deletePlan(plan.id)" class="text-xs text-red-600 dark:text-red-400 hover:underline">{{ t('super.billing.hide') }}</button>
                   </div>
                 </td>
@@ -1094,15 +1169,98 @@ onMounted(() => { fetchAll() })
               <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 <th class="px-6 py-3">{{ t('super.billing.account') }}</th>
                 <th class="px-6 py-3">{{ t('super.billing.discount') }}</th>
+                <th class="px-6 py-3">Free Tiers</th>
+                <th class="px-6 py-3">Resource Boost</th>
                 <th class="px-6 py-3">{{ t('super.billing.notes') }}</th>
+                <th class="px-6 py-3">{{ t('common.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-              <tr v-for="o in overrides" :key="o.id">
+              <template v-for="o in overrides" :key="o.id">
+              <tr>
                 <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">{{ o.account?.name ?? o.accountId }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ o.discountPercent }}%</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <span v-if="o.maxFreeServices != null" class="px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded mr-1">{{ o.maxFreeServices }} free</span>
+                  <span v-if="o.freeTierCpuLimit != null || o.freeTierMemoryLimit != null" class="text-xs text-gray-500">
+                    {{ o.freeTierCpuLimit != null ? `${o.freeTierCpuLimit}mc` : '' }}{{ o.freeTierCpuLimit != null && o.freeTierMemoryLimit != null ? ' / ' : '' }}{{ o.freeTierMemoryLimit != null ? `${o.freeTierMemoryLimit}MB` : '' }}
+                  </span>
+                  <span v-if="o.maxFreeServices == null && o.freeTierCpuLimit == null && o.freeTierMemoryLimit == null" class="text-gray-400">—</span>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                  <span v-if="o.boostCpuLimit != null || o.boostMemoryLimit != null" class="text-xs">
+                    <span v-if="o.boostCpuLimit != null" class="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded mr-1">{{ o.boostCpuLimit }}mc</span>
+                    <span v-if="o.boostMemoryLimit != null" class="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded">{{ o.boostMemoryLimit }}MB</span>
+                  </span>
+                  <span v-else class="text-gray-400">—</span>
+                </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ o.notes ?? '-' }}</td>
+                <td class="px-6 py-4">
+                  <button @click="editOverride(o)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">
+                    {{ editingOverrideId === o.accountId ? 'Close' : 'Edit Overrides' }}
+                  </button>
+                </td>
               </tr>
+              <tr v-if="editingOverrideId === o.accountId" class="bg-gray-50 dark:bg-gray-750">
+                <td colspan="6" class="px-6 py-4">
+                  <div class="space-y-4">
+                    <div>
+                      <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Free tier overrides</p>
+                      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Free Services</label>
+                          <input v-model.number="overrideForm.maxFreeServices" type="number" min="0" placeholder="Global default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU (millicores)</label>
+                          <input v-model.number="overrideForm.freeTierCpuLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (MB)</label>
+                          <input v-model.number="overrideForm.freeTierMemoryLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Containers</label>
+                          <input v-model.number="overrideForm.freeTierContainerLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (GB)</label>
+                          <input v-model.number="overrideForm.freeTierStorageLimit" type="number" min="0" placeholder="Plan default" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                      </div>
+                      <p class="text-xs text-gray-400 mt-1">Replaces free plan limits for this account.</p>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Resource boost (all tiers)</p>
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU (millicores)</label>
+                          <input v-model.number="overrideForm.boostCpuLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Memory (MB)</label>
+                          <input v-model.number="overrideForm.boostMemoryLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Containers</label>
+                          <input v-model.number="overrideForm.boostContainerLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Storage (GB)</label>
+                          <input v-model.number="overrideForm.boostStorageLimit" type="number" min="0" placeholder="No boost" class="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        </div>
+                      </div>
+                      <p class="text-xs text-gray-400 mt-1">Applies to all tiers. Effective limit = max(plan limit, boost). Can only increase, never reduce.</p>
+                    </div>
+                    <div class="flex justify-end">
+                      <button @click="saveOverride(o.accountId)" :disabled="savingOverride" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
+                        {{ savingOverride ? 'Saving...' : 'Save overrides' }}
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>

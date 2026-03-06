@@ -1293,7 +1293,7 @@ onUnmounted(() => {
           </div>
 
           <div class="p-6">
-            <TierSelector v-model="selectedStackPlanId" :stack-mode="true" />
+            <TierSelector v-model="selectedStackPlanId" />
           </div>
         </div>
       </div>
