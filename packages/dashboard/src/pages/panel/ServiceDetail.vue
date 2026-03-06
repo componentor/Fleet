@@ -2,7 +2,8 @@
 defineOptions({ inheritAttrs: false })
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, Loader2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive, FileCode, RotateCcw } from 'lucide-vue-next'
+import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive, FileCode, RotateCcw } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import ConfirmDeleteModal from '../../components/ConfirmDeleteModal.vue'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
@@ -1627,7 +1628,7 @@ onUnmounted(() => {
   <div>
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Error -->
@@ -1705,7 +1706,7 @@ onUnmounted(() => {
             :disabled="!!actionLoading"
             class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
           >
-            <Loader2 v-if="actionLoading === 'redeploy'" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="actionLoading === 'redeploy'" size="w-4 h-4" />
             <Play v-else class="w-4 h-4" />
             {{ actionLoading === 'redeploy' ? 'Deploying...' : 'Redeploy' }}
           </button>
@@ -1744,7 +1745,7 @@ onUnmounted(() => {
         class="mb-4 flex items-center gap-3 rounded-xl border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 px-4 py-3 cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
         @click="activeTab = 'overview'"
       >
-        <Loader2 class="w-5 h-5 text-primary-600 dark:text-primary-400 animate-spin shrink-0" />
+        <CompassSpinner size="w-5 h-5" class="shrink-0" />
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-primary-800 dark:text-primary-200">Deployment in progress</p>
           <p class="text-xs text-primary-600 dark:text-primary-400">Click to view progress</p>
@@ -1880,7 +1881,7 @@ onUnmounted(() => {
                     'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
                   ]">
                     <svg v-if="getStepStatus(step.key) === 'done'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                    <Loader2 v-else-if="getStepStatus(step.key) === 'active'" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-else-if="getStepStatus(step.key) === 'active'" size="w-4 h-4" />
                     <span v-else>{{ idx + 1 }}</span>
                   </div>
                   <span :class="['text-[10px] mt-1 text-center truncate w-full', getStepStatus(step.key) === 'active' ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-400 dark:text-gray-500']">{{ step.label }}</span>
@@ -1919,7 +1920,7 @@ onUnmounted(() => {
                 >{{ line }}</div>
               </div>
               <div v-else class="flex items-center justify-center h-full text-gray-500">
-                <Loader2 class="w-5 h-5 animate-spin mr-2" />
+                <CompassSpinner size="w-5 h-5" class="mr-2" />
                 Waiting for build output...
               </div>
             </div>
@@ -1958,7 +1959,7 @@ onUnmounted(() => {
           <!-- Deploying progress -->
           <div v-if="service.status === 'deploying' && failedTasks.length === 0" class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-5">
             <div class="flex items-start gap-3">
-              <Loader2 class="w-5 h-5 text-yellow-500 dark:text-yellow-400 shrink-0 mt-0.5 animate-spin" />
+              <CompassSpinner size="w-5 h-5" color="text-yellow-500 dark:text-yellow-400" class="shrink-0 mt-0.5" />
               <div class="min-w-0 flex-1">
                 <h3 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200">Service is deploying</h3>
                 <p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">Waiting for containers to start...</p>
@@ -2078,7 +2079,7 @@ onUnmounted(() => {
             </div>
             <div class="p-6">
               <div v-if="statsLoading && !serviceStats" class="flex items-center justify-center py-8">
-                <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+                <CompassSpinner size="w-5 h-5" color="text-gray-400" />
               </div>
               <div v-else-if="!serviceStats" class="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
                 Stats unavailable. Service may still be starting.
@@ -2229,7 +2230,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div v-if="dockerfileLoading" class="p-12 flex items-center justify-center">
-              <Loader2 class="w-6 h-6 text-primary-500 animate-spin" />
+              <CompassSpinner color="text-primary-500" />
             </div>
             <div v-else-if="dockerfileSource === 'none' && !dockerfileContent" class="p-12 text-center">
               <p class="text-gray-500 dark:text-gray-400 text-sm">No Dockerfile found. The system will auto-detect your runtime on the next deploy, or you can write one below.</p>
@@ -2279,7 +2280,7 @@ onUnmounted(() => {
                   :disabled="nginxSaving || !nginxConfig.trim()"
                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="nginxSaving" class="w-3.5 h-3.5 animate-spin" />
+                  <CompassSpinner v-if="nginxSaving" size="w-3.5 h-3.5" />
                   Save
                 </button>
                 <button
@@ -2288,13 +2289,13 @@ onUnmounted(() => {
                   :disabled="nginxSaving || !nginxConfig.trim()"
                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="nginxSaving" class="w-3.5 h-3.5 animate-spin" />
+                  <CompassSpinner v-if="nginxSaving" size="w-3.5 h-3.5" />
                   Save & Apply
                 </button>
               </div>
             </div>
             <div v-if="nginxLoading" class="p-12 flex items-center justify-center">
-              <Loader2 class="w-6 h-6 text-primary-500 animate-spin" />
+              <CompassSpinner color="text-primary-500" />
             </div>
             <div v-else>
               <textarea
@@ -2319,7 +2320,7 @@ onUnmounted(() => {
         <!-- Analytics -->
         <div v-if="activeTab === 'analytics'" class="space-y-6">
           <div v-if="analyticsLoading" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+            <CompassSpinner color="text-primary-600" />
           </div>
 
           <template v-else-if="analyticsData">
@@ -2468,7 +2469,7 @@ onUnmounted(() => {
         <!-- Billing -->
         <div v-if="activeTab === 'billing'" class="space-y-6">
           <div v-if="billingLoading" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+            <CompassSpinner color="text-primary-600" />
           </div>
 
           <template v-else>
@@ -2739,7 +2740,7 @@ onUnmounted(() => {
             <!-- Log entries -->
             <div ref="logsContainer" @scroll="onLogsScroll" class="h-96 overflow-y-auto font-mono text-xs leading-relaxed">
               <div v-if="logsLoading && !liveMode" class="flex items-center justify-center h-full">
-                <Loader2 class="w-6 h-6 text-gray-500 animate-spin" />
+                <CompassSpinner color="text-gray-500" />
               </div>
               <!-- Deploy stream mode: show build/deploy output -->
               <template v-else-if="isDeployStreaming && deployStream.logLines.value.length > 0">
@@ -2765,7 +2766,7 @@ onUnmounted(() => {
                 </div>
               </template>
               <div v-else-if="isDeployStreaming" class="flex items-center justify-center h-full text-gray-500">
-                <Loader2 class="w-5 h-5 animate-spin mr-2" />
+                <CompassSpinner size="w-5 h-5" class="mr-2" />
                 Waiting for deployment logs...
               </div>
               <div v-else class="flex items-center justify-center h-full text-gray-500">
@@ -2841,7 +2842,7 @@ onUnmounted(() => {
         <!-- Deployments -->
         <div v-if="activeTab === 'deployments'">
           <div v-if="deploymentsLoading" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-gray-400 animate-spin" />
+            <CompassSpinner color="text-gray-400" />
           </div>
           <div v-else-if="deployments.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
             No deployments yet.
@@ -3083,7 +3084,7 @@ onUnmounted(() => {
               :disabled="creatingBackup"
               class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
             >
-              <Loader2 v-if="creatingBackup" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="creatingBackup" size="w-3.5 h-3.5" />
               <Archive v-else class="w-3.5 h-3.5" />
               {{ creatingBackup ? 'Creating...' : 'Create Backup' }}
             </button>
@@ -3125,7 +3126,7 @@ onUnmounted(() => {
           <!-- Backups list -->
           <div v-if="backupSubTab === 'backups'">
             <div v-if="backupsLoading" class="flex items-center justify-center py-12">
-              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+              <CompassSpinner />
             </div>
             <div v-else-if="serviceBackups.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
               No backups for this service yet.

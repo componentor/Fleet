@@ -1,7 +1,7 @@
 slug: nextcloud
 name: Nextcloud
 description: Self-hosted productivity platform with file sync, collaboration, and office suite.
-icon_url: https://nextcloud.com/wp-content/uploads/2022/10/nextcloud-logo.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nextcloud.png
 category: storage
 
 variables:

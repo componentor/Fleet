@@ -1,7 +1,7 @@
 slug: authentik
 name: Authentik
 description: Flexible identity provider with support for OAuth2, SAML, LDAP, and SCIM. Modern authentication for all apps. Includes PostgreSQL and Redis.
-icon_url: https://goauthentik.io/img/icon.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/authentik.png
 category: auth
 
 variables:

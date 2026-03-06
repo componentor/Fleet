@@ -5,8 +5,9 @@ import { useTheme } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/auth'
 import {
   Sun, Moon, UserPlus, Globe, CheckCircle2, ArrowRight, ArrowLeft,
-  Loader2, Shield, Crown, Network, Container, AlertTriangle, RefreshCw, Ship,
+  Shield, Crown, Network, Container, AlertTriangle, RefreshCw, Ship,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -353,7 +354,7 @@ async function goToDashboard() {
               <!-- Docker detection (shown when docker or both is selected) -->
               <template v-if="orchestratorChoice === 'docker' || orchestratorChoice === 'both'">
                 <div v-if="dockerLoading" class="flex items-center justify-center py-6 gap-3 text-gray-500 dark:text-gray-400">
-                  <Loader2 class="w-5 h-5 animate-spin" />
+                  <CompassSpinner size="w-5 h-5" />
                   <span class="text-sm">{{ $t('setup.detectingDocker') }}</span>
                 </div>
 
@@ -389,7 +390,7 @@ async function goToDashboard() {
                       :disabled="swarmInitLoading"
                       class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
                     >
-                      <Loader2 v-if="swarmInitLoading" class="w-3.5 h-3.5 animate-spin" />
+                      <CompassSpinner v-if="swarmInitLoading" size="w-3.5 h-3.5" />
                       {{ swarmInitLoading ? $t('setup.initializing') : $t('setup.initSwarm') }}
                     </button>
                   </div>
@@ -545,7 +546,7 @@ async function goToDashboard() {
               :disabled="!canProceed || loading"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="loading" size="w-4 h-4" />
               <template v-if="currentStep === 3">
                 {{ loading ? $t('setup.settingUp') : $t('setup.completeSetup') }}
               </template>

@@ -1,7 +1,7 @@
 slug: strapi
 name: Strapi
 description: Leading open-source headless CMS with a customizable API and admin panel.
-icon_url: https://strapi.io/assets/favicon-32x32.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/strapi.png
 category: cms
 
 variables:

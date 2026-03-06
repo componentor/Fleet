@@ -3,7 +3,6 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   Activity,
   RefreshCw,
-  Loader2,
   Server,
   Database,
   Container,
@@ -18,6 +17,7 @@ import {
   BarChart3,
   Download,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -201,7 +201,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="loading && !status" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else-if="status">
@@ -365,7 +365,7 @@ onUnmounted(() => {
                     :disabled="installingMetrics"
                     class="ml-2 flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 transition-colors"
                   >
-                    <Loader2 v-if="installingMetrics" class="w-3 h-3 animate-spin" />
+                    <CompassSpinner v-if="installingMetrics" size="w-3 h-3" />
                     <Download v-else class="w-3 h-3" />
                     Install
                   </button>

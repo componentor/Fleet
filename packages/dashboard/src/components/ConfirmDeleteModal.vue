@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { AlertTriangle, Loader2, Trash2 } from 'lucide-vue-next'
+import { AlertTriangle, Trash2 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -144,7 +145,7 @@ function toggleAll() {
               :disabled="loading"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="loading" size="w-4 h-4" />
               <Trash2 v-else class="w-4 h-4" />
               {{ loading ? t('confirmDelete.deleting', 'Deleting...') : t('confirmDelete.confirm', 'Delete') }}
             </button>

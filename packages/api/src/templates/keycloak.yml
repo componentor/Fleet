@@ -1,7 +1,7 @@
 slug: keycloak
 name: Keycloak
 description: Open-source identity and access management. Single sign-on, social login, and user federation. Includes PostgreSQL.
-icon_url: https://www.keycloak.org/resources/images/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/keycloak.png
 category: auth
 
 variables:

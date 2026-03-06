@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Users,
-  Loader2,
   Save,
   Settings,
   FileText,
@@ -21,6 +20,7 @@ import {
   Eye,
   ExternalLink,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 
@@ -276,7 +276,7 @@ onMounted(() => { fetchAll() })
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>
@@ -454,7 +454,7 @@ onMounted(() => { fetchAll() })
                 :disabled="savingConfig"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="savingConfig" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingConfig" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingConfig ? 'Saving...' : 'Save Configuration' }}
               </button>
@@ -472,7 +472,7 @@ onMounted(() => { fetchAll() })
           </div>
 
           <div v-if="loadingApplications" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            <CompassSpinner />
           </div>
 
           <div v-else-if="applications.length === 0" class="px-6 py-12 text-center">
@@ -503,7 +503,7 @@ onMounted(() => { fetchAll() })
                     :disabled="processingApplication === app.id"
                     class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
                   >
-                    <Loader2 v-if="processingApplication === app.id" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="processingApplication === app.id" size="w-3.5 h-3.5" />
                     <Check v-else class="w-3.5 h-3.5" />
                     Approve
                   </button>
@@ -549,7 +549,7 @@ onMounted(() => { fetchAll() })
 
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div v-if="loadingResellers" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+            <CompassSpinner />
           </div>
 
           <div v-else-if="filteredResellers.length === 0" class="px-6 py-12 text-center">
@@ -711,7 +711,7 @@ onMounted(() => { fetchAll() })
                             :disabled="savingReseller === (reseller.account?.id ?? reseller.id)"
                             class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                           >
-                            <Loader2 v-if="savingReseller === (reseller.account?.id ?? reseller.id)" class="w-4 h-4 animate-spin" />
+                            <CompassSpinner v-if="savingReseller === (reseller.account?.id ?? reseller.id)" size="w-4 h-4" />
                             <Save v-else class="w-4 h-4" />
                             Save
                           </button>
@@ -759,7 +759,7 @@ onMounted(() => { fetchAll() })
                 :disabled="processingApplication !== null"
                 class="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="processingApplication !== null" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="processingApplication !== null" size="w-4 h-4" />
                 <X v-else class="w-4 h-4" />
                 Reject
               </button>

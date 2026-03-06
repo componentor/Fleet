@@ -34,6 +34,7 @@ import { orchestrator } from '../services/orchestrator.js';
 import { requireOwner } from '../middleware/rbac.js';
 import { calculateResellerPricing } from './reseller.js';
 import { logger, logToErrorTable } from '../services/logger.js';
+import { deployPendingService, deployPendingStack } from './services.js';
 import { exchangeRateService } from '../services/exchange-rate.service.js';
 import { currencyService } from '../services/currency.service.js';
 import { emailService } from '../services/email.service.js';
@@ -1872,6 +1873,121 @@ billing.post('/webhook', async (c) => {
             }
           } catch { /* email is best-effort */ }
         }
+      } else if (session.metadata?.type === 'bulk_domain_registration') {
+        // Multiple domains in a single checkout session
+        const accountId = session.metadata.accountId!;
+        const paymentIntentId = session.payment_intent as string;
+
+        try {
+          const domainsData: Array<{ domain: string; years: number }> = JSON.parse(session.metadata.domains || '[]');
+
+          if (domainsData.length === 0) {
+            logger.error({ metadata: session.metadata }, 'Bulk domain checkout: empty domains metadata');
+            break;
+          }
+
+          const { registrarService } = await import('../services/registrar.service.js');
+          const { domainRegistrations: domRegTable } = await import('@fleet/db');
+
+          // Look up account owner for WHOIS contact
+          const ownerMembership = await db.query.userAccounts.findFirst({
+            where: and(eq(userAccounts.accountId, accountId), eq(userAccounts.role, 'owner')),
+            with: { user: true },
+          });
+          const purchaseUser = ownerMembership?.user ?? null;
+
+          const contact = {
+            firstName: purchaseUser?.name?.split(' ')[0] ?? 'Account',
+            lastName: purchaseUser?.name?.split(' ').slice(1).join(' ') || 'Owner',
+            email: purchaseUser?.email ?? 'admin@example.com',
+            phone: '0000000000',
+            address1: 'See account profile',
+            city: 'See account profile',
+            state: 'N/A',
+            postalCode: '00000',
+            country: 'US',
+          };
+
+          const results: Array<{ domain: string; success: boolean; error?: string }> = [];
+
+          for (const item of domainsData) {
+            try {
+              // Idempotency check
+              const existing = await db.query.domainRegistrations.findFirst({
+                where: and(eq(domRegTable.domain, item.domain), eq(domRegTable.accountId, accountId)),
+              });
+
+              if (existing) {
+                logger.warn({ domain: item.domain, accountId }, 'Bulk checkout: domain already registered — skipping');
+                results.push({ domain: item.domain, success: true });
+                continue;
+              }
+
+              const registration = await registrarService.registerDomain(
+                item.domain, item.years, contact, accountId,
+              );
+
+              if (registration?.id && paymentIntentId) {
+                await db.update(domRegTable)
+                  .set({ stripePaymentId: paymentIntentId })
+                  .where(eq(domRegTable.id, registration.id));
+              }
+
+              results.push({ domain: item.domain, success: true });
+              logger.info({ domain: item.domain, accountId }, 'Bulk checkout: domain registered');
+            } catch (regErr) {
+              logger.error({ err: regErr, domain: item.domain, accountId }, 'Bulk checkout: domain registration failed');
+              logToErrorTable({ level: 'error', message: `Bulk domain registration failed for ${item.domain}: ${regErr instanceof Error ? regErr.message : String(regErr)}`, stack: regErr instanceof Error ? regErr.stack : null, metadata: { context: 'billing', operation: 'bulk-domain-registration', domain: item.domain, accountId } });
+              results.push({ domain: item.domain, success: false, error: regErr instanceof Error ? regErr.message : String(regErr) });
+            }
+          }
+
+          // Capture payment if at least one domain registered successfully
+          const anySuccess = results.some(r => r.success);
+          if (paymentIntentId) {
+            try {
+              if (anySuccess) {
+                await stripeService.capturePaymentIntent(paymentIntentId);
+                logger.info({ paymentIntent: paymentIntentId, accountId, results }, 'Bulk domain checkout: payment captured');
+              } else {
+                await stripeService.cancelPaymentIntent(paymentIntentId);
+                logger.info({ paymentIntent: paymentIntentId, accountId }, 'Bulk domain checkout: all registrations failed — payment cancelled');
+              }
+            } catch (captureErr) {
+              logger.error({ err: captureErr, paymentIntent: paymentIntentId, accountId, results },
+                'CRITICAL: Bulk domain checkout — payment capture/cancel failed');
+              logToErrorTable({ level: 'fatal', message: `Bulk domain checkout payment capture/cancel failed: ${captureErr instanceof Error ? captureErr.message : String(captureErr)}`, stack: captureErr instanceof Error ? captureErr.stack : null, metadata: { context: 'billing', operation: 'bulk-domain-capture', accountId, paymentIntent: paymentIntentId } });
+            }
+          }
+
+          // Notify about any failures
+          const failures = results.filter(r => !r.success);
+          if (failures.length > 0) {
+            try {
+              const { notifications } = await import('@fleet/db');
+              const failedDomains = failures.map(f => f.domain).join(', ');
+              await db.insert(notifications).values({
+                id: crypto.randomUUID(),
+                accountId,
+                type: 'billing',
+                title: 'Some Domain Registrations Failed',
+                message: `Registration failed for: ${failedDomains}. ${anySuccess ? 'Other domains were registered successfully.' : 'Your card was not charged.'} Please try again or contact support.`,
+                read: false,
+              });
+            } catch { /* notification is best-effort */ }
+          }
+        } catch (err) {
+          logger.error({ err, metadata: session.metadata }, 'Bulk domain checkout: unexpected error');
+          logToErrorTable({ level: 'fatal', message: `Bulk domain checkout unexpected error: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'billing', operation: 'bulk-domain-registration-webhook', accountId, paymentIntent: paymentIntentId } });
+
+          if (paymentIntentId) {
+            try {
+              await stripeService.cancelPaymentIntent(paymentIntentId);
+            } catch (cancelErr) {
+              logger.error({ err: cancelErr, paymentIntent: paymentIntentId }, 'Failed to cancel payment for failed bulk domain checkout');
+            }
+          }
+        }
       } else if (session.metadata?.type === 'domain_renewal') {
         const registrationId = session.metadata.registrationId!;
         const accountId = session.metadata.accountId;
@@ -2020,6 +2136,17 @@ billing.post('/webhook', async (c) => {
               await tx.update(services).set({ planId, updatedAt: new Date() }).where(eq(services.id, serviceId));
             }
           });
+
+          // Deploy service(s) that were waiting for payment
+          if (stackId) {
+            deployPendingStack(stackId).catch((err) => {
+              logger.error({ err, stackId }, 'Failed to deploy stack after checkout webhook');
+            });
+          } else if (serviceId) {
+            deployPendingService(serviceId).catch((err) => {
+              logger.error({ err, serviceId }, 'Failed to deploy service after checkout webhook');
+            });
+          }
         }
       } else if (session.customer && session.subscription) {
         // Legacy account-level subscription checkout
@@ -2561,6 +2688,7 @@ const publicPlansRoute = createRoute({
       plans: z.array(z.any()),
       allowedCycles: z.array(z.string()).optional(),
       trialDays: z.number().optional(),
+      domainMaxYears: z.number().optional(),
       currency: z.string().optional(),
     }), 'Public plans list'),
   },
@@ -2623,17 +2751,19 @@ billing.openapi(publicPlansRoute, (async (c: any) => {
   // Include billing config for cycle/trial info
   let allowedCycles: string[] | undefined;
   let trialDays: number | undefined;
+  let domainMaxYears: number | undefined;
   try {
     const config = await db.query.billingConfig.findFirst();
     if (config) {
       allowedCycles = (config.allowedCycles as string[]) ?? undefined;
       trialDays = config.trialDays ?? undefined;
+      domainMaxYears = (config as any).domainMaxYears ?? 10;
     }
   } catch {
     // Billing config may not exist yet
   }
 
-  return c.json({ plans: safePlans, allowedCycles, trialDays, currency: tc });
+  return c.json({ plans: safePlans, allowedCycles, trialDays, domainMaxYears, currency: tc });
 }) as any);
 
 // ─── Exchange Rate endpoints (admin, on authed sub-router) ────────────────────

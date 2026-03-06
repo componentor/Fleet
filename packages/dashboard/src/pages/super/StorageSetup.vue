@@ -4,11 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 import {
   HardDrive, Server, Shield, CheckCircle2, ArrowRight, ArrowLeft,
-  Loader2, Plus, Trash2, RefreshCw, AlertTriangle, Database,
+  Plus, Trash2, RefreshCw, AlertTriangle, Database,
   Cloud, Monitor, Settings, Activity, BookOpen, ChevronDown,
   ChevronUp, Lock, Network, Terminal, Wifi, WifiOff, Cpu,
   MapPin, Globe,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const { t } = useI18n()
 const api = useApi()
@@ -1128,7 +1129,7 @@ async function attachNewNode() {
           <div v-if="swarmNodes.length || loadingSwarmNodes" class="space-y-2">
             <p class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('storageSetup.pickFromSwarm') }}</p>
             <div v-if="loadingSwarmNodes && !swarmNodes.length" class="flex items-center gap-2 py-3 text-sm text-gray-500 dark:text-gray-400">
-              <Loader2 class="w-4 h-4 animate-spin" />
+              <CompassSpinner size="w-4 h-4" />
               {{ t('storageSetup.loadingNodes') }}
             </div>
             <div v-else class="grid grid-cols-1 gap-2">
@@ -1191,7 +1192,7 @@ async function attachNewNode() {
               :disabled="attaching || !attachNode.hostname || !attachNode.ipAddress"
               class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="attaching" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+              <CompassSpinner v-if="attaching" size="w-4 h-4" class="inline -mt-0.5 mr-1" />
               {{ attaching ? t('common.saving') : t('storageSetup.attachNode') }}
             </button>
             <button @click="showAttachNode = false" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
@@ -1219,7 +1220,7 @@ async function attachNewNode() {
               :disabled="repairLoading"
               class="shrink-0 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="repairLoading" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+              <CompassSpinner v-if="repairLoading" size="w-4 h-4" class="inline -mt-0.5 mr-1" />
               {{ repairLoading ? 'Repairing...' : 'Repair Services' }}
             </button>
           </div>
@@ -1300,7 +1301,7 @@ async function attachNewNode() {
                 :disabled="detaching || !detachPassword"
                 class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="detaching" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+                <CompassSpinner v-if="detaching" size="w-4 h-4" class="inline -mt-0.5 mr-1" />
                 {{ detaching ? t('storageSetup.detaching') : t('storageSetup.confirmDetach') }}
               </button>
               <button @click="detachingNodeId = null; detachPassword = ''" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
@@ -1347,7 +1348,7 @@ async function attachNewNode() {
                 :disabled="resetting || !resetPassword"
                 class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="resetting" class="w-4 h-4 animate-spin inline -mt-0.5 mr-1" />
+                <CompassSpinner v-if="resetting" size="w-4 h-4" class="inline -mt-0.5 mr-1" />
                 {{ resetting ? t('storageSetup.resettingStorage') : t('storageSetup.confirmReset') }}
               </button>
               <button @click="showResetConfirm = false; resetPassword = ''" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
@@ -1378,7 +1379,7 @@ async function attachNewNode() {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-12 gap-3 text-gray-500 dark:text-gray-400">
-      <Loader2 class="w-5 h-5 animate-spin" />
+      <CompassSpinner size="w-5 h-5" />
       <span class="text-sm">{{ t('storageSetup.loading') }}</span>
     </div>
 
@@ -2015,7 +2016,7 @@ async function attachNewNode() {
               <div class="flex items-center gap-2">
                 <CheckCircle2 v-if="node.testStatus === 'ok'" class="w-4 h-4 text-green-500" />
                 <AlertTriangle v-else-if="node.testStatus === 'error'" class="w-4 h-4 text-red-500" />
-                <Loader2 v-else-if="node.testStatus === 'testing'" class="w-4 h-4 animate-spin text-gray-400" />
+                <CompassSpinner v-else-if="node.testStatus === 'testing'" size="w-4 h-4" color="text-gray-400" />
                 <button @click="testNode(index)" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ t('storageSetup.test') }}</button>
                 <button @click="removeNode(index)" class="text-red-500 hover:text-red-700">
                   <Trash2 class="w-4 h-4" />
@@ -2047,7 +2048,7 @@ async function attachNewNode() {
                 <div v-if="probeResults[sn.id]" class="px-3 pb-3 border-t border-gray-100 dark:border-gray-700/50">
                   <!-- Loading state -->
                   <div v-if="probeResults[sn.id]?.loading" class="flex items-center gap-2 py-2 text-xs text-gray-500 dark:text-gray-400">
-                    <Loader2 class="w-3 h-3 animate-spin" />
+                    <CompassSpinner size="w-3 h-3" />
                     {{ t('storageSetup.probing') }}
                   </div>
 
@@ -2134,7 +2135,7 @@ async function attachNewNode() {
           </div>
 
           <div v-if="loadingSwarmNodes && !swarmNodes.length" class="flex items-center justify-center py-4 text-sm text-gray-500 dark:text-gray-400">
-            <Loader2 class="w-4 h-4 animate-spin mr-2" />
+            <CompassSpinner size="w-4 h-4" class="mr-2" />
             {{ t('storageSetup.loadingNodes') }}
           </div>
 
@@ -2195,7 +2196,7 @@ async function attachNewNode() {
                 :disabled="installingPrereqs"
                 class="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="installingPrereqs" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="installingPrereqs" size="w-4 h-4" />
                 <Settings v-else class="w-4 h-4" />
                 {{ installingPrereqs ? 'Installing...' : 'Install Now' }}
               </button>
@@ -2404,7 +2405,7 @@ async function attachNewNode() {
             <div class="bg-gray-900 rounded-lg p-4 font-mono text-xs text-green-400 max-h-64 overflow-y-auto">
               <div v-for="(log, i) in initLogs" :key="i" class="py-0.5">{{ log }}</div>
               <div v-if="initStatus === 'running'" class="flex items-center gap-2 py-0.5">
-                <Loader2 class="w-3 h-3 animate-spin" />
+                <CompassSpinner size="w-3 h-3" />
                 {{ t('storageSetup.working') }}
               </div>
             </div>

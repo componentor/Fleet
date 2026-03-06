@@ -1,7 +1,7 @@
 slug: minio
 name: MinIO
 description: High-performance S3-compatible object storage for cloud-native workloads.
-icon_url: https://min.io/resources/img/logo/MINIO_Bird.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/minio.png
 category: storage
 
 variables:

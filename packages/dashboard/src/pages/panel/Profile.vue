@@ -2,7 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { User, Save, Lock, Loader2, Mail, Github, Link2, Unlink, Download, Trash2, AlertTriangle, Send, Upload, X, Shield, ToggleLeft, ToggleRight, KeyRound, Plus, Copy, Check } from 'lucide-vue-next'
+import { User, Save, Lock, Mail, Github, Link2, Unlink, Download, Trash2, AlertTriangle, Send, Upload, X, Shield, ToggleLeft, ToggleRight, KeyRound, Plus, Copy, Check } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/composables/useAuth'
@@ -476,7 +477,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="space-y-8 max-w-2xl">
@@ -539,7 +540,7 @@ onMounted(() => {
                     :disabled="changingEmail || !newEmail || !emailPassword"
                     class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
-                    <Loader2 v-if="changingEmail" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="changingEmail" size="w-3.5 h-3.5" />
                     <Mail v-else class="w-3.5 h-3.5" />
                     {{ $t('profile.sendVerification') }}
                   </button>
@@ -577,7 +578,7 @@ onMounted(() => {
                     :disabled="uploadingAvatar"
                     class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
                   >
-                    <Loader2 v-if="uploadingAvatar" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="uploadingAvatar" size="w-3.5 h-3.5" />
                     <Upload v-else class="w-3.5 h-3.5" />
                     {{ $t('profile.uploadAvatar') }}
                   </button>
@@ -605,7 +606,7 @@ onMounted(() => {
           </div>
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="savingProfile" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingProfile" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingProfile" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingProfile ? $t('profile.saving') : $t('profile.saveChanges') }}
             </button>
@@ -656,7 +657,7 @@ onMounted(() => {
           </div>
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="changingPassword || !currentPassword || !newPassword || !confirmPassword" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="changingPassword" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="changingPassword" size="w-4 h-4" />
               <Lock v-else class="w-4 h-4" />
               {{ changingPassword ? $t('profile.changingPassword') : $t('profile.changePassword') }}
             </button>
@@ -675,7 +676,7 @@ onMounted(() => {
         </div>
         <div class="p-6 space-y-4">
           <div v-if="loadingOAuth" class="flex items-center justify-center py-4">
-            <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+            <CompassSpinner size="w-5 h-5" color="text-gray-400" />
           </div>
           <template v-else>
             <!-- GitHub -->
@@ -696,7 +697,7 @@ onMounted(() => {
                 :disabled="disconnecting === 'github'"
                 class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
               >
-                <Loader2 v-if="disconnecting === 'github'" class="w-3.5 h-3.5 animate-spin" />
+                <CompassSpinner v-if="disconnecting === 'github'" size="w-3.5 h-3.5" />
                 <Unlink v-else class="w-3.5 h-3.5" />
                 {{ $t('profile.disconnect') }}
               </button>
@@ -733,7 +734,7 @@ onMounted(() => {
                 :disabled="disconnecting === 'google'"
                 class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
               >
-                <Loader2 v-if="disconnecting === 'google'" class="w-3.5 h-3.5 animate-spin" />
+                <CompassSpinner v-if="disconnecting === 'google'" size="w-3.5 h-3.5" />
                 <Unlink v-else class="w-3.5 h-3.5" />
                 {{ $t('profile.disconnect') }}
               </button>
@@ -761,7 +762,7 @@ onMounted(() => {
         </div>
         <div class="p-6 space-y-3">
           <div v-if="loadingLoginMethods" class="flex items-center justify-center py-4">
-            <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+            <CompassSpinner size="w-5 h-5" color="text-gray-400" />
           </div>
           <template v-else>
             <div
@@ -796,7 +797,7 @@ onMounted(() => {
                 class="p-1 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 :class="method.enabled ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20' : 'text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-600'"
               >
-                <Loader2 v-if="togglingMethod === method.method" class="w-7 h-7 animate-spin" />
+                <CompassSpinner v-if="togglingMethod === method.method" size="w-7 h-7" />
                 <ToggleRight v-else-if="method.enabled" class="w-7 h-7" />
                 <ToggleLeft v-else class="w-7 h-7" />
               </button>
@@ -863,7 +864,7 @@ onMounted(() => {
                 :disabled="addingKey || !newKeyName.trim() || !newKeyPublicKey.trim()"
                 class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="addingKey" class="w-3.5 h-3.5 animate-spin" />
+                <CompassSpinner v-if="addingKey" size="w-3.5 h-3.5" />
                 <Plus v-else class="w-3.5 h-3.5" />
                 Add Key
               </button>
@@ -872,7 +873,7 @@ onMounted(() => {
 
           <!-- Loading -->
           <div v-if="loadingSshKeys" class="flex items-center justify-center py-4">
-            <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+            <CompassSpinner size="w-5 h-5" color="text-gray-400" />
           </div>
 
           <!-- Keys list -->
@@ -916,7 +917,7 @@ onMounted(() => {
                 class="shrink-0 ml-4 p-2 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
                 title="Delete key"
               >
-                <Loader2 v-if="deletingKeyId === key.id" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="deletingKeyId === key.id" size="w-4 h-4" />
                 <Trash2 v-else class="w-4 h-4" />
               </button>
             </div>
@@ -942,7 +943,7 @@ onMounted(() => {
             :disabled="exporting"
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
           >
-            <Loader2 v-if="exporting" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="exporting" size="w-4 h-4" />
             <Download v-else class="w-4 h-4" />
             {{ exporting ? $t('profile.exporting') : $t('profile.downloadMyData') }}
           </button>
@@ -1067,7 +1068,7 @@ onMounted(() => {
                 :disabled="deletingAccount || (!deletePassword && !deleteEmailCode)"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="deletingAccount" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="deletingAccount" size="w-4 h-4" />
                 <Trash2 v-else class="w-4 h-4" />
                 {{ deletingAccount ? $t('profile.deleting') : $t('profile.deletePermanently') }}
               </button>

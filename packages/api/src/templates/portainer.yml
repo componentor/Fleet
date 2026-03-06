@@ -1,7 +1,7 @@
 slug: portainer
 name: Portainer
 description: Lightweight container management UI for Docker, Swarm, and Kubernetes. Manage containers visually.
-icon_url: https://www.portainer.io/hubfs/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/portainer.png
 category: development
 
 variables:

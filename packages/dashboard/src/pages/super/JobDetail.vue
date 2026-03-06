@@ -11,11 +11,11 @@ import {
   CheckCircle2,
   XCircle,
   Timer,
-  Loader2,
   RefreshCw,
   Trash2,
   FastForward,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const props = defineProps<{
   queue: string
@@ -142,7 +142,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Not found -->

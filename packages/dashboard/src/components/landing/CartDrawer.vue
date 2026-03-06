@@ -43,6 +43,7 @@ const plans = ref<ApiPlan[]>([])
 const plansLoaded = ref(false)
 const showComparison = ref(false)
 const allowedCycles = ref<BillingCycle[]>(['monthly', 'yearly'])
+const domainMaxYears = ref(10)
 
 function formatMemory(mb: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${mb} MB`
@@ -62,6 +63,7 @@ watch(() => props.open, async (isOpen) => {
         const data = await res.json()
         if (data.plans?.length) plans.value = data.plans
         if (data.allowedCycles?.length) allowedCycles.value = data.allowedCycles
+        if (data.domainMaxYears) domainMaxYears.value = data.domainMaxYears
       }
     } catch { /* fallback: no plans shown */ }
     plansLoaded.value = true
@@ -189,7 +191,7 @@ function togglePlan(domain: string, plan: ApiPlan) {
                       </span>
                       <button
                         @click="setYears(item.domain, item.years + 1)"
-                        :disabled="item.years >= 10"
+                        :disabled="item.years >= domainMaxYears"
                         class="flex items-center justify-center w-7 h-7 rounded-lg border border-surface-200 dark:border-surface-700 text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-700 disabled:opacity-30 transition-colors"
                       >
                         <Plus class="w-3.5 h-3.5" />
@@ -319,11 +321,11 @@ function togglePlan(domain: string, plan: ApiPlan) {
               <p class="text-[11px] text-surface-400 dark:text-surface-500">{{ t('landing.cart.exclVat', 'Excl. VAT') }}</p>
             </div>
             <router-link
-              to="/get-started?cart=true"
+              to="/onboarding?cart=true"
               @click="emit('close')"
               class="block w-full rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
             >
-              {{ t('landing.cart.checkout', 'Continue to Checkout') }}
+              {{ t('landing.cart.checkout', 'Proceed to checkout') }}
             </router-link>
           </div>
         </div>

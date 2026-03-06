@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, Plus, Loader2, Info, FolderOpen, RefreshCw, MapPin, Maximize2 } from 'lucide-vue-next'
+import { HardDrive, Plus, Info, FolderOpen, RefreshCw, MapPin, Maximize2 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import FileExplorer from '@/components/FileExplorer.vue'
@@ -319,7 +320,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Key, Plus, Trash2, Loader2 } from 'lucide-vue-next'
+import { Key, Plus, Trash2 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 
@@ -109,7 +110,7 @@ onMounted(() => {
             :disabled="adding || !newKeyName || !newKeyContent"
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
-            <Loader2 v-if="adding" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="adding" size="w-4 h-4" />
             <Plus v-else class="w-4 h-4" />
             {{ adding ? t('ssh.adding') : t('ssh.addKey') }}
           </button>
@@ -118,7 +119,7 @@ onMounted(() => {
 
       <!-- Keys table -->
       <div v-if="loading" class="flex items-center justify-center py-20">
-        <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+        <CompassSpinner size="w-8 h-8" />
       </div>
 
       <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { Database, Table2, Play, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, Eye, Columns3, Terminal, Plus, Trash2, X, Check, Download, Upload, KeyRound, Copy, EyeOff, Eye as EyeIcon, Info } from 'lucide-vue-next'
+import { Database, Table2, Play, ChevronLeft, ChevronRight, ArrowUpDown, Eye, Columns3, Terminal, Plus, Trash2, X, Check, Download, Upload, KeyRound, Copy, EyeOff, Eye as EyeIcon, Info } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 import { usePlatformDomain } from '@/composables/usePlatformDomain'
@@ -497,7 +498,7 @@ watch(() => props.serviceId, () => {
   <div>
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Not a database -->
@@ -535,12 +536,12 @@ watch(() => props.serviceId, () => {
         <div class="flex items-center gap-2">
           <!-- Export / Import / Connection buttons -->
           <button @click="exportDatabase" :disabled="exportLoading" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-750 text-xs font-medium transition-colors disabled:opacity-50" title="Export database dump">
-            <Loader2 v-if="exportLoading" class="w-3.5 h-3.5 animate-spin" />
+            <CompassSpinner v-if="exportLoading" size="w-3.5 h-3.5" />
             <Download v-else class="w-3.5 h-3.5" />
             Export
           </button>
           <button @click="triggerImport" :disabled="importLoading" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-750 text-xs font-medium transition-colors disabled:opacity-50" title="Import SQL dump">
-            <Loader2 v-if="importLoading" class="w-3.5 h-3.5 animate-spin" />
+            <CompassSpinner v-if="importLoading" size="w-3.5 h-3.5" />
             <Upload v-else class="w-3.5 h-3.5" />
             Import
           </button>
@@ -575,7 +576,7 @@ watch(() => props.serviceId, () => {
           <button @click="showConnectionGuide = false" class="p-1 text-gray-400 hover:text-gray-600"><X class="w-4 h-4" /></button>
         </div>
         <div v-if="credentialsLoading" class="flex items-center justify-center py-8">
-          <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+          <CompassSpinner size="w-5 h-5" color="text-gray-400" />
         </div>
         <div v-else-if="credentials" class="p-4 space-y-4">
           <!-- Credentials grid -->
@@ -662,7 +663,7 @@ watch(() => props.serviceId, () => {
               </button>
             </div>
             <div v-if="tablesLoading" class="flex items-center justify-center py-8">
-              <Loader2 class="w-5 h-5 text-gray-400 animate-spin" />
+              <CompassSpinner size="w-5 h-5" color="text-gray-400" />
             </div>
             <div v-else-if="tables.length === 0" class="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
               {{ isMongo ? 'No collections found.' : 'No tables found.' }}
@@ -743,14 +744,14 @@ watch(() => props.serviceId, () => {
               <div class="flex justify-end gap-2 mt-3">
                 <button @click="showAddRowForm = false" class="px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800">Cancel</button>
                 <button @click="insertRow" :disabled="addRowLoading" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors">
-                  <Loader2 v-if="addRowLoading" class="w-3.5 h-3.5 animate-spin" />
+                  <CompassSpinner v-if="addRowLoading" size="w-3.5 h-3.5" />
                   Insert Row
                 </button>
               </div>
             </div>
 
             <div v-if="dataLoading" class="flex items-center justify-center py-16">
-              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+              <CompassSpinner />
             </div>
             <template v-else>
               <div class="overflow-x-auto">
@@ -807,7 +808,7 @@ watch(() => props.serviceId, () => {
                       <!-- Delete button -->
                       <td v-if="primaryKeyColumns.length > 0" class="px-2 py-2.5">
                         <button @click="deleteRow(i)" :disabled="deleteRowLoading === i" class="p-1 rounded text-gray-400 hover:text-red-500 transition-colors" title="Delete row">
-                          <Loader2 v-if="deleteRowLoading === i" class="w-3.5 h-3.5 animate-spin" />
+                          <CompassSpinner v-if="deleteRowLoading === i" size="w-3.5 h-3.5" />
                           <Trash2 v-else class="w-3.5 h-3.5" />
                         </button>
                       </td>
@@ -837,7 +838,7 @@ watch(() => props.serviceId, () => {
           <!-- Structure view -->
           <div v-if="activeView === 'structure' && selectedTable" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
             <div v-if="structureLoading" class="flex items-center justify-center py-16">
-              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+              <CompassSpinner />
             </div>
             <table v-else class="w-full text-sm">
               <thead>
@@ -884,7 +885,7 @@ watch(() => props.serviceId, () => {
                     Read-only
                   </label>
                   <button @click="executeQuery" :disabled="queryLoading || !queryText.trim()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors">
-                    <Loader2 v-if="queryLoading" class="w-3.5 h-3.5 animate-spin" />
+                    <CompassSpinner v-if="queryLoading" size="w-3.5 h-3.5" />
                     <Play v-else class="w-3.5 h-3.5" />
                     Execute
                   </button>
@@ -966,7 +967,7 @@ watch(() => props.serviceId, () => {
         <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
           <button @click="showCreateTableForm = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800">Cancel</button>
           <button @click="createTable" :disabled="createTableLoading || !newTableName.trim() || (!isMongo && newTableColumns.length === 0)" class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-            <Loader2 v-if="createTableLoading" class="w-4 h-4 animate-spin inline mr-1" />
+            <CompassSpinner v-if="createTableLoading" size="w-4 h-4" class="inline mr-1" />
             {{ isMongo ? 'Create Collection' : 'Create Table' }}
           </button>
         </div>

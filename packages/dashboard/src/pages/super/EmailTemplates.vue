@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Mail, Loader2, Save, RotateCcw, Send, Eye, Code, Check, RefreshCw } from 'lucide-vue-next'
+import { Mail, Save, RotateCcw, Send, Eye, Code, Check, RefreshCw } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -204,14 +205,14 @@ onMounted(() => {
         :disabled="reseeding"
         class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
       >
-        <Loader2 v-if="reseeding" class="w-4 h-4 animate-spin" />
+        <CompassSpinner v-if="reseeding" size="w-4 h-4" />
         <RefreshCw v-else class="w-4 h-4" />
         Re-seed All
       </button>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else class="flex flex-col lg:flex-row gap-6">
@@ -245,7 +246,7 @@ onMounted(() => {
               class="p-1.5 rounded-md text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 shrink-0"
               title="Re-seed to default"
             >
-              <Loader2 v-if="reseedingSlug === tpl.slug" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="reseedingSlug === tpl.slug" size="w-3.5 h-3.5" />
               <RefreshCw v-else class="w-3.5 h-3.5" />
             </button>
           </div>
@@ -337,7 +338,7 @@ onMounted(() => {
                   :disabled="saving"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
-                  <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="saving" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                   Save
                 </button>
@@ -346,7 +347,7 @@ onMounted(() => {
                   :disabled="resetting"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
                 >
-                  <Loader2 v-if="resetting" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="resetting" size="w-4 h-4" />
                   <RotateCcw v-else class="w-4 h-4" />
                   Reset to Default
                 </button>
@@ -391,7 +392,7 @@ onMounted(() => {
                 :disabled="sending || !testEmail"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="sending" size="w-4 h-4" />
                 <Send v-else class="w-4 h-4" />
                 Send Test
               </button>

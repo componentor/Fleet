@@ -3,13 +3,13 @@ import { ref, reactive, onMounted } from 'vue'
 import {
   ScrollText,
   Search,
-  Loader2,
   Filter,
   ChevronDown,
   ChevronUp,
   X,
   Archive,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useAccount } from '@/composables/useAccount'
 import { useI18n } from 'vue-i18n'
@@ -318,7 +318,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Table -->

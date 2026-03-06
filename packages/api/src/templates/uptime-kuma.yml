@@ -1,7 +1,7 @@
 slug: uptime-kuma
 name: Uptime Kuma
 description: Self-hosted monitoring tool with a beautiful UI. Supports HTTP, TCP, DNS, and more.
-icon_url: https://uptime.kuma.pet/img/icon.svg
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png
 category: monitoring
 
 variables:

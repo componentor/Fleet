@@ -1,7 +1,7 @@
 slug: wordpress
 name: WordPress
 description: The world's most popular CMS. Includes WordPress and MySQL database.
-icon_url: https://s.w.org/style/images/about/WordPress-logotype-wmark.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/wordpress.png
 category: cms
 
 variables:

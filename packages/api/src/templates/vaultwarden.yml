@@ -1,7 +1,7 @@
 slug: vaultwarden
 name: Vaultwarden
 description: Lightweight Bitwarden-compatible password manager server written in Rust.
-icon_url: https://raw.githubusercontent.com/dani-garcia/vaultwarden/main/resources/vaultwarden-icon.svg
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/vaultwarden.png
 category: other
 
 variables:

@@ -65,7 +65,7 @@
     "namePlaceholder": "Enter your name",
     "signInButton": "Sign In",
     "signUpButton": "Create Account",
-    "noAccount": "Don't have an account?",
+    "noAccount": "New to the crew?",
     "hasAccount": "Already have an account?",
     "emailNotVerified": "Please verify your email address",
     "resendVerification": "Resend Verification Email",
@@ -81,7 +81,7 @@
     "verifyButton": "Verify",
     "backToLogin": "Back to Sign In",
     "orContinueWith": "Or continue with",
-    "welcomeBack": "Welcome back",
+    "welcomeBack": "Welcome aboard",
     "createYourAccount": "Create your account",
     "enterCode": "Enter the verification code",
     "signInWithGithub": "Sign in with GitHub",
@@ -91,7 +91,7 @@
     "orContinueWithEmail": "or continue with email",
     "signingIn": "Signing in...",
     "creatingAccount": "Creating account...",
-    "createOne": "Create one",
+    "createOne": "Come aboard",
     "getStartedWithSiglar": "Get started with Siglar today",
     "createStrongPassword": "Create a strong password",
     "passwordMinLength": "Must be at least 8 characters",
@@ -123,7 +123,7 @@
     "emailVerifiedDesc": "Your email has been successfully verified. You can now sign in.",
     "continueToSignIn": "Continue to sign in",
     "verificationFailed": "Verification failed",
-    "signInToAccount": "Sign in to your account",
+    "signInToAccount": "Sign in to get started",
     "pleaseEnterBackupCode": "Please enter a backup code.",
     "pleaseEnter6DigitCode": "Please enter your 6-digit code.",
     "codeMustBe6Digits": "Code must be exactly 6 digits.",
@@ -133,7 +133,7 @@
     "noTokenReceived": "Authentication failed. No token received."
   },
   "authLayout": {
-    "tagline": "Cloud hosting made simple"
+    "tagline": "Navigate with confidence"
   },
   "notifications": {
     "title": "Notifications",
@@ -248,7 +248,7 @@
     "goodMorning": "Good morning, {name}",
     "goodAfternoon": "Good afternoon, {name}",
     "goodEvening": "Good evening, {name}",
-    "welcomeBack": "Welcome back, {name}! We're glad to see you.",
+    "welcomeBack": "Welcome back, {name}!",
     "servicesHealth": "Services Health",
     "allHealthy": "All systems operational",
     "running": "Running",
@@ -986,6 +986,14 @@
     "deploying": "Deploying...",
     "deploy": "Deploy",
     "deploymentFailed": "Deployment failed",
+    "dockerfile": {
+      "title": "Dockerfile / Compose",
+      "optional": "(optional)",
+      "hint": "Paste or upload a Dockerfile or docker-compose.yml to build a custom image for this service.",
+      "upload": "Upload file",
+      "lines": "lines",
+      "clear": "Clear"
+    },
     "github": {
       "checkingConnection": "Checking GitHub connection...",
       "connectTitle": "Connect GitHub Account",
@@ -1009,6 +1017,51 @@
       "failedConnection": "Failed to check GitHub connection",
       "failedRepos": "Failed to fetch repositories",
       "failedBranches": "Failed to fetch branches"
+    },
+    "fromRegistry": "From Registry",
+    "fromRegistryDesc": "Deploy from a Docker registry with auto-deploy on push",
+    "fromCli": "Deploy from CLI",
+    "fromCliDesc": "Deploy directly from your terminal using the Siglar CLI",
+    "cli": {
+      "title": "Deploy from CLI",
+      "subtitle": "Use the Siglar CLI to deploy services directly from your terminal.",
+      "installTitle": "Install the CLI",
+      "loginTitle": "Log in to your account",
+      "loginHint": "Or use an API key:",
+      "initTitle": "Initialize your project",
+      "initHint": "This creates a siglar.yml config in your project directory.",
+      "deployTitle": "Deploy!",
+      "usefulCommands": "Useful commands",
+      "cmdList": "List your services",
+      "cmdLogs": "View service logs",
+      "cmdEnv": "Set environment variables",
+      "cmdRedeploy": "Redeploy a service",
+      "envTipTitle": "Tip: Skip login with a .env file",
+      "envTipDesc": "Add an API key to your project's .env file so the CLI authenticates automatically — no need to run login each time.",
+      "envTipApiKeys": "You can create a long-lived API key from",
+      "envTipApiKeysLink": "Settings → API Keys",
+      "manageTitle": "Updating existing services",
+      "manageDesc": "Already have a running service? Use these commands to update it without redeploying from scratch.",
+      "cmdUpdate": "Push an update to an existing service",
+      "cmdScale": "Scale a service up or down",
+      "cmdDomain": "Attach a custom domain",
+      "cmdEnvUpdate": "Update environment variables (auto-redeploys)",
+      "cmdStop": "Stop a service",
+      "cmdStart": "Start a stopped service"
+    },
+    "fromGit": "Deploy from Git",
+    "fromGitDesc": "Deploy from any Git repository — GitLab, Bitbucket, Gitea, or any self-hosted provider",
+    "git": {
+      "title": "Deploy from Git Repository",
+      "subtitle": "Clone and build from any Git provider using an HTTPS URL.",
+      "repoUrl": "Repository URL",
+      "repoUrlPlaceholder": "https://gitlab.com/user/project.git",
+      "repoUrlHint": "HTTPS URL to any Git repository. Supports GitLab, Bitbucket, Gitea, Codeberg, Forgejo, and self-hosted instances.",
+      "branch": "Branch",
+      "branchPlaceholder": "main",
+      "accessToken": "Access Token (for private repos)",
+      "accessTokenHint": "Personal access token or deploy token. Only needed for private repositories.",
+      "providers": "Works with GitLab, Bitbucket, Gitea, Codeberg, Forgejo, and any Git host"
     },
     "fromUpload": "Upload Project",
     "fromUploadDesc": "Upload a project archive (zip, tar) or folder and deploy it.",
@@ -1843,6 +1896,24 @@
         "noVars": "No environment variables found",
         "refresh": "Refresh",
         "filePath": "/opt/fleet/config/env"
+      },
+      "registration": {
+        "title": "Registration",
+        "desc": "Control whether new users can sign up for the platform.",
+        "currentAccounts": "{count} accounts registered",
+        "modeLabel": "Registration mode",
+        "modeOpen": "Open",
+        "modeOpenDesc": "Anyone can create a new account.",
+        "modeLimited": "Limited",
+        "modeLimitedDesc": "Allow registrations up to a maximum number of accounts. Admins are notified when the limit is reached.",
+        "modeClosed": "Closed",
+        "modeClosedDesc": "No new accounts can be created. Existing users can still log in.",
+        "maxAccountsLabel": "Maximum accounts",
+        "maxAccountsHint": "New registrations will be blocked once this limit is reached.",
+        "closedMessageLabel": "Custom message for visitors",
+        "closedMessagePlaceholder": "We are not accepting new registrations right now. Please check back soon!",
+        "save": "Save",
+        "saved": "Registration settings saved"
       }
     },
     "billing": {
@@ -2831,15 +2902,27 @@
     "errorLog": "Error Log",
     "createdAt": "Archived At"
   },
+  "checkout": {
+    "title": "Checkout",
+    "subtitle": "Review your cart before proceeding",
+    "proceed": "Proceed to checkout",
+    "processing": "Processing...",
+    "checkoutFailed": "Checkout failed. Please try again.",
+    "stripeNotConfigured": "Payment processing is not yet configured. Please contact support or try again later.",
+    "noCheckoutUrl": "Could not create checkout session. Please try again.",
+    "skipToDashboard": "Skip to dashboard"
+  },
   "onboarding": {
-    "welcome": "Let's get you set up",
-    "welcomeDesc": "Create your account to get started. It only takes a minute.",
+    "welcome": "Welcome aboard",
+    "welcomeDesc": "Create your account to set sail. It only takes a minute.",
     "createAccount": "Create your account",
-    "createAccountDesc": "One last step before we get you started.",
+    "createAccountDesc": "One last step before you set sail.",
     "createAndContinue": "Create Account & Continue",
     "alreadyHaveAccount": "Already have an account?",
     "signIn": "Sign in",
     "registrationFailed": "Registration failed. Please try again.",
+    "registrationClosed": "We are not accepting new registrations at this time. Please check back soon — we would love to have you on board!",
+    "registrationClosedTitle": "Registration is currently closed",
     "stepAccount": "Account",
     "stepPlan": "Plan",
     "stepCheckout": "Checkout",
@@ -2875,13 +2958,19 @@
     "redirectingCheckoutDesc": "You'll be taken to Stripe to complete your payment.",
     "checkoutFailed": "Could not start checkout. Please try again.",
     "backToPlans": "Back to plans",
-    "welcomeBack": "You're all set, {name}!",
-    "welcomeBackDesc": "Your account is ready. Here's what you can do.",
+    "welcomeGreeting0": "Good to see you, {name}!",
+    "welcomeGreeting1": "All hands on deck, {name}!",
+    "welcomeGreeting2": "Ready to dock, {name}?",
+    "welcomeGreeting3": "Welcome aboard, {name}!",
+    "welcomeGreeting4": "Smooth sailing, {name}!",
+    "welcomeGreeting5": "Ready to launch, {name}?",
+    "loading": "Getting bearings...",
+    "welcomeBackDesc": "Your containers are waiting. Pick up where you left off.",
     "yourPlan": "Your Plan",
     "plan": "Plan",
-    "letsGo": "Let's go",
-    "whereToStart": "Where would you like to start?",
-    "whereToStartDesc": "Choose your first action, or head straight to the dashboard.",
+    "letsGo": "Launch",
+    "whereToStart": "Where to next?",
+    "whereToStartDesc": "Pick something to deploy, or head straight to the dock.",
     "deployDocker": "Deploy from Docker Hub",
     "deployDockerDesc": "Pull any public image and deploy it in seconds.",
     "deployGithub": "Deploy from GitHub",
@@ -2891,7 +2980,7 @@
     "registerDomain": "Register a Domain",
     "registerDomainDesc": "Get a custom domain for your services.",
     "domainsSaved": "We've saved your domain selections — you can configure them in Domains.",
-    "skipToDashboard": "Skip to Dashboard"
+    "skipToDashboard": "Go to the dock"
   },
   "subAccounts": {
     "title": "Sub-Accounts",
@@ -2964,7 +3053,7 @@
       "features": "Features",
       "pricing": "Pricing",
       "github": "GitHub",
-      "getStarted": "Get Started",
+      "getStarted": "Come Aboard",
       "login": "Log In"
     },
     "hero": {
@@ -2973,7 +3062,7 @@
       "dockerServices": "Docker Services",
       "atScale": "at Scale",
       "subtitle": "Siglar is a multi-tenant PaaS built on Docker Swarm. Self-host your own Heroku/Vercel alternative with full control over your infrastructure.",
-      "getStarted": "Get Started",
+      "getStarted": "Come Aboard",
       "viewOnGithub": "View on GitHub"
     },
     "domainSearch": {
@@ -3012,7 +3101,7 @@
       "services": "Services",
       "unlimited": "Unlimited",
       "exclVat": "Excl. VAT",
-      "checkout": "Continue to Checkout"
+      "checkout": "Proceed to checkout"
     },
     "howItWorks": {
       "label": "How It Works",
@@ -3091,6 +3180,7 @@
       }
     },
     "pricing": {
+      "free": "Free",
       "label": "Pricing",
       "title": "Pay per service",
       "subtitle": "Every account is free. Pick a tier for each service you deploy.",

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Archive, RotateCw, Trash2, Plus, Clock, Play, Loader2, Filter, HardDrive } from 'lucide-vue-next'
+import { Archive, RotateCw, Trash2, Plus, Clock, Play, Filter, HardDrive } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import { useServicesStore } from '@/stores/services'
@@ -291,7 +292,7 @@ onMounted(async () => {
                 {{ t('backups.cancel') }}
               </button>
               <button type="submit" :disabled="creatingBackup" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-                <Loader2 v-if="creatingBackup" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="creatingBackup" size="w-4 h-4" />
                 {{ creatingBackup ? t('backups.creating') : t('backups.createBtn') }}
               </button>
             </div>
@@ -344,7 +345,7 @@ onMounted(async () => {
       </div>
 
       <div v-if="loading" class="flex items-center justify-center py-20">
-        <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+        <CompassSpinner size="w-8 h-8" />
       </div>
       <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
         <div class="overflow-x-auto">

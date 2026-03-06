@@ -1,7 +1,7 @@
 slug: paperless-ngx
 name: Paperless-ngx
 description: Document management system that transforms physical documents into a searchable online archive. Includes PostgreSQL and Redis.
-icon_url: https://docs.paperless-ngx.com/assets/favicon.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/paperless-ngx.png
 category: other
 
 variables:

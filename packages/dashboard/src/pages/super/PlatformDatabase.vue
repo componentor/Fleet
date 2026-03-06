@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Database, Table2, Play, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, Eye, Columns3, Terminal, Plus, Trash2, X, Check, Copy, Info, Shield, BarChart3 } from 'lucide-vue-next'
+import { Database, Table2, Play, ChevronLeft, ChevronRight, ArrowUpDown, Eye, Columns3, Terminal, Plus, Trash2, X, Check, Copy, Info, Shield, BarChart3 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 
@@ -470,7 +471,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Main content -->
@@ -583,14 +584,14 @@ onMounted(() => {
               <div class="flex justify-end gap-2 mt-3">
                 <button @click="showAddRowForm = false" class="px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800">{{ t('super.platformDb.cancel') }}</button>
                 <button @click="insertRow" :disabled="addRowLoading" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors">
-                  <Loader2 v-if="addRowLoading" class="w-3.5 h-3.5 animate-spin" />
+                  <CompassSpinner v-if="addRowLoading" size="w-3.5 h-3.5" />
                   {{ t('super.platformDb.insertRow') }}
                 </button>
               </div>
             </div>
 
             <div v-if="dataLoading" class="flex items-center justify-center py-16">
-              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+              <CompassSpinner />
             </div>
             <template v-else>
               <div class="overflow-x-auto">
@@ -647,7 +648,7 @@ onMounted(() => {
                       <!-- Delete button -->
                       <td v-if="primaryKeyColumns.length > 0" class="px-2 py-2.5">
                         <button @click="deleteRow(i)" :disabled="deleteRowLoading === i" class="p-1 rounded text-gray-400 hover:text-red-500 transition-colors" title="Delete row">
-                          <Loader2 v-if="deleteRowLoading === i" class="w-3.5 h-3.5 animate-spin" />
+                          <CompassSpinner v-if="deleteRowLoading === i" size="w-3.5 h-3.5" />
                           <Trash2 v-else class="w-3.5 h-3.5" />
                         </button>
                       </td>
@@ -683,7 +684,7 @@ onMounted(() => {
           <!-- Structure view -->
           <div v-if="activeTab === 'structure' && selectedTable" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
             <div v-if="structureLoading" class="flex items-center justify-center py-16">
-              <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+              <CompassSpinner />
             </div>
             <table v-else class="w-full text-sm">
               <thead>
@@ -727,7 +728,7 @@ onMounted(() => {
           <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('super.platformDb.sqlQuery') }}</span>
             <button @click="executeQuery" :disabled="queryLoading || !queryText.trim()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium transition-colors">
-              <Loader2 v-if="queryLoading" class="w-3.5 h-3.5 animate-spin" />
+              <CompassSpinner v-if="queryLoading" size="w-3.5 h-3.5" />
               <Play v-else class="w-3.5 h-3.5" />
               {{ t('super.platformDb.execute') }}
             </button>
@@ -776,7 +777,7 @@ onMounted(() => {
       <!-- Connection tab -->
       <div v-if="activeTab === 'connection'">
         <div v-if="connectionLoading" class="flex items-center justify-center py-20">
-          <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          <CompassSpinner />
         </div>
         <div v-else-if="connectionInfo" class="space-y-4">
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 space-y-5">
@@ -876,7 +877,7 @@ onMounted(() => {
       <!-- Access Control tab -->
       <div v-if="activeTab === 'access'">
         <div v-if="allowlistLoading" class="flex items-center justify-center py-20">
-          <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          <CompassSpinner />
         </div>
         <div v-else class="space-y-4">
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6">
@@ -961,7 +962,7 @@ onMounted(() => {
         <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
           <button @click="showCreateTableForm = false" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800">{{ t('super.platformDb.cancel') }}</button>
           <button @click="createTable" :disabled="createTableLoading || !newTableName.trim() || newTableColumns.length === 0" class="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-            <Loader2 v-if="createTableLoading" class="w-4 h-4 animate-spin inline mr-1" />
+            <CompassSpinner v-if="createTableLoading" size="w-4 h-4" class="inline mr-1" />
             {{ t('super.platformDb.createTable') }}
           </button>
         </div>

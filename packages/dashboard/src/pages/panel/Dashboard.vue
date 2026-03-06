@@ -2,10 +2,11 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Box, Globe, HardDrive, DollarSign, Activity, Loader2, Clock,
+  Box, Globe, HardDrive, DollarSign, Activity, Clock,
   Rocket, Sun, Moon, Sunset, CheckCircle, Wifi, Container,
   Sparkles, ArrowRight, Cpu, MemoryStick, ExternalLink, Shield,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useServicesStore } from '@/stores/services'
 import { useAccount } from '@/composables/useAccount'
@@ -293,7 +294,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="stagger-children">
+  <!-- Full-page loading state -->
+  <div v-if="loading" class="flex flex-col items-center justify-center py-32">
+    <CompassSpinner size="w-10 h-10" />
+    <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">{{ $t('dashboard.loading', 'Getting bearings...') }}</p>
+  </div>
+
+  <div v-else class="stagger-children">
     <!-- Greeting -->
     <div class="flex items-center gap-3 mb-6">
       <component :is="greetingIcon" class="w-7 h-7 text-primary-600 dark:text-primary-400" />
@@ -318,11 +325,6 @@ onMounted(async () => {
       </div>
     </Transition>
 
-    <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
-    </div>
-
-    <template v-else>
       <!-- Empty state (no services and no domains) -->
       <div v-if="servicesStore.services.length === 0 && domainPicker.domains.value.length === 0" class="text-center py-16">
         <div class="mx-auto w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center mb-4">
@@ -608,6 +610,5 @@ onMounted(async () => {
           </div>
         </div>
       </template>
-    </template>
   </div>
 </template>

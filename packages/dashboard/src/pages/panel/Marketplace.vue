@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Store, Rocket, Loader2, Search } from 'lucide-vue-next'
+import { Store, Rocket, Search } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -94,7 +95,7 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <div v-else-if="filteredTemplates.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
@@ -110,7 +111,7 @@ onMounted(() => {
       >
         <div class="p-6">
           <div class="flex items-start gap-3 mb-3">
-            <div class="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 overflow-hidden">
+            <div class="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
               <img
                 v-if="tmpl.iconUrl"
                 :src="tmpl.iconUrl"

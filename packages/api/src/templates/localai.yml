@@ -1,7 +1,7 @@
 slug: localai
 name: LocalAI
 description: Drop-in OpenAI API replacement. Run LLMs, generate images, and audio locally with GPU or CPU.
-icon_url: https://localai.io/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/localai.png
 category: ai
 
 variables:

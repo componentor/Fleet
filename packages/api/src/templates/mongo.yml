@@ -1,7 +1,7 @@
 slug: mongo
 name: MongoDB
 description: Document-oriented NoSQL database for modern applications.
-icon_url: https://www.mongodb.com/assets/images/global/leaf.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/mongodb.png
 category: database
 
 variables:

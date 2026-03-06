@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Loader2,
   Save,
   Trash2,
   Plus,
@@ -23,6 +22,7 @@ import {
   Languages,
   Megaphone,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { renderMarkdown } from '@/utils/markdown'
 
@@ -404,7 +404,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading && posts.length === 0" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Main two-panel layout -->
@@ -435,7 +435,7 @@ onMounted(() => {
           :disabled="creating"
           class="w-full flex items-center justify-center gap-2 px-4 py-2.5 mb-4 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
         >
-          <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="creating" size="w-4 h-4" />
           <Plus v-else class="w-4 h-4" />
           {{ t('super.statusPosts.newPost') }}
         </button>
@@ -722,7 +722,7 @@ onMounted(() => {
                     :disabled="autoTranslating || !hasTranslation(editLocale) || !translationConfigured"
                     class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
                   >
-                    <Loader2 v-if="autoTranslating" class="w-4 h-4 animate-spin" />
+                    <CompassSpinner v-if="autoTranslating" size="w-4 h-4" />
                     <Languages v-else class="w-4 h-4" />
                     {{ t('super.statusPosts.autoTranslate') }}
                   </button>
@@ -749,7 +749,7 @@ onMounted(() => {
               :disabled="saving"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="saving" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ t('super.statusPosts.save') }}
             </button>
@@ -758,7 +758,7 @@ onMounted(() => {
               :disabled="deleting"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-sm font-medium transition-colors hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
             >
-              <Loader2 v-if="deleting" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="deleting" size="w-4 h-4" />
               <Trash2 v-else class="w-4 h-4" />
               {{ t('super.statusPosts.delete') }}
             </button>

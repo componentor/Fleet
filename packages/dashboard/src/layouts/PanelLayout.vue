@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard,
   Box,
-  Rocket,
+  Ship,
   Store,
   Globe,
   Terminal as TerminalIcon,
@@ -133,18 +133,18 @@ const allNavGroups: NavGroup[] = [
     ],
   },
   {
+    labelKey: 'nav.group.deploy',
+    items: [
+      { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Ship },
+      { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
+    ],
+  },
+  {
     labelKey: 'nav.group.hosting',
     items: [
       { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
       { nameKey: 'nav.services', path: '/panel/services', icon: Box },
       { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
-    ],
-  },
-  {
-    labelKey: 'nav.group.deploy',
-    items: [
-      { nameKey: 'nav.deploy', path: '/panel/deploy', icon: Rocket },
-      { nameKey: 'nav.marketplace', path: '/panel/marketplace', icon: Store },
     ],
   },
   {
@@ -255,7 +255,7 @@ function changeLocale(newLocale: string) {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div :class="['flex items-center justify-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'px-2' : 'px-6']">
+      <div :class="['flex items-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0', collapsed ? 'px-2 justify-center' : 'px-6']">
         <RouterLink to="/" :class="['flex items-center', collapsed ? 'justify-center' : 'gap-2']">
           <img v-if="resellerBranding.found && resellerBranding.brandLogoUrl" :src="resellerBranding.brandLogoUrl" :alt="resellerBranding.brandName" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
           <img v-else-if="logoSrc()" :src="logoSrc()!" :alt="brandTitle" :class="['h-8 object-contain', collapsed ? 'w-8' : 'w-auto max-w-[140px]']" />
@@ -417,7 +417,7 @@ function changeLocale(newLocale: string) {
           <div class="relative">
             <button
               @click="localeOpen = !localeOpen"
-              class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs sm:text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
             >
               <span v-if="currentLocale.flagSvg" class="inline-block w-5 h-3.5 rounded-sm overflow-hidden shrink-0" v-html="currentLocale.flagSvg"></span>
               <span>{{ currentLocale.label }}</span>
@@ -443,6 +443,16 @@ function changeLocale(newLocale: string) {
             </div>
           </div>
 
+          <!-- Search trigger -->
+          <button
+            @click="commandPalette.open()"
+            class="hidden sm:flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-sm"
+          >
+            <Search class="w-3.5 h-3.5" />
+            <span class="hidden md:inline">{{ $t('common.search') }}</span>
+            <kbd class="ml-1 px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">{{ isMac ? '⌘' : 'Ctrl+' }}K</kbd>
+          </button>
+
           <!-- Theme toggle -->
           <button
             @click="toggle"
@@ -451,16 +461,6 @@ function changeLocale(newLocale: string) {
           >
             <Sun v-if="theme === 'light'" class="w-5 h-5" />
             <Moon v-else class="w-5 h-5" />
-          </button>
-
-          <!-- Search trigger -->
-          <button
-            @click="commandPalette.open()"
-            class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-xs"
-          >
-            <Search class="w-3.5 h-3.5" />
-            <span class="hidden md:inline">{{ $t('common.search') }}</span>
-            <kbd class="ml-1 px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono">{{ isMac ? '⌘' : 'Ctrl+' }}K</kbd>
           </button>
 
           <!-- Notifications -->

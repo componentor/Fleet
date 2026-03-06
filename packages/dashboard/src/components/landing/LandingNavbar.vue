@@ -225,7 +225,7 @@ onUnmounted(() => {
           </template>
           <template v-else-if="showGetStarted">
             <router-link
-              to="/get-started"
+              to="/onboarding"
               class="rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
             >
               {{ $t('landing.nav.getStarted') }}
@@ -327,7 +327,7 @@ onUnmounted(() => {
         </template>
         <template v-else-if="showGetStarted">
           <router-link
-            to="/get-started"
+            to="/onboarding"
             class="mx-3 mt-2 block rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-3 py-2 text-center text-sm font-semibold text-white"
             @click="mobileMenuOpen = false"
           >

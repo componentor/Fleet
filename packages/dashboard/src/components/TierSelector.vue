@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useServiceBilling, usePlanLocale, type ServiceTier } from '@/composables/useServiceBilling'
 import { useCurrency } from '@/composables/useCurrency'
 import { Check, Cpu, HardDrive, MemoryStick, Zap } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const props = defineProps<{
   modelValue?: string | null
@@ -30,6 +31,12 @@ onMounted(async () => {
     freeTierLimitReached.value = true
   }
   if (config) allowDowngrade.value = config.allowDowngrade
+
+  // Auto-select the default tier if nothing is selected
+  if (!props.modelValue && tiers.value.length > 0) {
+    const defaultTier = tiers.value.find(t => t.isDefault) ?? tiers.value[0]
+    if (defaultTier) emit('update:modelValue', defaultTier.id)
+  }
 })
 
 function isDowngrade(tier: ServiceTier): boolean {
@@ -66,7 +73,7 @@ function formatMb(mb: number): string {
 
 <template>
   <div v-if="!tiersLoaded" class="flex items-center justify-center py-8">
-    <div class="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
+    <CompassSpinner size="w-5 h-5" />
   </div>
   <div v-else-if="filteredTiers.length === 0" class="text-sm text-gray-500 dark:text-gray-400 py-4">
     No plans available.

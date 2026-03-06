@@ -365,6 +365,20 @@
       "when": 1776400000000,
       "tag": "0051_reseller_domain_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1776600000000,
+      "tag": "0052_add_domain_max_years",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1776800000000,
+      "tag": "0053_add_git_url",
+      "breakpoints": true
     }
   ]
 }

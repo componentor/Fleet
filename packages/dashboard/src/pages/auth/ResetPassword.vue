@@ -4,7 +4,8 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useApi } from '@/composables/useApi'
-import { Lock, Loader2, CheckCircle } from 'lucide-vue-next'
+import { Lock, CheckCircle } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -125,7 +126,7 @@ async function handleSubmit() {
           :disabled="loading"
           class="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
         >
-          <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+          <CompassSpinner v-if="loading" size="w-4 h-4" />
           <Lock v-else class="w-4 h-4" />
           <span v-if="loading">{{ $t('auth.resetting') }}</span>
           <span v-else>{{ $t('auth.resetPassword') }}</span>

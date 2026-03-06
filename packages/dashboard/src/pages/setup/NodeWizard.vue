@@ -2,7 +2,8 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
-import { Sun, Moon, Server, Key, HardDrive, CheckCircle2, ArrowRight, ArrowLeft, Loader2 } from 'lucide-vue-next'
+import { Sun, Moon, Server, Key, HardDrive, CheckCircle2, ArrowRight, ArrowLeft } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -248,7 +249,7 @@ async function completeSetup() {
             :disabled="loading"
             class="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
-            <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="loading" size="w-4 h-4" />
             <CheckCircle2 v-else class="w-4 h-4" />
             {{ loading ? $t('setup.finishing') : $t('setup.completeSetup') }}
           </button>

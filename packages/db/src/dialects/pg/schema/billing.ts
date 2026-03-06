@@ -137,6 +137,7 @@ export const billingConfig = pgTable('billing_config', {
   allowDowngrade: boolean('allow_downgrade').default(true),
   deletionBillingPolicy: varchar('deletion_billing_policy').default('end_of_period').notNull(),
   maxFreeServicesPerAccount: integer('max_free_services_per_account'),
+  domainMaxYears: integer('domain_max_years').default(10),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

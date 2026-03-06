@@ -8,7 +8,6 @@ import { useAuthStore } from '@/stores/auth'
 import { renderMarkdown } from '@/utils/markdown'
 import {
   ArrowLeft,
-  Loader2,
   Send,
   MessageSquare,
   Lock,
@@ -21,6 +20,7 @@ import {
   Quote,
   Eye,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 interface Message {
   id: string
@@ -337,7 +337,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Not found -->
@@ -522,7 +522,7 @@ onMounted(() => {
                 :disabled="!replyBody.trim() || sending"
                 class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="sending" size="w-4 h-4" />
                 <Send v-else class="w-4 h-4" />
                 {{ t('support.admin.sendReply') }}
               </button>

@@ -1,7 +1,7 @@
 slug: sonarqube
 name: SonarQube
 description: Code quality and security analysis platform. Detect bugs, vulnerabilities, and code smells. Includes PostgreSQL.
-icon_url: https://www.sonarsource.com/favicon.ico
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/sonarqube.png
 category: development
 
 variables:

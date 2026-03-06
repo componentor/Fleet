@@ -1,7 +1,7 @@
 slug: gitea
 name: Gitea
 description: Lightweight self-hosted Git service with issue tracking and CI/CD.
-icon_url: https://about.gitea.com/gitea-text.svg
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/gitea.png
 category: dev-tools
 
 variables:

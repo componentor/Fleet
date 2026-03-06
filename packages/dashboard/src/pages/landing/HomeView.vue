@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Check, X, Globe, Shield, Zap, Server, ArrowRight, Clock, Rocket, MousePointerClick } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import LandingNavbar from '@/components/landing/LandingNavbar.vue'
 import type { NavLink } from '@/components/landing/LandingNavbar.vue'
 import LandingFooter from '@/components/landing/LandingFooter.vue'
@@ -340,7 +341,7 @@ const trustSignals = computed(() => [
         <!-- Search results -->
         <div v-if="searching" class="mx-auto mt-8 max-w-2xl">
           <div class="flex items-center justify-center gap-3 py-8">
-            <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary-400 border-t-transparent"></div>
+            <CompassSpinner size="w-5 h-5" />
             <span class="text-sm text-white/60">{{ t('landing.domainSearch.searching', 'Searching available domains...') }}</span>
           </div>
         </div>
@@ -541,7 +542,7 @@ const trustSignals = computed(() => [
               </li>
             </ul>
             <router-link
-              :to="`/get-started?plan=${plan.slug || plan.id}`"
+              :to="`/onboarding?plan=${plan.slug || plan.id}`"
               :class="[
                 'mt-8 block w-full rounded-xl px-4 py-3 text-center text-sm font-semibold transition-all',
                 plan.highlighted
@@ -581,7 +582,7 @@ const trustSignals = computed(() => [
             </p>
             <div class="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <router-link
-                to="/get-started"
+                to="/onboarding"
                 class="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 px-8 py-3.5 text-base font-semibold text-white shadow-xl shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110"
               >
                 {{ t('landing.cta.getStarted') }}

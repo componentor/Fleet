@@ -3,10 +3,11 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Server, ArrowLeft, Cpu, MemoryStick, HardDrive, Container,
-  SquareTerminal, Activity, RefreshCw, Loader2, MapPin,
+  SquareTerminal, Activity, RefreshCw, MapPin,
   Play, Pause, Trash2, Network, Crown, Shield, X,
   KeyRound, Copy, Check, Plus, ShieldCheck, Globe
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
 import { useI18n } from 'vue-i18n'
@@ -373,7 +374,7 @@ onUnmounted(() => {
   <div>
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else-if="node">
@@ -644,7 +645,7 @@ onUnmounted(() => {
         <!-- Containers table -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
           <div v-if="containersLoading && containers.length === 0" class="flex items-center justify-center py-12">
-            <Loader2 class="w-6 h-6 text-gray-400 animate-spin" />
+            <CompassSpinner color="text-gray-400" />
           </div>
           <div v-else-if="containers.length === 0" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
             No containers running on this node.
@@ -815,7 +816,7 @@ onUnmounted(() => {
       <div v-if="activeTab === 'ssh'" class="space-y-6">
         <!-- Loading -->
         <div v-if="sshLoading" class="flex items-center justify-center py-12">
-          <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          <CompassSpinner />
         </div>
 
         <template v-else-if="sshConfig">
@@ -1007,7 +1008,7 @@ onUnmounted(() => {
                 :disabled="savingIps"
                 class="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
               >
-                <Loader2 v-if="savingIps" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="savingIps" size="w-4 h-4" />
                 Save IP Restrictions
               </button>
             </div>

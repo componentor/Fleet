@@ -6,7 +6,8 @@ import { useApi } from '@/composables/useApi'
 import { useServicesStore } from '@/stores/services'
 import { useServiceBilling, usePlanLocale, type ServiceSubscription, type ServiceTier } from '@/composables/useServiceBilling'
 import { useCurrency } from '@/composables/useCurrency'
-import { ArrowLeft, Play, Square, RotateCcw, Trash2, Loader2, Cpu, MemoryStick, HardDrive, Layers } from 'lucide-vue-next'
+import { ArrowLeft, Play, Square, RotateCcw, Trash2, Cpu, MemoryStick, HardDrive, Layers } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const props = defineProps<{ stackId: string }>()
 const { t } = useI18n()
@@ -186,7 +187,7 @@ async function confirmDelete() {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-12">
-      <Loader2 class="w-6 h-6 text-primary-600 animate-spin" />
+      <CompassSpinner color="text-primary-600" />
     </div>
 
     <template v-else>

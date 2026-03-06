@@ -1,7 +1,7 @@
 slug: open-webui
 name: Open WebUI
 description: ChatGPT-style web interface for Ollama and OpenAI-compatible APIs. Includes Ollama backend.
-icon_url: https://openwebui.com/favicon.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/open-webui.png
 category: ai
 
 variables:

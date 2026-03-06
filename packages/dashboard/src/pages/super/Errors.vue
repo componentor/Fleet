@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Bug, CheckCircle, RefreshCw, Filter, Loader2, Archive, Copy, Check, Bot, Clock, X } from 'lucide-vue-next'
+import { Bug, CheckCircle, RefreshCw, Filter, Archive, Copy, Check, Bot, Clock, X } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -334,7 +335,7 @@ onUnmounted(() => {
 
       <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center py-20">
-        <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+        <CompassSpinner size="w-8 h-8" />
       </div>
 
       <!-- Table -->
@@ -418,7 +419,7 @@ onUnmounted(() => {
                         :disabled="resolvingId === err.id"
                         class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
                       >
-                        <Loader2 v-if="resolvingId === err.id" class="w-3 h-3 animate-spin" />
+                        <CompassSpinner v-if="resolvingId === err.id" size="w-3 h-3" />
                         <CheckCircle v-else class="w-3 h-3" />
                         {{ $t('super.errors.resolve') }}
                       </button>
@@ -601,7 +602,7 @@ onUnmounted(() => {
               :disabled="selfHealing"
               class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              <Loader2 v-if="selfHealing" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="selfHealing" size="w-4 h-4" />
               <Bot v-else class="w-4 h-4" />
               {{ $t('super.settings.selfHealing.selfHeal') }}
             </button>

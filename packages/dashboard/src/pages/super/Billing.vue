@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CreditCard, DollarSign, Save, Loader2, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown, X } from 'lucide-vue-next'
+import { CreditCard, DollarSign, Save, Plus, Trash2, RefreshCw, MapPin, Shield, Users, Gauge, Info, ExternalLink, Clock, ArrowUp, ArrowDown, X } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
 const { t } = useI18n()
@@ -574,7 +575,7 @@ onMounted(() => { fetchAll() })
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>
@@ -667,7 +668,7 @@ onMounted(() => { fetchAll() })
 
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="savingConfig" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingConfig" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingConfig" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingConfig ? t('common.saving') : t('super.billing.saveBillingConfig') }}
             </button>
@@ -716,7 +717,7 @@ onMounted(() => { fetchAll() })
           </div>
           <div class="flex justify-end">
             <button @click="saveCurrenciesConfig" :disabled="savingCurrencies || allowedCurrenciesList.length === 0" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingCurrencies" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingCurrencies" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingCurrencies ? 'Saving...' : 'Save Currencies' }}
             </button>
@@ -797,7 +798,7 @@ onMounted(() => { fetchAll() })
 
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="savingLifecycle" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingLifecycle" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingLifecycle" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingLifecycle ? t('common.saving') : t('super.billing.saveLifecycle') }}
             </button>
@@ -853,7 +854,7 @@ onMounted(() => { fetchAll() })
 
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="savingTierPolicies" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingTierPolicies" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingTierPolicies" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingTierPolicies ? t('common.saving') : 'Save Tier Policies' }}
             </button>
@@ -962,7 +963,7 @@ onMounted(() => { fetchAll() })
             <div class="flex gap-2 justify-end">
               <button type="button" @click="showPlanForm = false" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">{{ t('common.cancel') }}</button>
               <button type="submit" :disabled="saving" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium">
-                <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="saving" size="w-4 h-4" />
                 {{ editingPlan ? t('super.billing.updatePlan') : t('super.billing.createPlan') }}
               </button>
             </div>
@@ -1023,7 +1024,7 @@ onMounted(() => { fetchAll() })
                       <span v-if="plan.prices?.length" class="text-gray-400">({{ plan.prices.length }})</span>
                     </button>
                     <button @click="syncPlan(plan.id)" :disabled="syncing" class="text-xs hover:underline" :class="syncStatus[plan.id] === 'ok' ? 'text-green-600 dark:text-green-400' : syncStatus[plan.id] === 'error' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'">
-                      <template v-if="syncStatus[plan.id] === 'syncing'"><Loader2 class="w-3 h-3 animate-spin inline" /> Syncing...</template>
+                      <template v-if="syncStatus[plan.id] === 'syncing'"><CompassSpinner size="w-3 h-3" class="inline" /> Syncing...</template>
                       <template v-else-if="syncStatus[plan.id] === 'ok'">Synced!</template>
                       <template v-else-if="syncStatus[plan.id] === 'error'">Failed</template>
                       <template v-else>{{ t('super.billing.sync') }}</template>
@@ -1110,7 +1111,7 @@ onMounted(() => { fetchAll() })
           </div>
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="savingPricing" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingPricing" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingPricing" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingPricing ? t('common.saving') : t('super.billing.saveUsagePricing') }}
             </button>
@@ -1220,7 +1221,7 @@ onMounted(() => { fetchAll() })
           </div>
           <div class="pt-2 flex justify-end">
             <button type="submit" :disabled="savingLimits" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-              <Loader2 v-if="savingLimits" class="w-4 h-4 animate-spin" />
+              <CompassSpinner v-if="savingLimits" size="w-4 h-4" />
               <Save v-else class="w-4 h-4" />
               {{ savingLimits ? t('common.saving') : t('super.billing.saveResourceLimits') }}
             </button>

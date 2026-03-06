@@ -13,7 +13,6 @@ import {
   Play,
   Trash2,
   RefreshCw,
-  Loader2,
   Eye,
   ListFilter,
   Timer,
@@ -22,6 +21,7 @@ import {
   Database,
   Server,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const { t } = useI18n()
 const api = useApi()
@@ -317,7 +317,7 @@ onUnmounted(() => {
 
     <!-- Loading -->
     <div v-if="queuesLoading && jobsLoading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <template v-else>
@@ -418,7 +418,7 @@ onUnmounted(() => {
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
         <!-- Loading spinner only on initial load (no data yet) -->
         <div v-if="jobsLoading && jobs.length === 0" class="flex items-center justify-center py-12">
-          <Loader2 class="w-6 h-6 text-primary-600 dark:text-primary-400 animate-spin" />
+          <CompassSpinner />
         </div>
 
         <template v-else>

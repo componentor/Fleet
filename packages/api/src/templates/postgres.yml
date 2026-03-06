@@ -1,7 +1,7 @@
 slug: postgres
 name: PostgreSQL
 description: Powerful open-source relational database system with over 35 years of active development.
-icon_url: https://www.postgresql.org/media/img/about/press/elephant.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/postgresql.png
 category: database
 
 variables:

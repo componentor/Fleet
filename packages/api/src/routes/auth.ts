@@ -6,7 +6,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
-import { db, users, userAccounts, accounts, oauthProviders, insertReturning, safeTransaction, eq, and, isNull } from '@fleet/db';
+import { db, users, userAccounts, accounts, oauthProviders, platformSettings, insertReturning, safeTransaction, countSql, eq, and, isNull } from '@fleet/db';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../services/logger.js';
@@ -84,6 +84,74 @@ async function queueEmail(data: EmailJobData): Promise<void> {
     // Fallback: direct send for local dev without Valkey
     emailService.sendTemplateEmail(data.templateSlug, data.to, data.variables, data.accountId)
       .catch((err) => logger.error({ err }, `Failed to send ${data.templateSlug} email`));
+  }
+}
+
+/**
+ * Check if new registrations are allowed.
+ * Returns null if allowed, or an error object if blocked.
+ */
+async function checkRegistrationGate(): Promise<{ blocked: true; message: string } | null> {
+  const modeRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'registration:mode') });
+  const mode = (modeRow?.value as string) ?? 'open';
+
+  if (mode === 'open') return null;
+
+  if (mode === 'closed') {
+    const msgRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'registration:closedMessage') });
+    const message = (msgRow?.value as string) || 'We are not accepting new registrations at this time. Please check back soon!';
+    return { blocked: true, message };
+  }
+
+  if (mode === 'limited') {
+    const limitRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'registration:maxAccounts') });
+    const maxAccounts = parseInt(String(limitRow?.value ?? '0'), 10);
+    if (!maxAccounts || maxAccounts <= 0) return null; // No limit set = open
+
+    const countResult = await db.select({ count: countSql() }).from(accounts).where(isNull(accounts.deletedAt));
+    const currentCount = countResult[0]?.count ?? 0;
+
+    if (currentCount >= maxAccounts) {
+      // Check if we already sent the limit-reached notification (avoid spamming)
+      const notifiedRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'registration:limitNotified') });
+      if (!notifiedRow) {
+        // Send email to all super admins
+        notifyAdminsRegistrationLimitReached(currentCount, maxAccounts).catch((err) =>
+          logger.error({ err }, 'Failed to notify admins about registration limit'),
+        );
+        // Mark as notified
+        await db.insert(platformSettings).values({ key: 'registration:limitNotified', value: 'true' }).catch(() => {});
+      }
+
+      const msgRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'registration:closedMessage') });
+      const message = (msgRow?.value as string) || 'We have reached our capacity for new accounts. Please check back soon — we are working to open more spots!';
+      return { blocked: true, message };
+    }
+  }
+
+  return null;
+}
+
+/** Notify all super admins that the registration limit has been reached. */
+async function notifyAdminsRegistrationLimitReached(currentCount: number, maxAccounts: number): Promise<void> {
+  const superAdmins = await db.query.users.findMany({
+    where: and(eq(users.isSuper, true), isNull(users.deletedAt)),
+    columns: { email: true, name: true },
+  });
+
+  const appUrl = await getAppUrl();
+  for (const admin of superAdmins) {
+    if (!admin.email) continue;
+    queueEmail({
+      templateSlug: 'admin-registration-limit',
+      to: admin.email,
+      variables: {
+        adminName: admin.name ?? 'Admin',
+        currentCount: String(currentCount),
+        maxAccounts: String(maxAccounts),
+        settingsUrl: `${appUrl}/super/settings`,
+      },
+    }).catch(() => {});
   }
 }
 
@@ -187,6 +255,12 @@ const registerRoute = createRoute({
 
 auth.openapi(registerRoute, (async (c: any) => {
   const { name, email, password } = c.req.valid('json');
+
+  // Check if registrations are allowed
+  const gate = await checkRegistrationGate();
+  if (gate) {
+    return c.json({ error: gate.message, code: 'REGISTRATION_CLOSED' }, 403);
+  }
 
   // Check if user already exists
   const existing = await db.query.users.findFirst({
@@ -1328,6 +1402,13 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
       });
 
       if (!user) {
+        // Check registration gate before creating a new user via OAuth
+        const gate = await checkRegistrationGate();
+        if (gate) {
+          const appUrl = await getAppUrl();
+          return c.redirect(`${appUrl}/login?registration=closed`);
+        }
+
         // Create new user, account, and link in a single transaction (OAuth = email already verified)
         await safeTransaction(async (tx) => {
           const [newUser] = await tx.insert(users).values({
@@ -1623,6 +1704,13 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
       });
 
       if (!user) {
+        // Check registration gate before creating a new user via OAuth
+        const gate = await checkRegistrationGate();
+        if (gate) {
+          const appUrl = await getAppUrl();
+          return c.redirect(`${appUrl}/login?registration=closed`);
+        }
+
         // Create new user, account, and link in a single transaction
         await safeTransaction(async (tx) => {
           const [newUser] = await tx.insert(users).values({
@@ -1718,6 +1806,33 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
     logger.error({ err }, 'Google OAuth error');
     return c.redirect('/auth/callback?error=OAuth+authentication+failed');
   }
+});
+
+// ── Public registration status (no auth required) ───────────────────────────
+
+const registrationStatusRoute = createRoute({
+  method: 'get',
+  path: '/registration-status',
+  tags: ['Auth'],
+  summary: 'Check if new registrations are open',
+  security: noSecurity,
+  responses: {
+    200: jsonContent(
+      z.object({
+        open: z.boolean(),
+        message: z.string().optional(),
+      }),
+      'Registration status',
+    ),
+  },
+});
+
+auth.openapi(registrationStatusRoute, async (c) => {
+  const gate = await checkRegistrationGate();
+  if (gate) {
+    return c.json({ open: false, message: gate.message });
+  }
+  return c.json({ open: true });
 });
 
 export default auth;

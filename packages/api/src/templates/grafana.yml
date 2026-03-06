@@ -1,7 +1,7 @@
 slug: grafana
 name: Grafana
 description: Beautiful analytics and monitoring dashboards. Visualize metrics from Prometheus, InfluxDB, and more. Includes Prometheus.
-icon_url: https://grafana.com/static/assets/img/fav32.png
+icon_url: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/grafana.png
 category: monitoring
 
 variables:

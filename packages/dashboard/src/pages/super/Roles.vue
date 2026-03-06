@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ShieldCheck, Plus, Loader2, Trash2, Pencil, X, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ShieldCheck, Plus, Trash2, Pencil, X, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
@@ -257,7 +258,7 @@ onMounted(() => {
             :disabled="creating || !createForm.name.trim()"
             class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
-            <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
+            <CompassSpinner v-if="creating" size="w-4 h-4" />
             {{ t('common.create') }}
           </button>
           <button
@@ -273,7 +274,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Roles table -->
@@ -439,7 +440,7 @@ onMounted(() => {
                         :disabled="saving || !editForm.name.trim()"
                         class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                       >
-                        <Loader2 v-if="saving" class="w-4 h-4 animate-spin" />
+                        <CompassSpinner v-if="saving" size="w-4 h-4" />
                         {{ t('roles.saveChanges') }}
                       </button>
                       <button
@@ -480,7 +481,7 @@ onMounted(() => {
                 :disabled="deleting"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
               >
-                <Loader2 v-if="deleting" class="w-4 h-4 animate-spin" />
+                <CompassSpinner v-if="deleting" size="w-4 h-4" />
                 {{ t('common.delete') }}
               </button>
             </div>

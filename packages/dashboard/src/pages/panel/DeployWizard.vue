@@ -4,11 +4,12 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useApi } from '@/composables/useApi'
 import {
-  ArrowLeft, ArrowRight, Rocket, Loader2, CheckCircle2,
+  ArrowLeft, ArrowRight, Rocket, CheckCircle2,
   Eye, EyeOff, Copy, RefreshCw, AlertTriangle, Database,
   Server, Globe, Shield, Cpu, HardDrive, Check, ExternalLink,
   Package, Info, ChevronDown, Link, Link2, X,
 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
 import TierSelector from '@/components/TierSelector.vue'
 import { useDomainPicker } from '@/composables/useDomainPicker'
@@ -19,10 +20,11 @@ const { t } = useI18n()
 const api = useApi()
 const router = useRouter()
 const { fetchDomains: fetchAccountDomains } = useDomainPicker()
-const { fetchTiers, freeTier, tiers } = useServiceBilling()
+const { fetchTiers, freeTier, tiers, formatCents } = useServiceBilling()
 
 // Plan selection for the stack
 const selectedStackPlanId = ref<string | null>(null)
+const selectedPlan = computed(() => tiers.value.find(t => t.id === selectedStackPlanId.value) ?? null)
 
 // ── Step management ──
 const currentStep = ref(1)
@@ -218,8 +220,12 @@ async function quickDeploy() {
   if (quickDeployVolumeStrategy.value === 'shared' && templateVolumes.value.length >= 2) {
     setAllShared(true)
   }
-  // Skip config steps but stop at plan selection (step 4)
-  currentStep.value = 4
+  // Auto-select the default tier and skip straight to deploy
+  if (!selectedStackPlanId.value && tiers.value.length > 0) {
+    const defaultTier = tiers.value.find(t => t.isDefault) ?? tiers.value[0]
+    if (defaultTier) selectedStackPlanId.value = defaultTier.id
+  }
+  currentStep.value = 5
 }
 
 // ── Volume sharing helpers ──
@@ -608,6 +614,12 @@ async function executeDeploy() {
       ...(Object.keys(domainOverrides).length > 0 ? { domainOverrides } : {}),
     })
 
+    // Redirect to Stripe Checkout if a paid plan was selected
+    if (result.checkoutUrl) {
+      window.location.href = result.checkoutUrl
+      return
+    }
+
     stackId.value = result.stackId
     deployed.value = true
     deployedServices.value = (result.services ?? []).map((s: any) => ({
@@ -684,7 +696,7 @@ onUnmounted(() => {
 
     <!-- Loading -->
     <div v-if="templateLoading" class="flex items-center justify-center py-20">
-      <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin" />
+      <CompassSpinner size="w-8 h-8" />
     </div>
 
     <!-- Error -->
@@ -751,9 +763,9 @@ onUnmounted(() => {
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div class="px-6 py-5 border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center gap-4">
-              <div class="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center shrink-0">
-                <img v-if="template.iconUrl" :src="template.iconUrl" class="w-8 h-8 rounded" :alt="template.name" />
-                <Package v-else class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+              <div class="w-14 h-14 rounded-xl bg-primary-50 dark:bg-gray-200 flex items-center justify-center shrink-0">
+                <img v-if="template.iconUrl" :src="template.iconUrl" class="w-8 h-8 rounded" :alt="template.name" @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden')" />
+                <Package :class="[template.iconUrl ? 'hidden' : '', 'w-7 h-7 text-primary-600 dark:text-primary-400']" />
               </div>
               <div>
                 <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ template.name }}</h2>
@@ -789,7 +801,7 @@ onUnmounted(() => {
                   </div>
                   <span v-else-if="tagsLoading[svc.name]" class="flex items-center gap-1.5 text-xs font-mono text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2.5 py-1.5 rounded">
                     {{ svc.image }}
-                    <Loader2 class="w-3 h-3 animate-spin" />
+                    <CompassSpinner size="w-3 h-3" />
                   </span>
                   <span v-else class="text-xs font-mono text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2.5 py-1.5 rounded">
                     {{ imageVersions[svc.name] || svc.image }}
@@ -823,7 +835,7 @@ onUnmounted(() => {
                   :disabled="deploying"
                   class="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition-all hover:shadow-lg active:scale-[0.98]"
                 >
-                  <Loader2 v-if="deploying" class="w-4 h-4 animate-spin" />
+                  <CompassSpinner v-if="deploying" size="w-4 h-4" />
                   <Rocket v-else class="w-4 h-4" />
                   {{ deploying ? t('deployWizard.deploying') : t('deployWizard.quickDeploy') }}
                 </button>
@@ -1381,6 +1393,40 @@ onUnmounted(() => {
                   </div>
                 </div>
               </div>
+
+              <!-- Plan summary -->
+              <div v-if="selectedPlan">
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.plan', 'Service Plan') }}</h3>
+                <div class="p-4 rounded-lg border-2" :class="selectedPlan.isFree ? 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750' : 'border-primary-200 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20'">
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                      <Cpu class="w-4 h-4" :class="selectedPlan.isFree ? 'text-gray-500' : 'text-primary-600 dark:text-primary-400'" />
+                      <span class="text-base font-semibold text-gray-900 dark:text-white">{{ selectedPlan.name }}</span>
+                    </div>
+                    <span class="text-base font-bold" :class="selectedPlan.isFree ? 'text-green-600 dark:text-green-400' : 'text-primary-600 dark:text-primary-400'">
+                      {{ selectedPlan.isFree ? t('deployWizard.review.free', 'Free') : formatCents(selectedPlan.priceCents) + '/mo' }}
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div class="text-center px-2 py-2 rounded-md bg-white/60 dark:bg-gray-800/60">
+                      <p class="text-xs text-gray-500 dark:text-gray-400">CPU</p>
+                      <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ selectedPlan.cpuLimit < 1 ? (selectedPlan.cpuLimit * 1000) + 'm' : selectedPlan.cpuLimit + ' core' + (selectedPlan.cpuLimit > 1 ? 's' : '') }}</p>
+                    </div>
+                    <div class="text-center px-2 py-2 rounded-md bg-white/60 dark:bg-gray-800/60">
+                      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('deployWizard.review.memory', 'Memory') }}</p>
+                      <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ selectedPlan.memoryLimit >= 1024 ? (selectedPlan.memoryLimit / 1024) + ' GB' : selectedPlan.memoryLimit + ' MB' }}</p>
+                    </div>
+                    <div class="text-center px-2 py-2 rounded-md bg-white/60 dark:bg-gray-800/60">
+                      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('deployWizard.review.storage', 'Storage') }}</p>
+                      <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ selectedPlan.storageLimit >= 1024 ? (selectedPlan.storageLimit / 1024) + ' GB' : selectedPlan.storageLimit + ' MB' }}</p>
+                    </div>
+                    <div class="text-center px-2 py-2 rounded-md bg-white/60 dark:bg-gray-800/60">
+                      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('deployWizard.review.containers', 'Containers') }}</p>
+                      <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ selectedPlan.containerLimit }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1399,7 +1445,7 @@ onUnmounted(() => {
 
         <!-- Deploying spinner -->
         <div v-if="deploying && !deployed" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
-          <Loader2 class="w-10 h-10 text-primary-600 dark:text-primary-400 animate-spin mx-auto mb-4" />
+          <CompassSpinner size="w-10 h-10" class="mx-auto mb-4" />
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.progress.deployingStack') }}</p>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('deployWizard.progress.settingUp') }}</p>
         </div>
@@ -1458,7 +1504,7 @@ onUnmounted(() => {
                 >
                   <CheckCircle2 v-if="svc.status === 'running'" class="w-5 h-5 text-green-600 dark:text-green-400" />
                   <AlertTriangle v-else-if="svc.status === 'failed'" class="w-5 h-5 text-red-600 dark:text-red-400" />
-                  <Loader2 v-else class="w-5 h-5 text-yellow-600 dark:text-yellow-400 animate-spin" />
+                  <CompassSpinner v-else size="w-5 h-5" color="text-yellow-600 dark:text-yellow-400" />
                 </div>
 
                 <!-- Service info -->

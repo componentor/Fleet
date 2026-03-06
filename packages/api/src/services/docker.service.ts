@@ -18,6 +18,27 @@ import type {
 
 const PLATFORM_CERTS_VOLUME = 'fleet-platform-certs';
 
+// Database and stateful images that require stop-first update order to avoid data file locks
+const STATEFUL_IMAGE_PATTERNS = [
+  /^mysql(:|$)/i,
+  /^mariadb(:|$)/i,
+  /^postgres(:|$)/i,
+  /^mongo(:|$)/i,
+  /^redis(:|$)/i,
+  /^valkey(:|$)/i,
+  /^elasticsearch(:|$)/i,
+  /^opensearch(:|$)/i,
+  /^clickhouse(:|$)/i,
+  /^influxdb(:|$)/i,
+  /^mssql(:|$)/i,
+  /mcr\.microsoft\.com\/mssql/i,
+];
+
+export function isStatefulImage(image: string): boolean {
+  const imageName = image.replace(/^[^/]+\.[^/]+\/([^/]+\/)?/, '');
+  return STATEFUL_IMAGE_PATTERNS.some((p) => p.test(imageName));
+}
+
 const docker = new Dockerode({ socketPath: '/var/run/docker.sock', version: 'v1.45' });
 
 /** @deprecated Use CreateServiceOptions from orchestrator.interface.ts */
@@ -239,7 +260,7 @@ export class DockerService implements OrchestratorService {
         Parallelism: opts.updateParallelism,
         Delay: parseDelay(opts.updateDelay),
         FailureAction: opts.rollbackOnFailure ? 'rollback' : 'pause',
-        Order: 'start-first',
+        Order: opts.updateOrder ?? 'start-first',
       },
       RollbackConfig: {
         Parallelism: 1,
@@ -392,12 +413,13 @@ export class DockerService implements OrchestratorService {
       };
     }
 
-    if (opts.updateParallelism !== undefined || opts.updateDelay !== undefined || opts.rollbackOnFailure !== undefined) {
+    if (opts.updateParallelism !== undefined || opts.updateDelay !== undefined || opts.rollbackOnFailure !== undefined || opts.updateOrder !== undefined) {
       spec.UpdateConfig = {
         ...spec.UpdateConfig,
         ...(opts.updateParallelism !== undefined ? { Parallelism: opts.updateParallelism } : {}),
         ...(opts.updateDelay !== undefined ? { Delay: parseDelay(opts.updateDelay) } : {}),
         ...(opts.rollbackOnFailure !== undefined ? { FailureAction: opts.rollbackOnFailure ? 'rollback' : 'pause' } : {}),
+        ...(opts.updateOrder !== undefined ? { Order: opts.updateOrder } : {}),
       };
     }
 
@@ -1500,36 +1522,57 @@ export class DockerService implements OrchestratorService {
     stdout: string;
   }> {
     const timeout = opts?.timeoutMs ?? 60_000;
+
+    // Ensure alpine image is available (pull if not cached)
+    try {
+      await docker.getImage('alpine:latest').inspect();
+    } catch {
+      logger.info('Pulling alpine:latest for runOnLocalHost...');
+      await new Promise<void>((resolve, reject) => {
+        docker.pull('alpine:latest', (err: Error | null, stream: NodeJS.ReadableStream) => {
+          if (err) return reject(err);
+          docker.modem.followProgress(stream, (followErr: Error | null) => {
+            if (followErr) return reject(followErr);
+            resolve();
+          });
+        });
+      });
+    }
+
+    const escapedCmd = command.replace(/'/g, "'\\''");
     const container = await docker.createContainer({
       Image: 'alpine:latest',
-      Cmd: ['sh', '-c', `chroot /host sh -c '${command.replace(/'/g, "'\\''")}'`],
+      Cmd: ['nsenter', '-t', '1', '-m', '-u', '-i', '-n', '--', 'sh', '-c', escapedCmd],
       HostConfig: {
-        Binds: ['/:/host'],
+        Privileged: true,
+        PidMode: 'host',
       },
     });
 
     try {
       await container.start();
 
-      // Attach to get stdout
-      const logStream = await container.logs({ follow: true, stdout: true, stderr: true });
+      // Wait for container to finish, with timeout
+      const waitPromise = container.wait() as Promise<{ StatusCode: number }>;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Command timed out after ${timeout}ms`)), timeout),
+      );
+      const result = await Promise.race([waitPromise, timeoutPromise]);
+
+      // Collect logs after container has exited
+      const logStream = await container.logs({ stdout: true, stderr: true });
       let output = '';
       if (Buffer.isBuffer(logStream)) {
         output = logStream.toString();
       } else {
         const chunks: Buffer[] = [];
-        const collectPromise = new Promise<void>((resolve) => {
+        await new Promise<void>((resolve) => {
           (logStream as NodeJS.ReadableStream).on('data', (chunk: Buffer) => chunks.push(chunk));
           (logStream as NodeJS.ReadableStream).on('end', resolve);
         });
-        const timeoutPromise = new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out')), timeout),
-        );
-        await Promise.race([collectPromise, timeoutPromise]);
         output = Buffer.concat(chunks).toString();
       }
 
-      const result = await container.wait();
       return { exitCode: result.StatusCode, stdout: output };
     } finally {
       await container.remove({ force: true }).catch(() => {});

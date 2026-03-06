@@ -1,11 +1,13 @@
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAccountStore } from '@/stores/account'
+import { useCart } from '@/composables/useCart'
 import { useRouter } from 'vue-router'
 
 export function useAuth() {
   const store = useAuthStore()
   const accountStore = useAccountStore()
+  const cart = useCart()
   const router = useRouter()
 
   const user = computed(() => store.user)
@@ -19,7 +21,13 @@ export function useAuth() {
     sessionStorage.setItem('fleet_just_logged_in', '1')
 
     const redirect = router.currentRoute.value.query.redirect as string | undefined
-    if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    // Returning user with cart items — always go to checkout
+    if (cart.count.value > 0) {
+      await router.push('/checkout')
+    } else if (redirect === '/onboarding') {
+      // No cart — skip onboarding for returning users
+      await router.push('/panel')
+    } else if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
       await router.push(redirect)
     } else if (store.isSuper) {
       await router.push('/admin')
@@ -38,7 +46,7 @@ export function useAuth() {
       sessionStorage.removeItem('fleet_onboarding_return')
       await router.push(onboardingReturn)
     } else {
-      await router.push('/get-started')
+      await router.push('/onboarding')
     }
   }
 

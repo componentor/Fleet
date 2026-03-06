@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Loader2 } from 'lucide-vue-next'
+import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -46,7 +46,7 @@ onMounted(async () => {
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
     <div class="text-center">
       <template v-if="!error">
-        <Loader2 class="w-8 h-8 text-primary-600 dark:text-primary-400 animate-spin mx-auto" />
+        <CompassSpinner size="w-8 h-8" class="mx-auto" />
         <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">{{ $t('auth.completingSignIn') }}</p>
       </template>
       <template v-else>
