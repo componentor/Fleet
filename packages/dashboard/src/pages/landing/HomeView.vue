@@ -256,7 +256,7 @@ const trustSignals = computed(() => [
 
 <template>
   <div class="min-h-screen bg-white dark:bg-surface-950 text-surface-700 dark:text-surface-200">
-    <LandingNavbar :nav-links="navLinks" :cart-count="cart.count.value" @open-cart="cartOpen = true" />
+    <LandingNavbar :nav-links="navLinks" :cart-count="cart.count.value" dark-hero @open-cart="cartOpen = true" />
 
     <CartDrawer :open="cartOpen" @close="cartOpen = false" />
 
@@ -288,7 +288,7 @@ const trustSignals = computed(() => [
               <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <span class="text-3xl font-bold text-white sm:text-4xl">{{ brandTitle }} {{ t('landing.domainSearch.brandHosting', 'Hosting') }}</span>
+          <span class="text-3xl font-medium text-white sm:text-4xl">{{ brandTitle }} {{ t('landing.domainSearch.brandHosting', 'Hosting') }}</span>
         </div>
         <h1 class="mx-auto max-w-5xl text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
           <span class="block">{{ t('landing.domainSearch.heroTitle', 'Find Your Perfect') }}</span>

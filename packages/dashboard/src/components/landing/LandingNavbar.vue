@@ -18,10 +18,12 @@ const props = withDefaults(defineProps<{
   showLocaleSwitcher?: boolean
   showGetStarted?: boolean
   cartCount?: number
+  darkHero?: boolean
 }>(), {
   showLocaleSwitcher: true,
   showGetStarted: true,
   cartCount: 0,
+  darkHero: false,
 })
 
 const emit = defineEmits<{
@@ -64,6 +66,9 @@ const locales = [
 ]
 
 const currentLocale = computed(() => locales.find(l => l.code === locale.value) || locales[0]!)
+
+// Use light (white) text only when over a dark hero and not yet scrolled
+const lightText = computed(() => props.darkHero && !isScrolled.value)
 
 function handleScroll() {
   isScrolled.value = window.scrollY > 20
@@ -120,7 +125,7 @@ onUnmounted(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <span :class="['text-xl font-medium transition-colors', isScrolled ? 'text-gray-900 dark:text-white' : 'text-white']">{{ brandTitle }}</span>
+          <span :class="['text-xl font-medium transition-colors', lightText ? 'text-white' : 'text-gray-900 dark:text-white']">{{ brandTitle }}</span>
         </router-link>
 
         <!-- Desktop nav links -->
@@ -129,7 +134,7 @@ onUnmounted(() => {
             <router-link
               v-if="link.routerLink"
               :to="link.href"
-              :class="['text-sm font-medium transition-colors', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
+              :class="['text-sm font-medium transition-colors', lightText ? 'text-white/70 hover:text-white' : 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white']"
             >
               {{ link.label }}
             </router-link>
@@ -138,7 +143,7 @@ onUnmounted(() => {
               :href="link.href"
               :target="link.external ? '_blank' : undefined"
               :rel="link.external ? 'noopener noreferrer' : undefined"
-              :class="['text-sm font-medium transition-colors', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
+              :class="['text-sm font-medium transition-colors', lightText ? 'text-white/70 hover:text-white' : 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white']"
             >
               {{ link.label }}
             </a>
@@ -147,7 +152,7 @@ onUnmounted(() => {
           <div v-if="showLocaleSwitcher" ref="localeRef" class="relative">
             <button
               @click.stop="localeOpen = !localeOpen"
-              :class="['flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800' : 'text-white/70 hover:text-white hover:bg-white/10']"
+              :class="['flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors cursor-pointer', lightText ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800']"
             >
               <span class="inline-block w-5 h-3.5 rounded-sm overflow-hidden shrink-0" v-html="currentLocale.flagSvg"></span>
               <span>{{ currentLocale.label }}</span>
@@ -191,7 +196,7 @@ onUnmounted(() => {
           <button
             v-if="cartCount > 0"
             @click="emit('open-cart')"
-            :class="['relative p-2 rounded-lg transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800' : 'text-white/70 hover:text-white hover:bg-white/10']"
+            :class="['relative p-2 rounded-lg transition-colors cursor-pointer', lightText ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800']"
             :title="$t('landing.cart.title', 'Cart')"
           >
             <ShoppingBasket class="w-5 h-5" />
@@ -200,7 +205,7 @@ onUnmounted(() => {
           <!-- Theme toggle -->
           <button
             @click="toggle"
-            :class="['p-2 rounded-lg transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800' : 'text-white/70 hover:text-white hover:bg-white/10']"
+            :class="['p-2 rounded-lg transition-colors cursor-pointer', lightText ? 'text-white/70 hover:text-white hover:bg-white/10' : 'text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800']"
             :title="`Theme: ${theme}`"
           >
             <svg v-if="theme === 'light'" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -227,7 +232,7 @@ onUnmounted(() => {
             </router-link>
             <router-link
               to="/login"
-              :class="['rounded-lg border px-4 py-2 text-sm font-semibold transition-all -ml-4', isScrolled ? 'border-surface-300 dark:border-surface-700 text-surface-600 dark:text-surface-300 hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white' : 'border-white/30 text-white/80 hover:border-white/50 hover:text-white']"
+              :class="['rounded-lg border px-4 py-2 text-sm font-semibold transition-all -ml-4', lightText ? 'border-white/30 text-white/80 hover:border-white/50 hover:text-white' : 'border-surface-300 dark:border-surface-700 text-surface-600 dark:text-surface-300 hover:border-surface-400 dark:hover:border-surface-600 hover:text-gray-900 dark:hover:text-white']"
             >
               {{ $t('landing.nav.login') }}
             </router-link>
@@ -239,14 +244,14 @@ onUnmounted(() => {
           <button
             v-if="cartCount > 0"
             @click="emit('open-cart')"
-            :class="['relative inline-flex items-center justify-center rounded-lg p-2 transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
+            :class="['relative inline-flex items-center justify-center rounded-lg p-2 transition-colors cursor-pointer', lightText ? 'text-white/70 hover:text-white' : 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white']"
           >
             <ShoppingBasket class="w-5 h-5" />
             <span class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary-600 text-[10px] leading-none font-bold text-white">{{ cartCount }}</span>
           </button>
           <button
             @click="toggle"
-            :class="['inline-flex items-center justify-center rounded-lg p-2 transition-colors cursor-pointer', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
+            :class="['inline-flex items-center justify-center rounded-lg p-2 transition-colors cursor-pointer', lightText ? 'text-white/70 hover:text-white' : 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white']"
             :title="`Theme: ${theme}`"
           >
             <svg v-if="theme === 'light'" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -257,7 +262,7 @@ onUnmounted(() => {
             </svg>
           </button>
           <button
-            :class="['inline-flex items-center justify-center rounded-lg p-2 cursor-pointer transition-colors', isScrolled ? 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white' : 'text-white/70 hover:text-white']"
+            :class="['inline-flex items-center justify-center rounded-lg p-2 cursor-pointer transition-colors', lightText ? 'text-white/70 hover:text-white' : 'text-surface-500 dark:text-surface-400 hover:text-gray-900 dark:hover:text-white']"
             @click.stop="mobileMenuOpen = !mobileMenuOpen"
           >
             <svg v-if="!mobileMenuOpen" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

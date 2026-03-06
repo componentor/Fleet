@@ -100,10 +100,7 @@ const POLL_INTERVAL = 5_000
 // ── Nav links ────────────────────────────────────────────────────────
 const navLinks = computed<NavLink[]>(() => {
   const links: NavLink[] = [
-    { label: t('landing.nav.features'), href: '/#features' },
-    { label: t('landing.nav.pricing'), href: '/#pricing' },
-    { label: 'Docs', href: '/docs', routerLink: true },
-    { label: 'API', href: '/api/docs', external: true },
+    { label: t('landing.nav.home'), href: '/', routerLink: true },
   ]
   if (brandGithubUrl.value) {
     links.push({ label: t('landing.nav.github'), href: brandGithubUrl.value, external: true })
