@@ -1704,6 +1704,8 @@ settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, 
         await done(false, `k3s install failed with exit code ${installResult.exitCode}`);
         return;
       }
+      // Ensure k3s service is running (installer skips start on reinstall)
+      await run('systemctl start k3s 2>/dev/null || true', { timeoutMs: 30000 });
       await log('k3s server installed successfully');
 
       // Step 2: Wait for kubeconfig
