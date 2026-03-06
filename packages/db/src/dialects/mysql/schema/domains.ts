@@ -94,6 +94,20 @@ export const domainTldPricing = mysqlTable('domain_tld_pricing', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const domainTldCurrencyPrices = mysqlTable('domain_tld_currency_prices', {
+  id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  tldPricingId: varchar('tld_pricing_id', { length: 36 })
+    .references(() => domainTldPricing.id, { onDelete: 'cascade' })
+    .notNull(),
+  currency: varchar('currency', { length: 3 }).notNull(),
+  sellRegistrationPrice: int('sell_registration_price').notNull(),
+  sellRenewalPrice: int('sell_renewal_price').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  uniqueIndex('idx_tld_currency_prices_tld_currency').on(table.tldPricingId, table.currency),
+]);
+
 export const sharedDomains = mysqlTable('shared_domains', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   domain: varchar('domain', { length: 255 }).notNull().unique(),

@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, domainRegistrations, domainTldPricing, accounts, eq, and, isNull } from '@fleet/db';
+import { db, domainRegistrations, domainTldPricing, domainTldCurrencyPrices, accounts, eq, and, isNull } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { tenantMiddleware, type AccountContext } from '../middleware/tenant.js';
 import { registrarService } from '../services/registrar.service.js';
@@ -168,6 +168,16 @@ async function handleDomainSearch(c: any) {
     // Overlay with our sell prices from domainTldPricing
     const pricingMap = new Map(pricingEntries.map((p: any) => [p.tld, p]));
 
+    // Load all TLD currency prices for fixed per-currency pricing
+    const allTldCurrencyPrices = await db.query.domainTldCurrencyPrices.findMany();
+    const tldCurrencyMap = new Map<string, Map<string, any>>();
+    for (const cp of allTldCurrencyPrices) {
+      if (!tldCurrencyMap.has(cp.tldPricingId)) tldCurrencyMap.set(cp.tldPricingId, new Map());
+      tldCurrencyMap.get(cp.tldPricingId)!.set(cp.currency, cp);
+    }
+
+    const tc = targetCurrency?.toUpperCase() ?? null;
+
     const enriched = results
       .map((r: any) => {
         const tld = r.domain.split('.').slice(1).join('.');
@@ -175,6 +185,21 @@ async function handleDomainSearch(c: any) {
 
         // Only show TLDs we have pricing for and that are enabled
         if (!pricing || !pricing.enabled) return null;
+
+        // Check for fixed currency price
+        const currencyPrices = tldCurrencyMap.get(pricing.id);
+        const fixedPrice = tc ? currencyPrices?.get(tc) : null;
+
+        if (fixedPrice) {
+          return {
+            ...r,
+            price: {
+              registration: fixedPrice.sellRegistrationPrice / 100,
+              renewal: fixedPrice.sellRenewalPrice / 100,
+              currency: tc,
+            },
+          };
+        }
 
         return {
           ...r,
@@ -187,9 +212,8 @@ async function handleDomainSearch(c: any) {
       })
       .filter(Boolean);
 
-    // Convert prices to requested currency if different
-    if (targetCurrency) {
-      const tc = targetCurrency.toUpperCase();
+    // Convert prices to requested currency if different (fallback for TLDs without fixed prices)
+    if (tc) {
       for (const r of enriched) {
         if (r.price && r.price.currency && r.price.currency.toUpperCase() !== tc) {
           const origCurrency = r.price.currency;
@@ -217,11 +241,12 @@ async function handleDomainSearch(c: any) {
 
     return c.json({ query: trimmed, results: enriched });
   } catch (err) {
-    logger.error({ err }, 'Domain search failed');
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err, message }, 'Domain search failed');
     return c.json(
       {
         error: 'Domain search failed',
-        details: undefined,
+        details: message,
       },
       500,
     );

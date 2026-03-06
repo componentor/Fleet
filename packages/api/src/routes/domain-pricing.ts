@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, domainTldPricing, eq } from '@fleet/db';
+import { db, domainTldPricing, domainTldCurrencyPrices, eq, deleteReturning } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { insertReturning, updateReturning } from '@fleet/db';
 import { registrarService } from '../services/registrar.service.js';
@@ -330,6 +330,110 @@ domainPricingRoutes.openapi(syncRoute, (async (c: any) => {
     logger.error({ err }, 'Price sync failed');
     return c.json({ error: 'Failed to sync prices' }, 500);
   }
+}) as any);
+
+// ─── TLD Currency Prices ─────────────────────────────────────────────────────
+
+const tldCurrencyPriceSchema = z.object({
+  currency: z.string().length(3),
+  sellRegistrationPrice: z.number().int().min(0),
+  sellRenewalPrice: z.number().int().min(0),
+}).openapi('TldCurrencyPriceRequest');
+
+const tldIdParamSchema = z.object({
+  tldId: z.string().openapi({ description: 'TLD pricing entry ID' }),
+});
+
+const tldPriceIdParamSchema = z.object({
+  tldId: z.string().openapi({ description: 'TLD pricing entry ID' }),
+  priceId: z.string().openapi({ description: 'Currency price ID' }),
+});
+
+// GET /:tldId/prices — list currency prices for a TLD
+const listTldPricesRoute = createRoute({
+  method: 'get',
+  path: '/{tldId}/prices',
+  tags: ['Domain Pricing'],
+  summary: 'List per-currency prices for a TLD',
+  security: bearerSecurity,
+  request: { params: tldIdParamSchema },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Currency prices'),
+    ...standardErrors,
+  },
+});
+
+domainPricingRoutes.openapi(listTldPricesRoute, (async (c: any) => {
+  const { tldId } = c.req.valid('param');
+  const prices = await db.query.domainTldCurrencyPrices.findMany({
+    where: eq(domainTldCurrencyPrices.tldPricingId, tldId),
+  });
+  return c.json(prices);
+}) as any);
+
+// PUT /:tldId/prices — set all currency prices for a TLD (replaces existing)
+const setTldPricesRoute = createRoute({
+  method: 'put',
+  path: '/{tldId}/prices',
+  tags: ['Domain Pricing'],
+  summary: 'Set per-currency prices for a TLD (replaces all)',
+  security: bearerSecurity,
+  request: {
+    params: tldIdParamSchema,
+    body: jsonBody(z.object({
+      prices: z.array(tldCurrencyPriceSchema),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Updated currency prices'),
+    ...standardErrors,
+  },
+});
+
+domainPricingRoutes.openapi(setTldPricesRoute, (async (c: any) => {
+  const { tldId } = c.req.valid('param');
+  const { prices } = c.req.valid('json');
+
+  const tld = await db.query.domainTldPricing.findFirst({
+    where: eq(domainTldPricing.id, tldId),
+  });
+  if (!tld) return c.json({ error: 'TLD pricing entry not found' }, 404);
+
+  await db.delete(domainTldCurrencyPrices).where(eq(domainTldCurrencyPrices.tldPricingId, tldId));
+
+  const result = [];
+  for (const p of prices) {
+    const [created] = await insertReturning(domainTldCurrencyPrices, {
+      tldPricingId: tldId,
+      currency: p.currency.toUpperCase(),
+      sellRegistrationPrice: p.sellRegistrationPrice,
+      sellRenewalPrice: p.sellRenewalPrice,
+    });
+    result.push(created);
+  }
+
+  return c.json(result);
+}) as any);
+
+// DELETE /:tldId/prices/:priceId — remove a single currency price
+const deleteTldPriceRoute = createRoute({
+  method: 'delete',
+  path: '/{tldId}/prices/{priceId}',
+  tags: ['Domain Pricing'],
+  summary: 'Remove a per-currency TLD price',
+  security: bearerSecurity,
+  request: { params: tldPriceIdParamSchema },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Price removed'),
+    ...standardErrors,
+  },
+});
+
+domainPricingRoutes.openapi(deleteTldPriceRoute, (async (c: any) => {
+  const { priceId } = c.req.valid('param');
+  const [deleted] = await deleteReturning(domainTldCurrencyPrices, eq(domainTldCurrencyPrices.id, priceId));
+  if (!deleted) return c.json({ error: 'Price not found' }, 404);
+  return c.json({ message: 'Currency price removed' });
 }) as any);
 
 export default domainPricingRoutes;

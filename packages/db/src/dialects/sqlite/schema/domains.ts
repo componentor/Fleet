@@ -91,6 +91,20 @@ export const domainTldPricing = sqliteTable('domain_tld_pricing', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+export const domainTldCurrencyPrices = sqliteTable('domain_tld_currency_prices', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  tldPricingId: text('tld_pricing_id')
+    .references(() => domainTldPricing.id, { onDelete: 'cascade' })
+    .notNull(),
+  currency: text('currency').notNull(),
+  sellRegistrationPrice: integer('sell_registration_price').notNull(),
+  sellRenewalPrice: integer('sell_renewal_price').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex('idx_tld_currency_prices_tld_currency').on(table.tldPricingId, table.currency),
+]);
+
 export const sharedDomains = sqliteTable('shared_domains', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   domain: text('domain').notNull().unique(),

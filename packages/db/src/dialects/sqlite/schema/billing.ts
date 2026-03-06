@@ -183,12 +183,33 @@ export const webhookEvents = sqliteTable('webhook_events', {
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
 });
 
+export const billingPlanPrices = sqliteTable('billing_plan_prices', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  planId: text('plan_id')
+    .references(() => billingPlans.id, { onDelete: 'cascade' })
+    .notNull(),
+  currency: text('currency').notNull(),
+  priceCents: integer('price_cents').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+]);
+
 export const billingPlansRelations = relations(
   billingPlans,
   ({ many }) => ({
     subscriptions: many(subscriptions),
+    prices: many(billingPlanPrices),
   }),
 );
+
+export const billingPlanPricesRelations = relations(billingPlanPrices, ({ one }) => ({
+  plan: one(billingPlans, {
+    fields: [billingPlanPrices.planId],
+    references: [billingPlans.id],
+  }),
+}));
 
 export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   account: one(accounts, {

@@ -9,24 +9,28 @@ let connectionFailed = false;
 
 function createClient(name: string): Redis | null {
   if (!VALKEY_URL) {
-    logger.warn({ name }, `Valkey ${name}: VALKEY_URL not set, Valkey disabled`);
-    connectionFailed = true;
     return null;
   }
   try {
     const redis = new Redis(VALKEY_URL, {
       maxRetriesPerRequest: 3,
       retryStrategy(times) {
-        if (times > 5) {
-          connectionFailed = true;
-          return null; // Stop retrying
+        if (times > 10) {
+          logger.warn({ name, times }, `Valkey ${name}: retry limit reached, will keep trying with longer backoff`);
+          return 30_000; // Retry every 30s instead of giving up
         }
-        return Math.min(times * 200, 2000);
+        return Math.min(times * 200, 5000);
       },
       lazyConnect: true,
     });
 
     redis.on('error', (err) => {
+      // MISCONF errors are transient (AOF/RDB rewrite) — don't permanently disable
+      const isMisconf = err.message?.includes('MISCONF');
+      if (isMisconf) {
+        logger.warn({ name }, `Valkey ${name}: transient MISCONF error (RDB/AOF rewrite in progress)`);
+        return;
+      }
       if (!connectionFailed) {
         logger.error({ error: err.message, name }, `Valkey ${name} error`);
       }
@@ -35,6 +39,10 @@ function createClient(name: string): Redis | null {
     redis.on('connect', () => {
       connectionFailed = false;
       logger.info({ name }, `Valkey ${name} connected`);
+    });
+
+    redis.on('ready', () => {
+      connectionFailed = false;
     });
 
     return redis;
@@ -49,7 +57,7 @@ function createClient(name: string): Redis | null {
  * Returns null if Valkey is unavailable — callers must handle gracefully.
  */
 export async function getValkey(): Promise<Redis | null> {
-  if (connectionFailed) return null;
+  if (!VALKEY_URL) return null;
 
   if (!client) {
     client = createClient('main');
@@ -57,11 +65,16 @@ export async function getValkey(): Promise<Redis | null> {
       try {
         await client.connect();
       } catch {
-        connectionFailed = true;
         client = null;
         return null;
       }
     }
+  }
+
+  // Check if the client is usable (connected or reconnecting)
+  if (client && client.status !== 'ready' && client.status !== 'connecting' && client.status !== 'reconnecting') {
+    client = null;
+    return null;
   }
 
   return client;
@@ -72,7 +85,7 @@ export async function getValkey(): Promise<Redis | null> {
  * ioredis requires a dedicated connection for subscriptions.
  */
 export async function getSubscriber(): Promise<Redis | null> {
-  if (connectionFailed) return null;
+  if (!VALKEY_URL) return null;
 
   if (!subscriber) {
     subscriber = createClient('subscriber');

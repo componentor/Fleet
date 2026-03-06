@@ -300,23 +300,23 @@ const trustSignals = computed(() => [
 
         <!-- Domain search bar -->
         <div class="mx-auto mt-10 max-w-2xl">
-          <div class="flex rounded-2xl border-2 border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-xl shadow-surface-200/50 dark:shadow-black/30 transition-all focus-within:border-primary-500 focus-within:shadow-primary-500/20">
-            <div class="flex items-center pl-5 text-surface-400">
+          <div class="flex rounded-2xl border-2 border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-xl shadow-surface-200/50 dark:shadow-black/30 transition-all focus-within:border-primary-500 focus-within:shadow-primary-500/20 min-w-0">
+            <div class="flex items-center pl-4 sm:pl-5 text-surface-400 shrink-0">
               <Globe class="w-5 h-5" />
             </div>
             <input
               v-model="searchQuery"
               type="text"
               :placeholder="t('landing.domainSearch.placeholder', 'Enter your domain name...')"
-              class="flex-1 bg-transparent px-4 py-4 text-lg text-gray-900 dark:text-white placeholder-surface-400 outline-none"
+              class="flex-1 min-w-0 bg-transparent px-3 sm:px-4 py-4 text-base sm:text-lg text-gray-900 dark:text-white placeholder-surface-400 outline-none"
             />
             <button
               @click="searchDomains"
               :disabled="searching || !searchQuery.trim()"
-              class="m-2 flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110 disabled:opacity-50"
+              class="m-2 flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-500 px-4 sm:px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-primary-500/40 hover:brightness-110 disabled:opacity-50 shrink-0"
             >
               <Search class="w-4 h-4" />
-              {{ t('landing.domainSearch.searchBtn', 'Search') }}
+              <span class="hidden sm:inline">{{ t('landing.domainSearch.searchBtn', 'Search') }}</span>
             </button>
           </div>
 

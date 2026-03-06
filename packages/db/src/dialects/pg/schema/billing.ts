@@ -186,12 +186,33 @@ export const webhookEvents = pgTable('webhook_events', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const billingPlanPrices = pgTable('billing_plan_prices', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  planId: uuid('plan_id')
+    .references(() => billingPlans.id, { onDelete: 'cascade' })
+    .notNull(),
+  currency: varchar('currency', { length: 3 }).notNull(),
+  priceCents: integer('price_cents').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  uniqueIndex('idx_billing_plan_prices_plan_currency').on(table.planId, table.currency),
+]);
+
 export const billingPlansRelations = relations(
   billingPlans,
   ({ many }) => ({
     subscriptions: many(subscriptions),
+    prices: many(billingPlanPrices),
   }),
 );
+
+export const billingPlanPricesRelations = relations(billingPlanPrices, ({ one }) => ({
+  plan: one(billingPlans, {
+    fields: [billingPlanPrices.planId],
+    references: [billingPlans.id],
+  }),
+}));
 
 export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   account: one(accounts, {

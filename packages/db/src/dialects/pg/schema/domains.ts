@@ -94,6 +94,20 @@ export const domainTldPricing = pgTable('domain_tld_pricing', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const domainTldCurrencyPrices = pgTable('domain_tld_currency_prices', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  tldPricingId: uuid('tld_pricing_id')
+    .references(() => domainTldPricing.id, { onDelete: 'cascade' })
+    .notNull(),
+  currency: varchar('currency', { length: 3 }).notNull(),
+  sellRegistrationPrice: integer('sell_registration_price').notNull(),
+  sellRenewalPrice: integer('sell_renewal_price').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  uniqueIndex('idx_tld_currency_prices_tld_currency').on(table.tldPricingId, table.currency),
+]);
+
 export const sharedDomains = pgTable('shared_domains', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   domain: varchar('domain', { length: 255 }).notNull().unique(),
