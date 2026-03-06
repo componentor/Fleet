@@ -2944,7 +2944,7 @@ const envUpdateRoute = createRoute({
   request: {
     body: jsonBody(z.object({
       updates: z.array(z.object({
-        key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.\-/+@:]*$/, 'Invalid variable name'),
+        key: z.string().min(1).max(256).regex(/^[^\s='"\\`$;&#!|<>{}[\]]+$/, 'Invalid variable name'),
         value: z.string(),
       })).max(50),
       restartServices: z.boolean().default(false),
@@ -2982,10 +2982,26 @@ settings.openapi(envUpdateRoute, (async (c: any) => {
     const updatedKeys: string[] = [];
     if (process.env['NODE_ENV'] === 'production') {
       for (const { key, value } of updates) {
-        // Escape special characters for sed
-        const escapedValue = value.replace(/[|&\\]/g, '\\$&');
+        // Base64-encode to safely pass arbitrary values through the shell
+        const b64Key = Buffer.from(key).toString('base64');
+        const b64Value = Buffer.from(value).toString('base64');
+        // Use node on the host to do file manipulation — avoids all shell escaping issues
         await orchestrator.runOnLocalHost(
-          `grep -q '^${key}=' ${ENV_FILE} && sed -i "s|^${key}=.*|${key}=${escapedValue}|" ${ENV_FILE} || echo "${key}=${escapedValue}" >> ${ENV_FILE}`,
+          `node -e "
+const fs = require('fs');
+const k = Buffer.from('${b64Key}','base64').toString();
+const v = Buffer.from('${b64Value}','base64').toString();
+const f = '${ENV_FILE}';
+let content = '';
+try { content = fs.readFileSync(f,'utf8'); } catch {}
+const lines = content.split('\\n');
+let found = false;
+for (let i = 0; i < lines.length; i++) {
+  if (lines[i].startsWith(k + '=')) { lines[i] = k + '=' + v; found = true; break; }
+}
+if (!found) lines.push(k + '=' + v);
+fs.writeFileSync(f, lines.join('\\n'));
+"`,
           { timeoutMs: 10_000 },
         );
         updatedKeys.push(key);
