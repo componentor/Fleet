@@ -489,6 +489,158 @@ adminNodeRoutes.openapi(listNodesRoute, (async (c: any) => {
   }
 }) as any);
 
+// ── Cluster Resources Overview (must be before /{id} routes) ─────────────
+
+const clusterResourcesRoute = createRoute({
+  method: 'get',
+  path: '/resources',
+  tags: ['Nodes'],
+  summary: 'Get cluster-wide resource overview (available, allocated, used)',
+  security: bearerSecurity,
+  middleware: [requireAdminPermission('nodes', 'read')] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Cluster resource overview'),
+    ...standardErrors,
+  },
+});
+
+adminNodeRoutes.openapi(clusterResourcesRoute, (async (c: any) => {
+  // 1. Get all active nodes with their latest metrics
+  const allNodes = await db.query.nodes.findMany({
+    where: isNotNull(nodes.id),
+    orderBy: (n: any, { asc }: any) => asc(n.hostname),
+  });
+
+  // 2. Get latest metrics for each node (most recent heartbeat)
+  const nodeIds = allNodes.map(n => n.id);
+  const latestMetrics: Record<string, any> = {};
+
+  if (nodeIds.length > 0) {
+    // Get the most recent metric for each node
+    for (const nodeId of nodeIds) {
+      const [metric] = await db.select()
+        .from(nodeMetrics)
+        .where(eq(nodeMetrics.nodeId, nodeId))
+        .orderBy(desc(nodeMetrics.recordedAt))
+        .limit(1);
+      if (metric) latestMetrics[nodeId] = metric;
+    }
+  }
+
+  // 3. Get allocated resources from running services (CPU + memory per container * replicas)
+  const activeServices = await db.select({
+    cpuLimit: services.cpuLimit,
+    memoryLimit: services.memoryLimit,
+    replicas: services.replicas,
+  })
+    .from(services)
+    .where(and(
+      eq(services.status, 'running'),
+      isNull(services.deletedAt),
+    ));
+
+  let allocatedCpuMilli = 0;   // millicores
+  let allocatedMemoryMb = 0;
+  let totalContainers = 0;
+
+  for (const svc of activeServices) {
+    const replicas = svc.replicas ?? 1;
+    totalContainers += replicas;
+    // cpuLimit is in millicores (e.g. 500 = 0.5 CPU), memoryLimit in MB
+    allocatedCpuMilli += (svc.cpuLimit ?? 0) * replicas;
+    allocatedMemoryMb += (svc.memoryLimit ?? 0) * replicas;
+  }
+
+  // 4. Aggregate cluster-wide totals from node metrics
+  let totalCpuCores = 0;
+  let totalMemoryMb = 0;
+  let usedMemoryMb = 0;
+  let totalDiskGb = 0;
+  let usedDiskGb = 0;
+  let totalRunningContainers = 0;
+
+  const nodeDetails = allNodes.map(n => {
+    const m = latestMetrics[n.id];
+    const cpuCores = m?.cpuCount ?? 0;
+    const memTotalMb = m ? Math.round((m.memTotal ?? 0) / (1024 * 1024)) : 0;
+    const memUsedMb = m ? Math.round((m.memUsed ?? 0) / (1024 * 1024)) : 0;
+    const memFreeMb = m ? Math.round((m.memFree ?? 0) / (1024 * 1024)) : 0;
+    const diskTotalGb = m ? Math.round((m.diskTotal ?? 0) / (1024 * 1024 * 1024) * 10) / 10 : 0;
+    const diskUsedGb = m ? Math.round((m.diskUsed ?? 0) / (1024 * 1024 * 1024) * 10) / 10 : 0;
+    const diskFreeGb = m ? Math.round((m.diskFree ?? 0) / (1024 * 1024 * 1024) * 10) / 10 : 0;
+    const containers = m?.containerCount ?? 0;
+
+    totalCpuCores += cpuCores;
+    totalMemoryMb += memTotalMb;
+    usedMemoryMb += memUsedMb;
+    totalDiskGb += diskTotalGb;
+    usedDiskGb += diskUsedGb;
+    totalRunningContainers += containers;
+
+    const isOnline = n.status === 'active' || n.status === 'draining';
+    const lastHeartbeat = n.lastHeartbeat ? new Date(n.lastHeartbeat).toISOString() : null;
+    const staleThreshold = Date.now() - 5 * 60 * 1000; // 5 min
+    const isStale = n.lastHeartbeat ? new Date(n.lastHeartbeat).getTime() < staleThreshold : true;
+
+    return {
+      id: n.id,
+      hostname: n.hostname,
+      ipAddress: n.ipAddress,
+      role: n.role,
+      status: n.status,
+      isOnline: isOnline && !isStale,
+      lastHeartbeat,
+      diskType: m?.diskType ?? 'unknown',
+      cpu: { cores: cpuCores },
+      memory: {
+        totalMb: memTotalMb,
+        usedMb: memUsedMb,
+        freeMb: memFreeMb,
+        usedPercent: memTotalMb > 0 ? Math.round((memUsedMb / memTotalMb) * 100) : 0,
+      },
+      disk: {
+        totalGb: diskTotalGb,
+        usedGb: diskUsedGb,
+        freeGb: diskFreeGb,
+        usedPercent: diskTotalGb > 0 ? Math.round((diskUsedGb / diskTotalGb) * 100) : 0,
+      },
+      containers,
+    };
+  });
+
+  // 5. Build cluster summary
+  const cluster = {
+    cpu: {
+      totalCores: totalCpuCores,
+      allocatedMilli: allocatedCpuMilli,
+      allocatedCores: Math.round(allocatedCpuMilli / 10) / 100, // millicores → cores with 2dp
+      allocatedPercent: totalCpuCores > 0 ? Math.round((allocatedCpuMilli / (totalCpuCores * 1000)) * 100) : 0,
+    },
+    memory: {
+      totalMb: totalMemoryMb,
+      usedMb: usedMemoryMb,
+      allocatedMb: allocatedMemoryMb,
+      usedPercent: totalMemoryMb > 0 ? Math.round((usedMemoryMb / totalMemoryMb) * 100) : 0,
+      allocatedPercent: totalMemoryMb > 0 ? Math.round((allocatedMemoryMb / totalMemoryMb) * 100) : 0,
+      freeMb: totalMemoryMb - usedMemoryMb,
+    },
+    disk: {
+      totalGb: totalDiskGb,
+      usedGb: usedDiskGb,
+      freeGb: Math.round((totalDiskGb - usedDiskGb) * 10) / 10,
+      usedPercent: totalDiskGb > 0 ? Math.round((usedDiskGb / totalDiskGb) * 100) : 0,
+    },
+    containers: {
+      running: totalRunningContainers,
+      allocated: totalContainers,
+    },
+    nodeCount: allNodes.length,
+    onlineNodes: nodeDetails.filter(n => n.isOnline).length,
+  };
+
+  return c.json({ cluster, nodes: nodeDetails });
+}) as any);
+
 // POST / — register a new node (returns join tokens)
 adminNodeRoutes.openapi(registerNodeRoute, (async (c: any) => {
   const data = c.req.valid('json');
@@ -1182,158 +1334,6 @@ const syncSshRoute = createRoute({
 adminNodeRoutes.openapi(syncSshRoute, (async (c: any) => {
   const result = await syncSshToNodes();
   return c.json(result);
-}) as any);
-
-// ── Cluster Resources Overview ───────────────────────────────────────────
-
-const clusterResourcesRoute = createRoute({
-  method: 'get',
-  path: '/resources',
-  tags: ['Nodes'],
-  summary: 'Get cluster-wide resource overview (available, allocated, used)',
-  security: bearerSecurity,
-  middleware: [requireAdminPermission('nodes', 'read')] as const,
-  responses: {
-    200: jsonContent(z.any(), 'Cluster resource overview'),
-    ...standardErrors,
-  },
-});
-
-adminNodeRoutes.openapi(clusterResourcesRoute, (async (c: any) => {
-  // 1. Get all active nodes with their latest metrics
-  const allNodes = await db.query.nodes.findMany({
-    where: isNotNull(nodes.id),
-    orderBy: (n: any, { asc }: any) => asc(n.hostname),
-  });
-
-  // 2. Get latest metrics for each node (most recent heartbeat)
-  const nodeIds = allNodes.map(n => n.id);
-  const latestMetrics: Record<string, any> = {};
-
-  if (nodeIds.length > 0) {
-    // Get the most recent metric for each node
-    for (const nodeId of nodeIds) {
-      const [metric] = await db.select()
-        .from(nodeMetrics)
-        .where(eq(nodeMetrics.nodeId, nodeId))
-        .orderBy(desc(nodeMetrics.recordedAt))
-        .limit(1);
-      if (metric) latestMetrics[nodeId] = metric;
-    }
-  }
-
-  // 3. Get allocated resources from running services (CPU + memory per container * replicas)
-  const activeServices = await db.select({
-    cpuLimit: services.cpuLimit,
-    memoryLimit: services.memoryLimit,
-    replicas: services.replicas,
-  })
-    .from(services)
-    .where(and(
-      eq(services.status, 'running'),
-      isNull(services.deletedAt),
-    ));
-
-  let allocatedCpuMilli = 0;   // millicores
-  let allocatedMemoryMb = 0;
-  let totalContainers = 0;
-
-  for (const svc of activeServices) {
-    const replicas = svc.replicas ?? 1;
-    totalContainers += replicas;
-    // cpuLimit is in millicores (e.g. 500 = 0.5 CPU), memoryLimit in MB
-    allocatedCpuMilli += (svc.cpuLimit ?? 0) * replicas;
-    allocatedMemoryMb += (svc.memoryLimit ?? 0) * replicas;
-  }
-
-  // 4. Aggregate cluster-wide totals from node metrics
-  let totalCpuCores = 0;
-  let totalMemoryMb = 0;
-  let usedMemoryMb = 0;
-  let totalDiskGb = 0;
-  let usedDiskGb = 0;
-  let totalRunningContainers = 0;
-
-  const nodeDetails = allNodes.map(n => {
-    const m = latestMetrics[n.id];
-    const cpuCores = m?.cpuCount ?? 0;
-    const memTotalMb = m ? Math.round((m.memTotal ?? 0) / (1024 * 1024)) : 0;
-    const memUsedMb = m ? Math.round((m.memUsed ?? 0) / (1024 * 1024)) : 0;
-    const memFreeMb = m ? Math.round((m.memFree ?? 0) / (1024 * 1024)) : 0;
-    const diskTotalGb = m ? Math.round((m.diskTotal ?? 0) / (1024 * 1024 * 1024) * 10) / 10 : 0;
-    const diskUsedGb = m ? Math.round((m.diskUsed ?? 0) / (1024 * 1024 * 1024) * 10) / 10 : 0;
-    const diskFreeGb = m ? Math.round((m.diskFree ?? 0) / (1024 * 1024 * 1024) * 10) / 10 : 0;
-    const containers = m?.containerCount ?? 0;
-
-    totalCpuCores += cpuCores;
-    totalMemoryMb += memTotalMb;
-    usedMemoryMb += memUsedMb;
-    totalDiskGb += diskTotalGb;
-    usedDiskGb += diskUsedGb;
-    totalRunningContainers += containers;
-
-    const isOnline = n.status === 'active' || n.status === 'draining';
-    const lastHeartbeat = n.lastHeartbeat ? new Date(n.lastHeartbeat).toISOString() : null;
-    const staleThreshold = Date.now() - 5 * 60 * 1000; // 5 min
-    const isStale = n.lastHeartbeat ? new Date(n.lastHeartbeat).getTime() < staleThreshold : true;
-
-    return {
-      id: n.id,
-      hostname: n.hostname,
-      ipAddress: n.ipAddress,
-      role: n.role,
-      status: n.status,
-      isOnline: isOnline && !isStale,
-      lastHeartbeat,
-      diskType: m?.diskType ?? 'unknown',
-      cpu: { cores: cpuCores },
-      memory: {
-        totalMb: memTotalMb,
-        usedMb: memUsedMb,
-        freeMb: memFreeMb,
-        usedPercent: memTotalMb > 0 ? Math.round((memUsedMb / memTotalMb) * 100) : 0,
-      },
-      disk: {
-        totalGb: diskTotalGb,
-        usedGb: diskUsedGb,
-        freeGb: diskFreeGb,
-        usedPercent: diskTotalGb > 0 ? Math.round((diskUsedGb / diskTotalGb) * 100) : 0,
-      },
-      containers,
-    };
-  });
-
-  // 5. Build cluster summary
-  const cluster = {
-    cpu: {
-      totalCores: totalCpuCores,
-      allocatedMilli: allocatedCpuMilli,
-      allocatedCores: Math.round(allocatedCpuMilli / 10) / 100, // millicores → cores with 2dp
-      allocatedPercent: totalCpuCores > 0 ? Math.round((allocatedCpuMilli / (totalCpuCores * 1000)) * 100) : 0,
-    },
-    memory: {
-      totalMb: totalMemoryMb,
-      usedMb: usedMemoryMb,
-      allocatedMb: allocatedMemoryMb,
-      usedPercent: totalMemoryMb > 0 ? Math.round((usedMemoryMb / totalMemoryMb) * 100) : 0,
-      allocatedPercent: totalMemoryMb > 0 ? Math.round((allocatedMemoryMb / totalMemoryMb) * 100) : 0,
-      freeMb: totalMemoryMb - usedMemoryMb,
-    },
-    disk: {
-      totalGb: totalDiskGb,
-      usedGb: usedDiskGb,
-      freeGb: Math.round((totalDiskGb - usedDiskGb) * 10) / 10,
-      usedPercent: totalDiskGb > 0 ? Math.round((usedDiskGb / totalDiskGb) * 100) : 0,
-    },
-    containers: {
-      running: totalRunningContainers,
-      allocated: totalContainers,
-    },
-    nodeCount: allNodes.length,
-    onlineNodes: nodeDetails.filter(n => n.isOnline).length,
-  };
-
-  return c.json({ cluster, nodes: nodeDetails });
 }) as any);
 
 nodeRoutes.route('/', adminNodeRoutes);

@@ -1526,7 +1526,8 @@
       "unresolvedIssues": "{count} uløste problemer",
       "fatalCount": "{count} fatale",
       "last24h": "{count} siste 24 timer",
-      "viewErrors": "Se feil"
+      "viewErrors": "Se feil",
+      "subtitle": "Plattformoversikt og systemhelse på et blikk"
     },
     "nodes": {
       "title": "Noder",
@@ -1556,7 +1557,8 @@
       "resources": "Ressurser",
       "docker": "Docker",
       "actions": "Handlinger",
-      "activate": "Aktiver"
+      "activate": "Aktiver",
+      "subtitle": "Administrer Docker Swarm-noder og infrastruktur"
     },
     "accounts": {
       "title": "Kontoer",
@@ -1578,7 +1580,8 @@
       "impersonate": "Utgi deg som",
       "pageOf": "Side {page} av {total}",
       "previous": "Forrige",
-      "next": "Neste"
+      "next": "Neste",
+      "subtitle": "Administrer alle kunde- og forhandlerkontoer"
     },
     "services": {
       "title": "Alle tjenester",
@@ -1596,7 +1599,9 @@
       "status": "Status",
       "replicas": "Replikaer",
       "domain": "Domene",
-      "created": "Opprettet"
+      "created": "Opprettet",
+      "subtitle": "Oversikt over alle distribuerte tjenester på tvers av kontoer",
+      "noServicesDesc": "Tjenester vil vises her når kontoer distribuerer applikasjoner."
     },
     "users": {
       "title": "Alle brukere",
@@ -1624,7 +1629,8 @@
       "permissions": "Tillatelser",
       "noRole": "Ingen rolle tildelt",
       "noPermissions": "Ingen tillatelser konfigurert for denne rollen.",
-      "superAdminAccess": "Full tilgang — superadminer omgår alle tillatelseskontroller."
+      "superAdminAccess": "Full tilgang — superadminer omgår alle tillatelseskontroller.",
+      "subtitle": "Se og administrer alle plattformbrukere på tvers av kontoer"
     },
     "marketplace": {
       "title": "Appmaler",
@@ -1655,7 +1661,8 @@
       "deleteConfirm": "Slett mal \"{slug}\"? Dette kan ikke angres.",
       "deleteFailed": "Kunne ikke slette mal",
       "synced": "Maler synkronisert fra disk",
-      "syncFailed": "Kunne ikke synkronisere maler"
+      "syncFailed": "Kunne ikke synkronisere maler",
+      "subtitle": "Administrer distribusjonsmaler for markedsplassen"
     },
     "auditLog": {
       "title": "Revisjonslogg",
@@ -1672,10 +1679,13 @@
       "pageOf": "Side {page} av {total}",
       "noLogs": "Ingen loggoppføringer",
       "timestamp": "Tidsstempel",
-      "details": "Detaljer"
+      "details": "Detaljer",
+      "subtitle": "Komplett revisjonslogg over alle plattformhandlinger og endringer",
+      "noEntriesDesc": "Hendelser vil bli registrert her etter hvert som brukere samhandler med plattformen."
     },
     "settings": {
       "title": "Plattforminnstillinger",
+      "subtitle": "Konfigurer merkevare, integrasjoner og plattformatferd",
       "platformName": "Plattformnavn",
       "platformDomain": "Plattformdomene",
       "rootDomain": "Rotdomene",
@@ -1920,6 +1930,7 @@
     },
     "billing": {
       "title": "Faktureringskonfigurasjon",
+      "subtitle": "Konfigurer prisplaner, Stripe-integrasjon og faktureringspolicyer",
       "plans": "Planer",
       "createPlan": "Opprett plan",
       "editPlan": "Rediger plan",
@@ -2066,10 +2077,13 @@
       "filter": "Filter",
       "all": "Alle",
       "pending": "Avventer",
-      "statusCol": "Status"
+      "statusCol": "Status",
+      "subtitle": "Spor og løs applikasjonsfeil på tvers av plattformen",
+      "noErrorsDesc": "Ingen feil har blitt registrert. Det er et godt tegn!"
     },
     "status": {
       "title": "Systemstatus",
+      "subtitle": "Sanntids helseovervåking av alle plattformkomponenter",
       "autoRefresh": "Automatisk oppdatering",
       "on": "PÅ",
       "off": "AV",
@@ -2119,6 +2133,7 @@
     },
     "statusPosts": {
       "title": "Statusinnlegg",
+      "subtitle": "Publiser vedlikeholdsmeldinger og hendelsesoppdateringer",
       "newPost": "Nytt innlegg",
       "editPost": "Rediger innlegg",
       "icon": "Ikon",
@@ -2189,6 +2204,7 @@
     },
     "sharedDomains": {
       "title": "Delte domener",
+      "subtitle": "Administrer jokertegndomener tilgjengelig for alle kontoer",
       "add": "Legg til domene",
       "edit": "Rediger domene",
       "domain": "Domene",
@@ -2744,6 +2760,7 @@
   },
   "jobs": {
     "title": "Jobber",
+    "subtitle": "Overvåk distribusjon, sikkerhetskopi og vedlikeholdsjobber",
     "queues": "Køer",
     "allQueues": "Alle køer",
     "allStatuses": "Alle statuser",
@@ -3913,6 +3930,7 @@
   },
   "roles": {
     "title": "Roller",
+    "subtitle": "Definer administratorroller med detaljerte tillatelseskontroller",
     "createRole": "Opprett rolle",
     "createTitle": "Opprett ny rolle",
     "nameLabel": "Navn",
@@ -3945,6 +3963,9 @@
     "createError": "Kunne ikke opprette rolle",
     "updateError": "Kunne ikke oppdatere rolle",
     "deleteError": "Kunne ikke slette rolle",
+    "presetConfirmTitle": "Opprett rolle fra mal",
+    "presetConfirmMessage": "Dette vil opprette en ny rolle \"{name}\" med forhåndskonfigurerte tillatelser.",
+    "presetConfirmPermissions": "Inkluderte tillatelser:",
     "sections": {
       "dashboard": "Dashbord",
       "nodes": "Noder",

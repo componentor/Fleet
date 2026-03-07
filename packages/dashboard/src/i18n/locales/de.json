@@ -1525,7 +1525,8 @@
       "unresolvedIssues": "{count} ungelöste Probleme",
       "fatalCount": "{count} kritisch",
       "last24h": "{count} in den letzten 24 Stunden",
-      "viewErrors": "Fehler anzeigen"
+      "viewErrors": "Fehler anzeigen",
+      "subtitle": "Plattformübersicht und Systemzustand auf einen Blick"
     },
     "nodes": {
       "title": "Knoten",
@@ -1555,7 +1556,8 @@
       "resources": "Ressourcen",
       "docker": "Docker",
       "actions": "Aktionen",
-      "activate": "Aktivieren"
+      "activate": "Aktivieren",
+      "subtitle": "Docker Swarm-Knoten und Infrastruktur verwalten"
     },
     "accounts": {
       "title": "Konten",
@@ -1577,7 +1579,8 @@
       "impersonate": "Identität annehmen",
       "pageOf": "Seite {page} von {total}",
       "previous": "Zurück",
-      "next": "Weiter"
+      "next": "Weiter",
+      "subtitle": "Alle Kunden- und Reseller-Konten verwalten"
     },
     "services": {
       "title": "Alle Dienste",
@@ -1595,7 +1598,9 @@
       "status": "Status",
       "replicas": "Replikate",
       "domain": "Domain",
-      "created": "Erstellt"
+      "created": "Erstellt",
+      "subtitle": "Übersicht aller bereitgestellten Dienste über alle Konten hinweg",
+      "noServicesDesc": "Dienste werden hier angezeigt, sobald Konten Anwendungen bereitstellen."
     },
     "users": {
       "title": "Alle Benutzer",
@@ -1623,7 +1628,8 @@
       "permissions": "Berechtigungen",
       "noRole": "Keine Rolle zugewiesen",
       "noPermissions": "Keine Berechtigungen für diese Rolle konfiguriert.",
-      "superAdminAccess": "Vollzugriff — Super-Admins umgehen alle Berechtigungsprüfungen."
+      "superAdminAccess": "Vollzugriff — Super-Admins umgehen alle Berechtigungsprüfungen.",
+      "subtitle": "Alle Plattformbenutzer kontoübergreifend anzeigen und verwalten"
     },
     "marketplace": {
       "title": "App-Vorlagen",
@@ -1654,7 +1660,8 @@
       "deleteConfirm": "Vorlage \"{slug}\" löschen? Dies kann nicht rückgängig gemacht werden.",
       "deleteFailed": "Vorlage konnte nicht gelöscht werden",
       "synced": "Vorlagen von Festplatte synchronisiert",
-      "syncFailed": "Synchronisierung fehlgeschlagen"
+      "syncFailed": "Synchronisierung fehlgeschlagen",
+      "subtitle": "Ein-Klick-Bereitstellungsvorlagen für den Marktplatz verwalten"
     },
     "auditLog": {
       "title": "Audit-Log",
@@ -1671,10 +1678,13 @@
       "pageOf": "Seite {page} von {total}",
       "noLogs": "Keine Audit-Log-Einträge",
       "timestamp": "Zeitstempel",
-      "details": "Details"
+      "details": "Details",
+      "subtitle": "Vollständiger Audit-Trail aller Plattformaktionen und -änderungen",
+      "noEntriesDesc": "Ereignisse werden hier aufgezeichnet, wenn Benutzer mit der Plattform interagieren."
     },
     "settings": {
       "title": "Plattformeinstellungen",
+      "subtitle": "Branding, Integrationen und Plattformverhalten konfigurieren",
       "platformName": "Plattformname",
       "platformDomain": "Plattform-Domain",
       "rootDomain": "Stamm-Domain",
@@ -1919,6 +1929,7 @@
     },
     "billing": {
       "title": "Abrechnungskonfiguration",
+      "subtitle": "Preispläne, Stripe-Integration und Abrechnungsrichtlinien konfigurieren",
       "plans": "Pläne",
       "createPlan": "Plan erstellen",
       "editPlan": "Plan bearbeiten",
@@ -2065,10 +2076,13 @@
       "filter": "Filter",
       "all": "Alle",
       "pending": "Ausstehend",
-      "statusCol": "Status"
+      "statusCol": "Status",
+      "subtitle": "Anwendungsfehler plattformübergreifend verfolgen und beheben",
+      "noErrorsDesc": "Keine Fehler wurden aufgezeichnet. Das ist ein gutes Zeichen!"
     },
     "status": {
       "title": "Systemstatus",
+      "subtitle": "Echtzeit-Zustandsüberwachung aller Plattformkomponenten",
       "autoRefresh": "Automatische Aktualisierung",
       "on": "EIN",
       "off": "AUS",
@@ -2118,6 +2132,7 @@
     },
     "statusPosts": {
       "title": "Statusbeiträge",
+      "subtitle": "Wartungshinweise und Vorfallaktualisierungen veröffentlichen",
       "newPost": "Neuer Beitrag",
       "editPost": "Beitrag bearbeiten",
       "icon": "Symbol",
@@ -2188,6 +2203,7 @@
     },
     "sharedDomains": {
       "title": "Geteilte Domains",
+      "subtitle": "Wildcard-Domains für alle Konten verwalten",
       "add": "Domain hinzufügen",
       "edit": "Domain bearbeiten",
       "domain": "Domain",
@@ -2793,7 +2809,8 @@
     "queueResumed": "Warteschlange fortgesetzt",
     "jobRetried": "Aufgabe erfolgreich wiederholt",
     "jobRemoved": "Aufgabe entfernt",
-    "jobPromoted": "Aufgabe auf wartend gesetzt"
+    "jobPromoted": "Aufgabe auf wartend gesetzt",
+    "subtitle": "Bereitstellungs-, Sicherungs- und Wartungswarteschlangen überwachen"
   },
   "confirmDelete": {
     "title": "Dienst löschen",
@@ -3906,6 +3923,10 @@
   },
   "roles": {
     "title": "Rollen",
+    "subtitle": "Administratorrollen mit granularen Berechtigungskontrollen definieren",
+    "presetConfirmTitle": "Rolle aus Vorlage erstellen",
+    "presetConfirmMessage": "Dies erstellt eine neue Rolle \"{name}\" mit vorkonfigurierten Berechtigungen.",
+    "presetConfirmPermissions": "Enthaltene Berechtigungen:",
     "createRole": "Rolle erstellen",
     "createTitle": "Neue Rolle erstellen",
     "nameLabel": "Name",

@@ -73,7 +73,6 @@ function selectTemplate(slug: string) {
     editSubject.value = tpl.subject
     editBodyHtml.value = tpl.bodyHtml
     editEnabled.value = tpl.enabled
-    previewMode.value = 'edit'
     // Build test variables
     testVariables.value = {}
     for (const v of getVariableNames(tpl.variables)) {

@@ -1525,7 +1525,8 @@
       "unresolvedIssues": "{count} 个未解决的问题",
       "fatalCount": "{count} 个致命错误",
       "last24h": "过去24小时内 {count} 个",
-      "viewErrors": "查看错误"
+      "viewErrors": "查看错误",
+      "subtitle": "平台概览和系统健康状态一目了然"
     },
     "nodes": {
       "title": "节点",
@@ -1555,7 +1556,8 @@
       "resources": "资源",
       "docker": "Docker",
       "actions": "操作",
-      "activate": "激活"
+      "activate": "激活",
+      "subtitle": "管理 Docker Swarm 节点和基础设施"
     },
     "accounts": {
       "title": "账户",
@@ -1577,7 +1579,8 @@
       "impersonate": "模拟身份",
       "pageOf": "第 {page} 页，共 {total} 页",
       "previous": "上一页",
-      "next": "下一页"
+      "next": "下一页",
+      "subtitle": "管理所有客户和经销商账户"
     },
     "services": {
       "title": "所有服务",
@@ -1595,7 +1598,9 @@
       "status": "状态",
       "replicas": "副本",
       "domain": "域名",
-      "created": "创建时间"
+      "created": "创建时间",
+      "subtitle": "跨账户所有已部署服务的概览",
+      "noServicesDesc": "账户部署应用程序后，服务将显示在此处。"
     },
     "users": {
       "title": "所有用户",
@@ -1623,10 +1628,12 @@
       "permissions": "权限",
       "noRole": "未分配角色",
       "noPermissions": "此角色未配置任何权限。",
-      "superAdminAccess": "完全访问权限 — 超级管理员绕过所有权限检查。"
+      "superAdminAccess": "完全访问权限 — 超级管理员绕过所有权限检查。",
+      "subtitle": "跨账户查看和管理所有平台用户"
     },
     "marketplace": {
       "title": "应用模板",
+      "subtitle": "管理市场的一键部署模板",
       "create": "创建模板",
       "noTemplates": "尚未配置应用模板。",
       "noTemplatesDesc": "创建用户可以一键部署的模板。",
@@ -1671,10 +1678,13 @@
       "pageOf": "第 {page} 页，共 {total} 页",
       "noLogs": "暂无审计日志条目",
       "timestamp": "时间戳",
-      "details": "详情"
+      "details": "详情",
+      "subtitle": "所有平台操作和变更的完整审计记录",
+      "noEntriesDesc": "用户与平台交互时，事件将在此处记录。"
     },
     "settings": {
       "title": "平台设置",
+      "subtitle": "配置品牌、集成和平台行为",
       "platformName": "平台名称",
       "platformDomain": "平台域名",
       "rootDomain": "根域名",
@@ -1919,6 +1929,7 @@
     },
     "billing": {
       "title": "计费配置",
+      "subtitle": "配置定价计划、Stripe 集成和计费策略",
       "plans": "套餐",
       "createPlan": "创建套餐",
       "editPlan": "编辑套餐",
@@ -2029,6 +2040,7 @@
     },
     "errors": {
       "title": "错误",
+      "subtitle": "跨平台跟踪和解决应用程序错误",
       "resolveAll": "全部解决",
       "resolving": "正在解决...",
       "autoRefresh": "自动刷新",
@@ -2065,10 +2077,12 @@
       "filter": "筛选",
       "all": "全部",
       "pending": "待处理",
-      "statusCol": "状态"
+      "statusCol": "状态",
+      "noErrorsDesc": "没有记录到错误。这是个好兆头！"
     },
     "status": {
       "title": "系统状态",
+      "subtitle": "所有平台组件的实时健康监控",
       "autoRefresh": "自动刷新",
       "on": "开启",
       "off": "关闭",
@@ -2118,6 +2132,7 @@
     },
     "statusPosts": {
       "title": "状态公告",
+      "subtitle": "发布维护通知和事件更新",
       "newPost": "新建公告",
       "editPost": "编辑公告",
       "icon": "图标",
@@ -2188,6 +2203,7 @@
     },
     "sharedDomains": {
       "title": "共享域名",
+      "subtitle": "管理对所有账户可用的通配符域名",
       "add": "添加域名",
       "edit": "编辑域名",
       "domain": "域名",
@@ -2793,7 +2809,8 @@
     "queueResumed": "队列已恢复",
     "jobRetried": "任务重试成功",
     "jobRemoved": "任务已移除",
-    "jobPromoted": "任务已提升为等待状态"
+    "jobPromoted": "任务已提升为等待状态",
+    "subtitle": "监控部署、备份和维护作业队列"
   },
   "confirmDelete": {
     "title": "删除服务",
@@ -3906,6 +3923,7 @@
   },
   "roles": {
     "title": "角色",
+    "subtitle": "定义具有精细权限控制的管理员角色",
     "createRole": "创建角色",
     "createTitle": "创建新角色",
     "nameLabel": "名称",
@@ -3960,7 +3978,10 @@
       "support": "支持",
       "roles": "角色",
       "database": "数据库"
-    }
+    },
+    "presetConfirmTitle": "从模板创建角色",
+    "presetConfirmMessage": "这将创建一个名为\"{name}\"的新角色，并带有预配置的权限。",
+    "presetConfirmPermissions": "包含的权限："
   },
   "security": {
     "title": "安全监控",
