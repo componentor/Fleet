@@ -1,0 +1,43 @@
+name: Docker Upgrade Simulation
+
+# Full A → B → C Docker upgrade simulation:
+# 1. Builds API image from main branch (State A), deploys, verifies health
+# 2. Builds API image from current branch (State B), upgrades same DB, verifies
+# 3. Verifies data survives upgrade, seeders, registration, stability (State C)
+#
+# Tests ALL 3 database dialects (SQLite, PostgreSQL, MySQL).
+# Runs on every push to `next` so the branch is always ready for merge to main.
+# Also runs on PRs to `main` as a merge gate.
+
+on:
+  push:
+    branches: [next]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: docker-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-upgrade:
+    name: "Docker Upgrade — ${{ matrix.dialect }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [sqlite, pg, mysql]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for main branch worktree
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Run Docker upgrade simulation (${{ matrix.dialect }})
+        run: bash scripts/test-docker-upgrade.sh ${{ matrix.dialect }}

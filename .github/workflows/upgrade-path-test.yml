@@ -5,10 +5,14 @@ name: Upgrade Path Test
 # across all 3 database dialects to ensure upgrades never break.
 
 on:
+  push:
+    branches: [next, main]
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+
+concurrency:
+  group: upgrade-path-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   upgrade-path-sqlite:
