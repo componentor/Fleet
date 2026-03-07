@@ -1225,6 +1225,11 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   });
   const stackId = stackRow!.id;
 
+  // Log volumes payload for debugging
+  if (data.volumes && data.volumes.length > 0) {
+    logger.info({ volumes: data.volumes, serviceName: data.name }, 'Creating service with volumes');
+  }
+
   // Insert into DB
   const [svc] = await insertReturning(services, {
     accountId,

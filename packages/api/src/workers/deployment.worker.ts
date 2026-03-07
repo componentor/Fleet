@@ -571,12 +571,16 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     }
 
     // For compose builds: update primary service with config from the compose file
+    // Only apply compose config for fields the user hasn't already configured
     if (build.composeServices && build.composeServices.length > 0) {
       const primaryConfig = build.composeServices[0]!;
+      const existingEnv = (svc.env as Record<string, string>) ?? {};
+      const existingPorts = (svc.ports as any[]) ?? [];
+      const existingVolumes = (svc.volumes as any[]) ?? [];
       const updates: Record<string, any> = { updatedAt: new Date() };
-      if (primaryConfig.env && Object.keys(primaryConfig.env).length > 0) updates.env = primaryConfig.env;
-      if (primaryConfig.ports && primaryConfig.ports.length > 0) updates.ports = primaryConfig.ports;
-      if (primaryConfig.volumes && primaryConfig.volumes.length > 0) updates.volumes = primaryConfig.volumes;
+      if (primaryConfig.env && Object.keys(primaryConfig.env).length > 0 && Object.keys(existingEnv).length === 0) updates.env = primaryConfig.env;
+      if (primaryConfig.ports && primaryConfig.ports.length > 0 && existingPorts.length === 0) updates.ports = primaryConfig.ports;
+      if (primaryConfig.volumes && primaryConfig.volumes.length > 0 && existingVolumes.length === 0) updates.volumes = primaryConfig.volumes;
       if (Object.keys(updates).length > 1) {
         await db.update(services).set(updates).where(eq(services.id, svc.id));
         Object.assign(svc, updates);
@@ -604,11 +608,14 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
           });
 
           if (existing) {
-            // Update env/ports/volumes from compose config if available
+            // Update env/ports/volumes from compose config — only if not already configured by user
+            const existEnv = (existing.env as Record<string, string>) ?? {};
+            const existPorts = (existing.ports as any[]) ?? [];
+            const existVols = (existing.volumes as any[]) ?? [];
             const updates: Record<string, any> = { updatedAt: new Date() };
-            if (composeSvc.env && Object.keys(composeSvc.env).length > 0) updates.env = composeSvc.env;
-            if (composeSvc.ports && composeSvc.ports.length > 0) updates.ports = composeSvc.ports;
-            if (composeSvc.volumes && composeSvc.volumes.length > 0) updates.volumes = composeSvc.volumes;
+            if (composeSvc.env && Object.keys(composeSvc.env).length > 0 && Object.keys(existEnv).length === 0) updates.env = composeSvc.env;
+            if (composeSvc.ports && composeSvc.ports.length > 0 && existPorts.length === 0) updates.ports = composeSvc.ports;
+            if (composeSvc.volumes && composeSvc.volumes.length > 0 && existVols.length === 0) updates.volumes = composeSvc.volumes;
             if (Object.keys(updates).length > 1) {
               await db.update(services).set(updates).where(eq(services.id, existing.id));
               // Merge updates into the existing object for deployOneService

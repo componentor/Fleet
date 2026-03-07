@@ -278,7 +278,7 @@ async function executeRegistryDeploy() {
       replicas: replicas.value,
       domain: domain.value || undefined,
       region: selectedRegion.value || undefined,
-      envVars: buildEnvVarsPayload(),
+      env: buildEnvVarsPayload(),
       volumes: buildVolumesPayload(),
       sourceType: 'registry',
       registryPollEnabled: registryPollEnabled.value,
@@ -332,7 +332,7 @@ async function executeGitDeploy() {
       replicas: replicas.value,
       domain: domain.value || undefined,
       region: selectedRegion.value || undefined,
-      envVars: buildEnvVarsPayload(),
+      env: buildEnvVarsPayload(),
       volumes: buildVolumesPayload(),
       planId: selectedPlanId.value || undefined,
     } as any)
@@ -508,7 +508,7 @@ async function executeDockerDeploy() {
       replicas: replicas.value,
       domain: domain.value || undefined,
       region: selectedRegion.value || undefined,
-      envVars: buildEnvVarsPayload(),
+      env: buildEnvVarsPayload(),
       volumes: buildVolumesPayload(),
       planId: selectedPlanId.value || undefined,
     } as any)
@@ -554,7 +554,7 @@ async function executeGithubDeploy() {
       githubBranch: selectedBranch.value,
       autoDeploy: autoDeploy.value,
       region: selectedRegion.value || undefined,
-      envVars: buildEnvVarsPayload(),
+      env: buildEnvVarsPayload(),
       volumes: buildVolumesPayload(),
       planId: selectedPlanId.value || undefined,
     } as any)
