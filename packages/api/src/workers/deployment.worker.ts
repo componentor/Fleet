@@ -10,6 +10,7 @@ import { decrypt } from '../services/crypto.service.js';
 import { logger, logToErrorTable } from '../services/logger.js';
 import { emailService } from '../services/email.service.js';
 import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
+import { reconcileDeployConfig } from '../services/deploy-reconciler.service.js';
 import type { EmailJobData } from './email.worker.js';
 
 async function queueEmail(data: EmailJobData): Promise<void> {
@@ -570,21 +571,39 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         .where(eq(services.id, targetSvc.id));
     }
 
-    // For compose builds: update primary service with config from the compose file
-    // Only apply compose config for fields the user hasn't already configured
-    if (build.composeServices && build.composeServices.length > 0) {
-      const primaryConfig = build.composeServices[0]!;
-      const existingEnv = (svc.env as Record<string, string>) ?? {};
-      const existingPorts = (svc.ports as any[]) ?? [];
-      const existingVolumes = (svc.volumes as any[]) ?? [];
-      const updates: Record<string, any> = { updatedAt: new Date() };
-      if (primaryConfig.env && Object.keys(primaryConfig.env).length > 0 && Object.keys(existingEnv).length === 0) updates.env = primaryConfig.env;
-      if (primaryConfig.ports && primaryConfig.ports.length > 0 && existingPorts.length === 0) updates.ports = primaryConfig.ports;
-      if (primaryConfig.volumes && primaryConfig.volumes.length > 0 && existingVolumes.length === 0) updates.volumes = primaryConfig.volumes;
-      if (Object.keys(updates).length > 1) {
-        await db.update(services).set(updates).where(eq(services.id, svc.id));
-        Object.assign(svc, updates);
+    // ── Reconcile user config with compose/Dockerfile intent ──────────────
+    {
+      const primaryComposeConfig = build.composeServices?.[0] ?? null;
+      const reconciled = await reconcileDeployConfig({
+        serviceId: svc.id,
+        accountId,
+        serviceName: svc.name,
+        userVolumes: ((svc.volumes as any[]) ?? []).map((v: any) => ({
+          source: v.source,
+          target: v.target,
+          readonly: v.readonly ?? false,
+        })),
+        userEnv: (svc.env as Record<string, string>) ?? {},
+        userPorts: ((svc.ports as any[]) ?? []).map((p: any) => ({
+          target: p.target ?? 80,
+          published: p.published ?? p.target ?? 80,
+          protocol: p.protocol ?? 'tcp',
+        })),
+        composeConfig: primaryComposeConfig,
+        dockerfile: svc.dockerfile as string | null,
+      });
+
+      if (reconciled.log.length > 0) {
+        logger.info({ serviceId: svc.id, reconcileLog: reconciled.log }, 'Deploy reconciler results');
       }
+
+      // Apply reconciled config to DB
+      const updates: Record<string, any> = { updatedAt: new Date() };
+      updates.volumes = reconciled.volumes;
+      updates.env = reconciled.env;
+      if (reconciled.ports.length > 0) updates.ports = reconciled.ports;
+      await db.update(services).set(updates).where(eq(services.id, svc.id));
+      Object.assign(svc, updates);
     }
 
     // Deploy primary service
@@ -608,33 +627,53 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
           });
 
           if (existing) {
-            // Update env/ports/volumes from compose config — only if not already configured by user
-            const existEnv = (existing.env as Record<string, string>) ?? {};
-            const existPorts = (existing.ports as any[]) ?? [];
-            const existVols = (existing.volumes as any[]) ?? [];
-            const updates: Record<string, any> = { updatedAt: new Date() };
-            if (composeSvc.env && Object.keys(composeSvc.env).length > 0 && Object.keys(existEnv).length === 0) updates.env = composeSvc.env;
-            if (composeSvc.ports && composeSvc.ports.length > 0 && existPorts.length === 0) updates.ports = composeSvc.ports;
-            if (composeSvc.volumes && composeSvc.volumes.length > 0 && existVols.length === 0) updates.volumes = composeSvc.volumes;
-            if (Object.keys(updates).length > 1) {
-              await db.update(services).set(updates).where(eq(services.id, existing.id));
-              // Merge updates into the existing object for deployOneService
-              Object.assign(existing, updates);
-            }
+            // Reconcile existing service config with compose config
+            const reconciledSub = await reconcileDeployConfig({
+              serviceId: existing.id,
+              accountId,
+              serviceName: existingName,
+              userVolumes: ((existing.volumes as any[]) ?? []).map((v: any) => ({
+                source: v.source, target: v.target, readonly: v.readonly ?? false,
+              })),
+              userEnv: (existing.env as Record<string, string>) ?? {},
+              userPorts: ((existing.ports as any[]) ?? []).map((p: any) => ({
+                target: p.target ?? 80, published: p.published ?? p.target ?? 80, protocol: p.protocol ?? 'tcp',
+              })),
+              composeConfig: composeSvc,
+            });
+
+            const updates: Record<string, any> = {
+              updatedAt: new Date(),
+              volumes: reconciledSub.volumes,
+              env: reconciledSub.env,
+            };
+            if (reconciledSub.ports.length > 0) updates.ports = reconciledSub.ports;
+            await db.update(services).set(updates).where(eq(services.id, existing.id));
+            Object.assign(existing, updates);
 
             await deployOneService(existing, composeSvc.imageTag);
             logger.info({ serviceId: existing.id, composeSvc: composeSvc.name }, 'Updated existing compose service');
           } else {
-            // Create new Fleet service record with compose-derived config
+            // Reconcile compose config for the new sub-service
+            const reconciledNew = await reconcileDeployConfig({
+              serviceId: '', // not created yet
+              accountId,
+              serviceName: existingName,
+              userVolumes: [],
+              userEnv: {},
+              userPorts: [],
+              composeConfig: composeSvc,
+            });
+
             const [newSvc] = await insertReturning(services, {
               accountId,
               name: existingName,
               image: composeSvc.imageTag,
               replicas: svc.replicas ?? 1,
-              env: composeSvc.env && Object.keys(composeSvc.env).length > 0 ? composeSvc.env : svc.env,
-              ports: composeSvc.ports && composeSvc.ports.length > 0 ? composeSvc.ports : svc.ports,
-              volumes: composeSvc.volumes && composeSvc.volumes.length > 0 ? composeSvc.volumes : svc.volumes,
-              domain: null, // additional compose services don't get the primary domain
+              env: Object.keys(reconciledNew.env).length > 0 ? reconciledNew.env : svc.env,
+              ports: reconciledNew.ports.length > 0 ? reconciledNew.ports : svc.ports,
+              volumes: reconciledNew.volumes,
+              domain: null,
               sslEnabled: svc.sslEnabled,
               sourceType: 'upload',
               sourcePath: svc.sourcePath,
