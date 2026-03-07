@@ -1741,14 +1741,25 @@ settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, 
         await log(`Warning: Cilium CLI install returned exit code ${ciliumCliResult.exitCode}`);
       }
 
-      // Step 3b: Deploy Cilium to cluster
-      await log('Deploying Cilium to cluster...');
-      const ciliumInstallResult = await run(
-        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; cilium install --set kubeProxyReplacement=true 2>&1',
-        { timeoutMs: 180000 },
+      // Step 3b: Deploy Cilium to cluster (skip if already installed)
+      await log('Checking if Cilium is already deployed...');
+      const ciliumCheckResult = await run(
+        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; ' +
+        'kubectl get daemonset cilium -n kube-system -o jsonpath="{.status.numberReady}" 2>/dev/null || echo "0"',
+        { timeoutMs: 30000 },
       );
-      if (ciliumInstallResult.exitCode !== 0) {
-        await log(`Warning: Cilium deploy returned exit code ${ciliumInstallResult.exitCode}`);
+      const ciliumReady = parseInt((ciliumCheckResult.stdout ?? '').replace(/[^0-9]/g, '') || '0', 10);
+      if (ciliumReady > 0) {
+        await log('Cilium is already running — skipping install');
+      } else {
+        await log('Deploying Cilium to cluster...');
+        const ciliumInstallResult = await run(
+          'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; cilium install --set kubeProxyReplacement=true 2>&1',
+          { timeoutMs: 180000 },
+        );
+        if (ciliumInstallResult.exitCode !== 0) {
+          await log(`Warning: Cilium deploy returned exit code ${ciliumInstallResult.exitCode}`);
+        }
       }
 
       // Step 3c: Wait for Cilium to be ready
