@@ -1455,6 +1455,8 @@
     "githubConnected": "GitHub koblet til",
     "googleConnected": "Google koblet til",
     "connectionFailed": "Tilkobling mislyktes",
+    "manageAccess": "Administrer tilgang",
+    "manageAccessHint": "Re-autoriser for å gi eller trekke tilbake tilgang til organisasjoner",
     "dataExport": "Dataeksport",
     "dataExportDesc": "Last ned en kopi av alle dine data (GDPR).",
     "dataExportDetails": "Denne eksporten inkluderer profilen din, kontomedlemskap, tjenester, utrullinger, SSH-nøkler, API-nøkler, domener og aktivitetslogg.",

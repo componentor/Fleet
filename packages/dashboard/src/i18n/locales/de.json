@@ -1454,6 +1454,8 @@
     "githubConnected": "GitHub erfolgreich verbunden",
     "googleConnected": "Google erfolgreich verbunden",
     "connectionFailed": "Verbindung fehlgeschlagen",
+    "manageAccess": "Zugriff verwalten",
+    "manageAccessHint": "Erneut autorisieren, um den Zugriff auf Organisationen zu gewähren oder zu widerrufen",
     "dataExport": "Datenexport",
     "dataExportDesc": "Laden Sie eine Kopie aller Ihrer Daten herunter (DSGVO).",
     "dataExportDetails": "Dieser Export umfasst Ihr Profil, Kontomitgliedschaften, Dienste, Bereitstellungen, SSH-Schlüssel, API-Schlüssel, Domains und Aktivitätsprotokoll.",

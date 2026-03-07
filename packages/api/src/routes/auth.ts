@@ -1202,12 +1202,17 @@ auth.get('/github', oauthRateLimit, async (c) => {
   }
 
   const returnTo = c.req.query('returnTo') || '';
+  const reauthorize = c.req.query('reauthorize') === '1';
   const redirectUri = `${await getAppUrl()}/api/v1/auth/github/callback`;
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     scope: 'user:email repo read:packages',
   });
+  // Force GitHub to show the authorization screen again (org access grant/revoke)
+  if (reauthorize) {
+    params.set('prompt', 'consent');
+  }
 
   // If user is already logged in (has valid refresh cookie), store their userId
   // so the callback can link the OAuth provider to their existing account
