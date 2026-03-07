@@ -1517,7 +1517,7 @@ export class DockerService implements OrchestratorService {
    * Run a shell command on the local host via a temporary container with chroot.
    * Used to execute host-level CLI tools (e.g. gluster) from within the API container.
    */
-  async runOnLocalHost(command: string, opts?: { timeoutMs?: number }): Promise<{
+  async runOnLocalHost(command: string, opts?: { timeoutMs?: number; env?: string[] }): Promise<{
     exitCode: number;
     stdout: string;
   }> {
@@ -1543,6 +1543,7 @@ export class DockerService implements OrchestratorService {
     const container = await docker.createContainer({
       Image: 'alpine:latest',
       Cmd: ['nsenter', '-t', '1', '-m', '-u', '-i', '-n', '--', 'sh', '-c', escapedCmd],
+      Env: opts?.env,
       HostConfig: {
         Privileged: true,
         PidMode: 'host',

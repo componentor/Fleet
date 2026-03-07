@@ -1312,10 +1312,17 @@ export class KubernetesService implements OrchestratorService {
     return this.runDaemonSetJob(command, true, opts?.timeoutMs);
   }
 
-  async runOnLocalHost(command: string, opts?: { timeoutMs?: number }): Promise<{ exitCode: number; stdout: string }> {
+  async runOnLocalHost(command: string, opts?: { timeoutMs?: number; env?: string[] }): Promise<{ exitCode: number; stdout: string }> {
     try {
+      // Merge env vars from opts into current process env
+      const envOverrides: Record<string, string> = {};
+      for (const entry of opts?.env ?? []) {
+        const eqIdx = entry.indexOf('=');
+        if (eqIdx > 0) envOverrides[entry.slice(0, eqIdx)] = entry.slice(eqIdx + 1);
+      }
       const { stdout } = await execAsync(command, {
         timeout: opts?.timeoutMs ?? 30_000,
+        env: opts?.env ? { ...process.env, ...envOverrides } : undefined,
       });
       return { exitCode: 0, stdout };
     } catch (err: any) {

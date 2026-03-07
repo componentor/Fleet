@@ -266,7 +266,7 @@ export interface OrchestratorService {
 
   runOnAllNodesPrivileged(command: string, opts?: { timeoutMs?: number }): Promise<RunOnNodesResult>;
 
-  runOnLocalHost(command: string, opts?: { timeoutMs?: number }): Promise<{ exitCode: number; stdout: string }>;
+  runOnLocalHost(command: string, opts?: { timeoutMs?: number; env?: string[] }): Promise<{ exitCode: number; stdout: string }>;
 
   // ── Platform storage management ──
 
