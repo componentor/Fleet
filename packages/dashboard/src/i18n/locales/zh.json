@@ -1454,6 +1454,8 @@
     "githubConnected": "GitHub 关联成功",
     "googleConnected": "Google 关联成功",
     "connectionFailed": "关联失败",
+    "manageAccess": "管理访问权限",
+    "manageAccessHint": "重新授权以授予或撤销组织的访问权限",
     "dataExport": "数据导出",
     "dataExportDesc": "下载您的所有数据副本（GDPR）。",
     "dataExportDetails": "此导出包括您的个人资料、账户成员关系、服务、部署、SSH 密钥、API 密钥、域名和活动日志。",

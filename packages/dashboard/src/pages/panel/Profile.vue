@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { User, Save, Lock, Mail, Github, Link2, Unlink, Download, Trash2, AlertTriangle, Send, Upload, X, Shield, ToggleLeft, ToggleRight, KeyRound, Plus, Copy, Check } from 'lucide-vue-next'
+import { User, Save, Lock, Mail, Github, Link2, Unlink, Download, Trash2, AlertTriangle, Send, Upload, X, Shield, ToggleLeft, ToggleRight, KeyRound, Plus, Copy, Check, RefreshCw } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
@@ -364,8 +364,10 @@ function copyFingerprint(fingerprint: string) {
   setTimeout(() => { copiedFingerprint.value = '' }, 2000)
 }
 
-function connectProvider(provider: string) {
-  window.location.href = `/api/v1/auth/${provider}?returnTo=/panel/profile`
+function connectProvider(provider: string, reauthorize = false) {
+  const params = new URLSearchParams({ returnTo: '/panel/profile' })
+  if (reauthorize) params.set('reauthorize', '1')
+  window.location.href = `/api/v1/auth/${provider}?${params.toString()}`
 }
 
 async function disconnectProvider(provider: string) {
@@ -691,16 +693,25 @@ onMounted(() => {
                   <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ $t('profile.notConnected') }}</p>
                 </div>
               </div>
-              <button
-                v-if="isConnected('github')"
-                @click="disconnectProvider('github')"
-                :disabled="disconnecting === 'github'"
-                class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
-              >
-                <CompassSpinner v-if="disconnecting === 'github'" size="w-3.5 h-3.5" />
-                <Unlink v-else class="w-3.5 h-3.5" />
-                {{ $t('profile.disconnect') }}
-              </button>
+              <div v-if="isConnected('github')" class="flex items-center gap-2">
+                <button
+                  @click="connectProvider('github', true)"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                  :title="$t('profile.manageAccessHint', 'Re-authorize to grant or revoke access to organizations')"
+                >
+                  <RefreshCw class="w-3.5 h-3.5" />
+                  {{ $t('profile.manageAccess', 'Manage access') }}
+                </button>
+                <button
+                  @click="disconnectProvider('github')"
+                  :disabled="disconnecting === 'github'"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+                >
+                  <CompassSpinner v-if="disconnecting === 'github'" size="w-3.5 h-3.5" />
+                  <Unlink v-else class="w-3.5 h-3.5" />
+                  {{ $t('profile.disconnect') }}
+                </button>
+              </div>
               <button
                 v-else
                 @click="connectProvider('github')"

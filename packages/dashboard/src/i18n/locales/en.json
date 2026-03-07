@@ -1458,6 +1458,8 @@
     "githubConnected": "GitHub connected successfully",
     "googleConnected": "Google connected successfully",
     "connectionFailed": "Connection failed",
+    "manageAccess": "Manage access",
+    "manageAccessHint": "Re-authorize to grant or revoke access to organizations",
     "methodsReEnabled": "Login methods re-enabled for safety: {methods}",
     "loginMethods": "Login Methods",
     "loginMethodsDesc": "Control which methods can be used to sign into your account.",
