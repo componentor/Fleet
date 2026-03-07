@@ -1,3 +1,5 @@
 ALTER TABLE "service_analytics" ADD COLUMN "avg_response_time_ms" integer NOT NULL DEFAULT 0;
+--> statement-breakpoint
 ALTER TABLE "service_analytics" ADD COLUMN "p95_response_time_ms" integer NOT NULL DEFAULT 0;
+--> statement-breakpoint
 ALTER TABLE "visitor_analytics" ADD COLUMN "countries" text NOT NULL DEFAULT '{}';

@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS "service_analytics" (
   "period" text NOT NULL DEFAULT '5m',
   "recorded_at" integer NOT NULL DEFAULT (unixepoch())
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS "idx_service_analytics_service_recorded" ON "service_analytics" ("service_id", "recorded_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_service_analytics_account_recorded" ON "service_analytics" ("account_id", "recorded_at");
