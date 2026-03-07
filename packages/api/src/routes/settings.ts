@@ -1720,23 +1720,45 @@ settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, 
       }
       await log('kubeconfig is ready');
 
-      // Step 3: Install Cilium CNI
-      await step(3, TOTAL_STEPS, 'Installing Cilium CNI (this may take a few minutes)...');
-      const ciliumResult = await run(
+      // Step 3: Install Cilium CLI
+      await step(3, TOTAL_STEPS, 'Installing Cilium CNI...');
+      const ciliumCliResult = await run(
         'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; ' +
-        'if ! command -v cilium >/dev/null 2>&1; then ' +
+        'if command -v cilium >/dev/null 2>&1; then echo "Cilium CLI already installed"; ' +
+        'else ' +
+          'echo "Downloading Cilium CLI..."; ' +
           'CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt); ' +
+          'echo "Version: ${CILIUM_CLI_VERSION}"; ' +
           'curl -L --fail --remote-name-all ' +
             '"https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz" 2>/dev/null; ' +
           'tar xzf cilium-linux-amd64.tar.gz -C /usr/local/bin 2>/dev/null; ' +
           'rm -f cilium-linux-amd64.tar.gz; ' +
-        'fi; ' +
-        'cilium install --set kubeProxyReplacement=true 2>&1; ' +
-        'cilium status --wait --wait-duration 120s 2>&1 || true',
-        { timeoutMs: 300000 },
+          'echo "Cilium CLI installed"; ' +
+        'fi',
+        { timeoutMs: 120000 },
       );
-      if (ciliumResult.exitCode !== 0) {
-        await log(`Warning: Cilium install returned exit code ${ciliumResult.exitCode} — cluster may still work`);
+      if (ciliumCliResult.exitCode !== 0) {
+        await log(`Warning: Cilium CLI install returned exit code ${ciliumCliResult.exitCode}`);
+      }
+
+      // Step 3b: Deploy Cilium to cluster
+      await log('Deploying Cilium to cluster...');
+      const ciliumInstallResult = await run(
+        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; cilium install --set kubeProxyReplacement=true 2>&1',
+        { timeoutMs: 180000 },
+      );
+      if (ciliumInstallResult.exitCode !== 0) {
+        await log(`Warning: Cilium deploy returned exit code ${ciliumInstallResult.exitCode}`);
+      }
+
+      // Step 3c: Wait for Cilium to be ready
+      await log('Waiting for Cilium to be ready...');
+      const ciliumWaitResult = await run(
+        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; cilium status --wait --wait-duration 180s 2>&1 || true',
+        { timeoutMs: 240000 },
+      );
+      if (ciliumWaitResult.exitCode !== 0) {
+        await log(`Warning: Cilium status wait returned exit code ${ciliumWaitResult.exitCode} — cluster may still work`);
       }
 
       // Step 4: Read join token + detect server IP
@@ -1753,10 +1775,10 @@ settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, 
       }
 
       const ipResult = await orchestrator.runOnLocalHost(
-        "ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'",
+        'hostname -I 2>/dev/null | cut -d" " -f1',
         { timeoutMs: 10000 },
       );
-      const serverIp = (ipResult.stdout ?? '').trim();
+      const serverIp = (ipResult.stdout ?? '').replace(/[^0-9.]/g, '').trim();
       const serverUrl = serverIp ? `https://${serverIp}:6443` : '';
       if (serverUrl) {
         await log(`Server URL: ${serverUrl}`);
@@ -1765,14 +1787,22 @@ settings.post('/orchestrator/install-k3s', authMiddleware, requireAdmin as any, 
       // Step 5: Persist credentials
       await step(5, TOTAL_STEPS, 'Saving cluster configuration...');
       if (joinToken) {
-        await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
-          .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } });
-        await log('Join token saved to database');
+        try {
+          await db.insert(platformSettings).values({ key: 'k3s:joinToken', value: encrypt(joinToken) })
+            .onConflictDoUpdate({ target: platformSettings.key, set: { value: encrypt(joinToken), updatedAt: new Date() } });
+          await log('Join token saved to database');
+        } catch (e) {
+          await log(`Warning: Could not save join token — ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       if (serverUrl) {
-        await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
-          .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } });
-        await log('Server URL saved to database');
+        try {
+          await db.insert(platformSettings).values({ key: 'k3s:serverUrl', value: serverUrl })
+            .onConflictDoUpdate({ target: platformSettings.key, set: { value: serverUrl, updatedAt: new Date() } });
+          await log('Server URL saved to database');
+        } catch (e) {
+          await log(`Warning: Could not save server URL — ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
 
       // Step 6: Reload orchestrator
