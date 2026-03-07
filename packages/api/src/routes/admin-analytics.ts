@@ -453,4 +453,44 @@ adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
   return c.json({ data, summary });
 }) as any);
 
+// ── Diagnostics ──────────────────────────────────────────────────────────
+
+const getDiagnosticsRoute = createRoute({
+  method: 'get',
+  path: '/diagnostics',
+  tags: ['Admin Analytics'],
+  summary: 'Run analytics pipeline diagnostics',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Diagnostics result'),
+    ...standardErrors,
+  },
+});
+
+adminAnalyticsRoutes.openapi(getDiagnosticsRoute, (async (c: any) => {
+  const { analyticsService } = await import('../services/analytics.service.js');
+  const result = await analyticsService.runDiagnostics();
+  return c.json(result);
+}) as any);
+
+// ── Force Collection (trigger manually) ─────────────────────────────────
+
+const forceCollectRoute = createRoute({
+  method: 'post',
+  path: '/collect',
+  tags: ['Admin Analytics'],
+  summary: 'Force an immediate analytics collection cycle',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.object({ ok: z.boolean(), message: z.string() }), 'Collection triggered'),
+    ...standardErrors,
+  },
+});
+
+adminAnalyticsRoutes.openapi(forceCollectRoute, (async (c: any) => {
+  const { analyticsService } = await import('../services/analytics.service.js');
+  await analyticsService.collectAnalytics();
+  return c.json({ ok: true, message: 'Analytics collection cycle completed — check logs for details' });
+}) as any);
+
 export default adminAnalyticsRoutes;

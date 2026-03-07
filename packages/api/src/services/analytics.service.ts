@@ -4,6 +4,7 @@ import {
   serviceAnalytics,
   eq,
   and,
+  sql,
   isNull,
   inArray,
 } from '@fleet/db';
@@ -69,14 +70,15 @@ class AnalyticsService {
       // 1. Build mapping: Docker Swarm service name → Fleet service record (single batch query)
       const { serviceMap, traefikNameToDockerName } = await this.buildServiceNameMap();
       if (serviceMap.size === 0) {
-        logger.debug('No services found for analytics collection');
+        logger.info('[analytics] No services with fleet.service-id label found — nothing to track');
         return;
       }
+      logger.info({ serviceCount: serviceMap.size, names: [...serviceMap.keys()] }, '[analytics] Service map built');
 
       // 2. Fetch metrics from all Traefik instances
       const metricsTexts = await this.fetchTraefikMetrics();
       if (metricsTexts.length === 0) {
-        logger.warn('No Traefik metrics available — analytics collection skipped');
+        logger.warn('[analytics] No Traefik metrics fetched — collection skipped');
         return;
       }
 
@@ -89,12 +91,27 @@ class AnalyticsService {
         }
       }
 
+      logger.info({ mergedMetricCount: merged.size }, '[analytics] Parsed Traefik metrics');
+
+      // Collect all unique service labels from metrics for debugging
+      const allMetricServiceNames = new Set<string>();
+      for (const key of merged.keys()) {
+        const m = key.match(/\{.*?service="([^"]*)".*?\}/);
+        if (m) allMetricServiceNames.add(m[1]!);
+      }
+      if (allMetricServiceNames.size > 0) {
+        logger.info({ metricServiceNames: [...allMetricServiceNames] }, '[analytics] Service names found in Traefik metrics');
+      }
+
       // 4. Extract per-service counters from merged metrics
       const serviceCounters = new Map<string, {
         requests: Record<string, number>;
         bytesIn: number;
         bytesOut: number;
       }>();
+
+      let unmatchedServices = 0;
+      const unmatchedNames = new Set<string>();
 
       for (const [key, value] of merged) {
         const metricMatch = key.match(/^(\w+)\{(.+)\}$/);
@@ -110,7 +127,14 @@ class AnalyticsService {
         const dockerSvcName = serviceMap.has(rawSvcName)
           ? rawSvcName
           : traefikNameToDockerName.get(rawSvcName);
-        if (!dockerSvcName || !serviceMap.has(dockerSvcName)) continue;
+        if (!dockerSvcName || !serviceMap.has(dockerSvcName)) {
+          // Track unmatched for diagnostics
+          if (metricName === 'traefik_service_requests_total') {
+            unmatchedServices++;
+            unmatchedNames.add(rawSvcName);
+          }
+          continue;
+        }
 
         if (!serviceCounters.has(dockerSvcName)) {
           serviceCounters.set(dockerSvcName, { requests: {}, bytesIn: 0, bytesOut: 0 });
@@ -128,6 +152,13 @@ class AnalyticsService {
         }
       }
 
+      if (unmatchedNames.size > 0) {
+        logger.info({ unmatchedCount: unmatchedServices, names: [...unmatchedNames].slice(0, 20) },
+          '[analytics] Unmatched service names in metrics (not Fleet user services)');
+      }
+
+      logger.info({ matchedServices: serviceCounters.size }, '[analytics] Matched services with metrics');
+
       // 5. Batch-read previous values from Valkey (single mget round-trip)
       const valkey = await getValkey();
       if (!valkey) {
@@ -139,7 +170,10 @@ class AnalyticsService {
       const serviceEntries = [...serviceCounters.entries()]
         .filter(([name]) => serviceMap.has(name));
 
-      if (serviceEntries.length === 0) return;
+      if (serviceEntries.length === 0) {
+        logger.info('[analytics] No matched service entries — nothing to insert');
+        return;
+      }
 
       // Single MGET for all previous values
       const prevKeys = serviceEntries.map(([name]) => `${ANALYTICS_KEY_PREFIX}${name}`);
@@ -148,6 +182,8 @@ class AnalyticsService {
       // Compute deltas and collect batch inserts + pipeline Valkey writes
       const insertBatch: Array<typeof serviceAnalytics.$inferInsert> = [];
       const setPipeline = valkey.pipeline();
+      let firstScrapeCount = 0;
+      let zeroDeltaCount = 0;
 
       for (let i = 0; i < serviceEntries.length; i++) {
         const [dockerSvcName, counters] = serviceEntries[i]!;
@@ -189,7 +225,11 @@ class AnalyticsService {
         );
 
         // Only insert if there's actual data (skip first scrape — no previous values)
-        if (prevJson && (deltaRequests > 0 || deltaBytesIn > 0 || deltaBytesOut > 0)) {
+        if (!prevJson) {
+          firstScrapeCount++;
+        } else if (deltaRequests === 0 && deltaBytesIn === 0 && deltaBytesOut === 0) {
+          zeroDeltaCount++;
+        } else {
           insertBatch.push({
             serviceId: svcInfo.serviceId,
             accountId: svcInfo.accountId,
@@ -211,7 +251,7 @@ class AnalyticsService {
         await setPipeline.exec();
       } catch (pipelineErr) {
         // MISCONF or other transient Valkey errors should not block DB inserts
-        logger.warn({ err: pipelineErr }, 'Valkey pipeline failed (analytics tracking may be inaccurate next cycle)');
+        logger.warn({ err: pipelineErr }, '[analytics] Valkey pipeline failed (tracking may be inaccurate next cycle)');
       }
 
       // 6. Batch insert into DB in chunks of 1000
@@ -220,18 +260,180 @@ class AnalyticsService {
         await db.insert(serviceAnalytics).values(chunk);
       }
 
-      logger.debug({ serviceCount: serviceCounters.size, inserted: insertBatch.length }, 'Analytics collection complete');
+      logger.info({
+        matchedServices: serviceCounters.size,
+        firstScrape: firstScrapeCount,
+        zeroDelta: zeroDeltaCount,
+        inserted: insertBatch.length,
+      }, '[analytics] Collection complete');
     } catch (err) {
-      logger.error({ err }, 'Analytics collection failed');
+      logger.error({ err }, '[analytics] Collection failed');
     }
   }
 
   /**
+   * Run a full diagnostic check of the analytics pipeline.
+   * Returns detailed info about each step for troubleshooting.
+   */
+  async runDiagnostics(): Promise<Record<string, any>> {
+    const diag: Record<string, any> = {
+      timestamp: new Date().toISOString(),
+      steps: {} as Record<string, any>,
+    };
+
+    // Step 1: Service name map
+    try {
+      const { serviceMap, traefikNameToDockerName } = await this.buildServiceNameMap();
+      diag.steps.serviceMap = {
+        ok: serviceMap.size > 0,
+        count: serviceMap.size,
+        dockerNames: [...serviceMap.keys()],
+        traefikAliases: Object.fromEntries(traefikNameToDockerName),
+      };
+    } catch (err) {
+      diag.steps.serviceMap = { ok: false, error: String(err) };
+    }
+
+    // Step 2: Traefik task discovery
+    try {
+      const tasks = await orchestrator.listTasks({
+        service: ['fleet_traefik'],
+        'desired-state': ['running'],
+      });
+      const taskInfo = tasks.map((t: any) => {
+        const networks = t.NetworksAttachments ?? [];
+        return {
+          id: t.ID?.substring(0, 12),
+          state: t.Status?.State,
+          networkCount: networks.length,
+          networks: networks.map((n: any) => ({
+            name: n.Network?.Spec?.Name ?? 'unknown',
+            addresses: n.Addresses ?? [],
+          })),
+        };
+      });
+      diag.steps.traefikTasks = {
+        ok: tasks.length > 0,
+        count: tasks.length,
+        tasks: taskInfo,
+      };
+    } catch (err) {
+      diag.steps.traefikTasks = { ok: false, error: String(err) };
+    }
+
+    // Step 3: Metrics fetch via DNS (most reliable)
+    try {
+      const resp = await fetch('http://fleet_traefik:9100/metrics', {
+        signal: AbortSignal.timeout(5000),
+      });
+      const text = await resp.text();
+      const serviceMetricLines = text.split('\n').filter(l => l.startsWith('traefik_service_requests_total'));
+      const uniqueServices = new Set<string>();
+      for (const line of serviceMetricLines) {
+        const m = line.match(/service="([^"]*)"/);
+        if (m) uniqueServices.add(m[1]!);
+      }
+      diag.steps.metricsFetchDns = {
+        ok: resp.ok,
+        status: resp.status,
+        totalBytes: text.length,
+        serviceRequestLines: serviceMetricLines.length,
+        uniqueServiceNames: [...uniqueServices],
+        sampleLines: serviceMetricLines.slice(0, 5),
+      };
+    } catch (err) {
+      diag.steps.metricsFetchDns = { ok: false, error: String(err) };
+    }
+
+    // Step 4: Metrics fetch via task IPs
+    try {
+      const texts = await this.fetchTraefikMetrics();
+      diag.steps.metricsFetchTaskIp = {
+        ok: texts.length > 0,
+        instanceCount: texts.length,
+        totalBytes: texts.reduce((a, t) => a + t.length, 0),
+      };
+    } catch (err) {
+      diag.steps.metricsFetchTaskIp = { ok: false, error: String(err) };
+    }
+
+    // Step 5: Valkey state
+    try {
+      const valkey = await getValkey();
+      if (!valkey) {
+        diag.steps.valkey = { ok: false, error: 'Valkey not available' };
+      } else {
+        // Check for any analytics keys
+        const keys = await valkey.keys(`${ANALYTICS_KEY_PREFIX}*`);
+        const samples: Record<string, any> = {};
+        if (keys.length > 0) {
+          const vals = await valkey.mget(...keys.slice(0, 5));
+          for (let i = 0; i < Math.min(keys.length, 5); i++) {
+            try { samples[keys[i]!] = JSON.parse(vals[i]!); } catch { samples[keys[i]!] = vals[i]; }
+          }
+        }
+        diag.steps.valkey = {
+          ok: true,
+          analyticsKeyCount: keys.length,
+          sampleKeys: keys.slice(0, 10),
+          sampleValues: samples,
+        };
+      }
+    } catch (err) {
+      diag.steps.valkey = { ok: false, error: String(err) };
+    }
+
+    // Step 6: DB row count
+    try {
+      const [row] = await db.select({
+        count: sql`count(*)`.as('count'),
+      }).from(serviceAnalytics);
+      diag.steps.database = {
+        ok: true,
+        totalRows: Number((row as any)?.count ?? 0),
+      };
+    } catch (err) {
+      diag.steps.database = { ok: false, error: String(err) };
+    }
+
+    // Overall verdict
+    const allOk = Object.values(diag.steps).every((s: any) => s.ok);
+    diag.healthy = allOk;
+    if (!allOk) {
+      const failedSteps = Object.entries(diag.steps)
+        .filter(([, s]: [string, any]) => !s.ok)
+        .map(([k]) => k);
+      diag.failedSteps = failedSteps;
+    }
+
+    return diag;
+  }
+
+  /**
    * Fetch Prometheus metrics from all Traefik task instances.
+   * Tries DNS-based fetch first (most reliable), then per-task IPs for full coverage.
    */
   private async fetchTraefikMetrics(): Promise<string[]> {
     const results: string[] = [];
 
+    // Primary: DNS-based fetch (resolves to service VIP, load-balanced across tasks)
+    // This is more reliable than task IP lookups which depend on NetworksAttachments parsing
+    try {
+      const resp = await fetch('http://fleet_traefik:9100/metrics', {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.ok) {
+        results.push(await resp.text());
+        logger.debug('[analytics] Fetched metrics via DNS (fleet_traefik:9100)');
+      } else {
+        logger.warn({ status: resp.status }, '[analytics] DNS metrics fetch returned non-OK');
+      }
+    } catch (err) {
+      logger.warn({ err: String(err) }, '[analytics] DNS metrics fetch failed, trying task IPs');
+    }
+
+    // Secondary: try per-task IPs for additional instances (global mode = one per node)
+    // Each instance has independent counters, so we want all of them for accurate totals
     try {
       const tasks = await orchestrator.listTasks({
         service: ['fleet_traefik'],
@@ -239,11 +441,17 @@ class AnalyticsService {
       });
 
       for (const task of tasks) {
-        const ip = task.NetworksAttachments?.find((n: any) =>
+        const networks: any[] = (task as any).NetworksAttachments ?? [];
+        const internalNet = networks.find((n: any) =>
           n.Network?.Spec?.Name?.includes('internal')
-        )?.Addresses?.[0]?.split('/')[0];
+        );
+        const ip = internalNet?.Addresses?.[0]?.split('/')[0];
 
-        if (!ip) continue;
+        if (!ip) {
+          logger.debug({ taskId: (task as any).ID?.substring(0, 12), networkCount: networks.length },
+            '[analytics] Task has no internal network IP');
+          continue;
+        }
 
         try {
           const resp = await fetch(`http://${ip}:9100/metrics`, {
@@ -251,23 +459,21 @@ class AnalyticsService {
           });
           if (resp.ok) {
             results.push(await resp.text());
+          } else {
+            logger.debug({ ip, status: resp.status }, '[analytics] Task metrics returned non-OK');
           }
         } catch {
-          logger.debug({ ip }, 'Failed to fetch metrics from Traefik instance');
+          logger.debug({ ip }, '[analytics] Failed to fetch metrics from Traefik task');
         }
       }
-    } catch {
-      // Fallback: try the service DNS name
-      try {
-        const resp = await fetch('http://fleet_traefik:9100/metrics', {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (resp.ok) {
-          results.push(await resp.text());
-        }
-      } catch {
-        logger.debug('Fallback Traefik metrics fetch also failed');
-      }
+    } catch (err) {
+      logger.debug({ err: String(err) }, '[analytics] Task enumeration failed');
+    }
+
+    if (results.length === 0) {
+      logger.warn('[analytics] All Traefik metrics fetch attempts failed');
+    } else {
+      logger.debug({ instanceCount: results.length }, '[analytics] Traefik metrics fetched');
     }
 
     return results;
@@ -288,9 +494,6 @@ class AnalyticsService {
       const swarmServices = await orchestrator.listServices();
 
       // Collect all fleet service IDs and their Docker names in one pass
-      // Traefik uses the router/service name from labels, which replaces
-      // non-alphanumeric chars with hyphens (see buildTraefikLabels).
-      // We need to map BOTH the Docker name AND the Traefik name.
       const serviceIdToDockerName = new Map<string, string>();
       for (const svc of swarmServices) {
         const labels = svc.Spec?.Labels || {};
@@ -306,7 +509,10 @@ class AnalyticsService {
         }
       }
 
-      if (serviceIdToDockerName.size === 0) return { serviceMap, traefikNameToDockerName };
+      if (serviceIdToDockerName.size === 0) {
+        logger.info({ totalSwarmServices: swarmServices.length }, '[analytics] No Swarm services with fleet.service-id label');
+        return { serviceMap, traefikNameToDockerName };
+      }
 
       // Single batch query for all service IDs
       const serviceIds = [...serviceIdToDockerName.keys()];
@@ -327,7 +533,7 @@ class AnalyticsService {
         }
       }
     } catch (err) {
-      logger.error({ err }, 'Failed to build service name map for analytics');
+      logger.error({ err }, '[analytics] Failed to build service name map');
     }
 
     return { serviceMap, traefikNameToDockerName };
