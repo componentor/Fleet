@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# ============================================================================
+# PRE-PUSH HOOK — Upgrade Path Gate
+# ============================================================================
+#
+# DO NOT REMOVE OR WEAKEN THIS HOOK.
+#
+# This hook prevents pushing to protected branches (next, main) unless the
+# upgrade path test passes. The test validates that database migrations can
+# upgrade from the main branch state (A) through the current state (B) to a
+# synthetic future state (C), using real SQLite migrations — no mocks,
+# no shortcuts, no backdoors.
+#
+# CI runs the full test across all 3 dialects (SQLite, PostgreSQL, MySQL).
+# This hook runs SQLite only for speed (~3-5 seconds).
+#
+# To install: pnpm run hooks:install
+# To bypass (EMERGENCY ONLY): git push --no-verify
+# ============================================================================
+
+set -euo pipefail
+
+# Protected branches that require the upgrade test
+PROTECTED_BRANCHES="refs/heads/next refs/heads/main"
+
+# Read stdin to get the refs being pushed
+while read -r local_ref local_sha remote_ref remote_sha; do
+  for protected in $PROTECTED_BRANCHES; do
+    if [ "$remote_ref" = "$protected" ]; then
+      branch_name="${protected#refs/heads/}"
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "  UPGRADE PATH GATE — pushing to '$branch_name'"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Running upgrade path test (SQLite)..."
+      echo ""
+
+      if ! pnpm test:upgrade -- sqlite; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  PUSH BLOCKED — Upgrade path test FAILED"
+        echo ""
+        echo "  Your changes would break the upgrade path."
+        echo "  Fix the issue before pushing to '$branch_name'."
+        echo ""
+        echo "  Emergency bypass: git push --no-verify"
+        echo "  (Use only if you are CERTAIN this is safe)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        exit 1
+      fi
+
+      echo ""
+      echo "  Upgrade path test PASSED — push allowed"
+      echo ""
+
+      # Only need to test once per push, even if multiple protected refs
+      break 2
+    fi
+  done
+done
+
+exit 0

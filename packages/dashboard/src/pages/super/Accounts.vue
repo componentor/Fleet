@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useAccountStore } from '@/stores/account'
 import { useI18n } from 'vue-i18n'
 import { useAdminPermissions } from '@/composables/useAdminPermissions'
+import AdminEmptyState from '@/components/AdminEmptyState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -84,7 +85,10 @@ onMounted(() => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <Users class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.accounts.title') }}</h1>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.accounts.title') }}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('super.accounts.subtitle') }}</p>
+        </div>
       </div>
     </div>
 
@@ -111,7 +115,7 @@ onMounted(() => {
 
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full">
+        <table class="w-full admin-table">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.accounts.name') }}</th>
@@ -123,8 +127,11 @@ onMounted(() => {
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="filteredAccounts.length === 0">
-              <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                {{ search ? $t('super.accounts.noAccountsSearch') : $t('super.accounts.noAccountsFound') }}
+              <td colspan="5">
+                <AdminEmptyState
+                  :icon="search ? Search : Users"
+                  :title="search ? $t('super.accounts.noAccountsSearch') : $t('super.accounts.noAccountsFound')"
+                />
               </td>
             </tr>
             <tr

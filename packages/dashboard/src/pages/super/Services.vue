@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Layers, Search, ExternalLink } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
+import AdminEmptyState from '@/components/AdminEmptyState.vue'
 import { useApi } from '@/composables/useApi'
 import { useRouter } from 'vue-router'
 
@@ -73,7 +74,10 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <Layers class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.services.title') }}</h1>
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.services.title') }}</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ t('super.services.subtitle') }}</p>
+      </div>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
@@ -118,12 +122,15 @@ onMounted(() => {
 
       <!-- Services table -->
       <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div v-if="filteredServices.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-          {{ searchQuery ? t('super.services.noMatch') : t('super.services.noServices') }}
-        </div>
+        <AdminEmptyState
+          v-if="filteredServices.length === 0"
+          :icon="searchQuery ? Search : Layers"
+          :title="searchQuery ? t('super.services.noMatch') : t('super.services.noServices')"
+          :description="searchQuery ? undefined : t('super.services.noServicesDesc')"
+        />
 
         <div v-else class="overflow-x-auto">
-          <table class="w-full">
+          <table class="w-full admin-table">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
                 <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{{ t('super.services.service') }}</th>

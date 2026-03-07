@@ -197,7 +197,10 @@ onMounted(() => {
     <div class="flex items-center justify-between mb-8">
       <div class="flex items-center gap-3">
         <Mail class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Email Templates</h1>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Email Templates</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Customize notification and transactional email templates</p>
+        </div>
       </div>
       <button
         v-if="!loading"

@@ -1411,7 +1411,10 @@ onMounted(() => {
   <div>
     <div class="flex items-center gap-3 mb-8">
       <Settings class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.settings.title') }}</h1>
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.settings.title') }}</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('super.settings.subtitle') }}</p>
+      </div>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">

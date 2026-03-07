@@ -22,6 +22,7 @@ import {
   Server,
 } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
+import AdminEmptyState from '@/components/AdminEmptyState.vue'
 
 const { t } = useI18n()
 const api = useApi()
@@ -303,7 +304,7 @@ onUnmounted(() => {
         <ListFilter class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
           <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('jobs.title') }}</h1>
-          <p v-if="!jobsLoading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} {{ t('jobs.title').toLowerCase() }}</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ t('jobs.subtitle') }}</p>
         </div>
       </div>
       <button
@@ -422,12 +423,15 @@ onUnmounted(() => {
         </div>
 
         <template v-else>
-          <div v-if="jobs.length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-            {{ t('jobs.noJobs') }}
-          </div>
+          <AdminEmptyState
+            v-if="jobs.length === 0"
+            :icon="ListFilter"
+            :title="t('jobs.noJobs')"
+            :description="t('jobs.noJobsDesc')"
+          />
 
           <div v-else class="overflow-x-auto">
-            <table class="w-full">
+            <table class="w-full admin-table">
               <thead>
                 <tr class="border-b border-gray-200 dark:border-gray-700">
                   <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('jobs.jobId') }}</th>

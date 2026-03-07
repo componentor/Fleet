@@ -13,6 +13,7 @@ import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 import LogArchiveList from '@/components/LogArchiveList.vue'
+import AdminEmptyState from '@/components/AdminEmptyState.vue'
 
 const { t } = useI18n()
 const api = useApi()
@@ -190,7 +191,7 @@ onMounted(() => {
         <ScrollText class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
           <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('nav.events') }}</h1>
-          <p v-if="!loading" class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ total.toLocaleString() }} events</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('super.auditLog.subtitle') }}</p>
         </div>
       </div>
       <div class="flex items-center gap-2">
@@ -312,7 +313,7 @@ onMounted(() => {
     <!-- Table -->
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full">
+        <table class="w-full admin-table">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.auditLog.time') }}</th>
@@ -325,8 +326,12 @@ onMounted(() => {
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="logs.length === 0">
-              <td colspan="6" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                {{ hasActiveFilters() ? 'No events match your filters.' : $t('super.auditLog.noEntries') }}
+              <td colspan="6">
+                <AdminEmptyState
+                  :icon="hasActiveFilters() ? Search : ScrollText"
+                  :title="hasActiveFilters() ? 'No events match your filters.' : $t('super.auditLog.noEntries')"
+                  :description="hasActiveFilters() ? undefined : $t('super.auditLog.noEntriesDesc')"
+                />
               </td>
             </tr>
             <template v-for="log in logs" :key="log.id">

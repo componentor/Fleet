@@ -6,6 +6,7 @@ import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import LogArchiveList from '@/components/LogArchiveList.vue'
+import AdminEmptyState from '@/components/AdminEmptyState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -243,7 +244,10 @@ onUnmounted(() => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <Bug class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.errors.title') }}</h1>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('super.errors.title') }}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('super.errors.subtitle') }}</p>
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <button
@@ -341,12 +345,14 @@ onUnmounted(() => {
       <!-- Table -->
       <template v-else>
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-x-auto">
-          <div v-if="filteredErrors.length === 0" class="text-center py-12">
-            <Bug class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('super.errors.noErrors') }}</p>
-          </div>
+          <AdminEmptyState
+            v-if="filteredErrors.length === 0"
+            :icon="Bug"
+            :title="$t('super.errors.noErrors')"
+            :description="$t('super.errors.noErrorsDesc')"
+          />
 
-          <table v-else class="w-full min-w-[900px]">
+          <table v-else class="w-full admin-table min-w-[900px]">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
                 <th class="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ $t('super.errors.timestamp') }}</th>

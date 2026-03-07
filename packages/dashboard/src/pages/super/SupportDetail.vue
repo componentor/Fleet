@@ -7,7 +7,6 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { renderMarkdown } from '@/utils/markdown'
 import {
-  ArrowLeft,
   Send,
   MessageSquare,
   Lock,
@@ -20,6 +19,7 @@ import {
   Quote,
   Eye,
 } from 'lucide-vue-next'
+import AdminBreadcrumb from '@/components/AdminBreadcrumb.vue'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 
 interface Message {
@@ -324,16 +324,10 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col h-full">
-    <!-- Back button -->
-    <div class="flex items-center gap-4 mb-6 shrink-0">
-      <router-link
-        to="/admin/support"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-      >
-        <ArrowLeft class="w-4 h-4" />
-        {{ t('support.admin.backToTickets') }}
-      </router-link>
-    </div>
+    <AdminBreadcrumb :items="[
+      { label: t('support.admin.title'), to: '/admin/support' },
+      { label: ticket?.subject ?? t('common.loading') },
+    ]" />
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">

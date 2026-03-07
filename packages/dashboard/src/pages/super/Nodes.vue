@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { Server, Plus, RefreshCw, Cpu, MemoryStick, MapPin, Pencil, Check, X } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
+import AdminEmptyState from '@/components/AdminEmptyState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -173,7 +174,10 @@ onMounted(() => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <Server class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.nodes.swarmNodes') }}</h1>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('super.nodes.swarmNodes') }}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ t('super.nodes.subtitle') }}</p>
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <button
@@ -245,7 +249,7 @@ onMounted(() => {
 
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full">
+        <table class="w-full admin-table">
           <thead>
             <tr class="border-b border-gray-200 dark:border-gray-700">
               <th class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('super.nodes.hostname') }}</th>
@@ -260,8 +264,12 @@ onMounted(() => {
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="nodes.length === 0">
-              <td colspan="8" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                {{ t('super.nodes.noNodesDesc') }}
+              <td colspan="8">
+                <AdminEmptyState
+                  :icon="Server"
+                  :title="t('super.nodes.noNodes')"
+                  :description="t('super.nodes.noNodesDesc')"
+                />
               </td>
             </tr>
             <tr

@@ -172,6 +172,17 @@ html.dark::-webkit-scrollbar-track {
 .wizard-leave-active { transition: opacity 0.2s ease; }
 .wizard-leave-to { opacity: 0; }
 
+/* Admin tables — sticky header for scrollable lists */
+.admin-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-surface-50);
+}
+.dark .admin-table thead th {
+  background: var(--color-surface-800);
+}
+
 /* Respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

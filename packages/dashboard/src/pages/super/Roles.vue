@@ -330,7 +330,10 @@ onMounted(() => {
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
       <div class="flex items-center gap-3">
         <ShieldCheck class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('roles.title') }}</h1>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('roles.title') }}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{{ t('roles.subtitle') }}</p>
+        </div>
       </div>
       <button
         @click="showCreateForm = !showCreateForm; error = ''; success = ''"
