@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { orchestrator } from './orchestrator.js';
+import { getOrchestrator } from './orchestrator.js';
+
+// Fleet platform services always run on Docker Swarm, regardless of the default
+// orchestrator chosen for user workloads (which may be Kubernetes).
+// Uses a Proxy so it resolves lazily (initOrchestrator runs after module load).
+const orchestrator = new Proxy({} as ReturnType<typeof getOrchestrator>, {
+  get(_target, prop) {
+    return (getOrchestrator('swarm') as any)[prop];
+  },
+});
 import { getRegistryAuthForImage } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
