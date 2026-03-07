@@ -4034,6 +4034,9 @@
       "database": "Database"
     },
     "quickCreate": "Quick Create from Template",
+    "presetConfirmTitle": "Create Role from Template",
+    "presetConfirmMessage": "This will create a new role \"{name}\" with pre-configured permissions.",
+    "presetConfirmPermissions": "Included permissions:",
     "presets": {
       "customerSupport": {
         "name": "Customer Support",

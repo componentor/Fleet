@@ -52,13 +52,13 @@ const ipLoading = ref(false)
 const expandedEvent = ref<string | null>(null)
 
 const threatColors: Record<string, { bg: string; text: string; border: string; icon: any }> = {
-  low: { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/30', icon: ShieldCheck },
-  medium: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/30', icon: Shield },
-  high: { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/30', icon: ShieldAlert },
-  critical: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30', icon: ShieldX },
+  low: { bg: 'bg-green-50 dark:bg-green-500/10', text: 'text-green-600 dark:text-green-400', border: 'border-green-300 dark:border-green-500/30', icon: ShieldCheck },
+  medium: { bg: 'bg-yellow-50 dark:bg-yellow-500/10', text: 'text-yellow-600 dark:text-yellow-400', border: 'border-yellow-300 dark:border-yellow-500/30', icon: Shield },
+  high: { bg: 'bg-orange-50 dark:bg-orange-500/10', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-300 dark:border-orange-500/30', icon: ShieldAlert },
+  critical: { bg: 'bg-red-50 dark:bg-red-500/10', text: 'text-red-600 dark:text-red-400', border: 'border-red-300 dark:border-red-500/30', icon: ShieldX },
 }
 
-const defaultThreat = { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/30', icon: ShieldCheck }
+const defaultThreat = { bg: 'bg-green-50 dark:bg-green-500/10', text: 'text-green-600 dark:text-green-400', border: 'border-green-300 dark:border-green-500/30', icon: ShieldCheck }
 
 const currentThreat = computed(() => {
   const level = overview.value?.threatLevel ?? 'low'
@@ -87,30 +87,30 @@ const hasActiveThreats = computed(() => {
 })
 
 const eventTypeLabels: Record<string, { label: string; color: string }> = {
-  'auth.login_failed': { label: 'Failed Login', color: 'text-red-400' },
-  'auth.2fa_failed': { label: '2FA Failed', color: 'text-orange-400' },
-  'auth.region_blocked': { label: 'Region Blocked', color: 'text-yellow-400' },
-  'auth.brute_force_detected': { label: 'Brute Force', color: 'text-red-500' },
-  'security.permission_denied': { label: 'Permission Denied', color: 'text-orange-400' },
-  'security.admin_permission_denied': { label: 'Admin Denied', color: 'text-red-400' },
-  'user.super_toggled': { label: 'Super Toggle', color: 'text-purple-400' },
-  'account.impersonated': { label: 'Impersonation', color: 'text-blue-400' },
-  'account.suspended': { label: 'Account Suspended', color: 'text-yellow-400' },
-  'account.deleted': { label: 'Account Deleted', color: 'text-red-400' },
-  'account.deletion_scheduled': { label: 'Deletion Scheduled', color: 'text-orange-400' },
-  'admin_role.created': { label: 'Role Created', color: 'text-blue-400' },
-  'admin_role.updated': { label: 'Role Updated', color: 'text-blue-400' },
-  'admin_role.deleted': { label: 'Role Deleted', color: 'text-red-400' },
-  'admin_role.assigned': { label: 'Role Assigned', color: 'text-green-400' },
-  'admin_role.removed': { label: 'Role Removed', color: 'text-orange-400' },
-  'api_key.created': { label: 'API Key Created', color: 'text-blue-400' },
-  'api_key.revoked': { label: 'API Key Revoked', color: 'text-orange-400' },
-  'settings.updated': { label: 'Settings Changed', color: 'text-yellow-400' },
-  'user.settings_changed': { label: 'User Settings', color: 'text-yellow-400' },
+  'auth.login_failed': { label: 'Failed Login', color: 'text-red-600 dark:text-red-400' },
+  'auth.2fa_failed': { label: '2FA Failed', color: 'text-orange-600 dark:text-orange-400' },
+  'auth.region_blocked': { label: 'Region Blocked', color: 'text-yellow-600 dark:text-yellow-400' },
+  'auth.brute_force_detected': { label: 'Brute Force', color: 'text-red-700 dark:text-red-500' },
+  'security.permission_denied': { label: 'Permission Denied', color: 'text-orange-600 dark:text-orange-400' },
+  'security.admin_permission_denied': { label: 'Admin Denied', color: 'text-red-600 dark:text-red-400' },
+  'user.super_toggled': { label: 'Super Toggle', color: 'text-purple-600 dark:text-purple-400' },
+  'account.impersonated': { label: 'Impersonation', color: 'text-blue-600 dark:text-blue-400' },
+  'account.suspended': { label: 'Account Suspended', color: 'text-yellow-600 dark:text-yellow-400' },
+  'account.deleted': { label: 'Account Deleted', color: 'text-red-600 dark:text-red-400' },
+  'account.deletion_scheduled': { label: 'Deletion Scheduled', color: 'text-orange-600 dark:text-orange-400' },
+  'admin_role.created': { label: 'Role Created', color: 'text-blue-600 dark:text-blue-400' },
+  'admin_role.updated': { label: 'Role Updated', color: 'text-blue-600 dark:text-blue-400' },
+  'admin_role.deleted': { label: 'Role Deleted', color: 'text-red-600 dark:text-red-400' },
+  'admin_role.assigned': { label: 'Role Assigned', color: 'text-green-600 dark:text-green-400' },
+  'admin_role.removed': { label: 'Role Removed', color: 'text-orange-600 dark:text-orange-400' },
+  'api_key.created': { label: 'API Key Created', color: 'text-blue-600 dark:text-blue-400' },
+  'api_key.revoked': { label: 'API Key Revoked', color: 'text-orange-600 dark:text-orange-400' },
+  'settings.updated': { label: 'Settings Changed', color: 'text-yellow-600 dark:text-yellow-400' },
+  'user.settings_changed': { label: 'User Settings', color: 'text-yellow-600 dark:text-yellow-400' },
 }
 
 function getEventLabel(type: string) {
-  return eventTypeLabels[type] ?? { label: type, color: 'text-zinc-400' }
+  return eventTypeLabels[type] ?? { label: type, color: 'text-gray-500 dark:text-gray-400' }
 }
 
 function timeAgo(dateStr: string) {
@@ -239,15 +239,15 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
           <component :is="currentThreat.icon" class="w-6 h-6" :class="currentThreat.text" />
         </div>
         <div>
-          <h1 class="text-2xl font-bold text-zinc-100">{{ t('security.title') }}</h1>
-          <p class="text-sm text-zinc-500">{{ t('security.subtitle') }}</p>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('security.title') }}</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-500">{{ t('security.subtitle') }}</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <select
           v-model="hours"
           @change="refresh()"
-          class="bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg px-3 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"
+          class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"
         >
           <option :value="1">1h</option>
           <option :value="6">6h</option>
@@ -258,7 +258,7 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
         <button
           @click="refresh()"
           :disabled="refreshing"
-          class="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors disabled:opacity-50"
+          class="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500 transition-colors disabled:opacity-50"
         >
           <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': refreshing }" />
         </button>
@@ -278,26 +278,26 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
       >
         <component :is="currentThreat.icon" class="w-8 h-8 flex-shrink-0" :class="currentThreat.text" />
         <div>
-          <div class="font-semibold text-zinc-100">
+          <div class="font-semibold text-gray-900 dark:text-white">
             {{ t('security.threatLevel') }}: <span :class="currentThreat.text" class="uppercase">{{ overview.threatLevel }}</span>
           </div>
-          <div class="text-sm text-zinc-400" v-if="overview.threatLevel === 'low'">{{ t('security.threatLow') }}</div>
-          <div class="text-sm text-zinc-400" v-else-if="overview.threatLevel === 'medium'">{{ t('security.threatMedium') }}</div>
-          <div class="text-sm text-zinc-400" v-else-if="overview.threatLevel === 'high'">{{ t('security.threatHigh') }}</div>
-          <div class="text-sm text-zinc-400" v-else>{{ t('security.threatCritical') }}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400" v-if="overview.threatLevel === 'low'">{{ t('security.threatLow') }}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400" v-else-if="overview.threatLevel === 'medium'">{{ t('security.threatMedium') }}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400" v-else-if="overview.threatLevel === 'high'">{{ t('security.threatHigh') }}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400" v-else>{{ t('security.threatCritical') }}</div>
         </div>
       </div>
 
       <!-- Tabs -->
-      <div class="flex gap-1 mb-6 border-b border-zinc-800">
+      <div class="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-700">
         <button
           v-for="tab in (['overview', 'events', 'investigate'] as const)"
           :key="tab"
           @click="switchTab(tab)"
           class="px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
           :class="activeTab === tab
-            ? 'border-blue-500 text-blue-400'
-            : 'border-transparent text-zinc-500 hover:text-zinc-300'"
+            ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+            : 'border-transparent text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:text-gray-300'"
         >
           {{ t(`security.tab.${tab}`) }}
         </button>
@@ -307,48 +307,48 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
       <div v-if="activeTab === 'overview'">
         <!-- Summary Cards -->
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-            <div class="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center gap-2 text-gray-500 dark:text-gray-500 text-xs font-medium mb-2">
               <Lock class="w-3.5 h-3.5" />
               {{ t('security.failedLogins') }}
             </div>
-            <div class="text-2xl font-bold" :class="(overview.summary?.failedLogins ?? 0) > 0 ? 'text-red-400' : 'text-zinc-100'">
+            <div class="text-2xl font-bold" :class="(overview.summary?.failedLogins ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'">
               {{ overview.summary?.failedLogins ?? 0 }}
             </div>
           </div>
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-            <div class="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center gap-2 text-gray-500 dark:text-gray-500 text-xs font-medium mb-2">
               <Ban class="w-3.5 h-3.5" />
               {{ t('security.permissionDenied') }}
             </div>
-            <div class="text-2xl font-bold" :class="(overview.summary?.permissionDenied ?? 0) > 0 ? 'text-orange-400' : 'text-zinc-100'">
+            <div class="text-2xl font-bold" :class="(overview.summary?.permissionDenied ?? 0) > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'">
               {{ overview.summary?.permissionDenied ?? 0 }}
             </div>
           </div>
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-            <div class="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center gap-2 text-gray-500 dark:text-gray-500 text-xs font-medium mb-2">
               <Key class="w-3.5 h-3.5" />
               {{ t('security.twoFaFailed') }}
             </div>
-            <div class="text-2xl font-bold" :class="(overview.summary?.twoFaFailed ?? 0) > 0 ? 'text-orange-400' : 'text-zinc-100'">
+            <div class="text-2xl font-bold" :class="(overview.summary?.twoFaFailed ?? 0) > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'">
               {{ overview.summary?.twoFaFailed ?? 0 }}
             </div>
           </div>
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-            <div class="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center gap-2 text-gray-500 dark:text-gray-500 text-xs font-medium mb-2">
               <Globe class="w-3.5 h-3.5" />
               {{ t('security.regionBlocked') }}
             </div>
-            <div class="text-2xl font-bold" :class="(overview.summary?.regionBlocked ?? 0) > 0 ? 'text-yellow-400' : 'text-zinc-100'">
+            <div class="text-2xl font-bold" :class="(overview.summary?.regionBlocked ?? 0) > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-900 dark:text-white'">
               {{ overview.summary?.regionBlocked ?? 0 }}
             </div>
           </div>
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-            <div class="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center gap-2 text-gray-500 dark:text-gray-500 text-xs font-medium mb-2">
               <AlertTriangle class="w-3.5 h-3.5" />
               {{ t('security.highRiskActions') }}
             </div>
-            <div class="text-2xl font-bold text-zinc-100">
+            <div class="text-2xl font-bold text-gray-900 dark:text-white">
               {{ overview.summary?.highRiskActions ?? 0 }}
             </div>
           </div>
@@ -356,8 +356,8 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
 
         <!-- Active Threats -->
         <div v-if="hasActiveThreats" class="mb-6">
-          <h2 class="text-lg font-semibold text-zinc-100 mb-3 flex items-center gap-2">
-            <ShieldAlert class="w-5 h-5 text-red-400" />
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+            <ShieldAlert class="w-5 h-5 text-red-600 dark:text-red-400" />
             {{ t('security.activeThreats') }}
           </h2>
           <div class="space-y-3">
@@ -368,15 +368,15 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               class="bg-red-500/5 border border-red-500/20 rounded-xl p-4 flex items-center justify-between"
             >
               <div class="flex items-center gap-3">
-                <ShieldX class="w-5 h-5 text-red-400 flex-shrink-0" />
+                <ShieldX class="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
                 <div>
-                  <span class="text-zinc-200 font-medium">{{ ip.ipAddress ?? 'Unknown IP' }}</span>
-                  <span class="text-red-400 text-sm ml-2">{{ ip.count }} {{ t('security.failedAttemptsLastHour') }}</span>
+                  <span class="text-gray-800 dark:text-gray-200 font-medium">{{ ip.ipAddress ?? 'Unknown IP' }}</span>
+                  <span class="text-red-600 dark:text-red-400 text-sm ml-2">{{ ip.count }} {{ t('security.failedAttemptsLastHour') }}</span>
                 </div>
               </div>
               <button
                 @click="investigateIpAddress(ip.ipAddress)"
-                class="text-xs px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+                class="text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:text-white hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
               >
                 {{ t('security.investigate') }}
               </button>
@@ -389,15 +389,15 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               class="bg-orange-500/5 border border-orange-500/20 rounded-xl p-4 flex items-center justify-between"
             >
               <div class="flex items-center gap-3">
-                <Activity class="w-5 h-5 text-orange-400 flex-shrink-0" />
+                <Activity class="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0" />
                 <div>
-                  <span class="text-zinc-200 font-medium">{{ ip.ipAddress ?? 'Unknown IP' }}</span>
-                  <span class="text-orange-400 text-sm ml-2">{{ ip.count }} {{ t('security.attemptsLast5Min') }}</span>
+                  <span class="text-gray-800 dark:text-gray-200 font-medium">{{ ip.ipAddress ?? 'Unknown IP' }}</span>
+                  <span class="text-orange-600 dark:text-orange-400 text-sm ml-2">{{ ip.count }} {{ t('security.attemptsLast5Min') }}</span>
                 </div>
               </div>
               <button
                 @click="investigateIpAddress(ip.ipAddress)"
-                class="text-xs px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+                class="text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:text-white hover:border-gray-400 dark:hover:border-gray-500 transition-colors"
               >
                 {{ t('security.investigate') }}
               </button>
@@ -409,10 +409,10 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               :key="'mi-' + entry.email"
               class="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 flex items-center gap-3"
             >
-              <Unlock class="w-5 h-5 text-yellow-400 flex-shrink-0" />
+              <Unlock class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
               <div>
-                <span class="text-zinc-200 font-medium">{{ entry.email ?? 'Unknown' }}</span>
-                <span class="text-yellow-400 text-sm ml-2">
+                <span class="text-gray-800 dark:text-gray-200 font-medium">{{ entry.email ?? 'Unknown' }}</span>
+                <span class="text-yellow-600 dark:text-yellow-400 text-sm ml-2">
                   {{ entry.attempts }} {{ t('security.attemptsFrom') }} {{ entry.ipCount }} {{ t('security.differentIps') }}
                 </span>
               </div>
@@ -421,8 +421,8 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
         </div>
 
         <!-- Timeline Chart -->
-        <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5 mb-6" v-if="timelineData.length > 1">
-          <h3 class="text-sm font-medium text-zinc-400 mb-4">{{ t('security.eventTimeline') }}</h3>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-6" v-if="timelineData.length > 1">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">{{ t('security.eventTimeline') }}</h3>
           <div class="flex items-end gap-px h-32">
             <div
               v-for="(bar, i) in timelineData"
@@ -443,17 +443,17 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               />
               <!-- Tooltip -->
               <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10">
-                <div class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs whitespace-nowrap shadow-xl">
-                  <div class="text-zinc-300 font-medium mb-1">{{ bar.hour }}</div>
-                  <div class="text-red-400" v-if="bar.failedLogins">Failed logins: {{ bar.failedLogins }}</div>
-                  <div class="text-orange-400" v-if="bar.permissionDenied">Perm denied: {{ bar.permissionDenied }}</div>
-                  <div class="text-yellow-400" v-if="bar.twoFaFailed">2FA failed: {{ bar.twoFaFailed }}</div>
+                <div class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-xs whitespace-nowrap shadow-xl">
+                  <div class="text-gray-700 dark:text-gray-300 font-medium mb-1">{{ bar.hour }}</div>
+                  <div class="text-red-600 dark:text-red-400" v-if="bar.failedLogins">Failed logins: {{ bar.failedLogins }}</div>
+                  <div class="text-orange-600 dark:text-orange-400" v-if="bar.permissionDenied">Perm denied: {{ bar.permissionDenied }}</div>
+                  <div class="text-yellow-600 dark:text-yellow-400" v-if="bar.twoFaFailed">2FA failed: {{ bar.twoFaFailed }}</div>
                 </div>
               </div>
             </div>
           </div>
           <!-- Legend -->
-          <div class="flex gap-4 mt-3 text-xs text-zinc-500">
+          <div class="flex gap-4 mt-3 text-xs text-gray-500 dark:text-gray-500">
             <div class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm bg-red-500/60" /> {{ t('security.failedLogins') }}</div>
             <div class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm bg-orange-500/60" /> {{ t('security.permissionDenied') }}</div>
             <div class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm bg-yellow-500/60" /> {{ t('security.twoFaFailed') }}</div>
@@ -463,9 +463,9 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
         <!-- Two-column: Top IPs + Top Emails -->
         <div class="grid md:grid-cols-2 gap-6 mb-6">
           <!-- Top Offending IPs -->
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-            <h3 class="text-sm font-medium text-zinc-400 mb-3">{{ t('security.topOffendingIps') }}</h3>
-            <div v-if="!overview.failedLoginsByIp?.length" class="text-sm text-zinc-600 py-4 text-center">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{{ t('security.topOffendingIps') }}</h3>
+            <div v-if="!overview.failedLoginsByIp?.length" class="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
               {{ t('security.noData') }}
             </div>
             <div v-else class="space-y-2">
@@ -476,11 +476,11 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               >
                 <button
                   @click="investigateIpAddress(entry.ipAddress)"
-                  class="text-sm text-zinc-300 hover:text-blue-400 transition-colors font-mono"
+                  class="text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors font-mono"
                 >
                   {{ entry.ipAddress ?? 'Unknown' }}
                 </button>
-                <span class="text-sm font-medium" :class="entry.count >= 10 ? 'text-red-400' : entry.count >= 5 ? 'text-orange-400' : 'text-zinc-400'">
+                <span class="text-sm font-medium" :class="entry.count >= 10 ? 'text-red-600 dark:text-red-400' : entry.count >= 5 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-500 dark:text-gray-400'">
                   {{ entry.count }}
                 </span>
               </div>
@@ -488,9 +488,9 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
           </div>
 
           <!-- Top Targeted Accounts -->
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-            <h3 class="text-sm font-medium text-zinc-400 mb-3">{{ t('security.topTargetedAccounts') }}</h3>
-            <div v-if="!overview.failedLoginsByEmail?.length" class="text-sm text-zinc-600 py-4 text-center">
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{{ t('security.topTargetedAccounts') }}</h3>
+            <div v-if="!overview.failedLoginsByEmail?.length" class="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
               {{ t('security.noData') }}
             </div>
             <div v-else class="space-y-2">
@@ -499,8 +499,8 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
                 :key="entry.email"
                 class="flex items-center justify-between"
               >
-                <span class="text-sm text-zinc-300 truncate mr-4">{{ entry.email }}</span>
-                <span class="text-sm font-medium" :class="entry.count >= 10 ? 'text-red-400' : entry.count >= 5 ? 'text-orange-400' : 'text-zinc-400'">
+                <span class="text-sm text-gray-700 dark:text-gray-300 truncate mr-4">{{ entry.email }}</span>
+                <span class="text-sm font-medium" :class="entry.count >= 10 ? 'text-red-600 dark:text-red-400' : entry.count >= 5 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-500 dark:text-gray-400'">
                   {{ entry.count }}
                 </span>
               </div>
@@ -509,43 +509,43 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
         </div>
 
         <!-- High-Risk Events -->
-        <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-          <h3 class="text-sm font-medium text-zinc-400 mb-3">{{ t('security.recentHighRisk') }}</h3>
-          <div v-if="!overview.highRiskEvents?.length" class="text-sm text-zinc-600 py-4 text-center">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{{ t('security.recentHighRisk') }}</h3>
+          <div v-if="!overview.highRiskEvents?.length" class="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
             {{ t('security.noHighRiskEvents') }}
           </div>
           <div v-else class="space-y-1">
             <div
               v-for="evt in overview.highRiskEvents.slice(0, 20)"
               :key="evt.id"
-              class="rounded-lg hover:bg-zinc-800/50 transition-colors"
+              class="rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
             >
               <button
                 @click="expandedEvent = expandedEvent === evt.id ? null : evt.id"
                 class="w-full flex items-center gap-3 px-3 py-2 text-left"
               >
-                <component :is="expandedEvent === evt.id ? ChevronDown : ChevronRight" class="w-3.5 h-3.5 text-zinc-600 flex-shrink-0" />
-                <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="getEventLabel(evt.eventType).color + ' bg-zinc-800'">
+                <component :is="expandedEvent === evt.id ? ChevronDown : ChevronRight" class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+                <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="getEventLabel(evt.eventType).color + ' bg-gray-100 dark:bg-gray-700'">
                   {{ getEventLabel(evt.eventType).label }}
                 </span>
-                <span class="text-sm text-zinc-300 truncate flex-1">{{ evt.description }}</span>
-                <span class="text-xs text-zinc-600 flex-shrink-0">{{ timeAgo(evt.createdAt) }}</span>
+                <span class="text-sm text-gray-700 dark:text-gray-300 truncate flex-1">{{ evt.description }}</span>
+                <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">{{ timeAgo(evt.createdAt) }}</span>
               </button>
               <div v-if="expandedEvent === evt.id" class="px-10 pb-3 text-xs space-y-1">
-                <div class="text-zinc-500">
-                  <span class="text-zinc-600">Actor:</span> {{ evt.actorEmail ?? 'System' }}
+                <div class="text-gray-500 dark:text-gray-500">
+                  <span class="text-gray-400 dark:text-gray-500">Actor:</span> {{ evt.actorEmail ?? 'System' }}
                 </div>
-                <div class="text-zinc-500">
-                  <span class="text-zinc-600">IP:</span>
-                  <button v-if="evt.ipAddress" @click="investigateIpAddress(evt.ipAddress)" class="text-blue-400 hover:underline ml-1">{{ evt.ipAddress }}</button>
+                <div class="text-gray-500 dark:text-gray-500">
+                  <span class="text-gray-400 dark:text-gray-500">IP:</span>
+                  <button v-if="evt.ipAddress" @click="investigateIpAddress(evt.ipAddress)" class="text-blue-600 dark:text-blue-400 hover:underline ml-1">{{ evt.ipAddress }}</button>
                   <span v-else class="ml-1">N/A</span>
                 </div>
-                <div class="text-zinc-500" v-if="evt.resourceType">
-                  <span class="text-zinc-600">Resource:</span> {{ evt.resourceType }} {{ evt.resourceId ? `(${evt.resourceId.slice(0,8)}...)` : '' }}
+                <div class="text-gray-500 dark:text-gray-500" v-if="evt.resourceType">
+                  <span class="text-gray-400 dark:text-gray-500">Resource:</span> {{ evt.resourceType }} {{ evt.resourceId ? `(${evt.resourceId.slice(0,8)}...)` : '' }}
                 </div>
-                <div class="text-zinc-500" v-if="evt.details && Object.keys(evt.details).length > 0">
-                  <span class="text-zinc-600">Details:</span>
-                  <code class="ml-1 text-zinc-400">{{ JSON.stringify(evt.details) }}</code>
+                <div class="text-gray-500 dark:text-gray-500" v-if="evt.details && Object.keys(evt.details).length > 0">
+                  <span class="text-gray-400 dark:text-gray-500">Details:</span>
+                  <code class="ml-1 text-gray-500 dark:text-gray-400">{{ JSON.stringify(evt.details) }}</code>
                 </div>
               </div>
             </div>
@@ -560,7 +560,7 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
           <select
             v-model="filterType"
             @change="eventsPage = 1; fetchEvents()"
-            class="bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg px-3 py-1.5 text-sm"
+            class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg px-3 py-1.5 text-sm"
           >
             <option value="">All security events</option>
             <option value="auth.login_failed">Failed Logins</option>
@@ -582,9 +582,9 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               @keyup.enter="eventsPage = 1; fetchEvents()"
               type="text"
               placeholder="Filter by IP..."
-              class="bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg px-3 py-1.5 text-sm pl-8 w-48"
+              class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg px-3 py-1.5 text-sm pl-8 w-48"
             />
-            <Globe class="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <Globe class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
           <div class="relative">
             <input
@@ -592,9 +592,9 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               @keyup.enter="eventsPage = 1; fetchEvents()"
               type="text"
               placeholder="Filter by email..."
-              class="bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg px-3 py-1.5 text-sm pl-8 w-48"
+              class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg px-3 py-1.5 text-sm pl-8 w-48"
             />
-            <User class="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <User class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
           <button
             @click="eventsPage = 1; fetchEvents()"
@@ -605,20 +605,20 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
           <button
             v-if="filterType || filterIp || filterEmail"
             @click="filterType = ''; filterIp = ''; filterEmail = ''; eventsPage = 1; fetchEvents()"
-            class="px-3 py-1.5 bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 rounded-lg text-sm transition-colors"
+            class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:text-gray-200 rounded-lg text-sm transition-colors"
           >
             <X class="w-3.5 h-3.5" />
           </button>
         </div>
 
         <!-- Events Table -->
-        <div class="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div v-if="eventsLoading" class="flex items-center justify-center py-12">
             <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500" />
           </div>
           <table v-else-if="events.length" class="w-full text-sm">
             <thead>
-              <tr class="border-b border-zinc-800 text-zinc-500 text-xs">
+              <tr class="border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-500 text-xs">
                 <th class="text-left px-4 py-3 font-medium">{{ t('security.eventType') }}</th>
                 <th class="text-left px-4 py-3 font-medium">{{ t('security.description') }}</th>
                 <th class="text-left px-4 py-3 font-medium">{{ t('security.actor') }}</th>
@@ -630,48 +630,48 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               <tr
                 v-for="evt in events"
                 :key="evt.id"
-                class="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors"
+                class="border-b border-gray-200 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
               >
                 <td class="px-4 py-2.5">
-                  <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="getEventLabel(evt.eventType).color + ' bg-zinc-800'">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="getEventLabel(evt.eventType).color + ' bg-gray-100 dark:bg-gray-700'">
                     {{ getEventLabel(evt.eventType).label }}
                   </span>
                 </td>
-                <td class="px-4 py-2.5 text-zinc-300 max-w-xs truncate">{{ evt.description }}</td>
-                <td class="px-4 py-2.5 text-zinc-400 text-xs">{{ evt.actorEmail ?? '-' }}</td>
+                <td class="px-4 py-2.5 text-gray-700 dark:text-gray-300 max-w-xs truncate">{{ evt.description }}</td>
+                <td class="px-4 py-2.5 text-gray-500 dark:text-gray-400 text-xs">{{ evt.actorEmail ?? '-' }}</td>
                 <td class="px-4 py-2.5">
                   <button
                     v-if="evt.ipAddress"
                     @click="investigateIpAddress(evt.ipAddress)"
-                    class="text-xs font-mono text-zinc-400 hover:text-blue-400 transition-colors"
+                    class="text-xs font-mono text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                   >
                     {{ evt.ipAddress }}
                   </button>
-                  <span v-else class="text-zinc-600 text-xs">-</span>
+                  <span v-else class="text-gray-400 dark:text-gray-500 text-xs">-</span>
                 </td>
-                <td class="px-4 py-2.5 text-zinc-500 text-xs whitespace-nowrap">{{ timeAgo(evt.createdAt) }}</td>
+                <td class="px-4 py-2.5 text-gray-500 dark:text-gray-500 text-xs whitespace-nowrap">{{ timeAgo(evt.createdAt) }}</td>
               </tr>
             </tbody>
           </table>
-          <div v-else class="text-center py-12 text-zinc-600 text-sm">{{ t('security.noEvents') }}</div>
+          <div v-else class="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">{{ t('security.noEvents') }}</div>
         </div>
 
         <!-- Pagination -->
         <div v-if="eventsTotalPages > 1" class="flex items-center justify-between mt-4 text-sm">
-          <span class="text-zinc-500">{{ eventsTotal }} {{ t('security.totalEvents') }}</span>
+          <span class="text-gray-500 dark:text-gray-500">{{ eventsTotal }} {{ t('security.totalEvents') }}</span>
           <div class="flex gap-2">
             <button
               :disabled="eventsPage <= 1"
               @click="eventsPage--; fetchEvents()"
-              class="px-3 py-1 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 disabled:opacity-30 hover:text-zinc-200 transition-colors"
+              class="px-3 py-1 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 dark:text-gray-400 disabled:opacity-30 hover:text-gray-800 dark:text-gray-200 transition-colors"
             >
               {{ t('security.prev') }}
             </button>
-            <span class="px-3 py-1 text-zinc-500">{{ eventsPage }} / {{ eventsTotalPages }}</span>
+            <span class="px-3 py-1 text-gray-500 dark:text-gray-500">{{ eventsPage }} / {{ eventsTotalPages }}</span>
             <button
               :disabled="eventsPage >= eventsTotalPages"
               @click="eventsPage++; fetchEvents()"
-              class="px-3 py-1 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 disabled:opacity-30 hover:text-zinc-200 transition-colors"
+              class="px-3 py-1 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 dark:text-gray-400 disabled:opacity-30 hover:text-gray-800 dark:text-gray-200 transition-colors"
             >
               {{ t('security.next') }}
             </button>
@@ -689,9 +689,9 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
               @keyup.enter="investigateIpAddress()"
               type="text"
               placeholder="Enter IP address to investigate..."
-              class="w-full bg-zinc-800 border border-zinc-700 text-zinc-300 rounded-lg px-4 py-2.5 text-sm pl-10"
+              class="w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg px-4 py-2.5 text-sm pl-10"
             />
-            <Search class="w-4 h-4 text-zinc-600 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search class="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
           <button
             @click="investigateIpAddress()"
@@ -709,69 +709,69 @@ function switchTab(tab: 'overview' | 'events' | 'investigate') {
         <template v-else-if="ipDetail">
           <!-- IP Summary -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-              <div class="text-xs text-zinc-500 mb-1">{{ t('security.totalEvents') }}</div>
-              <div class="text-xl font-bold text-zinc-100">{{ ipDetail.totalEvents }}</div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div class="text-xs text-gray-500 dark:text-gray-500 mb-1">{{ t('security.totalEvents') }}</div>
+              <div class="text-xl font-bold text-gray-900 dark:text-white">{{ ipDetail.totalEvents }}</div>
             </div>
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-              <div class="text-xs text-zinc-500 mb-1">{{ t('security.successfulLogins') }}</div>
-              <div class="text-xl font-bold" :class="ipDetail.successfulLogins > 0 ? 'text-green-400' : 'text-zinc-100'">{{ ipDetail.successfulLogins }}</div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div class="text-xs text-gray-500 dark:text-gray-500 mb-1">{{ t('security.successfulLogins') }}</div>
+              <div class="text-xl font-bold" :class="ipDetail.successfulLogins > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'">{{ ipDetail.successfulLogins }}</div>
             </div>
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-              <div class="text-xs text-zinc-500 mb-1">{{ t('security.targetedAccounts') }}</div>
-              <div class="text-xl font-bold text-zinc-100">{{ ipDetail.targetedEmails?.length ?? 0 }}</div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div class="text-xs text-gray-500 dark:text-gray-500 mb-1">{{ t('security.targetedAccounts') }}</div>
+              <div class="text-xl font-bold text-gray-900 dark:text-white">{{ ipDetail.targetedEmails?.length ?? 0 }}</div>
             </div>
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-              <div class="text-xs text-zinc-500 mb-1">{{ t('security.period') }}</div>
-              <div class="text-xl font-bold text-zinc-100">{{ ipDetail.period?.hours ?? 72 }}h</div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div class="text-xs text-gray-500 dark:text-gray-500 mb-1">{{ t('security.period') }}</div>
+              <div class="text-xl font-bold text-gray-900 dark:text-white">{{ ipDetail.period?.hours ?? 72 }}h</div>
             </div>
           </div>
 
           <!-- Two-column: Breakdown + Targeted Emails -->
           <div class="grid md:grid-cols-2 gap-6 mb-6">
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-              <h3 class="text-sm font-medium text-zinc-400 mb-3">{{ t('security.eventBreakdown') }}</h3>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{{ t('security.eventBreakdown') }}</h3>
               <div class="space-y-2">
                 <div v-for="b in ipDetail.breakdown" :key="b.eventType" class="flex items-center justify-between">
-                  <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="getEventLabel(b.eventType).color + ' bg-zinc-800'">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="getEventLabel(b.eventType).color + ' bg-gray-100 dark:bg-gray-700'">
                     {{ getEventLabel(b.eventType).label }}
                   </span>
-                  <span class="text-sm font-medium text-zinc-300">{{ b.count }}</span>
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ b.count }}</span>
                 </div>
               </div>
             </div>
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-              <h3 class="text-sm font-medium text-zinc-400 mb-3">{{ t('security.targetedAccounts') }}</h3>
-              <div v-if="!ipDetail.targetedEmails?.length" class="text-sm text-zinc-600 py-4 text-center">{{ t('security.noData') }}</div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{{ t('security.targetedAccounts') }}</h3>
+              <div v-if="!ipDetail.targetedEmails?.length" class="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">{{ t('security.noData') }}</div>
               <div v-else class="space-y-2">
                 <div v-for="e in ipDetail.targetedEmails" :key="e.email" class="flex items-center justify-between">
-                  <span class="text-sm text-zinc-300 truncate mr-4">{{ e.email ?? 'Unknown' }}</span>
-                  <span class="text-sm font-medium text-red-400">{{ e.count }}</span>
+                  <span class="text-sm text-gray-700 dark:text-gray-300 truncate mr-4">{{ e.email ?? 'Unknown' }}</span>
+                  <span class="text-sm font-medium text-red-600 dark:text-red-400">{{ e.count }}</span>
                 </div>
               </div>
             </div>
           </div>
 
           <!-- Recent Events from IP -->
-          <div class="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-            <h3 class="text-sm font-medium text-zinc-400 mb-3">{{ t('security.recentEventsFromIp') }}</h3>
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">{{ t('security.recentEventsFromIp') }}</h3>
             <div class="space-y-1 max-h-96 overflow-y-auto">
               <div
                 v-for="evt in ipDetail.recentEvents"
                 :key="evt.id"
-                class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50"
+                class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50"
               >
-                <span class="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" :class="getEventLabel(evt.eventType).color + ' bg-zinc-800'">
+                <span class="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" :class="getEventLabel(evt.eventType).color + ' bg-gray-100 dark:bg-gray-700'">
                   {{ getEventLabel(evt.eventType).label }}
                 </span>
-                <span class="text-sm text-zinc-300 truncate flex-1">{{ evt.description }}</span>
-                <span class="text-xs text-zinc-600 flex-shrink-0">{{ timeAgo(evt.createdAt) }}</span>
+                <span class="text-sm text-gray-700 dark:text-gray-300 truncate flex-1">{{ evt.description }}</span>
+                <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">{{ timeAgo(evt.createdAt) }}</span>
               </div>
             </div>
           </div>
         </template>
 
-        <div v-else class="text-center py-12 text-zinc-600 text-sm">
+        <div v-else class="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">
           {{ t('security.enterIpToInvestigate') }}
         </div>
       </div>

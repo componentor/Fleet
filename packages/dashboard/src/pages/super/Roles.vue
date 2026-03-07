@@ -105,13 +105,21 @@ const presetColors: Record<string, string> = {
 }
 
 const creatingPreset = ref<string | null>(null)
+const pendingPreset = ref<RolePreset | null>(null)
 
 const availablePresets = computed(() => {
   const existingNames = new Set(roles.value.map(r => r.name.toLowerCase()))
   return ROLE_PRESETS.filter(p => !existingNames.has(t(`roles.presets.${p.key}.name`).toLowerCase()))
 })
 
-async function createFromPreset(preset: RolePreset) {
+function confirmPreset(preset: RolePreset) {
+  pendingPreset.value = preset
+}
+
+async function createFromPreset() {
+  const preset = pendingPreset.value
+  if (!preset) return
+  pendingPreset.value = null
   creatingPreset.value = preset.key
   error.value = ''
   success.value = ''
@@ -401,7 +409,7 @@ onMounted(() => {
         <button
           v-for="preset in availablePresets"
           :key="preset.key"
-          @click="createFromPreset(preset)"
+          @click="confirmPreset(preset)"
           :disabled="creatingPreset !== null"
           :class="[
             'flex items-center gap-3 p-3.5 rounded-xl border text-left transition-all hover:shadow-sm disabled:opacity-50',
@@ -631,6 +639,50 @@ onMounted(() => {
               >
                 <CompassSpinner v-if="deleting" size="w-4 h-4" />
                 {{ t('common.delete') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Preset creation confirmation dialog -->
+    <Teleport to="body">
+      <div v-if="pendingPreset" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-black/50" @click="pendingPreset = null" />
+        <div class="relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-md">
+          <div class="p-6">
+            <div class="flex items-center gap-3 mb-4">
+              <div :class="['p-2 rounded-lg border', presetColors[pendingPreset.color]]">
+                <component :is="pendingPreset.icon" class="w-5 h-5" />
+              </div>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('roles.presetConfirmTitle') }}</h2>
+            </div>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
+              {{ t('roles.presetConfirmMessage', { name: t(`roles.presets.${pendingPreset.key}.name`) }) }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">{{ t('roles.presetConfirmPermissions') }}</p>
+            <div class="flex flex-wrap gap-1.5 mb-6">
+              <span
+                v-for="(levels, section) in pendingPreset.permissions"
+                :key="section"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+              >
+                {{ sectionLabel(section as string) }}: {{ (levels as string[]).join(', ') }}
+              </span>
+            </div>
+            <div class="flex justify-end gap-3">
+              <button
+                @click="pendingPreset = null"
+                class="px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                @click="createFromPreset()"
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+              >
+                {{ t('common.create') }}
               </button>
             </div>
           </div>
