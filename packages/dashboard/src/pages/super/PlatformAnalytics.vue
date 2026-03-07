@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { BarChart3, ArrowUpRight, ArrowDownRight, Globe, Activity, TrendingUp, Users, Eye, MonitorSmartphone, Link2, FileText } from 'lucide-vue-next'
+import { BarChart3, ArrowUpRight, ArrowDownRight, Globe, Activity, TrendingUp, Users, Eye, MonitorSmartphone, Link2, FileText, Wrench, Play, CheckCircle, XCircle, RefreshCw } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 
@@ -66,7 +66,7 @@ interface VisitorAnalytics {
 
 // ── State ────────────────────────────────────────────────────────────────
 
-const activeTab = ref<'traffic' | 'visitors'>('traffic')
+const activeTab = ref<'traffic' | 'visitors' | 'diagnostics'>('traffic')
 const period = ref<'24h' | '7d' | '30d'>('24h')
 const loading = ref(true)
 
@@ -99,9 +99,47 @@ watch(period, () => {
   else fetchVisitors()
 })
 
+// ── Diagnostics ──────────────────────────────────────────────────────────
+
+const diagnostics = ref<any>(null)
+const diagLoading = ref(false)
+const diagError = ref('')
+const collecting = ref(false)
+const collectMessage = ref('')
+
+async function fetchDiagnostics() {
+  diagLoading.value = true
+  diagError.value = ''
+  try {
+    diagnostics.value = await api.get<any>('/admin/analytics/diagnostics')
+  } catch (err: any) {
+    diagError.value = err?.body?.error || 'Failed to fetch diagnostics'
+    diagnostics.value = null
+  } finally {
+    diagLoading.value = false
+  }
+}
+
+async function forceCollect() {
+  collecting.value = true
+  collectMessage.value = ''
+  try {
+    const result = await api.post<any>('/admin/analytics/collect', {})
+    collectMessage.value = result.message || 'Collection complete'
+    // Refresh diagnostics and analytics after collection
+    await fetchDiagnostics()
+    await fetchAnalytics()
+  } catch (err: any) {
+    collectMessage.value = err?.body?.error || 'Collection failed'
+  } finally {
+    collecting.value = false
+  }
+}
+
 watch(activeTab, (tab) => {
   if (tab === 'visitors' && !visitors.value && !visitorsLoading.value) fetchVisitors()
   if (tab === 'traffic' && !analytics.value && !loading.value) fetchAnalytics()
+  if (tab === 'diagnostics' && !diagnostics.value && !diagLoading.value) fetchDiagnostics()
 })
 
 onMounted(fetchAnalytics)
@@ -266,7 +304,7 @@ const deviceSegments = computed(() => {
     <div class="flex flex-wrap items-center gap-4 mb-6">
       <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
         <button
-          v-for="tab in [{ id: 'traffic' as const, label: 'Traffic' }, { id: 'visitors' as const, label: 'Visitors' }]"
+          v-for="tab in [{ id: 'traffic' as const, label: 'Traffic' }, { id: 'visitors' as const, label: 'Visitors' }, { id: 'diagnostics' as const, label: 'Diagnostics' }]"
           :key="tab.id"
           @click="activeTab = tab.id"
           :class="[
@@ -619,6 +657,217 @@ const deviceSegments = computed(() => {
         <Users class="w-10 h-10 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
         <p class="text-sm text-gray-500 dark:text-gray-400">Unable to load visitor analytics.</p>
         <button @click="fetchVisitors" class="mt-2 text-primary-600 dark:text-primary-400 hover:underline text-sm">Try again</button>
+      </div>
+    </template>
+
+    <!-- ═══════════════════ DIAGNOSTICS TAB ═══════════════════ -->
+    <template v-if="activeTab === 'diagnostics'">
+      <div class="space-y-6">
+        <!-- Actions bar -->
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            @click="fetchDiagnostics"
+            :disabled="diagLoading"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw :class="['w-4 h-4', diagLoading && 'animate-spin']" />
+            Run Diagnostics
+          </button>
+          <button
+            @click="forceCollect"
+            :disabled="collecting"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            <Play v-if="!collecting" class="w-4 h-4" />
+            <CompassSpinner v-else size="w-4 h-4" />
+            {{ collecting ? 'Collecting...' : 'Force Collection' }}
+          </button>
+          <span v-if="collectMessage" class="text-sm text-gray-600 dark:text-gray-400">{{ collectMessage }}</span>
+        </div>
+
+        <div v-if="diagLoading" class="flex items-center justify-center py-12">
+          <CompassSpinner size="w-12 h-12" />
+        </div>
+
+        <div v-else-if="diagError" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
+          <p class="text-sm text-red-700 dark:text-red-300">{{ diagError }}</p>
+          <button @click="fetchDiagnostics" class="mt-2 text-sm text-red-600 hover:underline">Retry</button>
+        </div>
+
+        <template v-else-if="diagnostics">
+          <!-- Overall health -->
+          <div :class="[
+            'rounded-xl border p-5 flex items-center gap-4',
+            diagnostics.healthy
+              ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+              : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+          ]">
+            <CheckCircle v-if="diagnostics.healthy" class="w-6 h-6 text-green-600 dark:text-green-400 shrink-0" />
+            <XCircle v-else class="w-6 h-6 text-red-600 dark:text-red-400 shrink-0" />
+            <div>
+              <p :class="['font-semibold', diagnostics.healthy ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300']">
+                {{ diagnostics.healthy ? 'All pipeline steps healthy' : 'Pipeline has issues' }}
+              </p>
+              <p v-if="diagnostics.failedSteps" class="text-sm mt-0.5" :class="diagnostics.healthy ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'">
+                Failed: {{ diagnostics.failedSteps.join(', ') }}
+              </p>
+            </div>
+          </div>
+
+          <!-- Step cards -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Service Map -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">1. Service Map</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.serviceMap?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.serviceMap?.ok" class="w-3 h-3" />
+                  <XCircle v-else class="w-3 h-3" />
+                  {{ diagnostics.steps.serviceMap?.ok ? 'OK' : 'FAIL' }}
+                </span>
+              </div>
+              <div v-if="diagnostics.steps.serviceMap?.error" class="text-sm text-red-600 dark:text-red-400 mb-2">{{ diagnostics.steps.serviceMap.error }}</div>
+              <div v-else class="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <p>Docker services with <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">fleet.service-id</code>: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.serviceMap?.count ?? 0 }}</span></p>
+                <div v-if="diagnostics.steps.serviceMap?.dockerNames?.length" class="mt-2">
+                  <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Docker names:</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="name in diagnostics.steps.serviceMap.dockerNames" :key="name" class="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded font-mono">{{ name }}</span>
+                  </div>
+                </div>
+                <div v-if="Object.keys(diagnostics.steps.serviceMap?.traefikAliases ?? {}).length" class="mt-2">
+                  <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Traefik aliases:</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="(docker, traefik) in diagnostics.steps.serviceMap.traefikAliases" :key="traefik" class="text-xs bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded font-mono">{{ traefik }} → {{ docker }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Traefik Tasks -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">2. Traefik Tasks</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.traefikTasks?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.traefikTasks?.ok" class="w-3 h-3" />
+                  <XCircle v-else class="w-3 h-3" />
+                  {{ diagnostics.steps.traefikTasks?.ok ? 'OK' : 'FAIL' }}
+                </span>
+              </div>
+              <div v-if="diagnostics.steps.traefikTasks?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.traefikTasks.error }}</div>
+              <div v-else class="space-y-2">
+                <p class="text-sm text-gray-600 dark:text-gray-400">Running tasks: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.traefikTasks?.count ?? 0 }}</span></p>
+                <div v-for="task in (diagnostics.steps.traefikTasks?.tasks ?? [])" :key="task.id" class="text-xs bg-gray-50 dark:bg-gray-750 rounded-lg p-3 space-y-1">
+                  <p class="font-mono text-gray-700 dark:text-gray-300">Task {{ task.id }} — {{ task.state }}</p>
+                  <div v-for="net in task.networks" :key="net.name" class="text-gray-500 dark:text-gray-400">
+                    {{ net.name }}: {{ net.addresses.join(', ') || 'no addresses' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Metrics Fetch (DNS) -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">3. Metrics Fetch (DNS)</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.metricsFetchDns?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.metricsFetchDns?.ok" class="w-3 h-3" />
+                  <XCircle v-else class="w-3 h-3" />
+                  {{ diagnostics.steps.metricsFetchDns?.ok ? 'OK' : 'FAIL' }}
+                </span>
+              </div>
+              <div v-if="diagnostics.steps.metricsFetchDns?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.metricsFetchDns.error }}</div>
+              <div v-else class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                <p>HTTP {{ diagnostics.steps.metricsFetchDns?.status }} — {{ ((diagnostics.steps.metricsFetchDns?.totalBytes ?? 0) / 1024).toFixed(1) }} KB</p>
+                <p>Service request metric lines: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.metricsFetchDns?.serviceRequestLines ?? 0 }}</span></p>
+                <div v-if="diagnostics.steps.metricsFetchDns?.uniqueServiceNames?.length">
+                  <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Services in Prometheus metrics:</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="name in diagnostics.steps.metricsFetchDns.uniqueServiceNames" :key="name" class="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded font-mono">{{ name }}</span>
+                  </div>
+                </div>
+                <div v-if="diagnostics.steps.metricsFetchDns?.sampleLines?.length" class="mt-2">
+                  <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Sample lines:</p>
+                  <div class="text-xs font-mono bg-gray-50 dark:bg-gray-750 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto space-y-0.5">
+                    <p v-for="(line, i) in diagnostics.steps.metricsFetchDns.sampleLines" :key="i" class="text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ line }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Metrics Fetch (Task IPs) -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">4. Metrics Fetch (Task IPs)</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.metricsFetchTaskIp?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.metricsFetchTaskIp?.ok" class="w-3 h-3" />
+                  <XCircle v-else class="w-3 h-3" />
+                  {{ diagnostics.steps.metricsFetchTaskIp?.ok ? 'OK' : 'FAIL' }}
+                </span>
+              </div>
+              <div v-if="diagnostics.steps.metricsFetchTaskIp?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.metricsFetchTaskIp.error }}</div>
+              <div v-else class="text-sm text-gray-600 dark:text-gray-400">
+                <p>Instances scraped: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.metricsFetchTaskIp?.instanceCount ?? 0 }}</span></p>
+                <p>Total data: {{ ((diagnostics.steps.metricsFetchTaskIp?.totalBytes ?? 0) / 1024).toFixed(1) }} KB</p>
+              </div>
+            </div>
+
+            <!-- Valkey State -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">5. Valkey (Previous Values)</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.valkey?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.valkey?.ok" class="w-3 h-3" />
+                  <XCircle v-else class="w-3 h-3" />
+                  {{ diagnostics.steps.valkey?.ok ? 'OK' : 'FAIL' }}
+                </span>
+              </div>
+              <div v-if="diagnostics.steps.valkey?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.valkey.error }}</div>
+              <div v-else class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                <p>Cached analytics keys: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.valkey?.analyticsKeyCount ?? 0 }}</span></p>
+                <p v-if="diagnostics.steps.valkey?.analyticsKeyCount === 0" class="text-yellow-600 dark:text-yellow-400 text-xs">No cached values = first scrape will be baseline only (no data inserted). Second scrape (5 min later) will produce data.</p>
+                <div v-if="diagnostics.steps.valkey?.sampleValues && Object.keys(diagnostics.steps.valkey.sampleValues).length" class="mt-2">
+                  <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Sample cached values:</p>
+                  <div class="text-xs font-mono bg-gray-50 dark:bg-gray-750 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto space-y-1">
+                    <div v-for="(val, key) in diagnostics.steps.valkey.sampleValues" :key="key" class="text-gray-600 dark:text-gray-400">
+                      <span class="text-gray-500">{{ key }}:</span> {{ JSON.stringify(val) }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Database -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">6. Database</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.database?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.database?.ok" class="w-3 h-3" />
+                  <XCircle v-else class="w-3 h-3" />
+                  {{ diagnostics.steps.database?.ok ? 'OK' : 'FAIL' }}
+                </span>
+              </div>
+              <div v-if="diagnostics.steps.database?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.database.error }}</div>
+              <div v-else class="text-sm text-gray-600 dark:text-gray-400">
+                <p>Total analytics rows: <span class="font-medium text-gray-900 dark:text-white">{{ (diagnostics.steps.database?.totalRows ?? 0).toLocaleString() }}</span></p>
+                <p v-if="diagnostics.steps.database?.totalRows === 0" class="text-yellow-600 dark:text-yellow-400 text-xs mt-1">No rows = analytics has never successfully collected data. Use "Force Collection" twice (first run establishes baseline, second inserts data).</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Raw JSON (collapsible) -->
+          <details class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <summary class="px-5 py-3 cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+              Raw JSON Response
+            </summary>
+            <pre class="px-5 pb-5 text-xs font-mono text-gray-600 dark:text-gray-400 overflow-x-auto whitespace-pre-wrap">{{ JSON.stringify(diagnostics, null, 2) }}</pre>
+          </details>
+        </template>
+
+        <div v-else class="text-center py-20">
+          <Wrench class="w-10 h-10 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
+          <p class="text-sm text-gray-500 dark:text-gray-400">Click "Run Diagnostics" to test the analytics pipeline.</p>
+        </div>
       </div>
     </template>
   </div>
