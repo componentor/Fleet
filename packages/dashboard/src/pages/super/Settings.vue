@@ -6,12 +6,15 @@ import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 import { useAuthStore } from '@/stores/auth'
+import { useAdminPermissions } from '@/composables/useAdminPermissions'
 
 const { t } = useI18n()
 
 const api = useApi()
 const branding = useBranding()
 const authStore = useAuthStore()
+const adminPerms = useAdminPermissions()
+const canWrite = computed(() => adminPerms.can('settings', 'write'))
 
 const activeSection = ref('general')
 const loading = ref(true)
@@ -1400,6 +1403,7 @@ onMounted(() => {
   fetchEnvironment()
   fetchRobotsConfig()
   fetchRegistration()
+  adminPerms.fetch()
 })
 </script>
 
@@ -1455,7 +1459,7 @@ onMounted(() => {
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ $t('super.settings.rootDomainDesc') }}</p>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformDomain" type="text" placeholder="fleet.example.com" @keydown.enter="saveGeneralField('platform:domain', platformDomain)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                <button @click="saveGeneralField('platform:domain', platformDomain)" :disabled="savingField === 'general:platform:domain'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGeneralField('platform:domain', platformDomain)" :disabled="savingField === 'general:platform:domain'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'general:platform:domain'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1465,7 +1469,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.platformUrl') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="platformUrl" type="url" placeholder="https://your-platform.com" @keydown.enter="saveGeneralField('platform:url', platformUrl)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                <button @click="saveGeneralField('platform:url', platformUrl)" :disabled="savingField === 'general:platform:url'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGeneralField('platform:url', platformUrl)" :disabled="savingField === 'general:platform:url'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'general:platform:url'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1475,7 +1479,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.email') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="supportEmail" type="email" placeholder="support@your-platform.com" @keydown.enter="saveGeneralField('platform:supportEmail', supportEmail)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                <button @click="saveGeneralField('platform:supportEmail', supportEmail)" :disabled="savingField === 'general:platform:supportEmail'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGeneralField('platform:supportEmail', supportEmail)" :disabled="savingField === 'general:platform:supportEmail'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'general:platform:supportEmail'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1491,7 +1495,7 @@ onMounted(() => {
                   <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ t('super.settings.maxServicesPerAccountDesc') }}</p>
                   <div class="flex items-center gap-2 max-w-xs">
                     <input v-model="maxServicesPerAccount" type="number" min="1" max="10000" @keydown.enter="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                    <button @click="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" :disabled="savingField === 'general:limits:maxServicesPerAccount'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <button @click="saveGeneralField('limits:maxServicesPerAccount', maxServicesPerAccount)" :disabled="savingField === 'general:limits:maxServicesPerAccount'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                       <CompassSpinner v-if="savingField === 'general:limits:maxServicesPerAccount'" size="w-4 h-4" />
                       <Save v-else class="w-4 h-4" />
                     </button>
@@ -1502,7 +1506,7 @@ onMounted(() => {
                   <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">{{ t('super.settings.maxReplicasPerAccountDesc') }}</p>
                   <div class="flex items-center gap-2 max-w-xs">
                     <input v-model="maxTotalReplicasPerAccount" type="number" min="1" max="100000" @keydown.enter="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                    <button @click="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" :disabled="savingField === 'general:limits:maxTotalReplicasPerAccount'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                    <button @click="saveGeneralField('limits:maxTotalReplicasPerAccount', maxTotalReplicasPerAccount)" :disabled="savingField === 'general:limits:maxTotalReplicasPerAccount'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                       <CompassSpinner v-if="savingField === 'general:limits:maxTotalReplicasPerAccount'" size="w-4 h-4" />
                       <Save v-else class="w-4 h-4" />
                     </button>
@@ -1528,7 +1532,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientId') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="githubClientId" type="text" placeholder="Ov23li..." @keydown.enter="saveGitHubField('clientId', githubClientId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveGitHubField('clientId', githubClientId)" :disabled="savingField === 'github:clientId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGitHubField('clientId', githubClientId)" :disabled="savingField === 'github:clientId'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'github:clientId'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1538,7 +1542,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubClientSecret') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="githubClientSecret" type="password" :placeholder="githubClientSecretHint || 'Enter client secret'" @keydown.enter="saveGitHubField('clientSecret', githubClientSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveGitHubField('clientSecret', githubClientSecret)" :disabled="savingField === 'github:clientSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGitHubField('clientSecret', githubClientSecret)" :disabled="savingField === 'github:clientSecret'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'github:clientSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1548,7 +1552,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.githubWebhookSecret') }} ({{ $t('common.optional') }})</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="githubWebhookSecret" type="password" :placeholder="githubWebhookSecretHint || 'Enter webhook secret'" @keydown.enter="saveGitHubField('webhookSecret', githubWebhookSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveGitHubField('webhookSecret', githubWebhookSecret)" :disabled="savingField === 'github:webhookSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGitHubField('webhookSecret', githubWebhookSecret)" :disabled="savingField === 'github:webhookSecret'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'github:webhookSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1573,7 +1577,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientId') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="googleClientId" type="text" placeholder="123456789-abc.apps.googleusercontent.com" @keydown.enter="saveGoogleField('clientId', googleClientId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveGoogleField('clientId', googleClientId)" :disabled="savingField === 'google:clientId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGoogleField('clientId', googleClientId)" :disabled="savingField === 'google:clientId'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'google:clientId'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1583,7 +1587,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.googleClientSecret') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="googleClientSecret" type="password" :placeholder="googleClientSecretHint || 'Enter client secret'" @keydown.enter="saveGoogleField('clientSecret', googleClientSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveGoogleField('clientSecret', googleClientSecret)" :disabled="savingField === 'google:clientSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveGoogleField('clientSecret', googleClientSecret)" :disabled="savingField === 'google:clientSecret'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'google:clientSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1608,7 +1612,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripePublishableKey') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="stripePublishableKey" type="text" placeholder="pk_live_..." @keydown.enter="saveStripeField('publishableKey', stripePublishableKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveStripeField('publishableKey', stripePublishableKey)" :disabled="savingField === 'stripe:publishableKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveStripeField('publishableKey', stripePublishableKey)" :disabled="savingField === 'stripe:publishableKey'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'stripe:publishableKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1618,7 +1622,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeSecretKey') }}</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="stripeSecretKey" type="password" :placeholder="stripeSecretKeyHint || 'sk_live_...'" @keydown.enter="saveStripeField('secretKey', stripeSecretKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveStripeField('secretKey', stripeSecretKey)" :disabled="savingField === 'stripe:secretKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveStripeField('secretKey', stripeSecretKey)" :disabled="savingField === 'stripe:secretKey'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'stripe:secretKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1628,7 +1632,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.stripeWebhookSecret') }} ({{ $t('common.optional') }})</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="stripeWebhookSecret" type="password" :placeholder="stripeWebhookSecretHint || 'whsec_...'" @keydown.enter="saveStripeField('webhookSecret', stripeWebhookSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveStripeField('webhookSecret', stripeWebhookSecret)" :disabled="savingField === 'stripe:webhookSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveStripeField('webhookSecret', stripeWebhookSecret)" :disabled="savingField === 'stripe:webhookSecret'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'stripe:webhookSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1669,7 +1673,7 @@ onMounted(() => {
                 </div>
                 <button
                   @click="stripeTaxEnabled = !stripeTaxEnabled; saveStripeField('taxEnabled', stripeTaxEnabled)"
-                  :disabled="savingField === 'stripe:taxEnabled'"
+                  :disabled="savingField === 'stripe:taxEnabled' || !canWrite"
                   class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50"
                   :class="stripeTaxEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'"
                 >
@@ -1694,7 +1698,7 @@ onMounted(() => {
                   <option value="smtp">SMTP</option>
                   <option value="resend">Resend</option>
                 </select>
-                <button @click="saveEmailField('provider', emailProvider)" :disabled="savingField === 'email:provider'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveEmailField('provider', emailProvider)" :disabled="savingField === 'email:provider'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'email:provider'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1706,7 +1710,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpHost') }}</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpHost" type="text" placeholder="smtp.example.com" @keydown.enter="saveEmailField('smtpHost', smtpHost)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                  <button @click="saveEmailField('smtpHost', smtpHost)" :disabled="savingField === 'email:smtpHost'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('smtpHost', smtpHost)" :disabled="savingField === 'email:smtpHost'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:smtpHost'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1716,7 +1720,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPort') }}</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model.number="smtpPort" type="number" placeholder="587" @keydown.enter="saveEmailField('smtpPort', smtpPort)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                  <button @click="saveEmailField('smtpPort', smtpPort)" :disabled="savingField === 'email:smtpPort'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('smtpPort', smtpPort)" :disabled="savingField === 'email:smtpPort'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:smtpPort'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1726,7 +1730,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpUser') }}</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpUser" type="text" placeholder="your-username" @keydown.enter="saveEmailField('smtpUser', smtpUser)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                  <button @click="saveEmailField('smtpUser', smtpUser)" :disabled="savingField === 'email:smtpUser'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('smtpUser', smtpUser)" :disabled="savingField === 'email:smtpUser'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:smtpUser'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1736,7 +1740,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.smtpPass') }}</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpPass" type="password" :placeholder="smtpPassHint || 'Enter new password to update'" @keydown.enter="saveEmailField('smtpPass', smtpPass)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                  <button @click="saveEmailField('smtpPass', smtpPass)" :disabled="savingField === 'email:smtpPass'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('smtpPass', smtpPass)" :disabled="savingField === 'email:smtpPass'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:smtpPass'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1746,7 +1750,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="smtpFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('smtpFrom', smtpFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                  <button @click="saveEmailField('smtpFrom', smtpFrom)" :disabled="savingField === 'email:smtpFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('smtpFrom', smtpFrom)" :disabled="savingField === 'email:smtpFrom'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:smtpFrom'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1759,7 +1763,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Resend API Key</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="resendApiKey" type="password" :placeholder="resendApiKeyHint || 're_...'" @keydown.enter="saveEmailField('resendApiKey', resendApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                  <button @click="saveEmailField('resendApiKey', resendApiKey)" :disabled="savingField === 'email:resendApiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('resendApiKey', resendApiKey)" :disabled="savingField === 'email:resendApiKey'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:resendApiKey'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1769,7 +1773,7 @@ onMounted(() => {
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('super.settings.emailFrom') }}</label>
                 <div class="flex items-center gap-2 max-w-lg">
                   <input v-model="resendFrom" type="email" placeholder="noreply@your-platform.com" @keydown.enter="saveEmailField('resendFrom', resendFrom)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                  <button @click="saveEmailField('resendFrom', resendFrom)" :disabled="savingField === 'email:resendFrom'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                  <button @click="saveEmailField('resendFrom', resendFrom)" :disabled="savingField === 'email:resendFrom'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                     <CompassSpinner v-if="savingField === 'email:resendFrom'" size="w-4 h-4" />
                     <Save v-else class="w-4 h-4" />
                   </button>
@@ -1820,7 +1824,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Reseller ID</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarResellerId" type="text" placeholder="Your ResellerClub Reseller ID" @keydown.enter="saveRegistrarField('resellerId', registrarResellerId)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                <button @click="saveRegistrarField('resellerId', registrarResellerId)" :disabled="savingField === 'registrar:resellerId'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveRegistrarField('resellerId', registrarResellerId)" :disabled="savingField === 'registrar:resellerId'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'registrar:resellerId'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1831,7 +1835,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Key</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiKey" type="password" :placeholder="registrarApiKeyHint || 'Enter API key'" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'registrar:apiKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1843,7 +1847,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Username</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiKey" type="text" placeholder="Your Name.com username" @keydown.enter="saveRegistrarField('apiKey', registrarApiKey)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" />
-                <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveRegistrarField('apiKey', registrarApiKey)" :disabled="savingField === 'registrar:apiKey'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'registrar:apiKey'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1854,7 +1858,7 @@ onMounted(() => {
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">API Token</label>
               <div class="flex items-center gap-2 max-w-lg">
                 <input v-model="registrarApiSecret" type="password" :placeholder="registrarApiSecretHint || 'Enter API token'" @keydown.enter="saveRegistrarField('apiSecret', registrarApiSecret)" class="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono" />
-                <button @click="saveRegistrarField('apiSecret', registrarApiSecret)" :disabled="savingField === 'registrar:apiSecret'" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
+                <button @click="saveRegistrarField('apiSecret', registrarApiSecret)" :disabled="savingField === 'registrar:apiSecret'" v-if="canWrite" class="shrink-0 p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors">
                   <CompassSpinner v-if="savingField === 'registrar:apiSecret'" size="w-4 h-4" />
                   <Save v-else class="w-4 h-4" />
                 </button>
@@ -1863,7 +1867,7 @@ onMounted(() => {
 
             <!-- Sandbox toggle (shared) -->
             <div class="flex items-center gap-3">
-              <input id="registrar-sandbox" v-model="registrarSandbox" type="checkbox" @change="saveRegistrarField('sandbox', registrarSandbox)" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500" />
+              <input id="registrar-sandbox" v-model="registrarSandbox" type="checkbox" @change="saveRegistrarField('sandbox', registrarSandbox)" :disabled="!canWrite" class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 disabled:opacity-50" />
               <label for="registrar-sandbox" class="text-sm text-gray-700 dark:text-gray-300">Sandbox mode (use test API)</label>
             </div>
 
@@ -2081,7 +2085,7 @@ onMounted(() => {
                           <button @click="removeTldCurrencyPrice(idx)" type="button" class="text-xs text-red-500 hover:underline">Remove</button>
                         </div>
                         <div class="flex justify-end">
-                          <button @click="saveTldCurrencyPrices" :disabled="savingTldPrices" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
+                          <button v-if="canWrite" @click="saveTldCurrencyPrices" :disabled="savingTldPrices" class="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-medium">
                             {{ savingTldPrices ? 'Saving...' : 'Save prices' }}
                           </button>
                         </div>
@@ -2166,7 +2170,7 @@ onMounted(() => {
             </div>
 
             <div class="pt-2 flex justify-end">
-              <button type="submit" :disabled="savingBranding" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <button v-if="canWrite" type="submit" :disabled="savingBranding" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <CompassSpinner v-if="savingBranding" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingBranding ? $t('common.saving') : $t('common.save') }}
@@ -2224,12 +2228,12 @@ onMounted(() => {
             </div>
 
             <div class="pt-2 flex items-center gap-3">
-              <button type="submit" :disabled="savingLogArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <button v-if="canWrite" type="submit" :disabled="savingLogArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <CompassSpinner v-if="savingLogArchive" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingLogArchive ? $t('common.saving') : $t('common.save') }}
               </button>
-              <button type="button" @click="triggerArchiveNow" :disabled="triggeringArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
+              <button v-if="canWrite" type="button" @click="triggerArchiveNow" :disabled="triggeringArchive" class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium transition-colors">
                 <CompassSpinner v-if="triggeringArchive" size="w-4 h-4" />
                 <RefreshCw v-else class="w-4 h-4" />
                 {{ $t('super.settings.logArchiveRunNow') }}
@@ -2262,7 +2266,7 @@ onMounted(() => {
               <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">When no cluster is explicitly chosen, backups will use this cluster. If no cluster is selected, the first available storage cluster is used.</p>
             </div>
             <div class="pt-2">
-              <button type="submit" :disabled="savingBackupDefaults" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              <button v-if="canWrite" type="submit" :disabled="savingBackupDefaults" class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
                 <CompassSpinner v-if="savingBackupDefaults" size="w-4 h-4" />
                 <Save v-else class="w-4 h-4" />
                 {{ savingBackupDefaults ? $t('common.saving') : $t('common.save') }}
@@ -2326,6 +2330,7 @@ onMounted(() => {
               </div>
               <div v-if="!registryHealth.reachable || !registryHealth.serviceRunning" class="flex items-center gap-3">
                 <button
+                  v-if="canWrite"
                   @click="repairRegistry"
                   :disabled="repairingRegistry"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -2357,6 +2362,7 @@ onMounted(() => {
                 <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage Docker registry credentials for pulling private images during deployments.</p>
               </div>
               <button
+                v-if="canWrite"
                 @click="showAddCred = !showAddCred"
                 class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
               >
@@ -2410,6 +2416,7 @@ onMounted(() => {
                 <p class="text-xs text-gray-500 dark:text-gray-400">Auto-connect using your linked GitHub account's access token.</p>
               </div>
               <button
+                v-if="canWrite"
                 @click="connectGithubPackages"
                 :disabled="connectingGithub"
                 class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -2439,6 +2446,7 @@ onMounted(() => {
                   </div>
                 </div>
                 <button
+                  v-if="canWrite"
                   @click="removeCredential(cred.id)"
                   class="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                   title="Remove credential"
@@ -2474,6 +2482,7 @@ onMounted(() => {
             </div>
             <div class="flex items-center gap-3">
               <button
+                v-if="canWrite"
                 @click="saveSupportSettings"
                 :disabled="savingSupport"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -2501,7 +2510,8 @@ onMounted(() => {
                   v-for="p in (['deepl', 'claude'] as const)"
                   :key="p"
                   @click="saveTranslationProvider(p)"
-                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+                  :disabled="!canWrite"
+                  class="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50"
                   :class="translationProvider === p
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 ring-1 ring-primary-500'
                     : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
@@ -2531,6 +2541,7 @@ onMounted(() => {
                   @keydown.enter="saveTranslationKey('deepl', deeplApiKey)"
                 />
                 <button
+                  v-if="canWrite"
                   @click="saveTranslationKey('deepl', deeplApiKey)"
                   :disabled="!deeplApiKey || savingField === 'translation:deeplApiKey'"
                   class="p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
@@ -2564,6 +2575,7 @@ onMounted(() => {
                   @keydown.enter="saveTranslationKey('claude', claudeApiKey)"
                 />
                 <button
+                  v-if="canWrite"
                   @click="saveTranslationKey('claude', claudeApiKey)"
                   :disabled="!claudeApiKey || savingField === 'translation:claudeApiKey'"
                   class="p-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white transition-colors"
@@ -2687,6 +2699,7 @@ onMounted(() => {
             <!-- Save + Test -->
             <div class="flex items-center gap-3 pt-2">
               <button
+                v-if="canWrite"
                 @click="saveSelfHealingConfig"
                 :disabled="savingSelfHealing"
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -2767,7 +2780,7 @@ onMounted(() => {
               <div class="flex items-center gap-3">
                 <button
                   @click="saveOrchestratorDefault('swarm')"
-                  :disabled="orchSaving || !orchSwarmAvailable"
+                  :disabled="orchSaving || !orchSwarmAvailable || !canWrite"
                   :class="[
                     'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors border',
                     orchDefault === 'swarm'
@@ -2780,7 +2793,7 @@ onMounted(() => {
                 </button>
                 <button
                   @click="saveOrchestratorDefault('kubernetes')"
-                  :disabled="orchSaving || !orchK8sAvailable"
+                  :disabled="orchSaving || !orchK8sAvailable || !canWrite"
                   :class="[
                     'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors border',
                     orchDefault === 'kubernetes'
@@ -2821,7 +2834,7 @@ onMounted(() => {
                 </div>
                 <button
                   @click="migrateServiceOrchestrator"
-                  :disabled="orchMigrating || !orchMigrateServiceId"
+                  :disabled="orchMigrating || !orchMigrateServiceId || !canWrite"
                   class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
                   <CompassSpinner v-if="orchMigrating" size="w-4 h-4" />
@@ -2845,7 +2858,7 @@ onMounted(() => {
                 <div>
                   <button
                     @click="installK3sServer"
-                    :disabled="orchInstallingK3s"
+                    :disabled="orchInstallingK3s || !canWrite"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
                     <CompassSpinner v-if="orchInstallingK3s" size="w-4 h-4" />
@@ -2857,7 +2870,7 @@ onMounted(() => {
                 <div>
                   <button
                     @click="installK3sAgents"
-                    :disabled="orchInstallingK3sAgents || orchInstallingK3s"
+                    :disabled="orchInstallingK3sAgents || orchInstallingK3s || !canWrite"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                   >
                     <CompassSpinner v-if="orchInstallingK3sAgents" size="w-4 h-4" />
@@ -2877,7 +2890,7 @@ onMounted(() => {
                 <div>
                   <button
                     @click="installDockerServer"
-                    :disabled="orchInstallingDocker"
+                    :disabled="orchInstallingDocker || !canWrite"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                   >
                     <CompassSpinner v-if="orchInstallingDocker" size="w-4 h-4" />
@@ -2889,7 +2902,7 @@ onMounted(() => {
                 <div>
                   <button
                     @click="installDockerAgents"
-                    :disabled="orchInstallingDockerAgents || orchInstallingDocker"
+                    :disabled="orchInstallingDockerAgents || orchInstallingDocker || !canWrite"
                     class="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                   >
                     <CompassSpinner v-if="orchInstallingDockerAgents" size="w-4 h-4" />
@@ -2924,7 +2937,7 @@ onMounted(() => {
                     </p>
                   </div>
                   <button
-                    v-if="!k3sStatus.joinToken"
+                    v-if="!k3sStatus.joinToken && canWrite"
                     @click="installK3sServer"
                     :disabled="orchInstallingK3s"
                     class="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
@@ -2943,7 +2956,7 @@ onMounted(() => {
               <div class="flex items-center gap-3">
                 <button
                   @click="installK3sAgents"
-                  :disabled="orchInstallingK3sAgents || (!k3sStatus?.joinToken && !k3sStatusLoading)"
+                  :disabled="orchInstallingK3sAgents || (!k3sStatus?.joinToken && !k3sStatusLoading) || !canWrite"
                   class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                 >
                   <CompassSpinner v-if="orchInstallingK3sAgents" size="w-4 h-4" />
@@ -2951,7 +2964,7 @@ onMounted(() => {
                 </button>
                 <button
                   @click="installDockerAgents"
-                  :disabled="orchInstallingDockerAgents"
+                  :disabled="orchInstallingDockerAgents || !canWrite"
                   class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors"
                 >
                   <CompassSpinner v-if="orchInstallingDockerAgents" size="w-4 h-4" />
@@ -3332,6 +3345,7 @@ onMounted(() => {
                   </div>
                   <div class="flex items-center gap-1 shrink-0">
                     <button
+                      v-if="canWrite"
                       @click="startEdit(v)"
                       class="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                       :title="t('super.settings.env.edit')"
@@ -3339,7 +3353,7 @@ onMounted(() => {
                       <Pencil class="w-3.5 h-3.5" />
                     </button>
                     <button
-                      v-if="!v.dangerous"
+                      v-if="canWrite && !v.dangerous"
                       @click="deleteEnvVar(v.key)"
                       :disabled="envSaving"
                       class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -3366,6 +3380,7 @@ onMounted(() => {
                       @keyup.escape="cancelEdit"
                     />
                     <button
+                      v-if="canWrite"
                       @click="saveEnvVar"
                       :disabled="envSaving || !envEditValue"
                       class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -3436,6 +3451,7 @@ onMounted(() => {
 
               <div class="flex justify-end">
                 <button
+                  v-if="canWrite"
                   @click="saveRobotsConfig"
                   :disabled="savingRobots"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -3525,6 +3541,7 @@ onMounted(() => {
 
               <div class="flex justify-end">
                 <button
+                  v-if="canWrite"
                   @click="saveRegistration"
                   :disabled="savingRegistration"
                   class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"

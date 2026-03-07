@@ -21,6 +21,10 @@ export const serviceAnalytics = mysqlTable('service_analytics', {
   requests5xx: bigint('requests_5xx', { mode: 'number' }).default(0).notNull(),
   bytesIn: bigint('bytes_in', { mode: 'number' }).default(0).notNull(),
   bytesOut: bigint('bytes_out', { mode: 'number' }).default(0).notNull(),
+  avgResponseTimeMs: bigint('avg_response_time_ms', { mode: 'number' }).default(0).notNull(),
+  p95ResponseTimeMs: bigint('p95_response_time_ms', { mode: 'number' }).default(0).notNull(),
+  ioReadBytes: bigint('io_read_bytes', { mode: 'number' }).default(0).notNull(),
+  ioWriteBytes: bigint('io_write_bytes', { mode: 'number' }).default(0).notNull(),
   period: varchar('period', { length: 10 }).default('5m').notNull(),
   recordedAt: timestamp('recorded_at').defaultNow().notNull(),
 }, (table) => [

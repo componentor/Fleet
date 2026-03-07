@@ -7,12 +7,15 @@ import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { useAccountStore } from '@/stores/account'
 import { useI18n } from 'vue-i18n'
+import { useAdminPermissions } from '@/composables/useAdminPermissions'
 
 const { t } = useI18n()
 const router = useRouter()
 const api = useApi()
 const authStore = useAuthStore()
 const accountStore = useAccountStore()
+const adminPerms = useAdminPermissions()
+const canImpersonate = computed(() => adminPerms.can('accounts', 'impersonate'))
 
 const accounts = ref<any[]>([])
 const search = ref('')
@@ -72,6 +75,7 @@ function formatDate(ts: any) {
 
 onMounted(() => {
   fetchAccounts()
+  adminPerms.fetch()
 })
 </script>
 
@@ -141,6 +145,7 @@ onMounted(() => {
               <td class="px-6 py-4 text-right" @click.stop>
                 <div class="flex items-center justify-end gap-2">
                   <button
+                    v-if="canImpersonate"
                     @click="impersonate(account.id)"
                     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
                   >

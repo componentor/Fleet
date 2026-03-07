@@ -2,8 +2,9 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Box, Plus, ArrowRight, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, RotateCw, Trash2, Tag } from 'lucide-vue-next'
+import { Box, Plus, ArrowRight, ChevronDown, ChevronRight, Layers, Search, Play, Square, XCircle, RotateCw, Trash2, Tag, RotateCcw, Clock, AlertTriangle } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
+import SkeletonLoader from '@/components/SkeletonLoader.vue'
 import ConfirmDeleteModal from '@/components/ConfirmDeleteModal.vue'
 import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
@@ -25,9 +26,12 @@ function tierName(planId: string | null | undefined): string | null {
   return tiers.value.find(t => t.id === planId)?.name ?? null
 }
 
+const activeView = ref<'services' | 'trash'>('services')
 const stackActionLoading = ref<string | null>(null)
 const deletingStackId = ref<string | null>(null)
 const deletingStackName = ref('')
+const restoreLoading = ref<string | null>(null)
+const permanentDeleteLoading = ref<string | null>(null)
 
 const searchQuery = ref('')
 const page = ref(1)
@@ -233,19 +237,50 @@ function promptDeleteStack(stackId: string, name: string) {
   deletingStackName.value = name
 }
 
-async function confirmDeleteStack(deleteVolumeNames: string[]) {
+async function confirmDeleteStack(deleteVolumeNames: string[], options: { backupBeforeDelete: boolean }) {
   const stackId = deletingStackId.value
   if (!stackId) return
   stackActionLoading.value = stackId
   try {
-    await store.deleteStack(stackId, { deleteVolumeNames })
+    await store.deleteStack(stackId, { deleteVolumeNames, backupBeforeDelete: options.backupBeforeDelete })
     deletingStackId.value = null
     deletingStackName.value = ''
-    toast.success(t('services.deleteStackSuccess', 'Stack deleted'))
+    toast.success(t('services.deleteStackSuccess', 'Stack moved to trash'))
   } catch {
     toast.error(t('services.deleteStackFailed', 'Failed to delete stack'))
   } finally {
     stackActionLoading.value = null
+  }
+}
+
+async function handleRestoreService(id: string) {
+  restoreLoading.value = id
+  try {
+    await store.restoreService(id)
+    toast.success(t('services.restoreSuccess', 'Service restored'))
+  } catch {
+    toast.error(t('services.restoreFailed', 'Failed to restore service'))
+  } finally {
+    restoreLoading.value = null
+  }
+}
+
+async function handlePermanentDelete(id: string) {
+  permanentDeleteLoading.value = id
+  try {
+    await store.permanentlyDeleteService(id)
+    toast.success(t('services.permanentDeleteSuccess', 'Service permanently deleted'))
+  } catch {
+    toast.error(t('services.permanentDeleteFailed', 'Failed to permanently delete service'))
+  } finally {
+    permanentDeleteLoading.value = null
+  }
+}
+
+function switchView(view: 'services' | 'trash') {
+  activeView.value = view
+  if (view === 'trash') {
+    store.fetchTrash()
   }
 }
 
@@ -277,6 +312,7 @@ watch(hasDeployingServices, (deploying) => {
 
 onMounted(() => {
   store.fetchServices()
+  store.fetchTrash()
   fetchTiers()
 })
 
@@ -287,7 +323,7 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <div class="flex flex-wrap items-center justify-between gap-y-3 mb-8">
+    <div class="flex flex-wrap items-center justify-between gap-y-3 mb-6">
       <div class="flex items-center gap-3">
         <Box class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ $t('services.title') }}</h1>
@@ -301,6 +337,116 @@ onUnmounted(() => {
         {{ $t('services.deployNew') }}
       </router-link>
     </div>
+
+    <!-- View toggle: Services / Trash -->
+    <div class="flex items-center gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg mb-6 w-fit">
+      <button
+        @click="switchView('services')"
+        :class="[
+          'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+          activeView === 'services'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+        ]"
+      >
+        <Box class="w-4 h-4" />
+        {{ $t('services.activeServices', 'Services') }}
+      </button>
+      <button
+        @click="switchView('trash')"
+        :class="[
+          'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+          activeView === 'trash'
+            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+        ]"
+      >
+        <Trash2 class="w-4 h-4" />
+        {{ $t('services.trash', 'Trash') }}
+        <span v-if="store.trashedServices.length > 0" class="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+          {{ store.trashedServices.length }}
+        </span>
+      </button>
+    </div>
+
+    <!-- ═══ TRASH VIEW ═══ -->
+    <template v-if="activeView === 'trash'">
+      <!-- Loading -->
+      <div v-if="store.trashLoading && store.trashedServices.length === 0" class="flex items-center justify-center py-20">
+        <CompassSpinner size="w-16 h-16" />
+      </div>
+
+      <!-- Empty trash -->
+      <div v-else-if="store.trashedServices.length === 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 text-center">
+        <Trash2 class="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">{{ $t('services.trashEmpty', 'Trash is empty') }}</h3>
+        <p class="text-gray-500 dark:text-gray-400 text-sm">{{ $t('services.trashEmptyDesc', 'Deleted services will appear here for 30 days before being permanently removed.') }}</p>
+      </div>
+
+      <!-- Trash items -->
+      <div v-else class="space-y-3">
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+          {{ $t('services.trashHint', 'These services have been deleted. You can restore them or permanently delete them.') }}
+        </p>
+        <div
+          v-for="svc in store.trashedServices"
+          :key="svc.id"
+          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5"
+        >
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0">
+                <Box class="w-5 h-5 text-gray-400 dark:text-gray-500" />
+              </div>
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ svc.name }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{{ svc.image }}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-4 shrink-0">
+              <!-- Countdown -->
+              <div class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <Clock class="w-3.5 h-3.5" />
+                <span v-if="svc.daysUntilPurge > 0">
+                  {{ $t('services.trashDaysLeft', { days: svc.daysUntilPurge }) }}
+                </span>
+                <span v-else class="text-red-500 dark:text-red-400 font-medium">
+                  {{ $t('services.trashExpiring', 'Expiring soon') }}
+                </span>
+              </div>
+              <!-- Actions -->
+              <div class="flex items-center gap-2">
+                <button
+                  @click="handleRestoreService(svc.id)"
+                  :disabled="restoreLoading === svc.id || permanentDeleteLoading === svc.id"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                >
+                  <CompassSpinner v-if="restoreLoading === svc.id" size="w-3.5 h-3.5" />
+                  <RotateCcw v-else class="w-3.5 h-3.5" />
+                  {{ $t('services.restore', 'Restore') }}
+                </button>
+                <button
+                  @click="handlePermanentDelete(svc.id)"
+                  :disabled="restoreLoading === svc.id || permanentDeleteLoading === svc.id"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs font-medium transition-colors disabled:opacity-50"
+                >
+                  <CompassSpinner v-if="permanentDeleteLoading === svc.id" size="w-3.5 h-3.5" />
+                  <AlertTriangle v-else class="w-3.5 h-3.5" />
+                  {{ $t('services.deletePermanently', 'Delete permanently') }}
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Deleted date -->
+          <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-2">
+            {{ $t('services.trashDeletedOn', 'Deleted') }} {{ new Date(svc.deletedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}
+          </p>
+        </div>
+      </div>
+    </template>
+
+    <!-- ═══ ACTIVE SERVICES VIEW ═══ -->
+    <template v-else>
 
     <!-- Search & tag filters -->
     <div v-if="store.services.length > 0" class="mb-6 space-y-3">
@@ -331,9 +477,22 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Loading state -->
-    <div v-if="store.loading && store.services.length === 0" class="flex items-center justify-center py-20">
-      <CompassSpinner size="w-16 h-16" />
+    <!-- Loading state — skeleton cards -->
+    <div v-if="store.loading && store.services.length === 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-for="i in 6" :key="i" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 animate-pulse">
+        <div class="flex items-start justify-between mb-4">
+          <div class="flex items-center gap-2.5">
+            <div class="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-700" />
+            <div class="h-4 w-28 bg-gray-200 dark:bg-gray-700 rounded" />
+          </div>
+          <div class="w-16 h-5 bg-gray-200 dark:bg-gray-700 rounded-full" />
+        </div>
+        <div class="h-3 w-40 bg-gray-100 dark:bg-gray-700/50 rounded mb-3" />
+        <div class="flex items-center justify-between">
+          <div class="h-3 w-20 bg-gray-100 dark:bg-gray-700/50 rounded" />
+          <div class="w-4 h-4 bg-gray-100 dark:bg-gray-700/50 rounded" />
+        </div>
+      </div>
     </div>
 
     <!-- Empty state -->
@@ -471,41 +630,41 @@ onUnmounted(() => {
       </div>
 
       <!-- Standalone services (no stack) -->
-      <div v-if="groupedServices.standalone.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div v-if="groupedServices.standalone.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <router-link
           v-for="service in groupedServices.standalone"
           :key="service.id"
           :to="`/panel/services/${service.id}`"
-          :class="['bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 border-l-[3px] shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-primary-200 dark:hover:border-primary-800 transition-all duration-200 overflow-hidden group', statusBorderColor(service.status)]"
+          :class="['bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 overflow-hidden group relative']"
         >
-          <div class="p-6">
+          <!-- Status accent line at top -->
+          <div :class="['h-0.5 w-full', statusColor(service.status)]" />
+          <div class="p-5">
             <div class="flex items-start justify-between mb-3">
-              <div class="flex items-center gap-3">
-                <div class="flex items-center gap-2">
-                  <span :class="[statusColor(service.status), 'w-2.5 h-2.5 rounded-full', service.status === 'deploying' ? 'animate-pulse' : '']"></span>
-                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ service.name }}</h3>
-                </div>
-                <span v-if="tierName((service as any).planId)" class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span :class="[statusColor(service.status), 'w-2 h-2 rounded-full shrink-0', service.status === 'deploying' ? 'animate-pulse' : '']"></span>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white truncate">{{ service.name }}</h3>
+                <span v-if="tierName((service as any).planId)" class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 shrink-0">
                   {{ tierName((service as any).planId) }}
                 </span>
               </div>
-              <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', statusBadge(service.status)]">
+              <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ml-2', statusBadge(service.status)]">
                 {{ service.status }}
               </span>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 font-mono mb-2">{{ service.image }}</p>
-            <p v-if="(service as any).lastDeployError" class="text-xs text-red-500 dark:text-red-400 line-clamp-2 mb-2">{{ (service as any).lastDeployError }}</p>
-            <div v-if="(service as any).tags?.length" class="flex flex-wrap gap-1 mb-2">
-              <span v-for="tag in (service as any).tags" :key="tag" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+            <p class="text-xs text-gray-400 dark:text-gray-500 font-mono mb-3 truncate">{{ service.image }}</p>
+            <p v-if="(service as any).lastDeployError" class="text-xs text-red-500 dark:text-red-400 line-clamp-2 mb-3 bg-red-50 dark:bg-red-900/10 rounded px-2 py-1.5">{{ (service as any).lastDeployError }}</p>
+            <div v-if="(service as any).tags?.length" class="flex flex-wrap gap-1 mb-3">
+              <span v-for="tag in (service as any).tags" :key="tag" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
                 {{ tag }}
               </span>
             </div>
-            <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-              <div>
+            <div class="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
+              <div class="flex items-center gap-3">
                 <span>{{ service.replicas ?? 1 }} {{ (service.replicas ?? 1) !== 1 ? $t('services.replicas') : $t('services.replica') }}</span>
-                <span v-if="service.status === 'stopped'" class="ml-2 text-gray-400 dark:text-gray-500">{{ $t('services.notBilled') }}</span>
+                <span v-if="service.status === 'stopped'" class="text-gray-300 dark:text-gray-600">{{ $t('services.notBilled') }}</span>
               </div>
-              <ArrowRight class="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-primary-600 dark:text-primary-400" />
+              <ArrowRight class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary-500" />
             </div>
           </div>
         </router-link>
@@ -534,6 +693,8 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    </template>
   </div>
 
   <!-- Delete stack confirmation modal -->

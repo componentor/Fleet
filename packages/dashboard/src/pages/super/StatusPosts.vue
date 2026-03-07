@@ -25,9 +25,12 @@ import {
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { renderMarkdown } from '@/utils/markdown'
+import { useAdminPermissions } from '@/composables/useAdminPermissions'
 
 const { t } = useI18n()
 const api = useApi()
+const adminPerms = useAdminPermissions()
+const canWrite = computed(() => adminPerms.can('statusPosts', 'write'))
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -389,6 +392,7 @@ async function fetchTranslationStatus() {
 onMounted(() => {
   fetchPosts()
   fetchTranslationStatus()
+  adminPerms.fetch()
 })
 </script>
 
@@ -431,6 +435,7 @@ onMounted(() => {
 
         <!-- New post button -->
         <button
+          v-if="canWrite"
           @click="createPost"
           :disabled="creating"
           class="w-full flex items-center justify-center gap-2 px-4 py-2.5 mb-4 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
@@ -731,7 +736,7 @@ onMounted(() => {
                   </div>
                 </div>
                 <button
-                  v-if="hasTranslation(editLocale)"
+                  v-if="canWrite && hasTranslation(editLocale)"
                   @click="deleteTranslation(editLocale)"
                   class="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-sm font-medium transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
                 >
@@ -743,7 +748,7 @@ onMounted(() => {
           </div>
 
           <!-- ── Action buttons ── -->
-          <div class="flex items-center gap-3">
+          <div v-if="canWrite" class="flex items-center gap-3">
             <button
               @click="savePost"
               :disabled="saving"

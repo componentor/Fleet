@@ -10,7 +10,7 @@ import { useServicesStore } from '@/stores/services'
 import { useApi } from '@/composables/useApi'
 import { useVolumeManager } from '@/composables/useVolumeManager'
 import { useServiceBilling } from '@/composables/useServiceBilling'
-import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
+import VolumeConfigurator, { type VolumeEntry } from '@/components/VolumeConfigurator.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
 import TierSelector from '@/components/TierSelector.vue'
 import { useI18n } from 'vue-i18n'
@@ -77,24 +77,7 @@ const ports = ref<ManifestPort[]>([])
 const autoDeploy = ref(true)
 
 // Volume state
-const deployVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
-
-function addDeployVolume() {
-  deployVolumes.value.push({ source: '', target: '', readonly: false })
-}
-
-function removeDeployVolume(index: number) {
-  deployVolumes.value.splice(index, 1)
-}
-
-async function handleDeployVolumeCreated(index: number, vol: { name: string; displayName: string; sizeGb: number }) {
-  try {
-    const created = await volumeManager.createVolume(vol.name, vol.sizeGb)
-    deployVolumes.value[index]!.source = created.name
-  } catch {
-    // Toast already shown by useApi
-  }
-}
+const deployVolumes = ref<VolumeEntry[]>([])
 
 // ── Lifecycle ────────────────────────────────────────────────────────────
 onMounted(async () => {
@@ -281,7 +264,9 @@ async function deploy() {
       }))
 
     // Build volumes payload
-    const volumesPayload = deployVolumes.value.filter((v) => v.source && v.target)
+    const volumesPayload = deployVolumes.value
+      .filter((v) => v.source && v.target)
+      .map((v) => ({ source: v.source, target: v.target, readonly: v.readonly }))
 
     // Create service
     const service = await store.createService({
@@ -567,40 +552,10 @@ const repoName = computed(() => repoParam.value.split('/')[1] || '')
           </div>
 
           <!-- Persistent Storage -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span class="inline-flex items-center gap-1.5">
-                  <HardDrive class="w-3.5 h-3.5" />
-                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
-                </span>
-              </label>
-              <button
-                type="button"
-                @click="addDeployVolume"
-                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-              >
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-if="deployVolumes.length > 0" class="space-y-2">
-              <InlineVolumeCreator
-                v-for="(vol, i) in deployVolumes"
-                :key="i"
-                :model-value="vol"
-                :account-volumes="volumeManager.accountVolumes.value"
-                :storage-quota="volumeManager.storageQuota.value"
-                :create-loading="volumeManager.createLoading.value"
-                :suggested-name="serviceName ? volumeManager.suggestedVolumeName(serviceName) : undefined"
-                @update:model-value="deployVolumes[i] = $event"
-                @volume-created="handleDeployVolumeCreated(i, $event)"
-                @remove="removeDeployVolume(i)"
-              />
-            </div>
-            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
-              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
-            </p>
-          </div>
+          <VolumeConfigurator
+            v-model="deployVolumes"
+            :service-name="serviceName"
+          />
 
           <!-- Validation Errors -->
           <div v-if="validationErrors.length > 0 && !deploying" class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">

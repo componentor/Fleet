@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import { db, adminRoles, eq } from '@fleet/db';
 import type { AuthUser } from './auth.js';
+import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 
 export type AdminSection =
   | 'dashboard'
@@ -89,6 +90,14 @@ export function requireAdminPermission(section: AdminSection, level: AdminPermis
 
     const sectionPerms = permissions[section];
     if (!sectionPerms || !sectionPerms.includes(level)) {
+      const ctx = eventContext(c);
+      eventService.log({
+        ...ctx,
+        eventType: EventTypes.ADMIN_PERMISSION_DENIED,
+        description: `Admin permission denied: ${section}:${level} for ${ctx.actorEmail ?? 'unknown'}`,
+        source: 'system',
+        details: { section, level, method: c.req.method, path: c.req.path },
+      });
       return c.json({ error: 'Insufficient permissions' }, 403);
     }
 
@@ -104,6 +113,14 @@ export function requireSuperAdmin() {
   return async (c: any, next: () => Promise<void>) => {
     const user = c.get('user') as AuthUser;
     if (!user.isSuper) {
+      const ctx = eventContext(c);
+      eventService.log({
+        ...ctx,
+        eventType: EventTypes.ADMIN_PERMISSION_DENIED,
+        description: `Super admin access denied for ${ctx.actorEmail ?? 'unknown'}`,
+        source: 'system',
+        details: { requiredLevel: 'super', method: c.req.method, path: c.req.path },
+      });
       return c.json({ error: 'Super admin access required' }, 403);
     }
     return next();

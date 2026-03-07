@@ -26,6 +26,7 @@ export const users = sqliteTable('users', {
   twoFactorSecret: text('two_factor_secret'),
   twoFactorBackupCodes: text('two_factor_backup_codes', { mode: 'json' }).$type<string[] | null>(),
   disabledLoginMethods: text('disabled_login_methods', { mode: 'json' }).$type<string[]>(),
+  allowedLoginRegions: text('allowed_login_regions', { mode: 'json' }).$type<string[] | null>(),
   securityChangedAt: integer('security_changed_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),

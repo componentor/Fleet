@@ -21,6 +21,7 @@ export const visitorAnalytics = mysqlTable('visitor_analytics', {
   topReferrers: json('top_referrers').default([]).notNull(),
   browsers: json('browsers').default({}).notNull(),
   devices: json('devices').default({}).notNull(),
+  countries: json('countries').default({}).notNull(),
   period: varchar('period', { length: 10 }).default('5m').notNull(),
   recordedAt: timestamp('recorded_at').defaultNow().notNull(),
 }, (table) => [

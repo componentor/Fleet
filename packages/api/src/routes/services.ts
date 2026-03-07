@@ -165,6 +165,31 @@ async function enforceResourcePool(
 }
 
 /**
+ * Auto-create a default backup schedule for a newly deployed service.
+ * Every 6 hours, 60-day retention, max 240 backups.
+ */
+async function createDefaultBackupSchedule(accountId: string, serviceId: string): Promise<void> {
+  try {
+    const { backupService } = await import('../services/backup.service.js');
+    const { schedulerService } = await import('../services/scheduler.service.js');
+
+    const schedule = await backupService.createSchedule({
+      accountId,
+      serviceId,
+      cron: '0 */6 * * *',       // Every 6 hours
+      retentionDays: 60,
+      retentionCount: 100,
+      storageBackend: 'nfs',
+    });
+
+    await schedulerService.onScheduleCreated(schedule.id);
+    logger.info({ serviceId, accountId, scheduleId: schedule.id }, 'Auto-created default backup schedule');
+  } catch (err) {
+    logger.warn({ err, serviceId, accountId }, 'Failed to auto-create backup schedule');
+  }
+}
+
+/**
  * Deploy a service that was created with pending_payment status after checkout completes.
  * Called from the billing webhook when a service subscription checkout is successful.
  */
@@ -559,6 +584,7 @@ const updateServiceRoute = createRoute({
 
 const deleteBodySchema = z.object({
   deleteVolumeNames: z.array(z.string()).default([]).openapi({ description: 'List of volume source names to permanently delete. Volumes not in this list will be kept.' }),
+  backupBeforeDelete: z.boolean().default(false).openapi({ description: 'Create a backup snapshot before deleting the service.' }),
 });
 
 const deleteServiceRoute = createRoute({
@@ -1225,6 +1251,11 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
   });
   const stackId = stackRow!.id;
 
+  // Log volumes payload for debugging
+  if (data.volumes && data.volumes.length > 0) {
+    logger.info({ volumes: data.volumes, serviceName: data.name }, 'Creating service with volumes');
+  }
+
   // Insert into DB
   const [svc] = await insertReturning(services, {
     accountId,
@@ -1376,6 +1407,9 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       resourceName: data.name,
     });
 
+    // Auto-create default backup schedule (fire-and-forget)
+    createDefaultBackupSchedule(accountId, svc.id).catch(() => {});
+
     const response: Record<string, unknown> = { ...svc, status: 'deploying', deploymentId: deployment!.id };
     if (webhookWarning) response.warning = webhookWarning;
     return c.json(response, 201);
@@ -1455,6 +1489,10 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
       resourceId: svc.id,
       resourceName: data.name,
     });
+
+    // Auto-create default backup schedule (fire-and-forget)
+    createDefaultBackupSchedule(accountId, svc.id).catch(() => {});
+
     return c.json(response, 201);
   } catch (err) {
     logger.warn({ err }, 'Docker not available — service created but not started');
@@ -1892,7 +1930,7 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
   const user = c.get('user');
   const { id: serviceId } = c.req.valid('param');
   const body = await c.req.json().catch(() => ({}));
-  const { deleteVolumeNames = [] } = body as { deleteVolumeNames?: string[] };
+  const { deleteVolumeNames = [], backupBeforeDelete = false } = body as { deleteVolumeNames?: string[]; backupBeforeDelete?: boolean };
   const deleteVolumeSet = new Set(deleteVolumeNames);
 
   if (!accountId) {
@@ -1905,6 +1943,18 @@ serviceRoutes.openapi(deleteServiceRoute, (async (c: any) => {
 
   if (!svc) {
     return c.json({ error: 'Service not found' }, 404);
+  }
+
+  // Create backup before deletion if requested
+  if (backupBeforeDelete) {
+    try {
+      const { backupService } = await import('../services/backup.service.js');
+      await backupService.createBackup(accountId, serviceId, 'nfs');
+      logger.info({ serviceId, accountId }, 'Pre-deletion backup created');
+    } catch (err) {
+      logger.warn({ err, serviceId }, 'Pre-deletion backup failed (continuing with delete)');
+      logToErrorTable({ level: 'warn', message: `Pre-deletion backup failed: ${err instanceof Error ? err.message : String(err)}`, stack: err instanceof Error ? err.stack : null, metadata: { context: 'services', operation: 'backup-before-delete' } });
+    }
   }
 
   // Remove from Docker Swarm
@@ -2771,7 +2821,7 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
   const user = c.get('user');
   const { stackId } = c.req.valid('param');
   const body = await c.req.json().catch(() => ({}));
-  const { deleteVolumeNames = [] } = body as { deleteVolumeNames?: string[] };
+  const { deleteVolumeNames = [], backupBeforeDelete = false } = body as { deleteVolumeNames?: string[]; backupBeforeDelete?: boolean };
   const deleteVolumeSet = new Set(deleteVolumeNames);
 
   if (!accountId) {
@@ -2788,6 +2838,21 @@ serviceRoutes.openapi(deleteStackRoute, (async (c: any) => {
 
   if (stackServices.length === 0) {
     return c.json({ error: 'Stack not found' }, 404);
+  }
+
+  // Create backups for all services before deletion if requested
+  if (backupBeforeDelete) {
+    try {
+      const { backupService } = await import('../services/backup.service.js');
+      await Promise.all(stackServices.map(svc =>
+        backupService.createBackup(accountId, svc.id, 'nfs').catch(err => {
+          logger.warn({ err, serviceId: svc.id }, 'Pre-deletion backup failed for stack service');
+        })
+      ));
+      logger.info({ stackId, accountId, serviceCount: stackServices.length }, 'Pre-deletion backups created for stack');
+    } catch (err) {
+      logger.warn({ err, stackId }, 'Pre-deletion backup failed for stack (continuing with delete)');
+    }
   }
 
   const results: { id: string; name: string; success: boolean }[] = [];
@@ -3266,6 +3331,207 @@ serviceRoutes.openapi(resetNginxConfigRoute, (async (c: any) => {
   }
 
   return c.json({ message: 'Nginx config reset to default' });
+}) as any);
+
+// POST /services/analyze-volumes — pre-deploy volume analysis
+const analyzeVolumesRoute = createRoute({
+  method: 'post',
+  path: '/services/analyze-volumes',
+  tags: ['Services'],
+  summary: 'Analyze what volumes a deployment will need (pre-deploy validation)',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      image: z.string().optional(),
+      volumes: z.array(z.object({
+        source: z.string(),
+        target: z.string(),
+        readonly: z.boolean().optional().default(false),
+      })).optional().default([]),
+      dockerfile: z.string().nullable().optional(),
+      composeConfig: z.object({
+        name: z.string(),
+        imageTag: z.string(),
+        ports: z.array(z.any()).optional(),
+        volumes: z.array(z.object({
+          source: z.string(),
+          target: z.string(),
+          readonly: z.boolean().optional().default(false),
+        })).optional(),
+        env: z.record(z.string(), z.string()).optional(),
+      }).nullable().optional(),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Volume analysis result'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+serviceRoutes.openapi(analyzeVolumesRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const body = c.req.valid('json');
+  const { analyzeVolumes } = await import('../services/deploy-reconciler.service.js');
+
+  const result = await analyzeVolumes({
+    accountId,
+    userVolumes: body.volumes ?? [],
+    composeConfig: body.composeConfig ?? null,
+    dockerfile: body.dockerfile ?? null,
+  });
+
+  return c.json(result);
+}) as any);
+
+// ── Trash & Restore ──
+
+// GET /trash — list soft-deleted services
+const listTrashRoute = createRoute({
+  method: 'get',
+  path: '/trash',
+  tags: ['Services'],
+  summary: 'List deleted services (trash)',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.array(z.any()), 'Deleted services'),
+    ...standardErrors,
+  },
+});
+
+serviceRoutes.openapi(listTrashRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const purgeRetentionDays = (await db.query.billingConfig.findFirst())?.purgeRetentionDays ?? 30;
+
+  const deleted = await db.query.services.findMany({
+    where: and(
+      eq(services.accountId, accountId),
+      not(isNull(services.deletedAt)),
+    ),
+    orderBy: (s: any, { desc }: any) => desc(s.deletedAt),
+  });
+
+  const now = Date.now();
+  const result = deleted.map((svc: any) => {
+    const deletedAt = new Date(svc.deletedAt).getTime();
+    const expiresAt = deletedAt + purgeRetentionDays * 24 * 60 * 60 * 1000;
+    const daysLeft = Math.max(0, Math.ceil((expiresAt - now) / (24 * 60 * 60 * 1000)));
+    return { ...svc, daysUntilPurge: daysLeft, purgeRetentionDays };
+  });
+
+  return c.json(result);
+}) as any);
+
+// POST /:id/restore — restore a soft-deleted service
+const restoreServiceRoute = createRoute({
+  method: 'post',
+  path: '/{id}/restore',
+  tags: ['Services'],
+  summary: 'Restore a deleted service from trash',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Service restored'),
+    ...standardErrors,
+  },
+});
+
+serviceRoutes.openapi(restoreServiceRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: serviceId } = c.req.valid('param');
+
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(
+      eq(services.id, serviceId),
+      eq(services.accountId, accountId),
+      not(isNull(services.deletedAt)),
+    ),
+  });
+
+  if (!svc) return c.json({ error: 'Deleted service not found' }, 404);
+
+  // Restore: clear deletedAt and set status to stopped (user can start it manually)
+  const [restored] = await updateReturning(
+    services,
+    { deletedAt: null, status: 'stopped' },
+    eq(services.id, serviceId),
+  );
+
+  // If the service was in a stack, restore the stack too if it was soft-deleted
+  if (svc.stackId) {
+    const stack = await db.query.stacks.findFirst({
+      where: and(eq(stacks.id, svc.stackId), not(isNull(stacks.deletedAt))),
+    });
+    if (stack) {
+      await db.update(stacks).set({ deletedAt: null, status: 'stopped' }).where(eq(stacks.id, svc.stackId));
+    }
+  }
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_UPDATED,
+    description: `Restored service '${svc.name}' from trash`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
+
+  return c.json(restored);
+}) as any);
+
+// DELETE /:id/permanent — permanently delete a service (skip trash)
+const permanentDeleteRoute = createRoute({
+  method: 'delete',
+  path: '/{id}/permanent',
+  tags: ['Services'],
+  summary: 'Permanently delete a service from trash',
+  security: bearerSecurity,
+  middleware: [requireMember, requireScope('write')] as const,
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: jsonContent(messageResponseSchema, 'Service permanently deleted'),
+    ...standardErrors,
+  },
+});
+
+serviceRoutes.openapi(permanentDeleteRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  const { id: serviceId } = c.req.valid('param');
+
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const svc = await db.query.services.findFirst({
+    where: and(
+      eq(services.id, serviceId),
+      eq(services.accountId, accountId),
+      not(isNull(services.deletedAt)),
+    ),
+  });
+
+  if (!svc) return c.json({ error: 'Deleted service not found' }, 404);
+
+  // Hard-delete the service record
+  await db.delete(services).where(eq(services.id, serviceId));
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.SERVICE_DELETED,
+    description: `Permanently deleted service '${svc.name}'`,
+    resourceId: serviceId,
+    resourceName: svc.name,
+  });
+
+  return c.json({ message: 'Service permanently deleted' });
 }) as any);
 
 export default serviceRoutes;

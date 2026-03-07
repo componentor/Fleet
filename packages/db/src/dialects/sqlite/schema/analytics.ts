@@ -20,6 +20,10 @@ export const serviceAnalytics = sqliteTable('service_analytics', {
   requests5xx: integer('requests_5xx').default(0).notNull(),
   bytesIn: integer('bytes_in').default(0).notNull(),
   bytesOut: integer('bytes_out').default(0).notNull(),
+  avgResponseTimeMs: integer('avg_response_time_ms').default(0).notNull(),
+  p95ResponseTimeMs: integer('p95_response_time_ms').default(0).notNull(),
+  ioReadBytes: integer('io_read_bytes').default(0).notNull(),
+  ioWriteBytes: integer('io_write_bytes').default(0).notNull(),
   period: text('period').default('5m').notNull(),
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`).notNull(),
 }, (table) => [

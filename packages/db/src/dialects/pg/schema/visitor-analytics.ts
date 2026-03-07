@@ -21,6 +21,7 @@ export const visitorAnalytics = pgTable('visitor_analytics', {
   topReferrers: jsonb('top_referrers').default(sql`'[]'`).notNull(),
   browsers: jsonb('browsers').default(sql`'{}'`).notNull(),
   devices: jsonb('devices').default(sql`'{}'`).notNull(),
+  countries: jsonb('countries').default(sql`'{}'`).notNull(),
   period: varchar('period', { length: 10 }).default('5m').notNull(),
   recordedAt: timestamp('recorded_at').defaultNow().notNull(),
 }, (table) => [

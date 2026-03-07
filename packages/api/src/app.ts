@@ -58,6 +58,7 @@ import selfHealingRoutes from './routes/self-healing.js';
 import platformDbRoutes from './routes/platform-db.js';
 import analyticsRoutes from './routes/analytics.js';
 import adminAnalyticsRoutes from './routes/admin-analytics.js';
+import adminSecurityRoutes from './routes/admin-security.js';
 
 // Fleet API is stateless — all shared state lives in PostgreSQL + Valkey.
 // To scale horizontally: run multiple instances behind a load balancer.
@@ -489,6 +490,7 @@ api.route('/admin/self-healing', selfHealingRoutes);
 api.route('/admin/platform-db', platformDbRoutes);
 api.route('/analytics', analyticsRoutes);
 api.route('/admin/analytics', adminAnalyticsRoutes);
+api.route('/admin/security', adminSecurityRoutes);
 
 // ── WebSocket: Live log streaming ──
 api.get(

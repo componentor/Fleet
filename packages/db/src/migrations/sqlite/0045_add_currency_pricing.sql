@@ -6,8 +6,10 @@ CREATE TABLE IF NOT EXISTS "billing_plan_prices" (
   "created_at" integer DEFAULT (unixepoch()),
   "updated_at" integer DEFAULT (unixepoch())
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_billing_plan_prices_plan_currency" ON "billing_plan_prices" ("plan_id", "currency");
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "domain_tld_currency_prices" (
   "id" text PRIMARY KEY,
@@ -18,5 +20,6 @@ CREATE TABLE IF NOT EXISTS "domain_tld_currency_prices" (
   "created_at" integer DEFAULT (unixepoch()),
   "updated_at" integer DEFAULT (unixepoch())
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_tld_currency_prices_tld_currency" ON "domain_tld_currency_prices" ("tld_pricing_id", "currency");

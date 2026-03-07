@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, serviceAnalytics, visitorAnalytics, services, accounts, eq, and, gte, sql, getDialect } from '@fleet/db';
+import { db, serviceAnalytics, visitorAnalytics, services, accounts, eq, and, gte, lte, sql, getDialect } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
@@ -36,12 +36,16 @@ const platformAnalyticsSchema = z.object({
     requests: z.number(),
     bytesIn: z.number(),
     bytesOut: z.number(),
+    avgResponseTimeMs: z.number(),
+    p95ResponseTimeMs: z.number(),
     statusBreakdown: z.record(z.string(), z.number()),
   })),
   summary: z.object({
     totalRequests: z.number(),
     totalBytesIn: z.number(),
     totalBytesOut: z.number(),
+    avgResponseTimeMs: z.number(),
+    p95ResponseTimeMs: z.number(),
     activeServices: z.number(),
     topServices: z.array(z.object({
       serviceId: z.string(),
@@ -52,6 +56,12 @@ const platformAnalyticsSchema = z.object({
       bytesOut: z.number(),
     })),
   }),
+  previousPeriod: z.object({
+    totalRequests: z.number(),
+    totalBytesIn: z.number(),
+    totalBytesOut: z.number(),
+    avgResponseTimeMs: z.number(),
+  }).optional(),
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -70,6 +80,15 @@ function getBucketSeconds(period: '24h' | '7d' | '30d'): number {
     case '24h': return 300;    // 5 min
     case '7d': return 3600;    // 1 hour
     case '30d': return 86400;  // 1 day
+  }
+}
+
+function getPreviousPeriodCutoff(period: '24h' | '7d' | '30d'): { start: Date; end: Date } {
+  const now = Date.now();
+  switch (period) {
+    case '24h': return { start: new Date(now - 48 * 60 * 60 * 1000), end: new Date(now - 24 * 60 * 60 * 1000) };
+    case '7d': return { start: new Date(now - 14 * 24 * 60 * 60 * 1000), end: new Date(now - 7 * 24 * 60 * 60 * 1000) };
+    case '30d': return { start: new Date(now - 60 * 24 * 60 * 60 * 1000), end: new Date(now - 30 * 24 * 60 * 60 * 1000) };
   }
 }
 
@@ -93,6 +112,7 @@ const getPlatformAnalyticsRoute = createRoute({
   tags: ['Admin Analytics'],
   summary: 'Get platform-wide analytics across all services',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('dashboard', 'read')] as const,
   request: {
     query: periodQuerySchema,
   },
@@ -118,6 +138,8 @@ adminAnalyticsRoutes.openapi(getPlatformAnalyticsRoute, (async (c: any) => {
     requests3xx: sql<number>`sum(${serviceAnalytics.requests3xx})`.as('requests_3xx'),
     requests4xx: sql<number>`sum(${serviceAnalytics.requests4xx})`.as('requests_4xx'),
     requests5xx: sql<number>`sum(${serviceAnalytics.requests5xx})`.as('requests_5xx'),
+    avgResponseTimeMs: sql<number>`avg(${serviceAnalytics.avgResponseTimeMs})`.as('avg_rt'),
+    p95ResponseTimeMs: sql<number>`max(${serviceAnalytics.p95ResponseTimeMs})`.as('p95_rt'),
   })
     .from(serviceAnalytics)
     .where(gte(serviceAnalytics.recordedAt, cutoff))
@@ -134,6 +156,8 @@ adminAnalyticsRoutes.openapi(getPlatformAnalyticsRoute, (async (c: any) => {
       requests: Number(r.requests) || 0,
       bytesIn: Number(r.bytesIn) || 0,
       bytesOut: Number(r.bytesOut) || 0,
+      avgResponseTimeMs: Math.round(Number(r.avgResponseTimeMs) || 0),
+      p95ResponseTimeMs: Math.round(Number(r.p95ResponseTimeMs) || 0),
       statusBreakdown: {
         '2xx': Number(r.requests2xx) || 0,
         '3xx': Number(r.requests3xx) || 0,
@@ -167,10 +191,17 @@ adminAnalyticsRoutes.openapi(getPlatformAnalyticsRoute, (async (c: any) => {
     .from(serviceAnalytics)
     .where(gte(serviceAnalytics.recordedAt, cutoff));
 
+  const totalRequests = data.reduce((a, d) => a + d.requests, 0);
+  const weighedRtSum = data.reduce((a, d) => a + d.avgResponseTimeMs * d.requests, 0);
+  const summaryAvgRt = totalRequests > 0 ? Math.round(weighedRtSum / totalRequests) : 0;
+  const summaryP95Rt = Math.max(...data.map(d => d.p95ResponseTimeMs), 0);
+
   const summary = {
-    totalRequests: data.reduce((a, d) => a + d.requests, 0),
+    totalRequests,
     totalBytesIn: data.reduce((a, d) => a + d.bytesIn, 0),
     totalBytesOut: data.reduce((a, d) => a + d.bytesOut, 0),
+    avgResponseTimeMs: summaryAvgRt,
+    p95ResponseTimeMs: summaryP95Rt,
     activeServices: Number(activeCount?.count) || 0,
     topServices: topServicesRows.map((r) => ({
       serviceId: r.serviceId,
@@ -182,7 +213,28 @@ adminAnalyticsRoutes.openapi(getPlatformAnalyticsRoute, (async (c: any) => {
     })),
   };
 
-  return c.json({ data, summary });
+  // Previous period comparison
+  const prev = getPreviousPeriodCutoff(period);
+  const [prevRow] = await db.select({
+    requests: sql<number>`sum(${serviceAnalytics.requests})`.as('requests'),
+    bytesIn: sql<number>`sum(${serviceAnalytics.bytesIn})`.as('bytes_in'),
+    bytesOut: sql<number>`sum(${serviceAnalytics.bytesOut})`.as('bytes_out'),
+    avgRt: sql<number>`avg(${serviceAnalytics.avgResponseTimeMs})`.as('avg_rt'),
+  })
+    .from(serviceAnalytics)
+    .where(and(
+      gte(serviceAnalytics.recordedAt, prev.start),
+      lte(serviceAnalytics.recordedAt, prev.end),
+    ));
+
+  const previousPeriod = prevRow ? {
+    totalRequests: Number(prevRow.requests) || 0,
+    totalBytesIn: Number(prevRow.bytesIn) || 0,
+    totalBytesOut: Number(prevRow.bytesOut) || 0,
+    avgResponseTimeMs: Math.round(Number(prevRow.avgRt) || 0),
+  } : undefined;
+
+  return c.json({ data, summary, previousPeriod });
 }) as any);
 
 // Per-account analytics for admin drill-down
@@ -192,6 +244,7 @@ const getAdminAccountAnalyticsRoute = createRoute({
   tags: ['Admin Analytics'],
   summary: 'Get analytics for a specific account (admin)',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('accounts', 'read')] as const,
   request: {
     params: z.object({ accountId: z.string().uuid() }),
     query: periodQuerySchema,
@@ -218,6 +271,8 @@ adminAnalyticsRoutes.openapi(getAdminAccountAnalyticsRoute, (async (c: any) => {
     requests3xx: sql<number>`sum(${serviceAnalytics.requests3xx})`.as('requests_3xx'),
     requests4xx: sql<number>`sum(${serviceAnalytics.requests4xx})`.as('requests_4xx'),
     requests5xx: sql<number>`sum(${serviceAnalytics.requests5xx})`.as('requests_5xx'),
+    avgResponseTimeMs: sql<number>`avg(${serviceAnalytics.avgResponseTimeMs})`.as('avg_rt'),
+    p95ResponseTimeMs: sql<number>`max(${serviceAnalytics.p95ResponseTimeMs})`.as('p95_rt'),
   })
     .from(serviceAnalytics)
     .where(and(
@@ -237,6 +292,8 @@ adminAnalyticsRoutes.openapi(getAdminAccountAnalyticsRoute, (async (c: any) => {
       requests: Number(r.requests) || 0,
       bytesIn: Number(r.bytesIn) || 0,
       bytesOut: Number(r.bytesOut) || 0,
+      avgResponseTimeMs: Math.round(Number(r.avgResponseTimeMs) || 0),
+      p95ResponseTimeMs: Math.round(Number(r.p95ResponseTimeMs) || 0),
       statusBreakdown: {
         '2xx': Number(r.requests2xx) || 0,
         '3xx': Number(r.requests3xx) || 0,
@@ -277,10 +334,17 @@ adminAnalyticsRoutes.openapi(getAdminAccountAnalyticsRoute, (async (c: any) => {
     columns: { name: true },
   });
 
+  const acctTotalReqs = data.reduce((a, d) => a + d.requests, 0);
+  const acctWeighedRtSum = data.reduce((a, d) => a + d.avgResponseTimeMs * d.requests, 0);
+  const acctAvgRt = acctTotalReqs > 0 ? Math.round(acctWeighedRtSum / acctTotalReqs) : 0;
+  const acctP95Rt = Math.max(...data.map(d => d.p95ResponseTimeMs), 0);
+
   const summary = {
-    totalRequests: data.reduce((a, d) => a + d.requests, 0),
+    totalRequests: acctTotalReqs,
     totalBytesIn: data.reduce((a, d) => a + d.bytesIn, 0),
     totalBytesOut: data.reduce((a, d) => a + d.bytesOut, 0),
+    avgResponseTimeMs: acctAvgRt,
+    p95ResponseTimeMs: acctP95Rt,
     activeServices: Number(activeCount?.count) || 0,
     topServices: topServicesRows.map((r) => ({
       serviceId: r.serviceId,
@@ -292,7 +356,29 @@ adminAnalyticsRoutes.openapi(getAdminAccountAnalyticsRoute, (async (c: any) => {
     })),
   };
 
-  return c.json({ data, summary });
+  // Previous period comparison
+  const prevAcct = getPreviousPeriodCutoff(period);
+  const [prevAcctRow] = await db.select({
+    requests: sql<number>`sum(${serviceAnalytics.requests})`.as('requests'),
+    bytesIn: sql<number>`sum(${serviceAnalytics.bytesIn})`.as('bytes_in'),
+    bytesOut: sql<number>`sum(${serviceAnalytics.bytesOut})`.as('bytes_out'),
+    avgRt: sql<number>`avg(${serviceAnalytics.avgResponseTimeMs})`.as('avg_rt'),
+  })
+    .from(serviceAnalytics)
+    .where(and(
+      eq(serviceAnalytics.accountId, accountId),
+      gte(serviceAnalytics.recordedAt, prevAcct.start),
+      lte(serviceAnalytics.recordedAt, prevAcct.end),
+    ));
+
+  const previousPeriod = prevAcctRow ? {
+    totalRequests: Number(prevAcctRow.requests) || 0,
+    totalBytesIn: Number(prevAcctRow.bytesIn) || 0,
+    totalBytesOut: Number(prevAcctRow.bytesOut) || 0,
+    avgResponseTimeMs: Math.round(Number(prevAcctRow.avgRt) || 0),
+  } : undefined;
+
+  return c.json({ data, summary, previousPeriod });
 }) as any);
 
 // ── Visitor Analytics ────────────────────────────────────────────────────
@@ -311,6 +397,7 @@ const visitorAnalyticsResponseSchema = z.object({
     topReferrers: z.array(z.object({ referrer: z.string(), count: z.number() })),
     browsers: z.record(z.string(), z.number()),
     devices: z.record(z.string(), z.number()),
+    countries: z.record(z.string(), z.number()),
     topServices: z.array(z.object({
       serviceId: z.string(),
       serviceName: z.string().nullable(),
@@ -327,6 +414,7 @@ const getVisitorAnalyticsRoute = createRoute({
   tags: ['Admin Analytics'],
   summary: 'Get platform-wide visitor analytics from access logs',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('dashboard', 'read')] as const,
   request: { query: periodQuerySchema },
   responses: {
     200: jsonContent(visitorAnalyticsResponseSchema, 'Visitor analytics'),
@@ -372,12 +460,13 @@ adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
     };
   });
 
-  // Aggregate JSON fields from raw rows for top paths, referrers, browsers, devices
+  // Aggregate JSON fields from raw rows for top paths, referrers, browsers, devices, countries
   const rawRows = await db.select({
     topPaths: visitorAnalytics.topPaths,
     topReferrers: visitorAnalytics.topReferrers,
     browsers: visitorAnalytics.browsers,
     devices: visitorAnalytics.devices,
+    countries: visitorAnalytics.countries,
   })
     .from(visitorAnalytics)
     .where(gte(visitorAnalytics.recordedAt, cutoff));
@@ -387,6 +476,7 @@ adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
   const referrerMap = new Map<string, number>();
   const browserMap: Record<string, number> = {};
   const deviceMap: Record<string, number> = {};
+  const countryMap: Record<string, number> = {};
 
   for (const row of rawRows) {
     const paths = (Array.isArray(row.topPaths) ? row.topPaths : []) as Array<{ path: string; count: number }>;
@@ -404,6 +494,10 @@ adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
     const dev = (row.devices && typeof row.devices === 'object' ? row.devices : {}) as Record<string, number>;
     for (const [k, v] of Object.entries(dev)) {
       deviceMap[k] = (deviceMap[k] ?? 0) + (Number(v) || 0);
+    }
+    const ctry = (row.countries && typeof row.countries === 'object' ? row.countries : {}) as Record<string, number>;
+    for (const [k, v] of Object.entries(ctry)) {
+      countryMap[k] = (countryMap[k] ?? 0) + (Number(v) || 0);
     }
   }
 
@@ -441,6 +535,7 @@ adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
     topReferrers,
     browsers: browserMap,
     devices: deviceMap,
+    countries: countryMap,
     topServices: topSvcRows.map((r) => ({
       serviceId: r.serviceId,
       serviceName: r.serviceName ?? null,
@@ -451,6 +546,48 @@ adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
   };
 
   return c.json({ data, summary });
+}) as any);
+
+// ── Diagnostics ──────────────────────────────────────────────────────────
+
+const getDiagnosticsRoute = createRoute({
+  method: 'get',
+  path: '/diagnostics',
+  tags: ['Admin Analytics'],
+  summary: 'Run analytics pipeline diagnostics',
+  security: bearerSecurity,
+  middleware: [requireAdminPermission('dashboard', 'read')] as const,
+  responses: {
+    200: jsonContent(z.any(), 'Diagnostics result'),
+    ...standardErrors,
+  },
+});
+
+adminAnalyticsRoutes.openapi(getDiagnosticsRoute, (async (c: any) => {
+  const { analyticsService } = await import('../services/analytics.service.js');
+  const result = await analyticsService.runDiagnostics();
+  return c.json(result);
+}) as any);
+
+// ── Force Collection (trigger manually) ─────────────────────────────────
+
+const forceCollectRoute = createRoute({
+  method: 'post',
+  path: '/collect',
+  tags: ['Admin Analytics'],
+  summary: 'Force an immediate analytics collection cycle',
+  security: bearerSecurity,
+  middleware: [requireAdminPermission('dashboard', 'write')] as const,
+  responses: {
+    200: jsonContent(z.object({ ok: z.boolean(), message: z.string() }), 'Collection triggered'),
+    ...standardErrors,
+  },
+});
+
+adminAnalyticsRoutes.openapi(forceCollectRoute, (async (c: any) => {
+  const { analyticsService } = await import('../services/analytics.service.js');
+  await analyticsService.collectAnalytics();
+  return c.json({ ok: true, message: 'Analytics collection cycle completed — check logs for details' });
 }) as any);
 
 export default adminAnalyticsRoutes;

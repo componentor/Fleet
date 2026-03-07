@@ -231,6 +231,17 @@ class SchedulerService {
       },
     );
 
+    // Security threat detection — every 5 minutes
+    // Scans audit log for brute force, rapid-fire, and credential stuffing attacks
+    await getMaintenanceQueue().add(
+      'security-check',
+      { type: 'security-check' },
+      {
+        repeat: { every: 5 * 60 * 1000 },
+        jobId: 'system:security-check',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),
@@ -293,7 +304,7 @@ class SchedulerService {
   private async removeScheduleJob(scheduleId: string) {
     try {
       const repeatableJobs = await getMaintenanceQueue().getRepeatableJobs();
-      const match = repeatableJobs.find((j) => j.id === `backup:${scheduleId}`);
+      const match = repeatableJobs.find((j) => j.id === `backup-${scheduleId}`);
       if (match) {
         await getMaintenanceQueue().removeRepeatableByKey(match.key);
       }

@@ -10,12 +10,16 @@ import {
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
+import { useAdminPermissions } from '@/composables/useAdminPermissions'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const api = useApi()
 const authStore = useAuthStore()
+const adminPerms = useAdminPermissions()
+const canWrite = computed(() => adminPerms.can('accounts', 'write'))
+const canImpersonate = computed(() => adminPerms.can('accounts', 'impersonate'))
 
 const accountId = computed(() => route.params.id as string)
 
@@ -272,7 +276,10 @@ const runningServices = computed(() => (account.value?.services ?? []).filter((s
 const totalCpu = computed(() => (account.value?.services ?? []).reduce((sum: number, s: any) => sum + ((s.cpuLimit || 0) * (s.replicas || 1)), 0))
 const totalMemory = computed(() => (account.value?.services ?? []).reduce((sum: number, s: any) => sum + ((s.memoryLimit || 0) * (s.replicas || 1)), 0))
 
-onMounted(() => fetchAccount())
+onMounted(() => {
+  fetchAccount()
+  adminPerms.fetch()
+})
 watch(accountId, () => fetchAccount())
 </script>
 
@@ -297,7 +304,7 @@ watch(accountId, () => fetchAccount())
         <span v-else-if="account?.status === 'active'" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
           <CheckCircle class="w-3.5 h-3.5" /> Active
         </span>
-        <button @click="impersonate" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors">
+        <button v-if="canImpersonate" @click="impersonate" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors">
           <UserCog class="w-3.5 h-3.5" /> Impersonate
         </button>
       </div>
@@ -372,11 +379,11 @@ watch(accountId, () => fetchAccount())
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Name</label>
-                <input v-model="editForm.name" type="text" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                <input v-model="editForm.name" type="text" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Currency</label>
-                <input v-model="editForm.currency" type="text" maxlength="3" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                <input v-model="editForm.currency" type="text" maxlength="3" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" />
               </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
@@ -395,16 +402,16 @@ watch(accountId, () => fetchAccount())
             </div>
             <div class="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
               <div class="flex items-center gap-2">
-                <button v-if="account.status === 'active'" @click="suspendAccount" :disabled="suspending"
+                <button v-if="canWrite && account.status === 'active'" @click="suspendAccount" :disabled="suspending"
                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50">
                   <Ban class="w-3.5 h-3.5" /> Suspend
                 </button>
-                <button v-else-if="account.status === 'suspended'" @click="unsuspendAccount" :disabled="suspending"
+                <button v-else-if="canWrite && account.status === 'suspended'" @click="unsuspendAccount" :disabled="suspending"
                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors disabled:opacity-50">
                   <CheckCircle class="w-3.5 h-3.5" /> Unsuspend
                 </button>
               </div>
-              <button @click="saveAccount" :disabled="saving"
+              <button v-if="canWrite" @click="saveAccount" :disabled="saving"
                 class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors disabled:opacity-50">
                 <Save class="w-4 h-4" /> {{ saving ? 'Saving...' : 'Save' }}
               </button>
@@ -492,7 +499,7 @@ watch(accountId, () => fetchAccount())
               <DollarSign class="w-5 h-5 text-amber-500" />
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Billing Overrides</h2>
             </div>
-            <button v-if="account.billingOverride" @click="deleteOverride" :disabled="savingOverride"
+            <button v-if="canWrite && account.billingOverride" @click="deleteOverride" :disabled="savingOverride"
               class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
               <Trash2 class="w-3 h-3" /> Remove
             </button>
@@ -504,15 +511,15 @@ watch(accountId, () => fetchAccount())
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Discount %</label>
-                  <input v-model.number="overrideForm.discountPercent" type="number" min="0" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="0" />
+                  <input v-model.number="overrideForm.discountPercent" type="number" min="0" max="100" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="0" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Custom price (cents)</label>
-                  <input v-model.number="overrideForm.customPriceCents" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.customPriceCents" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div class="col-span-2">
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Notes</label>
-                  <input v-model="overrideForm.notes" type="text" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="Internal note" />
+                  <input v-model="overrideForm.notes" type="text" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="Internal note" />
                 </div>
               </div>
             </div>
@@ -523,23 +530,23 @@ watch(accountId, () => fetchAccount())
               <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">CPU $/hr</label>
-                  <input v-model.number="overrideForm.cpuCentsPerHourOverride" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.cpuCentsPerHourOverride" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Memory $/GB/hr</label>
-                  <input v-model.number="overrideForm.memoryCentsPerGbHourOverride" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.memoryCentsPerGbHourOverride" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Storage $/GB/mo</label>
-                  <input v-model.number="overrideForm.storageCentsPerGbMonthOverride" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.storageCentsPerGbMonthOverride" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Bandwidth $/GB</label>
-                  <input v-model.number="overrideForm.bandwidthCentsPerGbOverride" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.bandwidthCentsPerGbOverride" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Container $/hr</label>
-                  <input v-model.number="overrideForm.containerCentsPerHourOverride" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.containerCentsPerHourOverride" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
               </div>
               <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1">All values in cents. Leave empty for global default.</p>
@@ -551,23 +558,23 @@ watch(accountId, () => fetchAccount())
               <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Free Services</label>
-                  <input v-model.number="overrideForm.maxFreeServices" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.maxFreeServices" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">CPU (cores)</label>
-                  <input v-model.number="overrideForm.freeTierCpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.freeTierCpuLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Memory (MB)</label>
-                  <input v-model.number="overrideForm.freeTierMemoryLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.freeTierMemoryLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Containers</label>
-                  <input v-model.number="overrideForm.freeTierContainerLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.freeTierContainerLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Storage (GB)</label>
-                  <input v-model.number="overrideForm.freeTierStorageLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.freeTierStorageLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
               </div>
               <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1">Override the global free tier limits for this account. Leave empty for global default.</p>
@@ -581,25 +588,25 @@ watch(accountId, () => fetchAccount())
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">CPU (cores)</label>
-                  <input v-model.number="overrideForm.boostCpuLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.boostCpuLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Memory (MB)</label>
-                  <input v-model.number="overrideForm.boostMemoryLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.boostMemoryLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Containers</label>
-                  <input v-model.number="overrideForm.boostContainerLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.boostContainerLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Storage (GB)</label>
-                  <input v-model.number="overrideForm.boostStorageLimit" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                  <input v-model.number="overrideForm.boostStorageLimit" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
                 </div>
               </div>
               <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1">Applies to all tiers. Effective limit = max(plan limit, boost). Can only increase, never reduce.</p>
             </div>
 
-            <div class="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div v-if="canWrite" class="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
               <button @click="saveOverride" :disabled="savingOverride"
                 class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors disabled:opacity-50">
                 <Save class="w-4 h-4" /> {{ savingOverride ? 'Saving...' : 'Save Billing Overrides' }}
@@ -615,7 +622,7 @@ watch(accountId, () => fetchAccount())
               <Shield class="w-5 h-5 text-blue-500" />
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Resource Limits</h2>
             </div>
-            <button v-if="account.resourceLimit" @click="deleteLimits" :disabled="savingLimits"
+            <button v-if="canWrite && account.resourceLimit" @click="deleteLimits" :disabled="savingLimits"
               class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
               <Trash2 class="w-3 h-3" /> Remove
             </button>
@@ -624,39 +631,39 @@ watch(accountId, () => fetchAccount())
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max CPU/container</label>
-                <input v-model.number="limitsForm.maxCpuPerContainer" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxCpuPerContainer" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Memory/container (MB)</label>
-                <input v-model.number="limitsForm.maxMemoryPerContainer" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxMemoryPerContainer" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Replicas</label>
-                <input v-model.number="limitsForm.maxReplicas" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxReplicas" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Containers</label>
-                <input v-model.number="limitsForm.maxContainers" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxContainers" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Storage (GB)</label>
-                <input v-model.number="limitsForm.maxStorageGb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxStorageGb" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Bandwidth (GB)</label>
-                <input v-model.number="limitsForm.maxBandwidthGb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxBandwidthGb" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Total CPU (cores)</label>
-                <input v-model.number="limitsForm.maxTotalCpuCores" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxTotalCpuCores" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
               <div>
                 <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max Total Memory (MB)</label>
-                <input v-model.number="limitsForm.maxTotalMemoryMb" type="number" min="0" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" placeholder="--" />
+                <input v-model.number="limitsForm.maxTotalMemoryMb" type="number" min="0" :disabled="!canWrite" class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50" placeholder="--" />
               </div>
             </div>
             <p class="text-[11px] text-gray-400 dark:text-gray-500">Hard caps on what this account can allocate. Leave empty for no limit.</p>
-            <div class="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div v-if="canWrite" class="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
               <button @click="saveLimits" :disabled="savingLimits"
                 class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors disabled:opacity-50">
                 <Save class="w-4 h-4" /> {{ savingLimits ? 'Saving...' : 'Save Resource Limits' }}

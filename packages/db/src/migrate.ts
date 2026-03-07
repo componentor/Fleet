@@ -117,11 +117,15 @@ async function runSqliteMigrations(path: string): Promise<{ applied: number }> {
   const { default: Database } = await import('better-sqlite3');
   const { drizzle } = await import('drizzle-orm/better-sqlite3');
   const { migrate } = await import('drizzle-orm/better-sqlite3/migrator');
+  const { readFileSync } = await import('fs');
+  const { createHash } = await import('crypto');
 
   const sqlite = new Database(path);
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
   const db = drizzle(sqlite);
+
+  const migrationsFolder = new URL('./migrations/sqlite', import.meta.url).pathname;
 
   try {
     let beforeCount = 0;
@@ -134,9 +138,13 @@ async function runSqliteMigrations(path: string): Promise<{ applied: number }> {
       beforeCount = 0;
     }
 
-    migrate(db, {
-      migrationsFolder: new URL('./migrations/sqlite', import.meta.url).pathname,
-    });
+    // SQLite doesn't support ADD COLUMN IF NOT EXISTS, so migrations with
+    // ALTER TABLE ADD COLUMN can fail with "duplicate column name" if the
+    // migration previously partially applied (schema changed but not recorded).
+    // Pre-fix: find pending migrations that would fail and mark them as applied.
+    fixStuckSqliteMigrations(sqlite, migrationsFolder, readFileSync, createHash);
+
+    migrate(db, { migrationsFolder });
 
     let afterCount = 0;
     try {
@@ -151,6 +159,100 @@ async function runSqliteMigrations(path: string): Promise<{ applied: number }> {
     return { applied: afterCount - beforeCount };
   } finally {
     sqlite.close();
+  }
+}
+
+/**
+ * Pre-fix stuck SQLite migrations where ALTER TABLE ADD COLUMN partially applied
+ * (column exists in schema but migration not recorded in __drizzle_migrations).
+ */
+function fixStuckSqliteMigrations(
+  sqlite: import('better-sqlite3').Database,
+  migrationsFolder: string,
+  readFileSync: typeof import('fs').readFileSync,
+  createHash: typeof import('crypto').createHash,
+): void {
+  // Ensure migrations table exists
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )
+  `);
+
+  // Read journal
+  const journalPath = `${migrationsFolder}/meta/_journal.json`;
+  let journal: { entries: { idx: number; tag: string; when: number }[] };
+  try {
+    journal = JSON.parse(readFileSync(journalPath, 'utf-8'));
+  } catch {
+    return; // No journal = nothing to fix
+  }
+
+  // Get the last applied migration's created_at timestamp
+  let lastAppliedAt = -1;
+  try {
+    const row = sqlite.prepare(
+      'SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1',
+    ).get() as { created_at: number } | undefined;
+    if (row) lastAppliedAt = Number(row.created_at);
+  } catch { /* table empty or doesn't exist */ }
+
+  // Get existing columns for all tables (for checking duplicates)
+  const existingColumns = new Map<string, Set<string>>();
+  const tables = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle%'",
+  ).all() as { name: string }[];
+
+  for (const { name } of tables) {
+    const cols = sqlite.prepare(`PRAGMA table_info("${name}")`).all() as { name: string }[];
+    existingColumns.set(name, new Set(cols.map(c => c.name)));
+  }
+
+  // Check each pending migration
+  for (const entry of journal.entries) {
+    if (entry.when <= lastAppliedAt) continue; // Already applied
+
+    const sqlPath = `${migrationsFolder}/${entry.tag}.sql`;
+    let sqlContent: string;
+    try { sqlContent = readFileSync(sqlPath, 'utf-8'); } catch { continue; }
+
+    // Check if this migration has ALTER TABLE ADD COLUMN that would conflict
+    const addColRegex = /ALTER\s+TABLE\s+"(\w+)"\s+ADD\s+COLUMN\s+"(\w+)"/gi;
+    let hasConflict = false;
+    let match: RegExpExecArray | null;
+
+    while ((match = addColRegex.exec(sqlContent)) !== null) {
+      const tableName = match[1];
+      const colName = match[2];
+      if (!tableName || !colName) continue;
+      const tableCols = existingColumns.get(tableName);
+      if (tableCols?.has(colName)) {
+        hasConflict = true;
+        break;
+      }
+    }
+
+    if (!hasConflict) continue;
+
+    // This migration would fail — execute it manually with error handling
+    const statements = sqlContent.split(';').map(s => s.trim()).filter(Boolean);
+    for (const stmt of statements) {
+      try {
+        sqlite.exec(stmt);
+      } catch (err: any) {
+        if (!err?.message?.includes('duplicate column name')) {
+          throw err;
+        }
+      }
+    }
+
+    // Record the migration as applied (same hash algorithm as Drizzle)
+    const hash = createHash('sha256').update(sqlContent).digest('hex');
+    sqlite.prepare(
+      'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+    ).run(hash, entry.when);
   }
 }
 

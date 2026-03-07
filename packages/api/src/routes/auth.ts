@@ -18,7 +18,39 @@ import { getEmailQueue, isQueueAvailable } from '../services/queue.service.js';
 import type { EmailJobData } from '../workers/email.worker.js';
 import { eventService, EventTypes, eventContext } from '../services/event.service.js';
 import { getAppUrl } from '../services/platform.service.js';
+import geoip from 'geoip-lite';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity, noSecurity } from './_schemas.js';
+
+/**
+ * Check if an admin user is allowed to log in from the given IP address
+ * based on their allowedLoginRegions setting. Returns null if allowed,
+ * or an error message string if blocked.
+ */
+function checkAdminRegionRestriction(user: any, ip: string | undefined): string | null {
+  // Only enforce for admin users (super or role-based)
+  if (!user.isSuper && !user.adminRoleId) return null;
+
+  const allowedRegions: string[] | null = user.allowedLoginRegions ?? null;
+  if (!allowedRegions || allowedRegions.length === 0) return null;
+
+  if (!ip) {
+    logger.warn({ userId: user.id }, 'Admin login blocked — no IP available for region check');
+    return 'Login from this location is not permitted';
+  }
+
+  const geo = geoip.lookup(ip);
+  if (!geo) {
+    logger.warn({ userId: user.id, ip }, 'Admin login blocked — could not determine region from IP');
+    return 'Login from this location is not permitted';
+  }
+
+  if (!allowedRegions.includes(geo.country)) {
+    logger.warn({ userId: user.id, ip, country: geo.country, allowedRegions }, 'Admin login blocked — region not allowed');
+    return 'Login from this location is not permitted';
+  }
+
+  return null;
+}
 
 const auth = new OpenAPIHono();
 
@@ -382,12 +414,30 @@ auth.openapi(loginRoute, (async (c: any) => {
 
   if (!user || !user.passwordHash) {
     logger.warn({ email, ip: loginIp }, 'Failed login attempt — user not found');
+    eventService.log({
+      eventType: EventTypes.AUTH_LOGIN_FAILED,
+      description: `Failed login attempt for ${email} — user not found`,
+      ipAddress: loginIp,
+      source: 'system',
+      details: { email, reason: 'user_not_found' },
+    });
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
   const valid = await verify(user.passwordHash, password);
   if (!valid) {
     logger.warn({ userId: user.id, ip: loginIp }, 'Failed login attempt — wrong password');
+    eventService.log({
+      userId: user.id,
+      actorEmail: user.email,
+      eventType: EventTypes.AUTH_LOGIN_FAILED,
+      description: `Failed login attempt for ${user.email} — invalid password`,
+      ipAddress: loginIp,
+      source: 'system',
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { reason: 'invalid_password' },
+    });
     return c.json({ error: 'Invalid email or password' }, 401);
   }
 
@@ -400,6 +450,23 @@ auth.openapi(loginRoute, (async (c: any) => {
   const disabledMethods: string[] = (user as any).disabledLoginMethods ?? [];
   if (disabledMethods.includes('password')) {
     return c.json({ error: 'Password login is disabled for this account. Use GitHub or Google to sign in.', code: 'LOGIN_METHOD_DISABLED' }, 403);
+  }
+
+  // Check admin region restriction
+  const regionError = checkAdminRegionRestriction(user, loginIp);
+  if (regionError) {
+    eventService.log({
+      userId: user.id,
+      actorEmail: user.email,
+      eventType: EventTypes.AUTH_REGION_BLOCKED,
+      description: `Login blocked for ${user.email} — region restriction`,
+      ipAddress: loginIp,
+      source: 'system',
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { reason: 'region_blocked' },
+    });
+    return c.json({ error: regionError, code: 'REGION_BLOCKED' }, 403);
   }
 
   // Check 2FA
@@ -508,6 +575,15 @@ auth.openapi(refreshRoute, (async (c: any) => {
       }
     }
 
+    // Re-check admin region restriction on token refresh to prevent
+    // region-restricted admins from maintaining sessions after traveling
+    const refreshIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip') ?? undefined;
+    const refreshRegionError = checkAdminRegionRestriction(user, refreshIp);
+    if (refreshRegionError) {
+      logger.warn({ userId: user.id, ip: refreshIp }, 'Token refresh blocked — admin region restriction');
+      return c.json({ error: 'Session expired — login from this region is not permitted', code: 'REGION_BLOCKED' }, 403);
+    }
+
     const impersonatingAccountId = payload['impersonatingAccountId'] as string | undefined;
 
     const tokens = await generateTokens({
@@ -607,8 +683,20 @@ auth.openapi(logoutRoute, (async (c: any) => {
 
   clearRefreshTokenCookie(c);
 
+  const ctx = eventContext(c);
+
+  if (ctx.impersonatingAccountId) {
+    eventService.log({
+      ...ctx,
+      eventType: EventTypes.ACCOUNT_IMPERSONATION_ENDED,
+      description: `Ended impersonation of account ${ctx.impersonatingAccountId}`,
+      resourceType: 'account',
+      resourceId: ctx.impersonatingAccountId,
+    });
+  }
+
   eventService.log({
-    ...eventContext(c),
+    ...ctx,
     eventType: EventTypes.USER_LOGOUT,
     description: `User logged out`,
     resourceType: 'user',
@@ -1175,7 +1263,37 @@ auth.openapi(twoFactorVerifyRoute, (async (c: any) => {
   }
 
   if (!verified) {
+    const twoFaFailIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip') ?? undefined;
+    eventService.log({
+      userId: user.id,
+      actorEmail: user.email,
+      eventType: EventTypes.AUTH_2FA_FAILED,
+      description: `Failed 2FA verification for ${user.email}`,
+      ipAddress: twoFaFailIp,
+      source: 'system',
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { reason: '2fa_invalid_code' },
+    });
     return c.json({ error: 'Invalid verification code' }, 400);
+  }
+
+  // Check admin region restriction on 2FA verify
+  const twoFaIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip') ?? undefined;
+  const twoFaRegionError = checkAdminRegionRestriction(user, twoFaIp);
+  if (twoFaRegionError) {
+    eventService.log({
+      userId: user.id,
+      actorEmail: user.email,
+      eventType: EventTypes.AUTH_REGION_BLOCKED,
+      description: `2FA login blocked for ${user.email} — region restriction`,
+      ipAddress: twoFaIp,
+      source: 'system',
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { reason: 'region_blocked', method: '2fa' },
+    });
+    return c.json({ error: twoFaRegionError, code: 'REGION_BLOCKED' }, 403);
   }
 
   const tokens = await generateTokens({
@@ -1483,6 +1601,24 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
       return c.redirect('/auth/callback?error=GitHub+login+is+disabled+for+this+account');
     }
 
+    // Check admin region restriction for GitHub login
+    const ghLoginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip') ?? undefined;
+    const ghRegionError = checkAdminRegionRestriction(user, ghLoginIp);
+    if (ghRegionError) {
+      eventService.log({
+        userId: user.id,
+        actorEmail: user.email,
+        eventType: EventTypes.AUTH_REGION_BLOCKED,
+        description: `GitHub login blocked for ${user.email} — region restriction`,
+        ipAddress: ghLoginIp,
+        source: 'system',
+        resourceType: 'user',
+        resourceId: user.id,
+        details: { reason: 'region_blocked', method: 'github' },
+      });
+      return c.redirect('/auth/callback?error=Login+from+this+region+is+not+permitted');
+    }
+
     // 2FA check — if user has 2FA enabled, redirect to 2FA challenge
     if (user.twoFactorEnabled) {
       const secret = JWT_SECRET_KEY();
@@ -1782,6 +1918,24 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
     const googleDisabledMethods: string[] = (user as any).disabledLoginMethods ?? [];
     if (googleDisabledMethods.includes('google')) {
       return c.redirect('/auth/callback?error=Google+login+is+disabled+for+this+account');
+    }
+
+    // Check admin region restriction for Google login
+    const googleLoginIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip') ?? undefined;
+    const googleRegionError = checkAdminRegionRestriction(user, googleLoginIp);
+    if (googleRegionError) {
+      eventService.log({
+        userId: user.id,
+        actorEmail: user.email,
+        eventType: EventTypes.AUTH_REGION_BLOCKED,
+        description: `Google login blocked for ${user.email} — region restriction`,
+        ipAddress: googleLoginIp,
+        source: 'system',
+        resourceType: 'user',
+        resourceId: user.id,
+        details: { reason: 'region_blocked', method: 'google' },
+      });
+      return c.redirect('/auth/callback?error=Login+from+this+region+is+not+permitted');
     }
 
     // 2FA check — if user has 2FA enabled, redirect to 2FA challenge

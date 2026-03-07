@@ -28,6 +28,7 @@ export const users = pgTable('users', {
   twoFactorSecret: varchar('two_factor_secret', { length: 255 }),
   twoFactorBackupCodes: jsonb('two_factor_backup_codes').$type<string[] | null>(),
   disabledLoginMethods: jsonb('disabled_login_methods').$type<string[]>(),
+  allowedLoginRegions: jsonb('allowed_login_regions').$type<string[] | null>(),
   securityChangedAt: timestamp('security_changed_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

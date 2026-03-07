@@ -4,6 +4,8 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Box, Play, Square, Power, RotateCw, RefreshCcw, Trash2, ArrowLeft, Radio, SquareTerminal, FolderOpen, Github, Webhook, Archive, Clock, Database, XCircle, Eye, EyeOff, Upload, Download, Search, Filter, FileDown, Code2, Activity, MapPin, HardDrive, FileCode, RotateCcw } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
+import InteractiveChart from '@/components/InteractiveChart.vue'
+import Sparkline from '@/components/Sparkline.vue'
 import ConfirmDeleteModal from '../../components/ConfirmDeleteModal.vue'
 import FileExplorer from '@/components/FileExplorer.vue'
 import DatabaseManager from '@/components/DatabaseManager.vue'
@@ -17,10 +19,11 @@ import { useServiceEvents } from '@/composables/useServiceEvents'
 import { useTerminal } from '@/composables/useTerminal'
 import { useToast } from '@/composables/useToast'
 import { useVolumeManager } from '@/composables/useVolumeManager'
-import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
+import VolumeConfigurator, { type VolumeEntry } from '@/components/VolumeConfigurator.vue'
 import TierSelector from '@/components/TierSelector.vue'
 import { useServiceBilling, usePlanLocale, type ServiceSubscription, type ResourceConflict } from '@/composables/useServiceBilling'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 import '@xterm/xterm/css/xterm.css'
 
 const route = useRoute()
@@ -37,6 +40,7 @@ const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 const volumeManager = useVolumeManager()
 const serviceBilling = useServiceBilling()
 const { planName } = usePlanLocale()
+const authStore = useAuthStore()
 
 const activeTab = ref('overview')
 const tabs = computed(() => {
@@ -195,11 +199,20 @@ interface AnalyticsDataPoint {
   requests: number
   bytesIn: number
   bytesOut: number
+  avgResponseTimeMs: number
+  p95ResponseTimeMs: number
   statusBreakdown: Record<string, number>
 }
 interface AnalyticsResponse {
   data: AnalyticsDataPoint[]
-  summary: { totalRequests: number; totalBytesIn: number; totalBytesOut: number }
+  summary: {
+    totalRequests: number; totalBytesIn: number; totalBytesOut: number
+    avgResponseTimeMs: number; p95ResponseTimeMs: number
+  }
+  previousPeriod?: {
+    totalRequests: number; totalBytesIn: number; totalBytesOut: number
+    avgResponseTimeMs: number
+  }
 }
 const analyticsData = ref<AnalyticsResponse | null>(null)
 const analyticsPeriod = ref<'24h' | '7d' | '30d'>('24h')
@@ -231,72 +244,27 @@ function formatNumber(n: number): string {
   return n.toString()
 }
 
-const chartWidth = 600
-const chartHeight = 180
-const chartPadding = { top: 10, right: 10, bottom: 20, left: 50 }
-
-function buildPolylinePoints(values: number[]): string {
-  if (!values.length) return ''
-  const maxVal = Math.max(...values, 1)
-  const innerW = chartWidth - chartPadding.left - chartPadding.right
-  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
-  return values.map((v, i) => {
-    const x = chartPadding.left + (values.length === 1 ? innerW / 2 : (i / (values.length - 1)) * innerW)
-    const y = chartPadding.top + innerH - (v / maxVal) * innerH
-    return `${x},${y}`
-  }).join(' ')
+function analyticsTimeLabel(d: Date): string {
+  return analyticsPeriod.value === '24h'
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-function buildGridLines(values: number[]): { y: number; label: string }[] {
-  const maxVal = Math.max(...values, 1)
-  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
-  const steps = 4
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const val = (maxVal / steps) * i
-    const y = chartPadding.top + innerH - (val / maxVal) * innerH
-    return { y, label: val >= 1024 ? formatBytes(val) : formatNumber(Math.round(val)) }
-  })
+const requestsSparkline = computed(() => analyticsData.value?.data.map(d => d.requests) ?? [])
+const bytesInSparkline = computed(() => analyticsData.value?.data.map(d => d.bytesIn) ?? [])
+const bytesOutSparkline = computed(() => analyticsData.value?.data.map(d => d.bytesOut) ?? [])
+const responseTimeSparkline = computed(() => analyticsData.value?.data.map(d => d.avgResponseTimeMs) ?? [])
+
+function formatMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.round(ms)}ms`
 }
 
-function buildTimeLabels(data: AnalyticsDataPoint[]): { x: number; label: string }[] {
-  if (!data.length) return []
-  const innerW = chartWidth - chartPadding.left - chartPadding.right
-  const count = Math.min(data.length, 6)
-  const step = Math.max(1, Math.floor(data.length / count))
-  const labels: { x: number; label: string }[] = []
-  for (let i = 0; i < data.length; i += step) {
-    const point = data[i]
-    if (!point) continue
-    const d = new Date(point.timestamp)
-    const x = chartPadding.left + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW)
-    const label = analyticsPeriod.value === '24h'
-      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-    labels.push({ x, label })
-  }
-  return labels
+function percentChange(current: number, previous: number): { value: number; label: string; positive: boolean } | null {
+  if (!previous) return null
+  const pct = ((current - previous) / previous) * 100
+  return { value: Math.abs(pct), label: `${pct >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%`, positive: pct <= 0 }
 }
-
-const requestsPoints = computed(() =>
-  analyticsData.value ? buildPolylinePoints(analyticsData.value.data.map(d => d.requests)) : ''
-)
-const bytesOutPoints = computed(() =>
-  analyticsData.value ? buildPolylinePoints(analyticsData.value.data.map(d => d.bytesOut)) : ''
-)
-const bytesInPoints = computed(() =>
-  analyticsData.value ? buildPolylinePoints(analyticsData.value.data.map(d => d.bytesIn)) : ''
-)
-const requestsGrid = computed(() =>
-  analyticsData.value ? buildGridLines(analyticsData.value.data.map(d => d.requests)) : []
-)
-const bandwidthGrid = computed(() => {
-  if (!analyticsData.value) return []
-  const combined = analyticsData.value.data.map(d => Math.max(d.bytesIn, d.bytesOut))
-  return buildGridLines(combined)
-})
-const timeLabels = computed(() =>
-  analyticsData.value ? buildTimeLabels(analyticsData.value.data) : []
-)
 
 const statusBreakdown = computed(() => {
   if (!analyticsData.value?.data.length) return { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 }
@@ -320,6 +288,37 @@ const statusBarSegments = computed(() => {
     { key: '5xx', pct: ((b['5xx'] ?? 0) / total) * 100, color: '#ef4444', label: '5xx' },
   ].filter(s => s.pct > 0)
 })
+
+// ── Analytics diagnostics (admin only) ──
+const analyticsDiag = ref<any>(null)
+const analyticsDiagLoading = ref(false)
+const analyticsCollecting = ref(false)
+const analyticsCollectMsg = ref('')
+
+async function fetchAnalyticsDiag() {
+  analyticsDiagLoading.value = true
+  try {
+    analyticsDiag.value = await api.get<any>('/admin/analytics/diagnostics')
+  } catch {
+    analyticsDiag.value = null
+  } finally {
+    analyticsDiagLoading.value = false
+  }
+}
+
+async function forceAnalyticsCollect() {
+  analyticsCollecting.value = true
+  analyticsCollectMsg.value = ''
+  try {
+    await api.post<any>('/admin/analytics/collect', {})
+    analyticsCollectMsg.value = 'Collection complete — refresh analytics to see data'
+    await fetchAnalytics()
+  } catch {
+    analyticsCollectMsg.value = 'Collection failed'
+  } finally {
+    analyticsCollecting.value = false
+  }
+}
 
 // Service stats (health dashboard)
 const serviceStats = ref<any>(null)
@@ -411,7 +410,7 @@ const robotsContent = ref('')
 const robotsLoading = ref(false)
 
 // Volume settings
-const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
+const configVolumes = ref<VolumeEntry[]>([])
 const volumeLoading = ref(false)
 const migrationFailures = ref<Array<{ source: string; target: string; mountPath: string; error: string }>>([])
 const migrateRetryLoading = ref(false)
@@ -1316,12 +1315,13 @@ async function syncStatus() {
   }
 }
 
-async function confirmDeleteService(deleteVolumeNames: string[]) {
+async function confirmDeleteService(deleteVolumeNames: string[], options: { backupBeforeDelete: boolean }) {
   actionLoading.value = 'delete'
   try {
-    await store.deleteService(serviceId, { deleteVolumeNames })
+    await store.deleteService(serviceId, { deleteVolumeNames, backupBeforeDelete: options.backupBeforeDelete })
     showDeleteModal.value = false
     router.push('/panel/services')
+    toast.success(t('service.deleteSuccess', 'Service moved to trash'))
   } catch {
     toast.error(t('service.deleteFailed', 'Failed to delete service'))
   } finally {
@@ -1404,8 +1404,10 @@ async function saveVolumes() {
   volumeLoading.value = true
   migrationFailures.value = []
   try {
-    // Filter out incomplete volume entries
-    const validVolumes = configVolumes.value.filter(v => v.source && v.target)
+    // Filter out incomplete volume entries and map to API format
+    const validVolumes = configVolumes.value
+      .filter(v => v.source && v.target)
+      .map(v => ({ source: v.source, target: v.target, readonly: v.readonly }))
     const result = await api.patch(`/services/${serviceId}`, {
       volumes: validVolumes,
     }) as any
@@ -1442,22 +1444,7 @@ async function retryVolumeMigration(failure: { source: string; target: string; m
   }
 }
 
-function addVolume() {
-  configVolumes.value.push({ source: '', target: '', readonly: false })
-}
-
-function removeVolume(index: number) {
-  configVolumes.value.splice(index, 1)
-}
-
-async function handleVolumeCreated(index: number, vol: { name: string; displayName: string; sizeGb: number }) {
-  try {
-    const created = await volumeManager.createVolume(vol.name, vol.sizeGb)
-    configVolumes.value[index]!.source = created.name
-  } catch {
-    // Toast already shown by useApi
-  }
-}
+// VolumeConfigurator handles add/remove/create internally
 
 async function saveAutoDeploy() {
   autoDeployLoading.value = true
@@ -1628,7 +1615,10 @@ async function onTabChange(tabId: string) {
     configVolumes.value = ((service.value.volumes as any[]) ?? []).map((v: any) => ({
       source: v.source ?? '',
       target: v.target ?? '',
+      sizeGb: 0,
       readonly: v.readonly ?? false,
+      mode: 'existing' as const,
+      displayName: (v.source ?? '').replace(/^vol-[a-f0-9-]+-/, ''),
     }))
     // Fetch account volumes for the dropdown
     volumeManager.fetchAll()
@@ -2430,19 +2420,56 @@ onUnmounted(() => {
               </button>
             </div>
 
-            <!-- Summary cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <!-- Summary cards with sparklines and % change badges -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Requests</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatNumber(analyticsData.summary.totalRequests) }}</p>
+                <div class="flex items-center justify-between mb-1">
+                  <p class="text-sm text-gray-500 dark:text-gray-400">Total Requests</p>
+                  <span v-if="analyticsData.previousPeriod && percentChange(analyticsData.summary.totalRequests, analyticsData.previousPeriod.totalRequests)"
+                    :class="['text-xs font-medium px-1.5 py-0.5 rounded-full', percentChange(analyticsData.summary.totalRequests, analyticsData.previousPeriod.totalRequests)!.positive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400']"
+                  >{{ percentChange(analyticsData.summary.totalRequests, analyticsData.previousPeriod.totalRequests)!.label }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatNumber(analyticsData.summary.totalRequests) }}</p>
+                  <Sparkline v-if="requestsSparkline.length >= 2" :values="requestsSparkline" color="#6366f1" />
+                </div>
               </div>
               <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Bandwidth In</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalBytesIn) }}</p>
+                <div class="flex items-center justify-between mb-1">
+                  <p class="text-sm text-gray-500 dark:text-gray-400">Bandwidth In</p>
+                  <span v-if="analyticsData.previousPeriod && percentChange(analyticsData.summary.totalBytesIn, analyticsData.previousPeriod.totalBytesIn)"
+                    :class="['text-xs font-medium px-1.5 py-0.5 rounded-full', percentChange(analyticsData.summary.totalBytesIn, analyticsData.previousPeriod.totalBytesIn)!.positive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400']"
+                  >{{ percentChange(analyticsData.summary.totalBytesIn, analyticsData.previousPeriod.totalBytesIn)!.label }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalBytesIn) }}</p>
+                  <Sparkline v-if="bytesInSparkline.length >= 2" :values="bytesInSparkline" color="#3b82f6" />
+                </div>
               </div>
               <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Bandwidth Out</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalBytesOut) }}</p>
+                <div class="flex items-center justify-between mb-1">
+                  <p class="text-sm text-gray-500 dark:text-gray-400">Bandwidth Out</p>
+                  <span v-if="analyticsData.previousPeriod && percentChange(analyticsData.summary.totalBytesOut, analyticsData.previousPeriod.totalBytesOut)"
+                    :class="['text-xs font-medium px-1.5 py-0.5 rounded-full', percentChange(analyticsData.summary.totalBytesOut, analyticsData.previousPeriod.totalBytesOut)!.positive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400']"
+                  >{{ percentChange(analyticsData.summary.totalBytesOut, analyticsData.previousPeriod.totalBytesOut)!.label }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalBytesOut) }}</p>
+                  <Sparkline v-if="bytesOutSparkline.length >= 2" :values="bytesOutSparkline" color="#10b981" />
+                </div>
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                <div class="flex items-center justify-between mb-1">
+                  <p class="text-sm text-gray-500 dark:text-gray-400">Avg Response Time</p>
+                  <span v-if="analyticsData.previousPeriod && percentChange(analyticsData.summary.avgResponseTimeMs, analyticsData.previousPeriod.avgResponseTimeMs)"
+                    :class="['text-xs font-medium px-1.5 py-0.5 rounded-full', percentChange(analyticsData.summary.avgResponseTimeMs, analyticsData.previousPeriod.avgResponseTimeMs)!.positive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400']"
+                  >{{ percentChange(analyticsData.summary.avgResponseTimeMs, analyticsData.previousPeriod.avgResponseTimeMs)!.label }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ formatMs(analyticsData.summary.avgResponseTimeMs) }}</p>
+                  <Sparkline v-if="responseTimeSparkline.length >= 2" :values="responseTimeSparkline" color="#f59e0b" />
+                </div>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">p95: {{ formatMs(analyticsData.summary.p95ResponseTimeMs) }}</p>
               </div>
             </div>
 
@@ -2452,73 +2479,65 @@ onUnmounted(() => {
               <div v-if="analyticsData.data.length === 0" class="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                 No data yet. Analytics are collected every 5 minutes.
               </div>
-              <svg v-else :viewBox="`0 0 ${chartWidth} ${chartHeight}`" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
-                <!-- Grid lines -->
-                <line v-for="(g, i) in requestsGrid" :key="'rg'+i"
-                  :x1="chartPadding.left" :y1="g.y" :x2="chartWidth - chartPadding.right" :y2="g.y"
-                  stroke="currentColor" class="text-gray-200 dark:text-gray-700" stroke-width="0.5" />
-                <!-- Y-axis labels -->
-                <text v-for="(g, i) in requestsGrid" :key="'rl'+i"
-                  :x="chartPadding.left - 4" :y="g.y + 3"
-                  text-anchor="end" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ g.label }}</text>
-                <!-- X-axis labels -->
-                <text v-for="(tl, i) in timeLabels" :key="'tl'+i"
-                  :x="tl.x" :y="chartHeight - 2"
-                  text-anchor="middle" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ tl.label }}</text>
-                <!-- Area fill -->
-                <polygon
-                  v-if="requestsPoints"
-                  :points="`${chartPadding.left},${chartHeight - chartPadding.bottom} ${requestsPoints} ${chartWidth - chartPadding.right},${chartHeight - chartPadding.bottom}`"
-                  class="fill-primary-500/10 dark:fill-primary-400/10"
-                />
-                <!-- Line -->
-                <polyline
-                  v-if="requestsPoints"
-                  :points="requestsPoints"
-                  fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                  class="stroke-primary-500 dark:stroke-primary-400"
-                />
-              </svg>
+              <InteractiveChart
+                v-else
+                :data="analyticsData.data"
+                :series="[{ key: 'requests', label: 'Requests', color: '#6366f1' }]"
+                :format-value="formatNumber"
+                :format-time="analyticsTimeLabel"
+                :height="180"
+              />
             </div>
 
             <!-- Bandwidth chart -->
             <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Bandwidth</h3>
-              <div class="flex items-center gap-4 mb-3 text-xs text-gray-500 dark:text-gray-400">
-                <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-blue-500 inline-block rounded"></span> In</span>
-                <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-emerald-500 inline-block rounded"></span> Out</span>
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Bandwidth</h3>
+                <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span> In</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Out</span>
+                </div>
               </div>
               <div v-if="analyticsData.data.length === 0" class="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                 No data yet.
               </div>
-              <svg v-else :viewBox="`0 0 ${chartWidth} ${chartHeight}`" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
-                <!-- Grid lines -->
-                <line v-for="(g, i) in bandwidthGrid" :key="'bg'+i"
-                  :x1="chartPadding.left" :y1="g.y" :x2="chartWidth - chartPadding.right" :y2="g.y"
-                  stroke="currentColor" class="text-gray-200 dark:text-gray-700" stroke-width="0.5" />
-                <!-- Y-axis labels -->
-                <text v-for="(g, i) in bandwidthGrid" :key="'bl'+i"
-                  :x="chartPadding.left - 4" :y="g.y + 3"
-                  text-anchor="end" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ g.label }}</text>
-                <!-- X-axis labels -->
-                <text v-for="(tl, i) in timeLabels" :key="'btl'+i"
-                  :x="tl.x" :y="chartHeight - 2"
-                  text-anchor="middle" class="fill-gray-400 dark:fill-gray-500" font-size="9">{{ tl.label }}</text>
-                <!-- In line -->
-                <polyline
-                  v-if="bytesInPoints"
-                  :points="bytesInPoints"
-                  fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                  class="stroke-blue-500"
-                />
-                <!-- Out line -->
-                <polyline
-                  v-if="bytesOutPoints"
-                  :points="bytesOutPoints"
-                  fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                  class="stroke-emerald-500"
-                />
-              </svg>
+              <InteractiveChart
+                v-else
+                :data="analyticsData.data"
+                :series="[
+                  { key: 'bytesIn', label: 'In', color: '#3b82f6' },
+                  { key: 'bytesOut', label: 'Out', color: '#10b981' },
+                ]"
+                :format-value="formatBytes"
+                :format-time="analyticsTimeLabel"
+                :format-bytes="true"
+                :height="180"
+              />
+            </div>
+
+            <!-- Response Time chart -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Response Time</h3>
+                <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Avg</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span> p95</span>
+                </div>
+              </div>
+              <div v-if="analyticsData.data.length === 0" class="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                No data yet.
+              </div>
+              <InteractiveChart
+                v-else
+                :data="analyticsData.data"
+                :series="[
+                  { key: 'avgResponseTimeMs', label: 'Avg', color: '#f59e0b' },
+                  { key: 'p95ResponseTimeMs', label: 'p95', color: '#f87171', dashed: true },
+                ]"
+                :format-value="formatMs"
+                :format-time="analyticsTimeLabel"
+                :height="180"
+              />
             </div>
 
             <!-- Status breakdown -->
@@ -2545,6 +2564,54 @@ onUnmounted(() => {
                   </span>
                 </div>
               </template>
+            </div>
+
+            <!-- Admin diagnostics panel (only for super admins when data is empty) -->
+            <div v-if="authStore.isSuper && analyticsData.summary.totalRequests === 0" class="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800/50 rounded-xl p-5">
+              <div class="flex items-start gap-3">
+                <Activity class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-yellow-800 dark:text-yellow-300">No analytics data collected yet</p>
+                  <p class="text-xs text-yellow-700 dark:text-yellow-400 mt-1">Analytics are scraped from Traefik metrics every 5 minutes. If this service has traffic but shows no data, the pipeline may need troubleshooting.</p>
+                  <div class="flex flex-wrap items-center gap-2 mt-3">
+                    <button
+                      @click="forceAnalyticsCollect"
+                      :disabled="analyticsCollecting"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                      <CompassSpinner v-if="analyticsCollecting" size="w-3 h-3" />
+                      <Play v-else class="w-3 h-3" />
+                      {{ analyticsCollecting ? 'Collecting...' : 'Force Collection' }}
+                    </button>
+                    <button
+                      @click="fetchAnalyticsDiag"
+                      :disabled="analyticsDiagLoading"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 text-xs font-medium hover:bg-yellow-100 dark:hover:bg-yellow-900/20 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCcw :class="['w-3 h-3', analyticsDiagLoading && 'animate-spin']" />
+                      Run Diagnostics
+                    </button>
+                    <router-link
+                      to="/admin/analytics"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 text-xs font-medium hover:bg-yellow-100 dark:hover:bg-yellow-900/20 transition-colors"
+                    >
+                      Full Diagnostics
+                    </router-link>
+                    <span v-if="analyticsCollectMsg" class="text-xs text-yellow-700 dark:text-yellow-400">{{ analyticsCollectMsg }}</span>
+                  </div>
+                  <!-- Inline diagnostics result -->
+                  <div v-if="analyticsDiag" class="mt-3 text-xs space-y-1.5">
+                    <div v-for="(step, key) in analyticsDiag.steps" :key="key" class="flex items-center gap-2">
+                      <span :class="step.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" class="font-medium">{{ step.ok ? 'OK' : 'FAIL' }}</span>
+                      <span class="text-yellow-800 dark:text-yellow-300">{{ key }}</span>
+                      <span v-if="step.error" class="text-red-600 dark:text-red-400 truncate">— {{ step.error }}</span>
+                      <span v-else-if="step.count !== undefined" class="text-yellow-600 dark:text-yellow-500">({{ step.count }})</span>
+                      <span v-else-if="step.totalRows !== undefined" class="text-yellow-600 dark:text-yellow-500">({{ step.totalRows }} rows)</span>
+                      <span v-else-if="step.analyticsKeyCount !== undefined" class="text-yellow-600 dark:text-yellow-500">({{ step.analyticsKeyCount }} keys)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -3624,55 +3691,14 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- DB without volume warning -->
-          <div
-            v-if="service?.image && volumeManager.isDatabaseImage(service.image) && configVolumes.length === 0"
-            class="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800"
-          >
-            <div class="flex items-start gap-2">
-              <svg class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
-              <div>
-                <p class="text-sm font-medium text-amber-800 dark:text-amber-200">{{ $t('deploy.dbWithoutVolume') }}</p>
-                <p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{{ $t('deploy.dbWithoutVolumeDesc', { path: volumeManager.suggestedVolumePath(service.image) }) }}</p>
-              </div>
-            </div>
-          </div>
-
           <!-- Volumes -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volumes</h3>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Attach persistent storage volumes to this service</p>
-              </div>
-              <div class="flex items-center gap-3">
-                <span v-if="volumeManager.storageQuota.value" class="text-xs text-gray-400 dark:text-gray-500">
-                  {{ volumeManager.storageQuota.value.usedGb }} / {{ volumeManager.storageQuota.value.limitGb }} GB used
-                </span>
-                <button @click="addVolume" class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors">
-                  + Add Volume
-                </button>
-              </div>
-            </div>
             <div class="p-6">
-              <div v-if="configVolumes.length === 0" class="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
-                No volumes attached. Click "Add Volume" to mount a storage volume.
-              </div>
-              <div v-else class="space-y-3">
-                <InlineVolumeCreator
-                  v-for="(vol, idx) in configVolumes"
-                  :key="idx"
-                  :model-value="vol"
-                  :account-volumes="volumeManager.accountVolumes.value"
-                  :storage-quota="volumeManager.storageQuota.value"
-                  :create-loading="volumeManager.createLoading.value"
-                  :suggested-target="service?.image ? volumeManager.suggestedVolumePath(service.image) ?? undefined : undefined"
-                  @update:model-value="configVolumes[idx] = $event"
-                  @volume-created="handleVolumeCreated(idx, $event)"
-                  @remove="removeVolume(idx)"
-                  @browse="browsingVolumeName = $event"
-                />
-              </div>
+              <VolumeConfigurator
+                v-model="configVolumes"
+                :service-name="service?.name"
+                :image="service?.image"
+              />
             </div>
             <!-- Migration failure banner -->
             <div v-if="migrationFailures.length > 0" class="px-6 py-4 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">

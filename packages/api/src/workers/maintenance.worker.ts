@@ -1,5 +1,5 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, uptimeSnapshots, serviceAnalytics, eq, and, lt, lte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning, getDialect } from '@fleet/db';
+import { db, nodes, deployments, backups, backupSchedules, accounts, services, users, userAccounts, subscriptions, domainRegistrations, domainTldPricing, subdomainClaims, billingConfig, storageVolumes, auditLog, errorLog, logArchives, platformSettings, uptimeSnapshots, serviceAnalytics, eq, and, lt, lte, gte, like, isNull, isNotNull, inArray, sql, desc, asc, safeTransaction, updateReturning, getDialect } from '@fleet/db';
 import { backupService } from '../services/backup.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { usageService } from '../services/usage.service.js';
@@ -103,6 +103,10 @@ interface VisitorAnalyticsCollectionData {
   type: 'visitor-analytics-collection';
 }
 
+interface SecurityCheckData {
+  type: 'security-check';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -126,11 +130,38 @@ type MaintenanceJobData =
   | UptimeSnapshotData
   | AnalyticsCollectionData
   | AnalyticsDownsampleData
-  | VisitorAnalyticsCollectionData;
+  | VisitorAnalyticsCollectionData
+  | SecurityCheckData;
+
+/** Notify all super admins via in-app notification (deduplicates by accountId) */
+async function notifySuperAdmins(opts: { type: string; title: string; message: string; resourceType?: string }) {
+  const superAdmins = await db.query.users.findMany({
+    where: and(eq(users.isSuper, true), isNull(users.deletedAt)),
+  });
+  const memberships = await db.query.userAccounts.findMany({
+    where: inArray(userAccounts.userId, superAdmins.map(u => u.id)),
+  });
+  const seen = new Set<string>();
+  for (const m of memberships) {
+    if (seen.has(m.accountId)) continue;
+    seen.add(m.accountId);
+    await notificationService.create(m.accountId, {
+      type: opts.type,
+      title: opts.title,
+      message: opts.message,
+      userId: m.userId,
+      resourceType: opts.resourceType,
+    });
+  }
+}
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
   const allNodes = await db.query.nodes.findMany();
+  const valkey = await getValkey();
+
+  const offlineNodes: string[] = [];
+  const recoveredNodes: string[] = [];
 
   for (const node of allNodes) {
     const isStale = !node.lastHeartbeat || node.lastHeartbeat < fiveMinAgo;
@@ -141,15 +172,63 @@ async function checkNodeHealth(): Promise<void> {
         .set({ status: 'offline', updatedAt: new Date() })
         .where(eq(nodes.id, node.id));
 
-      logger.info(`Node ${node.hostname} marked offline (no heartbeat)`);
+      offlineNodes.push(node.hostname ?? node.id);
+      logger.warn(`Node ${node.hostname} marked offline (no heartbeat)`);
+
+      eventService.log({
+        eventType: EventTypes.NODE_OFFLINE,
+        description: `Node ${node.hostname} went offline — no heartbeat for 5+ minutes`,
+        source: 'system',
+        resourceType: 'node',
+        resourceId: node.id,
+        details: { hostname: node.hostname, lastHeartbeat: node.lastHeartbeat?.toISOString() },
+      });
     } else if (!isStale && node.status === 'offline') {
       await db
         .update(nodes)
         .set({ status: 'active', updatedAt: new Date() })
         .where(eq(nodes.id, node.id));
 
+      recoveredNodes.push(node.hostname ?? node.id);
       logger.info(`Node ${node.hostname} back online`);
+
+      eventService.log({
+        eventType: EventTypes.NODE_RECOVERED,
+        description: `Node ${node.hostname} recovered and is back online`,
+        source: 'system',
+        resourceType: 'node',
+        resourceId: node.id,
+        details: { hostname: node.hostname },
+      });
     }
+  }
+
+  // Notify super admins on node state changes (15 min cooldown via Valkey)
+  if (offlineNodes.length > 0) {
+    const dedupKey = `alert:node_offline:${offlineNodes.sort().join(',')}`;
+    const alreadySent = valkey ? await valkey.get(dedupKey) : null;
+    if (!alreadySent) {
+      if (valkey) await valkey.set(dedupKey, '1', 'EX', 900);
+      await notifySuperAdmins({
+        type: 'infrastructure_alert',
+        title: offlineNodes.length === 1
+          ? `Node Offline: ${offlineNodes[0]}`
+          : `${offlineNodes.length} Nodes Went Offline`,
+        message: `Node(s) stopped sending heartbeats and marked offline: ${offlineNodes.join(', ')}. Check cluster health immediately.`,
+        resourceType: 'node',
+      });
+    }
+  }
+
+  if (recoveredNodes.length > 0) {
+    await notifySuperAdmins({
+      type: 'infrastructure_alert',
+      title: recoveredNodes.length === 1
+        ? `Node Recovered: ${recoveredNodes[0]}`
+        : `${recoveredNodes.length} Nodes Recovered`,
+      message: `Node(s) back online: ${recoveredNodes.join(', ')}.`,
+      resourceType: 'node',
+    });
   }
 }
 
@@ -158,7 +237,7 @@ async function syncServiceStatus(): Promise<void> {
   //    Only select the columns we need to minimize data transfer
   const toCheck = await db.query.services.findMany({
     where: and(isNull(services.deletedAt)),
-    columns: { id: true, name: true, status: true, dockerServiceId: true, replicas: true },
+    columns: { id: true, name: true, status: true, dockerServiceId: true, replicas: true, accountId: true },
   });
 
   const active = toCheck.filter((s) => s.status === 'running' || s.status === 'deploying');
@@ -259,6 +338,43 @@ async function syncServiceStatus(): Promise<void> {
       { stopped: markStopped.length + markStoppedClear.length, failed: markFailed.length, running: markRunning.length },
       `Service status sync: updated ${total}/${active.length} service(s)`,
     );
+  }
+
+  // Notify service owners when their service crashes
+  if (markFailed.length > 0) {
+    const failedServices = active.filter(s => markFailed.includes(s.id));
+    for (const svc of failedServices) {
+      logger.warn({ serviceId: svc.id, name: svc.name }, `Service ${svc.name} crashed`);
+
+      eventService.log({
+        eventType: EventTypes.SERVICE_CRASHED,
+        accountId: svc.accountId,
+        description: `Service "${svc.name}" crashed — all tasks failed`,
+        source: 'system',
+        resourceType: 'service',
+        resourceId: svc.id,
+        resourceName: svc.name,
+      });
+
+      if (svc.accountId) {
+        await notificationService.create(svc.accountId, {
+          type: 'service_alert',
+          title: `Service Crashed: ${svc.name}`,
+          message: `Your service "${svc.name}" has crashed — all Docker tasks are in a failed state. Check logs and redeploy.`,
+          resourceType: 'service',
+        });
+      }
+    }
+
+    // Also alert super admins if multiple services crash simultaneously
+    if (failedServices.length >= 3) {
+      await notifySuperAdmins({
+        type: 'infrastructure_alert',
+        title: `${failedServices.length} Services Crashed Simultaneously`,
+        message: `Multiple services crashed at once: ${failedServices.map(s => s.name).slice(0, 10).join(', ')}. This may indicate an infrastructure issue.`,
+        resourceType: 'service',
+      });
+    }
   }
 }
 
@@ -1927,6 +2043,7 @@ async function pollRegistryDigests(): Promise<void> {
 
 async function recordUptimeSnapshot(): Promise<void> {
   const snapshots: Array<{ service: string; status: string; responseMs: number | null }> = [];
+  const valkey = await getValkey();
 
   // API — always healthy if we're executing this
   snapshots.push({ service: 'api', status: 'healthy', responseMs: null });
@@ -1942,7 +2059,6 @@ async function recordUptimeSnapshot(): Promise<void> {
 
   // Valkey (Redis)
   try {
-    const valkey = await getValkey();
     if (valkey) {
       const t0 = Date.now();
       await valkey.ping();
@@ -1967,6 +2083,78 @@ async function recordUptimeSnapshot(): Promise<void> {
   // Insert all snapshots
   for (const snap of snapshots) {
     await db.insert(uptimeSnapshots).values(snap);
+  }
+
+  // Infrastructure alerting — compare current status with previous, notify on state changes
+  const serviceLabels: Record<string, string> = {
+    docker: 'Docker Swarm',
+    queue: 'Valkey (Redis)',
+    storage: 'Storage',
+  };
+
+  for (const snap of snapshots) {
+    if (snap.service === 'api') continue; // API is always healthy here
+    const label = serviceLabels[snap.service] ?? snap.service;
+    const prevKey = `infra:status:${snap.service}`;
+    const prevStatus = valkey ? await valkey.get(prevKey) : null;
+
+    if (valkey) await valkey.set(prevKey, snap.status, 'EX', 1800); // 30 min TTL
+
+    // Only alert on state transitions (or first-time down when no previous state)
+    if (snap.status === 'down' && prevStatus !== 'down') {
+      logger.error(`Infrastructure alert: ${label} is DOWN`);
+      eventService.log({
+        eventType: EventTypes.INFRA_DOWN,
+        description: `${label} is down`,
+        source: 'system',
+        resourceType: 'infrastructure',
+        details: { service: snap.service },
+      });
+
+      const dedupKey = `alert:infra_down:${snap.service}`;
+      const alreadySent = valkey ? await valkey.get(dedupKey) : null;
+      if (!alreadySent) {
+        if (valkey) await valkey.set(dedupKey, '1', 'EX', 900); // 15 min cooldown
+        await notifySuperAdmins({
+          type: 'infrastructure_alert',
+          title: `Infrastructure Down: ${label}`,
+          message: `${label} is not responding. This may affect service deployments, queues, or storage. Investigate immediately.`,
+          resourceType: 'infrastructure',
+        });
+      }
+    } else if (snap.status === 'degraded' && prevStatus !== 'degraded') {
+      logger.warn(`Infrastructure alert: ${label} is DEGRADED`);
+      eventService.log({
+        eventType: EventTypes.INFRA_DEGRADED,
+        description: `${label} is degraded`,
+        source: 'system',
+        resourceType: 'infrastructure',
+        details: { service: snap.service },
+      });
+
+      await notifySuperAdmins({
+        type: 'infrastructure_alert',
+        title: `Infrastructure Degraded: ${label}`,
+        message: `${label} is reporting degraded health. Performance may be impacted.`,
+        resourceType: 'infrastructure',
+      });
+    } else if (snap.status === 'healthy' && (prevStatus === 'down' || prevStatus === 'degraded')) {
+      logger.info(`Infrastructure recovered: ${label} is healthy again`);
+      eventService.log({
+        eventType: EventTypes.INFRA_RECOVERED,
+        description: `${label} recovered and is healthy`,
+        source: 'system',
+        resourceType: 'infrastructure',
+        details: { service: snap.service },
+      });
+
+      await notifySuperAdmins({
+        type: 'infrastructure_alert',
+        title: `Infrastructure Recovered: ${label}`,
+        message: `${label} is back to healthy status.`,
+        resourceType: 'infrastructure',
+      });
+    }
   }
 
   // Prune snapshots older than 90 days
@@ -2049,6 +2237,105 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
       await visitorAnalyticsService.collectVisitorAnalytics();
       break;
     }
+    case 'security-check':
+      await executeSecurityCheck();
+      break;
+  }
+}
+
+/**
+ * Security check — detect brute force attacks, credential stuffing, and
+ * other threats from audit log data. Sends notifications to super admins
+ * when threat level is elevated.
+ */
+async function executeSecurityCheck(): Promise<void> {
+  try {
+    const valkey = await getValkey();
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    // Count failed logins in last 5 minutes per IP
+    const rapidFireIps = await db
+      .select({
+        ipAddress: auditLog.ipAddress,
+        count: sql<number>`count(*)`.as('count'),
+      })
+      .from(auditLog)
+      .where(and(
+        gte(auditLog.createdAt, fiveMinAgo),
+        eq(auditLog.eventType, 'auth.login_failed'),
+      ))
+      .groupBy(auditLog.ipAddress)
+      .having(sql`count(*) >= 5`);
+
+    // Count failed logins in last hour per IP (brute force)
+    const bruteForceIps = await db
+      .select({
+        ipAddress: auditLog.ipAddress,
+        count: sql<number>`count(*)`.as('count'),
+      })
+      .from(auditLog)
+      .where(and(
+        gte(auditLog.createdAt, oneHourAgo),
+        eq(auditLog.eventType, 'auth.login_failed'),
+      ))
+      .groupBy(auditLog.ipAddress)
+      .having(sql`count(*) >= 10`);
+
+    // Determine threat level
+    let threatLevel: 'low' | 'medium' | 'high' | 'critical' = 'low';
+    if (bruteForceIps.length > 0 || rapidFireIps.length > 0) threatLevel = 'high';
+    if (bruteForceIps.length > 3 || rapidFireIps.length > 3) threatLevel = 'critical';
+
+    // Check if threat level changed from last check
+    const lastLevel = valkey ? await valkey.get('security:threat_level') : null;
+    if (valkey) {
+      await valkey.set('security:threat_level', threatLevel, 'EX', 600);
+    }
+
+    // Only notify if escalated (not on every check)
+    const shouldNotify =
+      threatLevel !== 'low' &&
+      lastLevel !== threatLevel &&
+      (threatLevel === 'critical' || (threatLevel === 'high' && lastLevel !== 'critical'));
+
+    if (shouldNotify) {
+      const threatIps = [...rapidFireIps, ...bruteForceIps]
+        .map(ip => ip.ipAddress)
+        .filter(Boolean)
+        .slice(0, 5);
+
+      await notifySuperAdmins({
+        type: 'security_alert',
+        title: threatLevel === 'critical'
+          ? 'Critical Security Alert'
+          : 'Security Alert — Elevated Threat Level',
+        message: threatLevel === 'critical'
+          ? `Multiple active attacks detected from ${bruteForceIps.length + rapidFireIps.length} IPs. Suspicious IPs: ${threatIps.join(', ')}. Check the Security Monitor for details.`
+          : `Brute force or rapid-fire login attempts detected from ${threatIps.join(', ')}. Check the Security Monitor for details.`,
+        resourceType: 'security',
+      });
+
+      // Also log as an audit event
+      eventService.log({
+        eventType: EventTypes.AUTH_BRUTE_FORCE_DETECTED,
+        description: `Threat level escalated to ${threatLevel}: ${bruteForceIps.length} brute force IPs, ${rapidFireIps.length} rapid-fire IPs`,
+        source: 'system',
+        details: {
+          threatLevel,
+          bruteForceIps: bruteForceIps.map(ip => ({ ip: ip.ipAddress, count: ip.count })),
+          rapidFireIps: rapidFireIps.map(ip => ({ ip: ip.ipAddress, count: ip.count })),
+        },
+      });
+
+      logger.warn({
+        threatLevel,
+        bruteForceIps: bruteForceIps.length,
+        rapidFireIps: rapidFireIps.length,
+      }, `Security threat level escalated to ${threatLevel}`);
+    }
+  } catch (err) {
+    logger.error({ err }, 'Security check failed');
   }
 }
 
