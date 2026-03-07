@@ -22,3 +22,4 @@ export * from './support';
 export * from './self-healing';
 export * from './stacks';
 export * from './analytics';
+export * from './visitor-analytics';

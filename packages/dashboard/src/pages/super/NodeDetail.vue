@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Server, ArrowLeft, Cpu, MemoryStick, HardDrive, Container,
-  SquareTerminal, Activity, RefreshCw, MapPin,
+  SquareTerminal, Activity, RefreshCw, MapPin, BarChart3,
   Play, Pause, Trash2, Network, Crown, Shield, X,
   KeyRound, Copy, Check, Plus, ShieldCheck, Globe
 } from 'lucide-vue-next'
@@ -23,6 +23,7 @@ const nodeId = route.params.id as string
 const activeTab = ref('overview')
 const tabs = [
   { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'metrics', label: 'Metrics', icon: BarChart3 },
   { id: 'containers', label: 'Containers', icon: Container },
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
   { id: 'ssh', label: 'SSH Access', icon: KeyRound },
@@ -35,6 +36,11 @@ const error = ref('')
 
 // Latest metrics
 const latestMetrics = ref<any>(null)
+
+// Metrics history
+const metricsHistory = ref<any[]>([])
+const metricsLoading = ref(false)
+const metricsRange = ref<'1' | '6' | '24' | '72' | '168'>('24')
 
 // Containers
 const containers = ref<any[]>([])
@@ -86,6 +92,112 @@ async function fetchMetrics() {
   } catch { /* metrics unavailable */ }
 }
 
+// ── Fetch metrics history ──
+async function fetchMetricsHistory() {
+  metricsLoading.value = true
+  try {
+    const data = await api.get<any>(`/nodes/${nodeId}/metrics?hours=${metricsRange.value}`)
+    metricsHistory.value = Array.isArray(data) ? data : []
+  } catch {
+    metricsHistory.value = []
+  } finally {
+    metricsLoading.value = false
+  }
+}
+
+// ── SVG chart helpers ──
+function buildChartPath(points: { x: number; y: number }[], w: number, h: number, filled = false): string {
+  if (points.length === 0) return ''
+  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x * w).toFixed(1)},${(h - p.y * h).toFixed(1)}`).join(' ')
+  if (!filled) return path
+  return `${path} L${w},${h} L0,${h} Z`
+}
+
+function downsample(arr: any[], maxPoints: number): any[] {
+  if (arr.length <= maxPoints) return arr
+  const step = arr.length / maxPoints
+  const result: any[] = []
+  for (let i = 0; i < maxPoints; i++) {
+    result.push(arr[Math.floor(i * step)])
+  }
+  if (result[result.length - 1] !== arr[arr.length - 1]) result.push(arr[arr.length - 1])
+  return result
+}
+
+const memoryChartData = computed(() => {
+  const data = downsample(metricsHistory.value, 120)
+  if (data.length < 2) return { line: '', fill: '', labels: [], peak: 0, avg: 0, current: 0 }
+  const maxMem = Math.max(...data.map((m: any) => m.memTotal || 0)) || 1
+  const points = data.map((m: any, i: number) => ({
+    x: i / (data.length - 1),
+    y: Math.min(1, (m.memUsed || 0) / maxMem),
+  }))
+  const vals = data.map((m: any) => (m.memTotal ? ((m.memUsed || 0) / m.memTotal) * 100 : 0))
+  const labels = buildTimeLabels(data)
+  return {
+    line: buildChartPath(points, 600, 120),
+    fill: buildChartPath(points, 600, 120, true),
+    labels,
+    peak: Math.round(Math.max(...vals)),
+    avg: Math.round(vals.reduce((a: number, b: number) => a + b, 0) / vals.length),
+    current: Math.round(vals[vals.length - 1] || 0),
+  }
+})
+
+const diskChartData = computed(() => {
+  const data = downsample(metricsHistory.value, 120)
+  if (data.length < 2) return { line: '', fill: '', labels: [], peak: 0, avg: 0, current: 0 }
+  const maxDisk = Math.max(...data.map((m: any) => m.diskTotal || 0)) || 1
+  const points = data.map((m: any, i: number) => ({
+    x: i / (data.length - 1),
+    y: Math.min(1, (m.diskUsed || 0) / maxDisk),
+  }))
+  const vals = data.map((m: any) => (m.diskTotal ? ((m.diskUsed || 0) / m.diskTotal) * 100 : 0))
+  const labels = buildTimeLabels(data)
+  return {
+    line: buildChartPath(points, 600, 120),
+    fill: buildChartPath(points, 600, 120, true),
+    labels,
+    peak: Math.round(Math.max(...vals)),
+    avg: Math.round(vals.reduce((a: number, b: number) => a + b, 0) / vals.length),
+    current: Math.round(vals[vals.length - 1] || 0),
+  }
+})
+
+const containerChartData = computed(() => {
+  const data = downsample(metricsHistory.value, 120)
+  if (data.length < 2) return { line: '', fill: '', labels: [], peak: 0, current: 0 }
+  const maxCount = Math.max(...data.map((m: any) => m.containerCount ?? 0), 1)
+  const points = data.map((m: any, i: number) => ({
+    x: i / (data.length - 1),
+    y: Math.min(1, (m.containerCount ?? 0) / maxCount),
+  }))
+  const labels = buildTimeLabels(data)
+  return {
+    line: buildChartPath(points, 600, 120),
+    fill: buildChartPath(points, 600, 120, true),
+    labels,
+    peak: Math.max(...data.map((m: any) => m.containerCount ?? 0)),
+    current: data[data.length - 1]?.containerCount ?? 0,
+  }
+})
+
+function buildTimeLabels(data: any[]): { x: number; label: string }[] {
+  if (data.length < 2) return []
+  const labelCount = 5
+  const labels: { x: number; label: string }[] = []
+  for (let i = 0; i < labelCount; i++) {
+    const idx = Math.floor((i / (labelCount - 1)) * (data.length - 1))
+    const d = new Date(data[idx].recordedAt)
+    const hours = Number(metricsRange.value)
+    const label = hours <= 24
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    labels.push({ x: idx / (data.length - 1), label })
+  }
+  return labels
+}
+
 // ── Fetch containers ──
 async function fetchContainers() {
   containersLoading.value = true
@@ -116,6 +228,10 @@ function stopContainersPolling() {
 // ── Tab switching ──
 function onTabChange(tabId: string) {
   activeTab.value = tabId
+
+  if (tabId === 'metrics') {
+    fetchMetricsHistory()
+  }
 
   if (tabId === 'containers') {
     fetchContainers()
@@ -622,6 +738,154 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Metrics History Tab -->
+      <div v-if="activeTab === 'metrics'" class="space-y-6">
+        <!-- Time range selector -->
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Resource History</h3>
+          <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+            <button
+              v-for="range in [{ v: '1', l: '1h' }, { v: '6', l: '6h' }, { v: '24', l: '24h' }, { v: '72', l: '3d' }, { v: '168', l: '7d' }]"
+              :key="range.v"
+              @click="metricsRange = range.v as any; fetchMetricsHistory()"
+              :class="[
+                'px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+                metricsRange === range.v
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              ]"
+            >
+              {{ range.l }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Loading -->
+        <div v-if="metricsLoading && metricsHistory.length === 0" class="flex items-center justify-center py-12">
+          <CompassSpinner />
+        </div>
+
+        <!-- No data -->
+        <div v-else-if="metricsHistory.length < 2" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-8 text-center">
+          <Activity class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+          <p class="text-sm text-gray-500 dark:text-gray-400">No metrics data available for this time range.</p>
+          <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">The Fleet agent must be running on this node to collect metrics.</p>
+        </div>
+
+        <template v-else>
+          <!-- Memory chart -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2">
+                <MemoryStick class="w-4 h-4 text-purple-500" />
+                <span class="text-sm font-semibold text-gray-900 dark:text-white">Memory Usage</span>
+              </div>
+              <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span>Current: <strong class="text-gray-900 dark:text-white">{{ memoryChartData.current }}%</strong></span>
+                <span>Avg: <strong>{{ memoryChartData.avg }}%</strong></span>
+                <span>Peak: <strong :class="memoryChartData.peak > 80 ? 'text-red-600 dark:text-red-400' : ''">{{ memoryChartData.peak }}%</strong></span>
+              </div>
+            </div>
+            <div class="relative">
+              <svg viewBox="0 0 600 120" class="w-full h-32" preserveAspectRatio="none">
+                <!-- Grid lines -->
+                <line v-for="i in 4" :key="i" :x1="0" :y1="i * 30" :x2="600" :y2="i * 30" stroke="currentColor" class="text-gray-100 dark:text-gray-700" stroke-width="0.5" />
+                <!-- Fill -->
+                <path :d="memoryChartData.fill" fill="url(#memGradient)" opacity="0.3" />
+                <!-- Line -->
+                <path :d="memoryChartData.line" fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                <defs>
+                  <linearGradient id="memGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#a855f7" stop-opacity="0.4" />
+                    <stop offset="100%" stop-color="#a855f7" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <!-- Y-axis labels -->
+              <div class="absolute top-0 left-0 h-full flex flex-col justify-between text-[9px] text-gray-400 dark:text-gray-500 pointer-events-none py-0.5">
+                <span>100%</span>
+                <span>75%</span>
+                <span>50%</span>
+                <span>25%</span>
+                <span>0%</span>
+              </div>
+            </div>
+            <!-- X-axis labels -->
+            <div class="flex justify-between mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+              <span v-for="label in memoryChartData.labels" :key="label.x">{{ label.label }}</span>
+            </div>
+          </div>
+
+          <!-- Disk chart -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2">
+                <HardDrive class="w-4 h-4 text-green-500" />
+                <span class="text-sm font-semibold text-gray-900 dark:text-white">Disk Usage</span>
+              </div>
+              <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span>Current: <strong class="text-gray-900 dark:text-white">{{ diskChartData.current }}%</strong></span>
+                <span>Avg: <strong>{{ diskChartData.avg }}%</strong></span>
+                <span>Peak: <strong :class="diskChartData.peak > 80 ? 'text-red-600 dark:text-red-400' : ''">{{ diskChartData.peak }}%</strong></span>
+              </div>
+            </div>
+            <div class="relative">
+              <svg viewBox="0 0 600 120" class="w-full h-32" preserveAspectRatio="none">
+                <line v-for="i in 4" :key="i" :x1="0" :y1="i * 30" :x2="600" :y2="i * 30" stroke="currentColor" class="text-gray-100 dark:text-gray-700" stroke-width="0.5" />
+                <path :d="diskChartData.fill" fill="url(#diskGradient)" opacity="0.3" />
+                <path :d="diskChartData.line" fill="none" stroke="#22c55e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                <defs>
+                  <linearGradient id="diskGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#22c55e" stop-opacity="0.4" />
+                    <stop offset="100%" stop-color="#22c55e" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div class="absolute top-0 left-0 h-full flex flex-col justify-between text-[9px] text-gray-400 dark:text-gray-500 pointer-events-none py-0.5">
+                <span>100%</span>
+                <span>75%</span>
+                <span>50%</span>
+                <span>25%</span>
+                <span>0%</span>
+              </div>
+            </div>
+            <div class="flex justify-between mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+              <span v-for="label in diskChartData.labels" :key="label.x">{{ label.label }}</span>
+            </div>
+          </div>
+
+          <!-- Container count chart -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2">
+                <Container class="w-4 h-4 text-blue-500" />
+                <span class="text-sm font-semibold text-gray-900 dark:text-white">Container Count</span>
+              </div>
+              <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span>Current: <strong class="text-gray-900 dark:text-white">{{ containerChartData.current }}</strong></span>
+                <span>Peak: <strong>{{ containerChartData.peak }}</strong></span>
+              </div>
+            </div>
+            <div class="relative">
+              <svg viewBox="0 0 600 120" class="w-full h-32" preserveAspectRatio="none">
+                <line v-for="i in 4" :key="i" :x1="0" :y1="i * 30" :x2="600" :y2="i * 30" stroke="currentColor" class="text-gray-100 dark:text-gray-700" stroke-width="0.5" />
+                <path :d="containerChartData.fill" fill="url(#containerGradient)" opacity="0.3" />
+                <path :d="containerChartData.line" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                <defs>
+                  <linearGradient id="containerGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.4" />
+                    <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+            <div class="flex justify-between mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+              <span v-for="label in containerChartData.labels" :key="label.x">{{ label.label }}</span>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- Containers Tab -->

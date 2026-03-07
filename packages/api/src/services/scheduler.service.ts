@@ -220,6 +220,17 @@ class SchedulerService {
       },
     );
 
+    // Visitor analytics — every 5 minutes
+    // Parses Traefik JSON access logs and aggregates unique visitors, page views, etc.
+    await getMaintenanceQueue().add(
+      'visitor-analytics-collection',
+      { type: 'visitor-analytics-collection' },
+      {
+        repeat: { every: 5 * 60 * 1000 },
+        jobId: 'system:visitor-analytics-collection',
+      },
+    );
+
     // Load backup schedules from DB and register as repeatable jobs
     const schedules = await db.query.backupSchedules.findMany({
       where: eq(backupSchedules.enabled, true),

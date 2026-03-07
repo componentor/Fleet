@@ -67,7 +67,7 @@ class AnalyticsService {
   async collectAnalytics(): Promise<void> {
     try {
       // 1. Build mapping: Docker Swarm service name → Fleet service record (single batch query)
-      const serviceMap = await this.buildServiceNameMap();
+      const { serviceMap, traefikNameToDockerName } = await this.buildServiceNameMap();
       if (serviceMap.size === 0) {
         logger.debug('No services found for analytics collection');
         return;
@@ -105,8 +105,12 @@ class AnalyticsService {
         const svcLabel = extractLabel(labels, 'service');
         if (!svcLabel) continue;
 
-        const dockerSvcName = svcLabel.replace(/@(swarm|docker)$/, '');
-        if (!serviceMap.has(dockerSvcName)) continue;
+        const rawSvcName = svcLabel.replace(/@(swarm|docker)$/, '');
+        // Traefik uses hyphenated names in metrics, map back to Docker service name
+        const dockerSvcName = serviceMap.has(rawSvcName)
+          ? rawSvcName
+          : traefikNameToDockerName.get(rawSvcName);
+        if (!dockerSvcName || !serviceMap.has(dockerSvcName)) continue;
 
         if (!serviceCounters.has(dockerSvcName)) {
           serviceCounters.set(dockerSvcName, { requests: {}, bytesIn: 0, bytesOut: 0 });
@@ -273,13 +277,20 @@ class AnalyticsService {
    * Build mapping from Docker Swarm service names to Fleet service IDs.
    * Uses a single batch DB query instead of N+1 per-service queries.
    */
-  private async buildServiceNameMap(): Promise<Map<string, { serviceId: string; accountId: string }>> {
-    const map = new Map<string, { serviceId: string; accountId: string }>();
+  private async buildServiceNameMap(): Promise<{
+    serviceMap: Map<string, { serviceId: string; accountId: string }>;
+    traefikNameToDockerName: Map<string, string>;
+  }> {
+    const serviceMap = new Map<string, { serviceId: string; accountId: string }>();
+    const traefikNameToDockerName = new Map<string, string>();
 
     try {
       const swarmServices = await orchestrator.listServices();
 
       // Collect all fleet service IDs and their Docker names in one pass
+      // Traefik uses the router/service name from labels, which replaces
+      // non-alphanumeric chars with hyphens (see buildTraefikLabels).
+      // We need to map BOTH the Docker name AND the Traefik name.
       const serviceIdToDockerName = new Map<string, string>();
       for (const svc of swarmServices) {
         const labels = svc.Spec?.Labels || {};
@@ -287,10 +298,15 @@ class AnalyticsService {
         const dockerName = svc.Spec?.Name;
         if (serviceId && dockerName) {
           serviceIdToDockerName.set(serviceId, dockerName);
+          // Traefik router name: non-alphanumeric → hyphen
+          const traefikName = dockerName.replace(/[^a-zA-Z0-9]/g, '-');
+          if (traefikName !== dockerName) {
+            traefikNameToDockerName.set(traefikName, dockerName);
+          }
         }
       }
 
-      if (serviceIdToDockerName.size === 0) return map;
+      if (serviceIdToDockerName.size === 0) return { serviceMap, traefikNameToDockerName };
 
       // Single batch query for all service IDs
       const serviceIds = [...serviceIdToDockerName.keys()];
@@ -307,14 +323,14 @@ class AnalyticsService {
       for (const dbSvc of dbServices) {
         const dockerName = serviceIdToDockerName.get(dbSvc.id);
         if (dockerName) {
-          map.set(dockerName, { serviceId: dbSvc.id, accountId: dbSvc.accountId });
+          serviceMap.set(dockerName, { serviceId: dbSvc.id, accountId: dbSvc.accountId });
         }
       }
     } catch (err) {
       logger.error({ err }, 'Failed to build service name map for analytics');
     }
 
-    return map;
+    return { serviceMap, traefikNameToDockerName };
   }
 }
 

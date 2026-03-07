@@ -182,6 +182,7 @@
     "logs": "Logs",
     "roles": "Roles",
     "support": "Support",
+    "analytics": "Analytics",
     "selfHealing": "Self-Repair",
     "database": "Database",
     "group": {

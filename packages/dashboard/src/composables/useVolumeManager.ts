@@ -112,6 +112,7 @@ export function useVolumeManager() {
 
   function suggestedVolumeName(serviceName: string): string {
     return `${serviceName}-data`
+      .toLowerCase()
       .replace(/[^a-z0-9-]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')

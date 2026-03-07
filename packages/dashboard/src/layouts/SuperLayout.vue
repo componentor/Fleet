@@ -41,6 +41,7 @@ import {
   Bot,
   FileText,
   Database,
+  BarChart3,
 } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -132,6 +133,7 @@ const allNavGroups: NavGroup[] = [
   {
     labelKey: 'nav.group.monitoring',
     items: [
+      { nameKey: 'nav.analytics', path: '/admin/analytics', icon: BarChart3, section: 'dashboard' },
       { nameKey: 'nav.events', path: '/admin/events', icon: ScrollText, section: 'events' },
       { nameKey: 'nav.errors', path: '/admin/errors', icon: Bug, section: 'errors' },
       { nameKey: 'nav.logs', path: '/admin/logs', icon: FileText, section: 'services' },
