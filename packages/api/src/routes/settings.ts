@@ -1576,21 +1576,40 @@ settings.get('/orchestrator/k3s-status', authMiddleware, requireAdmin as any, (a
     installed = output.includes('INSTALLED');
     running = !output.includes('NOT_RUNNING');
 
-    // Read join token — look for the token line (starts with K10 or similar)
-    const tokenLine = output.split('\n').find((l: string) => l.startsWith('K10') || l.startsWith('K3s'));
-    if (tokenLine && tokenLine !== 'NO_TOKEN') {
-      joinToken = tokenLine.trim();
+    // Read join token — look for lines containing K10 token pattern (may have Docker log prefix bytes)
+    const tokenLine = output.split('\n').find((l: string) => l.includes('K10') || l.includes('K3s'));
+    if (tokenLine && !tokenLine.includes('NO_TOKEN')) {
+      // Extract the token by finding the K10/K3s prefix within the line
+      const match = tokenLine.match(/(K10[^\s]+|K3s[^\s]+)/);
+      if (match) joinToken = match[1]!.trim();
     }
 
     // Detect server URL
     const ipResult = await orchestrator.runOnLocalHost(
-      "ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}'",
+      'hostname -I 2>/dev/null | cut -d" " -f1',
       { timeoutMs: 10000 },
     );
-    const ip = (ipResult.stdout ?? '').trim();
+    const ip = (ipResult.stdout ?? '').replace(/[^0-9.]/g, '').trim();
     if (ip) serverUrl = `https://${ip}:6443`;
   } catch {
     logs.push('Could not check k3s status on local host');
+  }
+
+  // Fallback: check DB (saved by install-k3s endpoint)
+  if (!joinToken) {
+    try {
+      const tokenRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:joinToken') });
+      if (tokenRow?.value) {
+        try { joinToken = decrypt(tokenRow.value as string); } catch { joinToken = tokenRow.value as string; }
+        logs.push('Token found from database');
+      }
+    } catch { /* ignore */ }
+  }
+  if (!serverUrl) {
+    try {
+      const urlRow = await db.query.platformSettings.findFirst({ where: eq(platformSettings.key, 'k3s:serverUrl') });
+      if (urlRow?.value) { serverUrl = urlRow.value as string; logs.push('Server URL found from database'); }
+    } catch { /* ignore */ }
   }
 
   // Fallback: check env vars (set by install.sh via env_file)
@@ -1908,12 +1927,13 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
 
       // Step 2: Install on all worker nodes
       await step(2, TOTAL, 'Installing k3s agent on all worker nodes...');
-      const escapedToken = joinToken.replace(/'/g, "'\\''");
-      const escapedUrl = serverUrl.replace(/'/g, "'\\''");
+      // Use double quotes — runOnAllNodesPrivileged wraps in single quotes internally
+      const escapedToken = joinToken.replace(/"/g, '\\"');
+      const escapedUrl = serverUrl.replace(/"/g, '\\"');
 
-      const result = await orchestrator.runOnAllNodes(
+      const result = await orchestrator.runOnAllNodesPrivileged(
         `if command -v k3s >/dev/null 2>&1; then echo "k3s already installed"; ` +
-        `else curl -sfL https://get.k3s.io | K3S_URL='${escapedUrl}' K3S_TOKEN='${escapedToken}' sh - 2>&1; fi`,
+        `else curl -sfL https://get.k3s.io | K3S_URL="${escapedUrl}" K3S_TOKEN="${escapedToken}" sh - 2>&1; fi`,
         { timeoutMs: 300000 },
       );
 
