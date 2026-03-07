@@ -15,7 +15,17 @@ import { logger, logToErrorTable } from '../services/logger.js';
 import { join } from 'node:path';
 import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
-import { orchestrator, getDefaultOrchestratorType, setDefaultOrchestratorType, getAvailableOrchestrators, isKubernetesAvailable, isSwarmAvailable, getOrchestrator, reloadOrchestrators } from '../services/orchestrator.js';
+import { getDefaultOrchestratorType, setDefaultOrchestratorType, getAvailableOrchestrators, isKubernetesAvailable, isSwarmAvailable, getOrchestrator, reloadOrchestrators } from '../services/orchestrator.js';
+
+// All orchestrator calls in settings.ts are platform-level operations (managing
+// Fleet's own Docker Swarm services, host systemctl, k3s install, storage setup).
+// These must always use Swarm's nsenter-based approach, even when the default
+// orchestrator for user workloads is Kubernetes.
+const orchestrator = new Proxy({} as ReturnType<typeof getOrchestrator>, {
+  get(_target, prop) {
+    return (getOrchestrator('swarm') as any)[prop];
+  },
+});
 import type { OrchestratorType } from '../services/orchestrator.js';
 import { migrateService, migrateAccountServices } from '../services/orchestrator-migration.service.js';
 
