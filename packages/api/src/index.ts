@@ -66,6 +66,11 @@ try {
   await updateService.initVersion()
 } catch { /* non-critical */ }
 
+// Run upgrade system self-test — detect issues that would block future upgrades
+import('./services/upgrade-guard.service.js')
+  .then(({ upgradeSystemSelfTest }) => upgradeSystemSelfTest())
+  .catch((err) => logger.warn({ err }, 'Upgrade system self-test failed to run'))
+
 // Load JWT secret from DB if not set via env (setup wizard stores it encrypted in platformSettings)
 if (!process.env['JWT_SECRET']) {
   try {
