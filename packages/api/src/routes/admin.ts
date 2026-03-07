@@ -1,7 +1,7 @@
 import { stream } from 'hono/streaming';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, accounts, users, userAccounts, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, accountBillingOverrides, resourceLimits, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, isNotNull, desc, gte, lte } from '@fleet/db';
+import { db, accounts, users, userAccounts, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, accountBillingOverrides, resourceLimits, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, isNotNull, desc, gte, lte, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission, requireSuperAdmin } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
@@ -128,6 +128,66 @@ adminRoutes.openapi(statsRoute, (async (c: any) => {
     .from(errorLog)
     .where(and(eq(errorLog.level, 'fatal'), eq(errorLog.resolved, false)));
 
+  // Failed services count
+  const [failedServices] = await db
+    .select({ count: countSql() })
+    .from(services)
+    .where(and(eq(services.status, 'failed'), isNull(services.deletedAt)));
+
+  // Deploying services count
+  const [deployingServices] = await db
+    .select({ count: countSql() })
+    .from(services)
+    .where(and(
+      or(eq(services.status, 'deploying'), eq(services.status, 'building')),
+      isNull(services.deletedAt),
+    ));
+
+  // Recent deployments (last 24h, across all accounts)
+  let recentDeploys: any[] = [];
+  try {
+    recentDeploys = await db.query.deployments.findMany({
+      where: gte(deployments.createdAt, oneDayAgo),
+      orderBy: desc(deployments.createdAt),
+      limit: 10,
+      columns: {
+        id: true, serviceId: true, status: true, trigger: true, progressStep: true,
+        imageTag: true, commitSha: true, startedAt: true, completedAt: true, createdAt: true,
+      },
+    });
+    // Enrich with service name and account
+    if (recentDeploys.length > 0) {
+      const svcIds = [...new Set(recentDeploys.map(d => d.serviceId))];
+      const svcs = await db.query.services.findMany({
+        where: inArray(services.id, svcIds),
+        columns: { id: true, name: true, accountId: true },
+      });
+      const svcMap = new Map(svcs.map(s => [s.id, s]));
+      recentDeploys = recentDeploys.map(d => ({
+        ...d,
+        serviceName: svcMap.get(d.serviceId)?.name ?? null,
+        accountId: svcMap.get(d.serviceId)?.accountId ?? null,
+      }));
+    }
+  } catch { /* ignore */ }
+
+  // Queue health (if BullMQ available)
+  let queueHealth = null;
+  try {
+    if (isQueueAvailable()) {
+      const [deployQ, backupQ, maintenanceQ] = await Promise.all([
+        getDeploymentQueue().getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        getBackupQueue().getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        getMaintenanceQueue().getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+      ]);
+      queueHealth = {
+        deployment: deployQ,
+        backup: backupQ,
+        maintenance: maintenanceQ,
+      };
+    }
+  } catch { /* ignore */ }
+
   let swarmInfo = null;
   try {
     swarmInfo = await orchestrator.getClusterInfo();
@@ -135,17 +195,42 @@ adminRoutes.openapi(statsRoute, (async (c: any) => {
     // Docker may not be available
   }
 
+  // K3s/Kubernetes status (lightweight check)
+  let k8sStatus = null;
+  try {
+    const { isKubernetesAvailable: k8sAvail, getDefaultOrchestratorType: getOrcType } = await import('../services/orchestrator.js');
+    k8sStatus = {
+      available: k8sAvail(),
+      isDefault: getOrcType() === 'kubernetes',
+    };
+    if (k8sAvail()) {
+      const { getOrchestrator: getOrch } = await import('../services/orchestrator.js');
+      const k8s = getOrch('kubernetes');
+      try {
+        const clusterInfo = await k8s.getClusterInfo();
+        k8sStatus = { ...k8sStatus, connected: true, nodes: clusterInfo?.nodes ?? null };
+      } catch {
+        k8sStatus = { ...k8sStatus, connected: false };
+      }
+    }
+  } catch { /* ignore */ }
+
   return c.json({
     accounts: accountCount?.count ?? 0,
     users: userCount?.count ?? 0,
     services: serviceCount?.count ?? 0,
     runningServices: runningServices?.count ?? 0,
+    failedServices: failedServices?.count ?? 0,
+    deployingServices: deployingServices?.count ?? 0,
     nodes: nodeCount?.count ?? 0,
     errors: {
       unresolved: unresolvedErrors?.count ?? 0,
       last24h: recentErrors?.count ?? 0,
       fatal: fatalErrors?.count ?? 0,
     },
+    recentDeployments: recentDeploys,
+    queueHealth,
+    k8sStatus,
     swarm: swarmInfo
       ? {
           id: swarmInfo.ID,
