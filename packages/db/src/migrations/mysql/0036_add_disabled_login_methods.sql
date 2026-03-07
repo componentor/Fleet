@@ -1,1 +1,0 @@
-ALTER TABLE `users` ADD COLUMN `disabled_login_methods` json;
