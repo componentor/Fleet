@@ -917,6 +917,9 @@ install_k3s() {
     --disable=servicelb \
     --write-kubeconfig-mode=644" sh -
 
+  # Ensure k3s service is running (installer skips start on reinstall)
+  systemctl start k3s 2>/dev/null || true
+
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
   log "Waiting for k3s to be ready..."
