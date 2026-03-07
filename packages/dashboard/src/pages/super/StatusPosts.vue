@@ -404,7 +404,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading && posts.length === 0" class="flex items-center justify-center py-20">
-      <CompassSpinner size="w-8 h-8" />
+      <CompassSpinner size="w-16 h-16" />
     </div>
 
     <!-- Main two-panel layout -->

@@ -21,7 +21,7 @@ import CompassSpinner from '@/components/CompassSpinner.vue'
       </div>
       <div class="flex flex-col items-center gap-2">
         <span class="text-sm text-gray-500">w-8 h-8</span>
-        <CompassSpinner size="w-8 h-8" />
+        <CompassSpinner size="w-16 h-16" />
       </div>
       <div class="flex flex-col items-center gap-2">
         <span class="text-sm text-gray-500">w-10 h-10</span>
@@ -49,7 +49,7 @@ import CompassSpinner from '@/components/CompassSpinner.vue'
       </div>
       <div class="flex flex-col items-center gap-2">
         <span class="text-sm text-gray-400">w-8 h-8</span>
-        <CompassSpinner size="w-8 h-8" color="text-blue-400" />
+        <CompassSpinner size="w-16 h-16" color="text-blue-400" />
       </div>
       <div class="flex flex-col items-center gap-2">
         <span class="text-sm text-gray-400">w-12 h-12</span>

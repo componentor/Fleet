@@ -46,7 +46,7 @@ onMounted(async () => {
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
     <div class="text-center">
       <template v-if="!error">
-        <CompassSpinner size="w-8 h-8" class="mx-auto" />
+        <CompassSpinner size="w-16 h-16" class="mx-auto" />
         <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">{{ $t('auth.completingSignIn') }}</p>
       </template>
       <template v-else>

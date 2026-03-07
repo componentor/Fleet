@@ -189,7 +189,7 @@ onMounted(fetchBranding)
 
     <!-- Loading state -->
     <div v-if="pageLoading" class="relative z-10 flex flex-col items-center gap-4 animate-fade-in-up">
-      <CompassSpinner size="w-8 h-8" color="text-gray-400 dark:text-gray-500" />
+      <CompassSpinner size="w-16 h-16" color="text-gray-400 dark:text-gray-500" />
       <p class="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
     </div>
 

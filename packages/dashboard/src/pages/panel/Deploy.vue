@@ -1115,7 +1115,7 @@ onMounted(() => {
         v-if="githubStep === 'checking'"
         class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-12 flex flex-col items-center justify-center"
       >
-        <CompassSpinner size="w-8 h-8" color="text-primary-500" class="mb-4" />
+        <CompassSpinner size="w-16 h-16" color="text-primary-500" class="mb-4" />
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ $t('deploy.github.checkingConnection') }}</p>
       </div>
 

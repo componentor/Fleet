@@ -320,7 +320,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <CompassSpinner size="w-8 h-8" />
+      <CompassSpinner size="w-16 h-16" />
     </div>
 
     <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
