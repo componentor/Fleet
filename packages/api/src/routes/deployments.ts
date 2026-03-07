@@ -44,7 +44,7 @@ export type FleetManifest = z.infer<typeof fleetManifestSchema>;
 
 // Inline fallback for local dev when Valkey/BullMQ is not available.
 // Imports the worker's processor and runs it in-process.
-async function enqueueOrRunDeployment(data: DeploymentJobData) {
+export async function enqueueOrRunDeployment(data: DeploymentJobData) {
   if (isQueueAvailable()) {
     await getDeploymentQueue().add('build-and-deploy', data, {
       attempts: 2,
@@ -122,6 +122,45 @@ const githubWebhookRoute = createRoute({
   },
 });
 
+// In-memory set for webhook delivery deduplication (prevents duplicate deploys from GitHub retries)
+const recentDeliveryIds = new Set<string>();
+const DELIVERY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function recordDelivery(deliveryId: string) {
+  recentDeliveryIds.add(deliveryId);
+  setTimeout(() => recentDeliveryIds.delete(deliveryId), DELIVERY_TTL_MS);
+}
+
+// Per-repo rate limiting: max 5 webhook-triggered deploys per repo per minute
+const repoWebhookCounts = new Map<string, { count: number; resetAt: number }>();
+const WEBHOOK_RATE_LIMIT = 5;
+const WEBHOOK_RATE_WINDOW_MS = 60_000;
+
+function checkRepoRateLimit(repo: string): boolean {
+  const now = Date.now();
+  const entry = repoWebhookCounts.get(repo);
+  if (!entry || now >= entry.resetAt) {
+    repoWebhookCounts.set(repo, { count: 1, resetAt: now + WEBHOOK_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= WEBHOOK_RATE_LIMIT) return false;
+  entry.count++;
+  return true;
+}
+
+// Commit message patterns that skip deployment
+const SKIP_DEPLOY_PATTERNS = [
+  /\[skip deploy\]/i,
+  /\[deploy skip\]/i,
+  /\[skip cd\]/i,
+  /\[no deploy\]/i,
+  /\[ci skip\]/i,
+];
+
+function shouldSkipDeploy(commitMessage: string): boolean {
+  return SKIP_DEPLOY_PATTERNS.some(pattern => pattern.test(commitMessage));
+}
+
 webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
   const ghConfig = await getGitHubConfig();
   const webhookSecret = ghConfig.webhookSecret;
@@ -131,13 +170,25 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
 
   const signature = c.req.header('X-Hub-Signature-256');
   if (!signature) {
+    logger.warn({ path: c.req.path }, 'GitHub webhook: missing signature header');
     return c.json({ error: 'Missing signature' }, 401);
   }
 
   const rawBody = await c.req.text();
 
   if (!githubService.verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+    logger.warn({ path: c.req.path, ip: c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') }, 'GitHub webhook: invalid signature — possible attack or misconfigured secret');
     return c.json({ error: 'Invalid signature' }, 401);
+  }
+
+  // Idempotency: deduplicate GitHub delivery retries
+  const deliveryId = c.req.header('X-GitHub-Delivery');
+  if (deliveryId) {
+    if (recentDeliveryIds.has(deliveryId)) {
+      logger.info({ deliveryId }, 'GitHub webhook: duplicate delivery — skipping');
+      return c.json({ message: 'Duplicate delivery — already processed' });
+    }
+    recordDelivery(deliveryId);
   }
 
   const event = c.req.header('X-GitHub-Event');
@@ -146,16 +197,28 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
   let branch: string;
   let repoFullName: string;
   let commitSha: string;
+  let commitMessage = '';
   let triggerMessage: string;
 
   if (event === 'push') {
     const ref = payload['ref'] as string; // "refs/heads/main"
+
+    // Ignore tag pushes
+    if (!ref.startsWith('refs/heads/')) {
+      return c.json({ message: `Ignored non-branch ref: ${ref}` });
+    }
+
+    // Ignore branch deletion events (deleted flag or null head_commit)
+    if (payload['deleted'] === true) {
+      return c.json({ message: 'Ignored branch deletion event' });
+    }
+
     branch = ref.replace('refs/heads/', '');
     const repoData = payload['repository'] as Record<string, unknown>;
     repoFullName = repoData['full_name'] as string;
     const headCommit = payload['head_commit'] as Record<string, unknown> | null;
     commitSha = (headCommit?.['id'] as string) ?? 'unknown';
-    const commitMessage = (headCommit?.['message'] as string) ?? '';
+    commitMessage = (headCommit?.['message'] as string) ?? '';
     triggerMessage = `Auto-deploy triggered by push to ${branch}\nCommit: ${commitSha}\n${commitMessage}\n`;
   } else if (event === 'pull_request') {
     const action = payload['action'] as string;
@@ -175,9 +238,24 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
     commitSha = mergeCommit ?? 'unknown';
     const prTitle = pr['title'] as string;
     const prNumber = pr['number'] as number;
+    commitMessage = prTitle;
     triggerMessage = `Auto-deploy triggered by PR #${prNumber} merged into ${branch}\n${prTitle}\nCommit: ${commitSha}\n`;
+  } else if (event === 'ping') {
+    return c.json({ message: 'Pong — webhook configured successfully' });
   } else {
     return c.json({ message: `Ignored event: ${event}` });
+  }
+
+  // Skip deploy if commit message contains skip pattern
+  if (shouldSkipDeploy(commitMessage)) {
+    logger.info({ repo: repoFullName, commitSha, commitMessage }, 'Skipping deploy due to commit message flag');
+    return c.json({ message: 'Deploy skipped due to commit message flag', commitSha });
+  }
+
+  // Per-repo rate limiting
+  if (!checkRepoRateLimit(repoFullName)) {
+    logger.warn({ repo: repoFullName }, 'GitHub webhook rate limit exceeded');
+    return c.json({ error: `Rate limit exceeded for ${repoFullName} — max ${WEBHOOK_RATE_LIMIT} deploys per minute` }, 429);
   }
 
   // Find services that match this repo + branch + auto-deploy
@@ -194,7 +272,7 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
     return c.json({ message: 'No matching services for auto-deploy' });
   }
 
-  // Filter out services whose accounts are suspended or have no active subscription
+  // Filter out services whose accounts are suspended or deleted
   const accountIds = [...new Set(matchingServices.map(s => s.accountId))];
   const suspendedAccounts = new Set<string>();
   for (const accId of accountIds) {
@@ -209,9 +287,15 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
     return c.json({ message: 'No eligible services for auto-deploy (accounts suspended or inactive)' });
   }
 
+  // Skip services that are already deploying (prevent queuing on top of active builds)
+  const deployableServices = eligibleServices.filter(s => s.status !== 'deploying');
+  if (deployableServices.length === 0) {
+    return c.json({ message: 'All matching services are already deploying — skipping' });
+  }
+
   const results: Array<{ serviceId: string; deploymentId: string; status: string }> = [];
 
-  for (const svc of eligibleServices) {
+  for (const svc of deployableServices) {
     const [deployment] = await insertReturning(deployments, {
       serviceId: svc.id,
       commitSha,
@@ -230,9 +314,9 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
     });
   }
 
-  // Batch update all matched services to 'deploying' status (N+1 fix)
-  if (eligibleServices.length > 0) {
-    const serviceIds = eligibleServices.map(s => s.id);
+  // Batch update all matched services to 'deploying' status
+  if (deployableServices.length > 0) {
+    const serviceIds = deployableServices.map(s => s.id);
     await db.update(services)
       .set({ status: 'deploying', updatedAt: new Date() })
       .where(inArray(services.id, serviceIds));
@@ -240,7 +324,7 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
 
   // Queue build pipelines after DB updates are complete
   for (const result of results) {
-    const svc = eligibleServices.find(s => s.id === result.serviceId);
+    const svc = deployableServices.find(s => s.id === result.serviceId);
     if (svc) {
       await enqueueOrRunDeployment({
         deploymentId: result.deploymentId,
@@ -251,7 +335,7 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
 
       eventService.log({
         eventType: EventTypes.DEPLOYMENT_TRIGGERED,
-        description: `Auto-deploy triggered by push to ${branch}`,
+        description: `Auto-deploy triggered for '${svc.name}' by ${event === 'push' ? `push to ${branch}` : `PR merge into ${branch}`}`,
         resourceType: 'deployment',
         resourceId: svc.id,
         resourceName: svc.name,
@@ -261,6 +345,7 @@ webhookRoutes.openapi(githubWebhookRoute, (async (c: any) => {
     }
   }
 
+  logger.info({ repo: repoFullName, branch, event, deployments: results.length, commitSha }, 'GitHub webhook processed');
   return c.json({ message: `Triggered ${results.length} deployment(s)`, results });
 }) as any);
 

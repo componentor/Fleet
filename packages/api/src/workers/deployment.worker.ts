@@ -1,9 +1,9 @@
 import { Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { db, services, deployments, oauthProviders, userAccounts, users, eq, and, isNull, inArray } from '@fleet/db';
+import { db, services, deployments, oauthProviders, userAccounts, users, insertReturning, eq, and, isNull, inArray } from '@fleet/db';
 import { buildService, scrubSecrets } from '../services/build.service.js';
 import { orchestrator } from '../services/orchestrator.js';
 import { getRegistryAuthForImage } from '../services/docker.service.js';
-import { buildTraefikLabels } from '../services/traefik.js';
+import { buildTraefikLabels, ensureIngressRoute } from '../services/traefik.js';
 import { githubService } from '../services/github.service.js';
 import { getValkey } from '../services/valkey.service.js';
 import { decrypt } from '../services/crypto.service.js';
@@ -140,7 +140,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     .set({ startedAt: new Date(), progressStep: 'queued' })
     .where(eq(deployments.id, deploymentId));
 
-  let buildInfo: { id: string; status: string; log: string; imageTag: string; finishedAt: Date | null } | undefined;
+  let buildInfo: { id: string; status: string; log: string; imageTag: string; finishedAt: Date | null; composeServices?: import('../services/build.service.js').ComposeServiceConfig[] } | undefined;
 
   try {
     if (sourceType === 'upload' && sourcePath) {
@@ -367,7 +367,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       ),
     ]);
 
-    // Deploy the newly built image
+    // Deploy the newly built image(s)
     const fullImageTag = build.imageTag;
 
     // Persist final build log (handles cases where intermediate DB writes were missed)
@@ -382,64 +382,196 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       .set({ status: 'deploying', imageTag: fullImageTag })
       .where(eq(deployments.id, deploymentId));
 
-    if (svc.dockerServiceId) {
-      // Clean up old failed/dead containers before deploying new version
-      try {
-        const pruned = await orchestrator.pruneServiceContainers(svc.dockerServiceId);
-        if (pruned > 0) {
-          logger.info({ serviceId: svc.id, pruned }, 'Pruned dead containers before deploy');
-        }
-      } catch (err) {
-        logger.warn({ err, serviceId: svc.id }, 'Failed to prune old containers before deploy');
-      }
-
-      // Ensure correct networks and Traefik labels on every redeploy.
-      // Older services may have been created before the public network fix.
+    // Helper: deploy a single service to Docker Swarm (update existing or create new)
+    async function deployOneService(
+      targetSvc: NonNullable<typeof svc>,
+      targetImageTag: string,
+    ): Promise<void> {
       const networkName = `fleet-account-${accountId}`;
       const networkId = await orchestrator.ensureNetwork(networkName);
       const networkIds = [networkId];
-      if (svc.domain) {
+      if (targetSvc.domain) {
         const publicNetId = await orchestrator.ensureNetwork('fleet_fleet_public');
         networkIds.push(publicNetId);
       }
-      const svcPorts = (svc.ports as any[]) ?? [];
-      const primaryTargetPort = svcPorts[0]?.target ?? 80;
-      const traefikLabels = buildTraefikLabels(svc.name, svc.domain ?? null, svc.sslEnabled ?? true, primaryTargetPort, (svc.robotsConfig as any)?.mode ?? 'default');
 
-      const deployRegistryAuth = await getRegistryAuthForImage(accountId, fullImageTag);
-      await orchestrator.updateService(svc.dockerServiceId, {
-        image: fullImageTag,
-        replicas: svc.replicas ?? 1,
-        networkIds,
-        volumes: ((svc.volumes as any[]) ?? []).map((v: any) => ({
-          source: v.source,
-          target: v.target,
-          readonly: v.readonly ?? false,
-        })),
-        labels: {
-          ...traefikLabels,
-          'fleet.account-id': accountId,
-          'fleet.service-id': svc.id,
-        },
-      }, deployRegistryAuth);
-    } else {
-      logger.warn({ serviceId: svc.id }, 'No dockerServiceId — image built but cannot deploy to Docker');
+      const svcPorts = (targetSvc.ports as any[]) ?? [];
+      const primaryTargetPort = svcPorts[0]?.target ?? 80;
+      const traefikLabels = buildTraefikLabels(targetSvc.name, targetSvc.domain ?? null, targetSvc.sslEnabled ?? true, primaryTargetPort, (targetSvc.robotsConfig as any)?.mode ?? 'default');
+      const deployRegistryAuth = await getRegistryAuthForImage(accountId, targetImageTag);
+
+      if (targetSvc.dockerServiceId) {
+        // Update existing Docker service
+        try {
+          const pruned = await orchestrator.pruneServiceContainers(targetSvc.dockerServiceId);
+          if (pruned > 0) logger.info({ serviceId: targetSvc.id, pruned }, 'Pruned dead containers before deploy');
+        } catch (err) {
+          logger.warn({ err, serviceId: targetSvc.id }, 'Failed to prune old containers');
+        }
+
+        await orchestrator.updateService(targetSvc.dockerServiceId, {
+          image: targetImageTag,
+          replicas: targetSvc.replicas ?? 1,
+          networkIds,
+          volumes: ((targetSvc.volumes as any[]) ?? []).map((v: any) => ({
+            source: v.source,
+            target: v.target,
+            readonly: v.readonly ?? false,
+          })),
+          labels: {
+            ...traefikLabels,
+            'fleet.account-id': accountId,
+            'fleet.service-id': targetSvc.id,
+          },
+        }, deployRegistryAuth);
+      } else {
+        // Create new Docker service
+        logger.info({ serviceId: targetSvc.id }, 'Creating Docker service for deploy');
+
+        const constraints = [...((targetSvc.placementConstraints as string[]) ?? [])];
+        if (targetSvc.nodeConstraint) {
+          constraints.push(`node.id == ${targetSvc.nodeConstraint}`);
+        }
+
+        const accountShort = accountId.replace(/-/g, '').substring(0, 12);
+        const swarmServiceName = `fleet-${accountShort}-${targetSvc.name}`.toLowerCase();
+
+        const ingressPorts = targetSvc.domain
+          ? []
+          : await orchestrator.allocateIngressPorts(
+              svcPorts.map((p: any) => ({ target: p.target, protocol: p.protocol ?? 'tcp' })),
+            );
+
+        const result = await orchestrator.createService({
+          name: swarmServiceName,
+          image: targetImageTag,
+          replicas: targetSvc.replicas ?? 1,
+          env: (targetSvc.env as Record<string, string>) ?? {},
+          ports: ingressPorts,
+          volumes: ((targetSvc.volumes as any[]) ?? []).map((v: any) => ({
+            source: v.source,
+            target: v.target,
+            readonly: v.readonly ?? false,
+          })),
+          labels: {
+            ...traefikLabels,
+            'fleet.account-id': accountId,
+            'fleet.service-id': targetSvc.id,
+          },
+          constraints,
+          healthCheck: (targetSvc.healthCheck as any) ?? undefined,
+          updateParallelism: targetSvc.updateParallelism ?? 1,
+          updateDelay: targetSvc.updateDelay ?? '10s',
+          rollbackOnFailure: targetSvc.rollbackOnFailure ?? true,
+          cpuLimit: targetSvc.cpuLimit ?? undefined,
+          memoryLimit: targetSvc.memoryLimit ?? undefined,
+          networkIds,
+          registryAuth: deployRegistryAuth,
+        });
+
+        await ensureIngressRoute(`fleet-account-${accountId}`, swarmServiceName, targetSvc.domain ?? null, targetSvc.sslEnabled ?? true, primaryTargetPort).catch(() => {});
+
+        const updateFields: Record<string, any> = { dockerServiceId: result.id, updatedAt: new Date() };
+        if (ingressPorts.length > 0) updateFields.ports = ingressPorts;
+        await db.update(services).set(updateFields).where(eq(services.id, targetSvc.id));
+
+        targetSvc.dockerServiceId = result.id;
+        logger.info({ serviceId: targetSvc.id, dockerServiceId: result.id }, 'Docker service created');
+      }
+
+      // Update service image
+      await db.update(services)
+        .set({ image: targetImageTag, status: 'running', updatedAt: new Date() })
+        .where(eq(services.id, targetSvc.id));
     }
 
-    // Mark as succeeded
+    // For compose builds: update primary service with config from the compose file
+    if (build.composeServices && build.composeServices.length > 0) {
+      const primaryConfig = build.composeServices[0]!;
+      const updates: Record<string, any> = { updatedAt: new Date() };
+      if (primaryConfig.env && Object.keys(primaryConfig.env).length > 0) updates.env = primaryConfig.env;
+      if (primaryConfig.ports && primaryConfig.ports.length > 0) updates.ports = primaryConfig.ports;
+      if (primaryConfig.volumes && primaryConfig.volumes.length > 0) updates.volumes = primaryConfig.volumes;
+      if (Object.keys(updates).length > 1) {
+        await db.update(services).set(updates).where(eq(services.id, svc.id));
+        Object.assign(svc, updates);
+      }
+    }
+
+    // Deploy primary service
+    await deployOneService(svc, fullImageTag);
+
+    // For compose builds with multiple services: create and deploy additional services
+    if (build.composeServices && build.composeServices.length > 1) {
+      const additionalServices = build.composeServices.slice(1); // first one is already deployed above
+      logger.info({ serviceId: svc.id, additionalServices: additionalServices.length }, 'Deploying additional compose services');
+
+      for (const composeSvc of additionalServices) {
+        try {
+          // Check if a service with this name already exists in the same stack
+          const existingName = `${svc.name}-${composeSvc.name}`;
+          const existing = await db.query.services.findFirst({
+            where: and(
+              eq(services.accountId, accountId),
+              eq(services.name, existingName),
+              isNull(services.deletedAt),
+            ),
+          });
+
+          if (existing) {
+            // Update env/ports/volumes from compose config if available
+            const updates: Record<string, any> = { updatedAt: new Date() };
+            if (composeSvc.env && Object.keys(composeSvc.env).length > 0) updates.env = composeSvc.env;
+            if (composeSvc.ports && composeSvc.ports.length > 0) updates.ports = composeSvc.ports;
+            if (composeSvc.volumes && composeSvc.volumes.length > 0) updates.volumes = composeSvc.volumes;
+            if (Object.keys(updates).length > 1) {
+              await db.update(services).set(updates).where(eq(services.id, existing.id));
+              // Merge updates into the existing object for deployOneService
+              Object.assign(existing, updates);
+            }
+
+            await deployOneService(existing, composeSvc.imageTag);
+            logger.info({ serviceId: existing.id, composeSvc: composeSvc.name }, 'Updated existing compose service');
+          } else {
+            // Create new Fleet service record with compose-derived config
+            const [newSvc] = await insertReturning(services, {
+              accountId,
+              name: existingName,
+              image: composeSvc.imageTag,
+              replicas: svc.replicas ?? 1,
+              env: composeSvc.env && Object.keys(composeSvc.env).length > 0 ? composeSvc.env : svc.env,
+              ports: composeSvc.ports && composeSvc.ports.length > 0 ? composeSvc.ports : svc.ports,
+              volumes: composeSvc.volumes && composeSvc.volumes.length > 0 ? composeSvc.volumes : svc.volumes,
+              domain: null, // additional compose services don't get the primary domain
+              sslEnabled: svc.sslEnabled,
+              sourceType: 'upload',
+              sourcePath: svc.sourcePath,
+              stackId: svc.stackId,
+              status: 'deploying',
+            });
+
+            if (newSvc) {
+              await deployOneService(newSvc, composeSvc.imageTag);
+              logger.info({ serviceId: newSvc.id, composeSvc: composeSvc.name }, 'Created and deployed new compose service');
+            }
+          }
+        } catch (err) {
+          logger.error({ err, composeSvc: composeSvc.name }, 'Failed to deploy compose service — continuing with others');
+        }
+      }
+    }
+
+    // Mark deployment as succeeded
     await db.update(deployments)
       .set({ status: 'succeeded', commitSha, progressStep: 'succeeded', completedAt: new Date() })
       .where(eq(deployments.id, deploymentId));
 
-    await db.update(services)
-      .set({ image: fullImageTag, status: svc.dockerServiceId ? 'running' : 'stopped', updatedAt: new Date() })
-      .where(eq(services.id, svc.id));
-
     await publishProgress(deploymentId, 'succeeded', '', 'succeeded');
 
     // Notify account owners
+    const serviceCount = build.composeServices?.length ?? 1;
     notifyAccountMembers(accountId, 'deploy-success', {
-      serviceName: svc.name,
+      serviceName: serviceCount > 1 ? `${svc.name} (${serviceCount} services)` : svc.name,
       imageTag: fullImageTag,
     });
   } catch (err) {

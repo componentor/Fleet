@@ -11,6 +11,14 @@ const execFileAsync = promisify(execFile);
 
 export type BuildStatus = 'pending' | 'cloning' | 'building' | 'pushing' | 'succeeded' | 'failed' | 'cancelled';
 
+export interface ComposeServiceConfig {
+  name: string;
+  imageTag: string;
+  ports?: Array<{ target: number; published: number; protocol: string }>;
+  volumes?: Array<{ source: string; target: string; readonly: boolean }>;
+  env?: Record<string, string>;
+}
+
 export interface BuildInfo {
   id: string;
   serviceId: string;
@@ -19,6 +27,8 @@ export interface BuildInfo {
   log: string;
   startedAt: Date;
   finishedAt: Date | null;
+  /** For compose builds: all service configs that were built and pushed */
+  composeServices?: ComposeServiceConfig[];
 }
 
 const BUILD_DIR = process.env['BUILD_DIR'] ?? '/tmp/fleet-builds';
@@ -622,37 +632,141 @@ export class BuildService {
         600_000,
       );
 
-      // 3. Get the built service name
-      const servicesOutput = await this.exec(
-        'docker',
-        ['compose', '-f', join(workDir, composeFile), '-p', projectName, 'config', '--services'],
-        workDir,
-      );
-      const firstService = servicesOutput.trim().split('\n')[0]?.trim();
-      if (!firstService) {
+      // 3. Parse compose config to get service definitions (ports, volumes, env)
+      let composeConfig: Record<string, any> = {};
+      try {
+        const configJson = await this.exec(
+          'docker',
+          ['compose', '-f', join(workDir, composeFile), '-p', projectName, 'config', '--format', 'json'],
+          workDir,
+        );
+        composeConfig = JSON.parse(configJson);
+      } catch (err) {
+        info.log += `\n[warn] Could not parse compose config as JSON — falling back to service names only\n`;
+        this.events.emit(`build:${buildId}`, info);
+      }
+
+      // Get service names (from config or fallback to --services)
+      const configServices = composeConfig.services as Record<string, any> | undefined;
+      let composeServiceNames: string[];
+      if (configServices && Object.keys(configServices).length > 0) {
+        composeServiceNames = Object.keys(configServices);
+      } else {
+        const servicesOutput = await this.exec(
+          'docker',
+          ['compose', '-f', join(workDir, composeFile), '-p', projectName, 'config', '--services'],
+          workDir,
+        );
+        composeServiceNames = servicesOutput.trim().split('\n').map(s => s.trim()).filter(Boolean);
+      }
+
+      if (composeServiceNames.length === 0) {
         throw new Error('No services found in compose file');
       }
 
-      // The compose-built image is named <project>-<service>
-      const composeBuildImage = `${projectName}-${firstService}`;
-      info.log += `\n[tag] Tagging ${composeBuildImage} as ${imageTag}...\n`;
+      info.log += `\n[info] Found ${composeServiceNames.length} service(s): ${composeServiceNames.join(', ')}\n`;
       this.events.emit(`build:${buildId}`, info);
 
-      await this.exec('docker', ['tag', composeBuildImage, imageTag], workDir);
-
-      // 4. Push (with retry for transient registry failures)
+      // Tag and push ALL services, extracting per-service config
       info.status = 'pushing';
-      info.log += `\n[push] Pushing ${imageTag}...\n`;
-      this.events.emit(`build:${buildId}`, info);
+      const registry = await getRegistry();
+      const baseTag = imageTag.replace(`${registry}/`, '');
+      const composeServiceConfigs: ComposeServiceConfig[] = [];
 
-      await this.pushWithRetry(buildId, info, imageTag, workDir);
+      for (const svcName of composeServiceNames) {
+        const composeBuildImage = `${projectName}-${svcName}`;
+        const svcImageTag = composeServiceNames.length === 1
+          ? imageTag
+          : `${registry}/${baseTag.replace(/:/, `-${svcName}:`)}`;
 
-      // Cleanup local compose image
-      await this.exec('docker', ['rmi', composeBuildImage], workDir).catch(() => {});
+        info.log += `\n[tag] Tagging ${composeBuildImage} as ${svcImageTag}...\n`;
+        this.events.emit(`build:${buildId}`, info);
+
+        await this.exec('docker', ['tag', composeBuildImage, svcImageTag], workDir);
+
+        info.log += `[push] Pushing ${svcImageTag}...\n`;
+        this.events.emit(`build:${buildId}`, info);
+
+        await this.pushWithRetry(buildId, info, svcImageTag, workDir);
+
+        // Cleanup local compose image
+        await this.exec('docker', ['rmi', composeBuildImage], workDir).catch(() => {});
+
+        // Extract per-service config from compose definition
+        const svcDef = configServices?.[svcName] as Record<string, any> | undefined;
+        const svcConfig: ComposeServiceConfig = { name: svcName, imageTag: svcImageTag };
+
+        if (svcDef) {
+          // Parse ports: "8080:80" or { target: 80, published: 8080 }
+          if (Array.isArray(svcDef.ports)) {
+            svcConfig.ports = svcDef.ports.map((p: any) => {
+              if (typeof p === 'string') {
+                const [published, target] = p.split(':').map(Number);
+                return { target: target ?? published, published: published!, protocol: 'tcp' };
+              }
+              return {
+                target: p.target ?? 80,
+                published: p.published ?? p.target ?? 80,
+                protocol: p.protocol ?? 'tcp',
+              };
+            }).filter((p: any) => p.target > 0);
+          }
+
+          // Parse volumes: "data:/app/data" or { source: "data", target: "/app/data" }
+          if (Array.isArray(svcDef.volumes)) {
+            svcConfig.volumes = svcDef.volumes
+              .map((v: any) => {
+                if (typeof v === 'string') {
+                  const parts = v.split(':');
+                  if (parts.length >= 2) {
+                    return {
+                      source: parts[0]!,
+                      target: parts[1]!,
+                      readonly: parts[2] === 'ro',
+                    };
+                  }
+                  return null;
+                }
+                if (v.source && v.target) {
+                  return {
+                    source: v.source,
+                    target: v.target,
+                    readonly: v.read_only === true,
+                  };
+                }
+                return null;
+              })
+              .filter(Boolean) as ComposeServiceConfig['volumes'];
+          }
+
+          // Parse environment variables
+          if (svcDef.environment) {
+            if (Array.isArray(svcDef.environment)) {
+              svcConfig.env = {};
+              for (const e of svcDef.environment) {
+                const eqIdx = (e as string).indexOf('=');
+                if (eqIdx > 0) {
+                  svcConfig.env[(e as string).slice(0, eqIdx)] = (e as string).slice(eqIdx + 1);
+                }
+              }
+            } else if (typeof svcDef.environment === 'object') {
+              svcConfig.env = { ...svcDef.environment };
+            }
+          }
+        }
+
+        composeServiceConfigs.push(svcConfig);
+      }
+
+      // Store all service configs on the build info
+      info.composeServices = composeServiceConfigs;
+      if (composeServiceConfigs.length > 0) {
+        info.imageTag = composeServiceConfigs[0]!.imageTag;
+      }
 
       // Done
       info.status = 'succeeded';
-      info.log += '\n[done] Compose build and push completed successfully.\n';
+      info.log += `\n[done] Compose build completed — ${composeServiceConfigs.length} service(s) built and pushed.\n`;
       info.finishedAt = new Date();
       this.events.emit(`build:${buildId}`, info);
     } catch (err) {
