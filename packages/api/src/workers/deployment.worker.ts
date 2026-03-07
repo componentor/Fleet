@@ -211,10 +211,13 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
 
       let generatedDockerfile: string | undefined;
       let dockerfile: string | undefined;
+      let composeFile: string | undefined;
       try {
         const detection = await buildService.detectDockerfile(cloneUrl, branch);
         if (detection.dockerfiles.length > 0) {
           dockerfile = detection.dockerfiles[0];
+        } else if (detection.composeFiles.length > 0) {
+          composeFile = detection.composeFiles[0];
         } else {
           const { detectRuntime } = await import('../services/runtime.service.js');
           const runtimeResult = await detectRuntime(detection.allFiles, null, svc.nginxConfig);
@@ -230,15 +233,26 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to detect Dockerfiles — will try default Dockerfile');
       }
 
-      await setProgressStep(deploymentId, 'building', dockerfile ? `Building with ${dockerfile}...` : 'Building image (auto-detected runtime)...');
-      buildInfo = await buildService.buildImage({
-        serviceId: svc.id,
-        cloneUrl,
-        branch,
-        dockerfile,
-        imageTag,
-        generatedDockerfile,
-      });
+      if (composeFile) {
+        await setProgressStep(deploymentId, 'building', `Building services from ${composeFile}...`);
+        buildInfo = await buildService.buildFromComposeGit({
+          serviceId: svc.id,
+          cloneUrl,
+          branch,
+          composeFile,
+          imageTag,
+        });
+      } else {
+        await setProgressStep(deploymentId, 'building', dockerfile ? `Building with ${dockerfile}...` : 'Building image (auto-detected runtime)...');
+        buildInfo = await buildService.buildImage({
+          serviceId: svc.id,
+          cloneUrl,
+          branch,
+          dockerfile,
+          imageTag,
+          generatedDockerfile,
+        });
+      }
     } else {
       // GitHub build flow
       await setProgressStep(deploymentId, 'cloning', `Cloning ${svc.githubRepo} (${svc.githubBranch})...`);
@@ -262,15 +276,18 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         ? githubService.getAuthenticatedCloneUrl(githubToken, owner, repo)
         : `https://github.com/${svc.githubRepo}.git`;
 
-      // Detect Dockerfiles and project files for runtime detection
+      // Detect Dockerfiles, compose files, and project files for runtime detection
       let generatedDockerfile: string | undefined;
       let dockerfile: string | undefined;
+      let composeFile: string | undefined;
       try {
         const detection = await buildService.detectDockerfile(cloneUrl, svc.githubBranch);
         if (detection.dockerfiles.length > 0) {
           dockerfile = detection.dockerfiles[0];
+        } else if (detection.composeFiles.length > 0) {
+          composeFile = detection.composeFiles[0];
         } else {
-          // No Dockerfile found — try runtime detection
+          // No Dockerfile or compose found — try runtime detection
           const { detectRuntime } = await import('../services/runtime.service.js');
           const runtimeResult = await detectRuntime(detection.allFiles, null, svc.nginxConfig);
           if (runtimeResult) {
@@ -286,15 +303,26 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to detect Dockerfiles — will try default Dockerfile');
       }
 
-      await setProgressStep(deploymentId, 'building', dockerfile ? `Building with ${dockerfile}...` : 'Building image (auto-detected runtime)...');
-      buildInfo = await buildService.buildImage({
-        serviceId: svc.id,
-        cloneUrl,
-        branch: svc.githubBranch,
-        dockerfile,
-        imageTag,
-        generatedDockerfile,
-      });
+      if (composeFile) {
+        await setProgressStep(deploymentId, 'building', `Building services from ${composeFile}...`);
+        buildInfo = await buildService.buildFromComposeGit({
+          serviceId: svc.id,
+          cloneUrl,
+          branch: svc.githubBranch,
+          composeFile,
+          imageTag,
+        });
+      } else {
+        await setProgressStep(deploymentId, 'building', dockerfile ? `Building with ${dockerfile}...` : 'Building image (auto-detected runtime)...');
+        buildInfo = await buildService.buildImage({
+          serviceId: svc.id,
+          cloneUrl,
+          branch: svc.githubBranch,
+          dockerfile,
+          imageTag,
+          generatedDockerfile,
+        });
+      }
     }
 
     if (!buildInfo) {

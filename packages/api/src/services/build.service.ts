@@ -549,6 +549,64 @@ export class BuildService {
     }
   }
 
+  async buildFromComposeGit(opts: {
+    serviceId: string;
+    cloneUrl: string;
+    branch: string;
+    composeFile?: string;
+    imageTag: string;
+  }): Promise<BuildInfo> {
+    const buildId = randomUUID();
+    const workDir = join(BUILD_DIR, buildId);
+    const composeFile = opts.composeFile ?? 'docker-compose.yml';
+    if (composeFile.includes('..') || composeFile.startsWith('/') || composeFile.includes('\\')) {
+      throw new Error('Invalid compose file path: must be relative without directory traversal');
+    }
+    const fullImageTag = `${await getRegistry()}/${opts.imageTag}`;
+
+    const info: BuildInfo = {
+      id: buildId,
+      serviceId: opts.serviceId,
+      status: 'pending',
+      imageTag: fullImageTag,
+      log: '',
+      startedAt: new Date(),
+      finishedAt: null,
+    };
+
+    this.activeBuilds.set(buildId, { aborted: false, info, processes: new Set() });
+
+    (async () => {
+      try {
+        // 1. Clone
+        info.status = 'cloning';
+        info.log += `[clone] Cloning ${scrubSecrets(opts.cloneUrl)} branch ${opts.branch}...\n`;
+        this.events.emit(`build:${buildId}`, info);
+
+        await mkdir(workDir, { recursive: true });
+        const cloneResult = await this.exec(
+          'git',
+          ['clone', '--depth', '1', '--branch', opts.branch, opts.cloneUrl, workDir],
+          workDir,
+          120_000,
+        );
+        info.log += scrubSecrets(cloneResult);
+
+        // 2. Delegate to compose pipeline
+        await this.runComposeBuildPipeline(buildId, workDir, workDir, composeFile, fullImageTag, info);
+      } catch (err) {
+        if (info.status !== 'failed' && info.status !== 'cancelled') {
+          info.status = 'failed';
+          info.log += `\n[error] ${String(err)}`;
+          info.finishedAt = new Date();
+          this.events.emit(`build:${buildId}`, info);
+        }
+      }
+    })();
+
+    return info;
+  }
+
   async buildFromCompose(opts: {
     serviceId: string;
     sourceDir: string;
@@ -598,24 +656,26 @@ export class BuildService {
     info: BuildInfo,
   ): Promise<void> {
     try {
-      // 1. Copy source to temp build dir
-      info.status = 'cloning';
-      info.log += '[copy] Copying source files to build directory...\n';
-      this.events.emit(`build:${buildId}`, info);
+      // 1. Copy source to temp build dir (skip if already in workDir, e.g. after git clone)
+      if (sourceDir !== workDir) {
+        info.status = 'cloning';
+        info.log += '[copy] Copying source files to build directory...\n';
+        this.events.emit(`build:${buildId}`, info);
 
-      await mkdir(workDir, { recursive: true });
+        await mkdir(workDir, { recursive: true });
 
-      // Verify source directory exists before copying
-      try {
-        await stat(sourceDir);
-      } catch {
-        throw new Error(
-          `Source directory not found: ${sourceDir}\n` +
-          `Upload files may have been lost due to container restart. Please re-upload your project.`,
-        );
+        // Verify source directory exists before copying
+        try {
+          await stat(sourceDir);
+        } catch {
+          throw new Error(
+            `Source directory not found: ${sourceDir}\n` +
+            `Upload files may have been lost due to container restart. Please re-upload your project.`,
+          );
+        }
+
+        await this.exec('cp', ['-r', `${sourceDir}/.`, workDir], workDir);
       }
-
-      await this.exec('cp', ['-r', `${sourceDir}/.`, workDir], workDir);
 
       // 2. Build using docker compose
       info.status = 'building';
@@ -856,6 +916,7 @@ export class BuildService {
 
   async detectDockerfile(cloneUrl: string, branch: string): Promise<{
     dockerfiles: string[];
+    composeFiles: string[];
     allFiles: string[];
   }> {
     const workDir = join(BUILD_DIR, `detect-${randomUUID()}`);
@@ -874,14 +935,20 @@ export class BuildService {
       const files = output.trim().split('\n').filter(Boolean);
 
       const dockerfiles: string[] = [];
+      const composeFiles: string[] = [];
+      const composeNames = new Set(['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']);
       for (const file of files) {
         if (file === 'Dockerfile' || file.startsWith('Dockerfile.')) {
           dockerfiles.push(file);
         }
+        if (composeNames.has(file)) {
+          composeFiles.push(file);
+        }
       }
 
       return {
-        dockerfiles: dockerfiles.length > 0 ? dockerfiles : [],
+        dockerfiles,
+        composeFiles,
         allFiles: files,
       };
     } finally {
