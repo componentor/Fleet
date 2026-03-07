@@ -209,6 +209,11 @@ const superRoutes: RouteRecordRaw[] = [
         component: () => import('@/pages/super/SelfHealing.vue'),
       },
       {
+        path: 'analytics',
+        name: 'super-analytics',
+        component: () => import('@/pages/super/PlatformAnalytics.vue'),
+      },
+      {
         path: 'database',
         name: 'super-database',
         component: () => import('@/pages/super/PlatformDatabase.vue'),
