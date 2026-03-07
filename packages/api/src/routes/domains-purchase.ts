@@ -14,6 +14,21 @@ import { jsonBody, jsonContent, errorResponseSchema, standardErrors, bearerSecur
 
 const searchRateLimit = rateLimiter({ windowMs: 60 * 1000, max: 20, keyPrefix: 'domain-search' });
 
+// ── TLD pricing cache (avoids DB query on every search) ──
+const POPULAR_TLDS = ['com', 'net', 'org', 'io', 'dev', 'app', 'co', 'me'];
+const MAX_SEARCH_TLDS = 12;
+let _tldPricingCache: { entries: any[]; currencyPrices: any[]; ts: number } | null = null;
+
+async function getCachedTldPricing() {
+  if (_tldPricingCache && Date.now() - _tldPricingCache.ts < 60_000) return _tldPricingCache;
+  const [entries, currencyPrices] = await Promise.all([
+    db.query.domainTldPricing.findMany(),
+    db.query.domainTldCurrencyPrices.findMany(),
+  ]);
+  _tldPricingCache = { entries, currencyPrices, ts: Date.now() };
+  return _tldPricingCache;
+}
+
 /** Get the configured max registration years (default 10). */
 async function getDomainMaxYears(): Promise<number> {
   try {
@@ -142,7 +157,8 @@ async function handleDomainSearch(c: any) {
   }
 
   // Only search TLDs we have enabled in domainTldPricing — these are the ones we can actually sell
-  const pricingEntries = await db.query.domainTldPricing.findMany();
+  const cached = await getCachedTldPricing();
+  const pricingEntries = cached.entries;
   const enabledTlds = pricingEntries.filter((p: any) => p.enabled).map((p: any) => p.tld as string);
 
   if (enabledTlds.length === 0) {
@@ -161,28 +177,38 @@ async function handleDomainSearch(c: any) {
     if (userTld && enabledTlds.includes(userTld) && !tlds.includes(userTld)) {
       tlds.unshift(userTld);
     }
-    // Fill in the rest of our enabled TLDs as suggestions
+    // Fill in popular TLDs as suggestions (limit to avoid slow API calls)
     if (!tldsParam) {
+      for (const d of POPULAR_TLDS) {
+        if (enabledTlds.includes(d) && !tlds.includes(d)) tlds.push(d);
+      }
+      // Fill remaining from enabled TLDs up to the cap
       for (const d of enabledTlds) {
+        if (tlds.length >= MAX_SEARCH_TLDS) break;
         if (!tlds.includes(d)) tlds.push(d);
       }
     }
   } else if (!tldsParam) {
-    // No TLD typed and none specified — search all enabled TLDs
-    tlds.push(...enabledTlds);
+    // No TLD typed — search popular TLDs first, then fill up to cap
+    for (const d of POPULAR_TLDS) {
+      if (enabledTlds.includes(d)) tlds.push(d);
+    }
+    for (const d of enabledTlds) {
+      if (tlds.length >= MAX_SEARCH_TLDS) break;
+      if (!tlds.includes(d)) tlds.push(d);
+    }
   }
 
   try {
     const results = await registrarService.searchDomains(trimmed, tlds);
     logger.debug({ query: trimmed, tldCount: tlds.length, resultCount: results.length }, 'Domain search raw results');
 
-    // Overlay with our sell prices from domainTldPricing
+    // Overlay with our sell prices from domainTldPricing (cached)
     const pricingMap = new Map(pricingEntries.map((p: any) => [p.tld, p]));
 
-    // Load all TLD currency prices for fixed per-currency pricing
-    const allTldCurrencyPrices = await db.query.domainTldCurrencyPrices.findMany();
+    // Build TLD currency price map (cached)
     const tldCurrencyMap = new Map<string, Map<string, any>>();
-    for (const cp of allTldCurrencyPrices) {
+    for (const cp of cached.currencyPrices) {
       if (!tldCurrencyMap.has(cp.tldPricingId)) tldCurrencyMap.set(cp.tldPricingId, new Map());
       tldCurrencyMap.get(cp.tldPricingId)!.set(cp.currency, cp);
     }
@@ -223,16 +249,20 @@ async function handleDomainSearch(c: any) {
       })
       .filter(Boolean);
 
-    // Convert prices to requested currency if different (fallback for TLDs without fixed prices)
+    // Convert prices to requested currency if different (run in parallel)
     if (tc) {
-      for (const r of enriched) {
+      await Promise.all(enriched.map(async (r: any) => {
         if (r.price && r.price.currency && r.price.currency.toUpperCase() !== tc) {
           const origCurrency = r.price.currency;
-          r.price.registration = await exchangeRateService.convert(r.price.registration, origCurrency, tc);
-          r.price.renewal = await exchangeRateService.convert(r.price.renewal, origCurrency, tc);
+          const [reg, ren] = await Promise.all([
+            exchangeRateService.convert(r.price.registration, origCurrency, tc),
+            exchangeRateService.convert(r.price.renewal, origCurrency, tc),
+          ]);
+          r.price.registration = reg;
+          r.price.renewal = ren;
           r.price.currency = tc;
         }
-      }
+      }));
     }
 
     // Sort: exact user-typed domain first, then available before taken

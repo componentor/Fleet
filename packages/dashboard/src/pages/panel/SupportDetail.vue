@@ -249,7 +249,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <CompassSpinner size="w-8 h-8" />
+      <CompassSpinner size="w-16 h-16" />
     </div>
 
     <!-- Error (when no ticket loaded) -->

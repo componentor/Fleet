@@ -17,6 +17,7 @@ import { getDeploymentQueue, isQueueAvailable } from '../services/queue.service.
 import { storageManager } from '../services/storage/storage-manager.js';
 import { processDeploymentInline, type DeploymentJobData } from '../workers/deployment.worker.js';
 import { getPlatformDomain } from './settings.js';
+import { enqueueOrRunDeployment } from './deployments.js';
 import { jsonBody, jsonContent, errorResponseSchema, messageResponseSchema, standardErrors, bearerSecurity } from './_schemas.js';
 import { isNginxService, DEFAULT_NGINX_CONFIG } from '../services/runtime.service.js';
 import { stripeService } from '../services/stripe.service.js';
@@ -1294,7 +1295,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     const plan = await db.query.billingPlans.findFirst({
       where: eq(billingPlans.id, data.planId),
     });
-    if (plan && !plan.isFree) {
+    if (plan && !plan.isFree && plan.priceCents > 0) {
       // Set service to pending_payment — deployment happens after checkout completes
       await db.update(services).set({ status: 'pending_payment', updatedAt: new Date() }).where(eq(services.id, svc.id));
 
@@ -1345,6 +1346,39 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
         return c.json({ error: 'Failed to create checkout session. Please try again.' }, 500);
       }
     }
+  }
+
+  // Source-based services (GitHub, Git) need to be built first — skip Docker Swarm creation
+  // and queue a build pipeline instead. The deployment worker will create the Docker service
+  // after building the image.
+  const isSourceBased = data.sourceType === 'github' || data.sourceType === 'git' || data.githubRepo || data.gitUrl;
+
+  if (isSourceBased) {
+    const [deployment] = await insertReturning(deployments, {
+      serviceId: svc.id,
+      status: 'building',
+      trigger: 'auto',
+      startedAt: new Date(),
+    });
+
+    await enqueueOrRunDeployment({
+      deploymentId: deployment!.id,
+      serviceId: svc.id,
+      accountId,
+      commitSha: null,
+    });
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.SERVICE_CREATED,
+      description: `Created service '${data.name}' (building from source)`,
+      resourceId: svc.id,
+      resourceName: data.name,
+    });
+
+    const response: Record<string, unknown> = { ...svc, status: 'deploying', deploymentId: deployment!.id };
+    if (webhookWarning) response.warning = webhookWarning;
+    return c.json(response, 201);
   }
 
   // Try to deploy to Docker Swarm (non-fatal — service record is always kept)
@@ -2129,7 +2163,33 @@ serviceRoutes.openapi(redeployServiceRoute, (async (c: any) => {
     return c.json({ message: 'Rebuild initiated', deploymentId: deployment?.id });
   }
 
-  // For image-based / GitHub services — re-pull the existing image
+  // GitHub / generic Git services need a full rebuild through the deployment worker
+  if ((svc.sourceType === 'github' || svc.githubRepo) || (svc.sourceType === 'git' || svc.gitUrl)) {
+    const [deployment] = await insertReturning(deployments, {
+      serviceId,
+      status: 'building',
+      trigger: 'manual',
+      startedAt: new Date(),
+    });
+
+    await enqueueOrRunDeployment({
+      deploymentId: deployment!.id,
+      serviceId,
+      accountId,
+      commitSha: null,
+    });
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.SERVICE_REDEPLOYED,
+      description: `Rebuild triggered for source-based service '${svc.name}'`,
+      resourceId: serviceId,
+      resourceName: svc.name,
+    });
+    return c.json({ message: 'Rebuild initiated', deploymentId: deployment?.id });
+  }
+
+  // For image-based services — re-pull the existing image
   const [deployment] = await insertReturning(deployments, {
     serviceId,
     status: 'deploying',

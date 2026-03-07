@@ -13,6 +13,7 @@ import { useDomainPicker } from '@/composables/useDomainPicker'
 import { useApi, ApiError } from '@/composables/useApi'
 import { useLogStream } from '@/composables/useLogStream'
 import { useDeployStream } from '@/composables/useDeployStream'
+import { useServiceEvents } from '@/composables/useServiceEvents'
 import { useTerminal } from '@/composables/useTerminal'
 import { useToast } from '@/composables/useToast'
 import { useVolumeManager } from '@/composables/useVolumeManager'
@@ -31,6 +32,7 @@ const { t } = useI18n()
 const serviceId = route.params.id as string
 const logStream = useLogStream()
 const deployStream = useDeployStream()
+const serviceEvents = useServiceEvents()
 const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 const volumeManager = useVolumeManager()
 const serviceBilling = useServiceBilling()
@@ -468,6 +470,84 @@ function startStatusPolling() {
   }, 4000)
 }
 
+// Event-driven service watcher — instant notification when a webhook-triggered deploy starts.
+// Uses a lightweight WebSocket (service-events channel via Valkey pub/sub) instead of polling.
+// Falls back to 15s polling only if the WebSocket can't connect.
+let serviceWatcherFallback: ReturnType<typeof setInterval> | null = null
+
+function startServiceWatcher() {
+  serviceEvents.connect(serviceId)
+  // Fallback polling only if WebSocket doesn't connect within 3s
+  const fallbackDelay = setTimeout(() => {
+    if (!serviceEvents.connected.value) {
+      startServiceWatcherFallback()
+    }
+  }, 3_000)
+  // Clean up the timeout if we unmount quickly
+  const stopFallbackDelay = () => clearTimeout(fallbackDelay)
+  // Store for cleanup
+  ;(startServiceWatcher as any)._stopFallbackDelay = stopFallbackDelay
+}
+
+function startServiceWatcherFallback() {
+  stopServiceWatcherFallback()
+  serviceWatcherFallback = setInterval(async () => {
+    try {
+      const prev = service.value?.status
+      const fresh = await api.get<any>(`/services/${serviceId}`)
+      service.value = fresh
+      if ((fresh.status === 'deploying' || fresh.status === 'building') && prev !== 'deploying' && prev !== 'building') {
+        await onNewDeployDetected()
+      }
+    } catch { /* ignore */ }
+  }, 15_000)
+}
+
+function stopServiceWatcherFallback() {
+  if (serviceWatcherFallback) {
+    clearInterval(serviceWatcherFallback)
+    serviceWatcherFallback = null
+  }
+}
+
+function stopServiceWatcher() {
+  serviceEvents.disconnect()
+  stopServiceWatcherFallback()
+  if ((startServiceWatcher as any)._stopFallbackDelay) {
+    (startServiceWatcher as any)._stopFallbackDelay()
+  }
+}
+
+async function onNewDeployDetected(deploymentId?: string) {
+  // Update service status optimistically
+  if (service.value) {
+    service.value = { ...service.value, status: 'deploying' }
+  }
+  // If we got the deploymentId from the event, use it directly
+  if (deploymentId) {
+    latestDeployment.value = { id: deploymentId, status: 'building', log: '', progressStep: 'queued' }
+    deployStream.start(deploymentId)
+  } else {
+    await pollLatestDeployment()
+    if (latestDeployment.value?.id) {
+      deployStream.start(latestDeployment.value.id)
+    }
+  }
+  startDeploymentPolling()
+  startStatusPolling()
+  if (activeTab.value !== 'overview') {
+    toast.info('A new deployment has started — click the banner to view progress')
+  }
+}
+
+// React to service events from WebSocket
+watch(() => serviceEvents.lastEvent.value, (event) => {
+  if (!event) return
+  if (event.type === 'deployment_started') {
+    onNewDeployDetected(event.deploymentId)
+  }
+})
+
 function stopStatusPolling() {
   if (statusPolling) {
     clearInterval(statusPolling)
@@ -486,11 +566,13 @@ const progressSteps = [
 ]
 
 function getStepStatus(stepKey: string): 'done' | 'active' | 'pending' {
-  if (!latestDeployment.value?.progressStep) return 'pending'
-  const current = latestDeployment.value.progressStep
+  // Prefer real-time WebSocket step over polled DB value for responsiveness
+  const wsStep = deployStream.step.value
+  const current = wsStep || latestDeployment.value?.progressStep
+  if (!current) return 'pending'
   if (current === 'failed') {
     const idx = progressSteps.findIndex(s => s.key === stepKey)
-    const failedIdx = progressSteps.findIndex(s => s.key === latestDeployment.value._lastActiveStep || 'building')
+    const failedIdx = progressSteps.findIndex(s => s.key === latestDeployment.value?._lastActiveStep || 'building')
     if (idx < failedIdx) return 'done'
     if (idx === failedIdx) return 'active'
     return 'pending'
@@ -1610,16 +1692,19 @@ onMounted(async () => {
   if (!latestDeployment.value && service.value?.deployments?.length) {
     latestDeployment.value = service.value.deployments[0]
   }
-  // Auto-start deploy stream for build output panel if deploying
-  if (service.value?.status === 'deploying' && latestDeployment.value?.id) {
+  // Auto-start deploy stream for build output panel if deploying/building
+  if ((service.value?.status === 'deploying' || service.value?.status === 'building') && latestDeployment.value?.id) {
     deployStream.start(latestDeployment.value.id)
   }
+  // Start background watcher to detect webhook-triggered deploys
+  startServiceWatcher()
 })
 
 onUnmounted(() => {
   stopStatsPolling()
   stopDeploymentPolling()
   stopStatusPolling()
+  stopServiceWatcher()
   deployStream.stop()
 })
 </script>
@@ -1628,7 +1713,7 @@ onUnmounted(() => {
   <div>
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">
-      <CompassSpinner size="w-8 h-8" />
+      <CompassSpinner size="w-16 h-16" />
     </div>
 
     <!-- Error -->
@@ -1741,14 +1826,14 @@ onUnmounted(() => {
 
       <!-- Deploying banner (always visible regardless of tab) -->
       <div
-        v-if="service.status === 'deploying' && activeTab !== 'overview'"
+        v-if="(service.status === 'deploying' || service.status === 'building') && activeTab !== 'overview'"
         class="mb-4 flex items-center gap-3 rounded-xl border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 px-4 py-3 cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
         @click="activeTab = 'overview'"
       >
         <CompassSpinner size="w-5 h-5" class="shrink-0" />
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-primary-800 dark:text-primary-200">Deployment in progress</p>
-          <p class="text-xs text-primary-600 dark:text-primary-400">Click to view progress</p>
+          <p class="text-xs text-primary-600 dark:text-primary-400">{{ deployStream.statusMessage.value || 'Click to view progress' }}</p>
         </div>
       </div>
 
@@ -1866,33 +1951,37 @@ onUnmounted(() => {
           </div>
 
           <!-- Deployment Progress Stepper -->
-          <div v-if="service.status === 'deploying' && latestDeployment" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
+          <div v-if="(service.status === 'deploying' || service.status === 'building') && latestDeployment" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
             <div class="flex items-center justify-between mb-4">
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Deployment Progress</h3>
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDuration(latestDeployment.startedAt, latestDeployment.completedAt) }}</span>
             </div>
             <div class="flex items-center gap-1">
-              <template v-for="(step, idx) in progressSteps" :key="step.key">
+              <template v-for="(stepDef, idx) in progressSteps" :key="stepDef.key">
                 <div class="flex flex-col items-center flex-1 min-w-0">
                   <div :class="[
                     'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all',
-                    getStepStatus(step.key) === 'done' ? 'bg-green-500 text-white' :
-                    getStepStatus(step.key) === 'active' ? 'bg-primary-500 text-white animate-pulse' :
+                    getStepStatus(stepDef.key) === 'done' ? 'bg-green-500 text-white' :
+                    getStepStatus(stepDef.key) === 'active' ? 'bg-primary-500 text-white animate-pulse' :
                     'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
                   ]">
-                    <svg v-if="getStepStatus(step.key) === 'done'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                    <CompassSpinner v-else-if="getStepStatus(step.key) === 'active'" size="w-4 h-4" />
+                    <svg v-if="getStepStatus(stepDef.key) === 'done'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                    <CompassSpinner v-else-if="getStepStatus(stepDef.key) === 'active'" size="w-4 h-4" />
                     <span v-else>{{ idx + 1 }}</span>
                   </div>
-                  <span :class="['text-[10px] mt-1 text-center truncate w-full', getStepStatus(step.key) === 'active' ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-400 dark:text-gray-500']">{{ step.label }}</span>
+                  <span :class="['text-[10px] mt-1 text-center truncate w-full', getStepStatus(stepDef.key) === 'active' ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-400 dark:text-gray-500']">{{ stepDef.label }}</span>
                 </div>
                 <div v-if="idx < progressSteps.length - 1" :class="['h-0.5 flex-1 -mt-4 rounded', getStepStatus(progressSteps[idx + 1]!.key) !== 'pending' ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-700']" />
               </template>
             </div>
+            <!-- Live status message from deploy stream -->
+            <p v-if="deployStream.statusMessage.value" class="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center animate-pulse">
+              {{ deployStream.statusMessage.value }}
+            </p>
           </div>
 
-          <!-- Build Output Panel (only during active builds, not image-only deploys) -->
-          <div v-if="(service.status === 'deploying' || service.status === 'building') && latestDeployment && latestDeployment.status !== 'succeeded' && latestDeployment.status !== 'deploying'" class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
+          <!-- Build Output Panel (visible throughout entire build/deploy pipeline) -->
+          <div v-if="(service.status === 'deploying' || service.status === 'building') && latestDeployment && latestDeployment.status !== 'succeeded'" class="bg-gray-900 rounded-xl border border-gray-700 shadow-sm overflow-hidden">
             <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <Code2 class="w-4 h-4 text-gray-400" />

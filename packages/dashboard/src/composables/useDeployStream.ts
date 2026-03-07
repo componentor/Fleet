@@ -8,6 +8,7 @@ export function useDeployStream() {
   const logLines = ref<string[]>([])
   const status = ref<string>('')
   const step = ref<DeployStep | ''>('')
+  const statusMessage = ref<string>('')
   const state = ref<DeployStreamState>('disconnected')
 
   let ws: WebSocket | null = null
@@ -21,6 +22,7 @@ export function useDeployStream() {
     logLines.value = []
     status.value = ''
     step.value = ''
+    statusMessage.value = ''
     state.value = 'connecting'
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -41,6 +43,7 @@ export function useDeployStream() {
 
         if (data.status) status.value = data.status
         if (data.step) step.value = data.step
+        if (data.statusMessage) statusMessage.value = data.statusMessage
 
         if (data.type === 'init' && data.log) {
           // Initial log blob — split into lines
@@ -93,6 +96,7 @@ export function useDeployStream() {
     logLines,
     status,
     step,
+    statusMessage,
     state,
     start,
     stop,
