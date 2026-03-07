@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, serviceAnalytics, services, accounts, eq, and, gte, sql, getDialect } from '@fleet/db';
+import { db, serviceAnalytics, visitorAnalytics, services, accounts, eq, and, gte, sql, getDialect } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
@@ -289,6 +289,164 @@ adminAnalyticsRoutes.openapi(getAdminAccountAnalyticsRoute, (async (c: any) => {
       requests: Number(r.requests) || 0,
       bytesIn: Number(r.bytesIn) || 0,
       bytesOut: Number(r.bytesOut) || 0,
+    })),
+  };
+
+  return c.json({ data, summary });
+}) as any);
+
+// ── Visitor Analytics ────────────────────────────────────────────────────
+
+const visitorAnalyticsResponseSchema = z.object({
+  data: z.array(z.object({
+    timestamp: z.string(),
+    uniqueVisitors: z.number(),
+    pageViews: z.number(),
+  })),
+  summary: z.object({
+    totalUniqueVisitors: z.number(),
+    totalPageViews: z.number(),
+    activeServices: z.number(),
+    topPaths: z.array(z.object({ path: z.string(), count: z.number() })),
+    topReferrers: z.array(z.object({ referrer: z.string(), count: z.number() })),
+    browsers: z.record(z.string(), z.number()),
+    devices: z.record(z.string(), z.number()),
+    topServices: z.array(z.object({
+      serviceId: z.string(),
+      serviceName: z.string().nullable(),
+      accountName: z.string().nullable(),
+      uniqueVisitors: z.number(),
+      pageViews: z.number(),
+    })),
+  }),
+});
+
+const getVisitorAnalyticsRoute = createRoute({
+  method: 'get',
+  path: '/visitors',
+  tags: ['Admin Analytics'],
+  summary: 'Get platform-wide visitor analytics from access logs',
+  security: bearerSecurity,
+  request: { query: periodQuerySchema },
+  responses: {
+    200: jsonContent(visitorAnalyticsResponseSchema, 'Visitor analytics'),
+    ...standardErrors,
+  },
+});
+
+adminAnalyticsRoutes.openapi(getVisitorAnalyticsRoute, (async (c: any) => {
+  const { period } = c.req.valid('query');
+  const cutoff = getPeriodCutoff(period);
+  const bucketSeconds = getBucketSeconds(period);
+
+  // Time-bucketed visitor data
+  const dialect = getDialect();
+  let bucketExpr;
+  if (dialect === 'pg') {
+    bucketExpr = sql`to_timestamp(floor(extract(epoch from ${visitorAnalytics.recordedAt}) / ${bucketSeconds}) * ${bucketSeconds})`;
+  } else if (dialect === 'mysql') {
+    bucketExpr = sql`FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(${visitorAnalytics.recordedAt}) / ${bucketSeconds}) * ${bucketSeconds})`;
+  } else {
+    bucketExpr = sql`(${visitorAnalytics.recordedAt} / ${bucketSeconds}) * ${bucketSeconds}`;
+  }
+
+  const rows = await db.select({
+    bucket: bucketExpr.as('bucket'),
+    uniqueVisitors: sql<number>`sum(${visitorAnalytics.uniqueVisitors})`.as('unique_visitors'),
+    pageViews: sql<number>`sum(${visitorAnalytics.pageViews})`.as('page_views'),
+  })
+    .from(visitorAnalytics)
+    .where(gte(visitorAnalytics.recordedAt, cutoff))
+    .groupBy(sql`bucket`)
+    .orderBy(sql`bucket`);
+
+  const data = rows.map((r) => {
+    const bucketVal = r.bucket as any;
+    const ts = isSqlite && typeof bucketVal === 'number'
+      ? new Date(bucketVal * 1000)
+      : new Date(bucketVal);
+    return {
+      timestamp: ts.toISOString(),
+      uniqueVisitors: Number(r.uniqueVisitors) || 0,
+      pageViews: Number(r.pageViews) || 0,
+    };
+  });
+
+  // Aggregate JSON fields from raw rows for top paths, referrers, browsers, devices
+  const rawRows = await db.select({
+    topPaths: visitorAnalytics.topPaths,
+    topReferrers: visitorAnalytics.topReferrers,
+    browsers: visitorAnalytics.browsers,
+    devices: visitorAnalytics.devices,
+  })
+    .from(visitorAnalytics)
+    .where(gte(visitorAnalytics.recordedAt, cutoff));
+
+  // Merge top paths
+  const pathMap = new Map<string, number>();
+  const referrerMap = new Map<string, number>();
+  const browserMap: Record<string, number> = {};
+  const deviceMap: Record<string, number> = {};
+
+  for (const row of rawRows) {
+    const paths = (Array.isArray(row.topPaths) ? row.topPaths : []) as Array<{ path: string; count: number }>;
+    for (const p of paths) {
+      pathMap.set(p.path, (pathMap.get(p.path) ?? 0) + p.count);
+    }
+    const refs = (Array.isArray(row.topReferrers) ? row.topReferrers : []) as Array<{ referrer: string; count: number }>;
+    for (const r of refs) {
+      referrerMap.set(r.referrer, (referrerMap.get(r.referrer) ?? 0) + r.count);
+    }
+    const brow = (row.browsers && typeof row.browsers === 'object' ? row.browsers : {}) as Record<string, number>;
+    for (const [k, v] of Object.entries(brow)) {
+      browserMap[k] = (browserMap[k] ?? 0) + (Number(v) || 0);
+    }
+    const dev = (row.devices && typeof row.devices === 'object' ? row.devices : {}) as Record<string, number>;
+    for (const [k, v] of Object.entries(dev)) {
+      deviceMap[k] = (deviceMap[k] ?? 0) + (Number(v) || 0);
+    }
+  }
+
+  const topPaths = [...pathMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([path, count]) => ({ path, count }));
+  const topReferrers = [...referrerMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([referrer, count]) => ({ referrer, count }));
+
+  // Top services
+  const topSvcRows = await db.select({
+    serviceId: visitorAnalytics.serviceId,
+    serviceName: services.name,
+    accountName: accounts.name,
+    uniqueVisitors: sql<number>`sum(${visitorAnalytics.uniqueVisitors})`.as('uv'),
+    pageViews: sql<number>`sum(${visitorAnalytics.pageViews})`.as('pv'),
+  })
+    .from(visitorAnalytics)
+    .leftJoin(services, eq(visitorAnalytics.serviceId, services.id))
+    .leftJoin(accounts, eq(visitorAnalytics.accountId, accounts.id))
+    .where(gte(visitorAnalytics.recordedAt, cutoff))
+    .groupBy(visitorAnalytics.serviceId, services.name, accounts.name)
+    .orderBy(sql`pv DESC`)
+    .limit(20);
+
+  // Active services count
+  const [activeCount] = await db.select({
+    count: sql<number>`count(distinct ${visitorAnalytics.serviceId})`.as('count'),
+  })
+    .from(visitorAnalytics)
+    .where(gte(visitorAnalytics.recordedAt, cutoff));
+
+  const summary = {
+    totalUniqueVisitors: data.reduce((a, d) => a + d.uniqueVisitors, 0),
+    totalPageViews: data.reduce((a, d) => a + d.pageViews, 0),
+    activeServices: Number(activeCount?.count) || 0,
+    topPaths,
+    topReferrers,
+    browsers: browserMap,
+    devices: deviceMap,
+    topServices: topSvcRows.map((r) => ({
+      serviceId: r.serviceId,
+      serviceName: r.serviceName ?? null,
+      accountName: r.accountName ?? null,
+      uniqueVisitors: Number(r.uniqueVisitors) || 0,
+      pageViews: Number(r.pageViews) || 0,
     })),
   };
 

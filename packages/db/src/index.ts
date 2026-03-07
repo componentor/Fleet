@@ -133,6 +133,10 @@ export const nodeMetricsRelations = _schema.nodeMetricsRelations;
 export const serviceAnalytics = _schema.serviceAnalytics as typeof PgSchema.serviceAnalytics;
 export const serviceAnalyticsRelations = _schema.serviceAnalyticsRelations;
 
+// visitor-analytics.ts
+export const visitorAnalytics = _schema.visitorAnalytics as typeof PgSchema.visitorAnalytics;
+export const visitorAnalyticsRelations = _schema.visitorAnalyticsRelations;
+
 // notifications.ts
 export const notifications = _schema.notifications as typeof PgSchema.notifications;
 export const notificationsRelations = _schema.notificationsRelations;

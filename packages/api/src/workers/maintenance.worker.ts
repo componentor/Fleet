@@ -99,6 +99,10 @@ interface AnalyticsDownsampleData {
   type: 'analytics-downsample';
 }
 
+interface VisitorAnalyticsCollectionData {
+  type: 'visitor-analytics-collection';
+}
+
 type MaintenanceJobData =
   | HealthCheckData
   | StaleCleanupData
@@ -121,7 +125,8 @@ type MaintenanceJobData =
   | RegistryPollData
   | UptimeSnapshotData
   | AnalyticsCollectionData
-  | AnalyticsDownsampleData;
+  | AnalyticsDownsampleData
+  | VisitorAnalyticsCollectionData;
 
 async function checkNodeHealth(): Promise<void> {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -2039,6 +2044,11 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<void
     case 'analytics-downsample':
       await executeAnalyticsDownsample();
       break;
+    case 'visitor-analytics-collection': {
+      const { visitorAnalyticsService } = await import('../services/visitor-analytics.service.js');
+      await visitorAnalyticsService.collectVisitorAnalytics();
+      break;
+    }
   }
 }
 
