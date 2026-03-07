@@ -84,6 +84,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/fleet/nfs-exports/uploads:/srv/nfs/uploads
+      - traefik_logs:/var/log/traefik:ro
     networks:
       - fleet_internal
       - fleet_public
@@ -184,6 +185,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - fleet_certs:/certs
+      - traefik_logs:/var/log/traefik
     configs:
       - source: traefik_config
         target: /etc/traefik/traefik.yml
@@ -336,6 +338,8 @@ volumes:
   valkey_data:
     driver: local
   registry_data:
+    driver: local
+  traefik_logs:
     driver: local
   fleet_certs:
     driver: local

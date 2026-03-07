@@ -14,7 +14,7 @@ import { getRegistryAuthForImage } from './docker.service.js';
 import { backupService } from './backup.service.js';
 import { logger } from './logger.js';
 import { getValkey } from './valkey.service.js';
-import { db, platformSettings, accounts, eq, upsert, safeTransaction } from '@fleet/db';
+import { db, platformSettings, accounts, eq, sql, upsert, safeTransaction } from '@fleet/db';
 
 const GITHUB_REPO = process.env['FLEET_GITHUB_REPO'] ?? 'componentor/fleet';
 const GITHUB_TOKEN = process.env['GITHUB_TOKEN'] ?? '';
@@ -54,6 +54,7 @@ export interface UpdateState {
   previousImageTags: Map<string, string>;
   preUpdateBackupId: string | null;
   servicesUpdated: string[];
+  migrationsApplied: number;
 }
 
 /** JSON-serializable shape stored in platformSettings under STATE_KEY */
@@ -67,6 +68,7 @@ export interface PersistedUpdateState {
   previousImageTags: Record<string, string>;
   preUpdateBackupId: string | null;
   servicesUpdated: string[];
+  migrationsApplied: number;
   fencingToken: number;
 }
 
@@ -100,6 +102,7 @@ export class UpdateService {
     previousImageTags: new Map(),
     preUpdateBackupId: null,
     servicesUpdated: [],
+    migrationsApplied: 0,
   };
 
   /** Read persisted version from DB — call once after DB is ready. */
@@ -182,6 +185,7 @@ export class UpdateService {
     this.state.previousImageTags.clear();
     this.state.preUpdateBackupId = null;
     this.state.servicesUpdated = [];
+    this.state.migrationsApplied = 0;
     this.fencingToken = 0;
 
     this.events.emit('update', this.state);
@@ -338,6 +342,7 @@ export class UpdateService {
       this.state.startedAt = persisted.startedAt ? new Date(persisted.startedAt) : null;
       this.state.finishedAt = persisted.finishedAt ? new Date(persisted.finishedAt) : null;
       this.state.servicesUpdated = persisted.servicesUpdated;
+      this.state.migrationsApplied = persisted.migrationsApplied ?? 0;
       this.state.preUpdateBackupId = persisted.preUpdateBackupId;
       // Restore previous image tags so rollback button works after container restart
       this.state.previousImageTags = new Map(Object.entries(persisted.previousImageTags ?? {}));
@@ -528,12 +533,23 @@ export class UpdateService {
     this.state.previousImageTags.clear();
     this.state.preUpdateBackupId = null;
     this.state.servicesUpdated = [];
+    this.state.migrationsApplied = 0;
 
     const imageTag = targetVersion.startsWith('v') ? targetVersion.slice(1) : targetVersion;
     await this.persistState();
 
     try {
-      // 0. Run database migrations FIRST (transactional + advisory-locked)
+      // 0. Pre-flight: verify database is healthy and accessible before touching anything
+      if (signal.aborted) throw new Error('Update aborted by admin');
+      this.appendLog('Pre-flight: verifying database connectivity...');
+      const { verifyDatabase: preVerify } = await import('@fleet/db/migrate');
+      const preCheck = await preVerify();
+      if (!preCheck.ok) {
+        throw new Error(`Pre-flight database check failed: ${preCheck.error ?? 'unknown error'}. Update aborted — nothing was modified.`);
+      }
+      this.appendLog('Pre-flight database check passed.');
+
+      // 0.5. Run database migrations (transactional + advisory-locked)
       // Migrations must run before backup because the Drizzle ORM schema
       // may reference new columns that don't exist in the DB yet.
       // Migrations are transactional — they roll back cleanly on failure.
@@ -543,6 +559,7 @@ export class UpdateService {
       this.appendLog('Running database migrations (transactional)...');
       try {
         const result = await runMigrations();
+        this.state.migrationsApplied = result.applied;
         this.appendLog(`Migrations completed: ${result.applied} migration(s) applied.`);
       } catch (err) {
         this.appendLog(`Migration FAILED (rolled back): ${errorToString(err)}`);
@@ -868,10 +885,17 @@ export class UpdateService {
       this.appendLog('Rollback completed. Verifying health...');
       await this.verifyServiceHealth();
 
-      // If we have a pre-update backup, mention it
-      if (this.state.preUpdateBackupId) {
-        this.appendLog(`Pre-update backup available: ${this.state.preUpdateBackupId}`);
-        this.appendLog('If database migrations need reverting, restore from this backup via POST /api/v1/backups/:id/restore');
+      // Provide migration rollback instructions if migrations were applied
+      if (this.state.migrationsApplied > 0) {
+        this.appendLog(`WARNING: ${this.state.migrationsApplied} database migration(s) were applied during this update.`);
+        this.appendLog('Service images have been rolled back, but database schema changes persist.');
+        if (this.state.preUpdateBackupId) {
+          this.appendLog(`To fully revert, restore the pre-update backup: POST /api/v1/backups/${this.state.preUpdateBackupId}/restore`);
+        } else {
+          this.appendLog('No pre-update backup is available. Manual database schema revert may be needed.');
+        }
+      } else if (this.state.preUpdateBackupId) {
+        this.appendLog(`Pre-update backup available if needed: ${this.state.preUpdateBackupId}`);
       }
 
       this.state.status = 'idle';
@@ -1039,6 +1063,7 @@ export class UpdateService {
         previousImageTags: Object.fromEntries(this.state.previousImageTags),
         preUpdateBackupId: this.state.preUpdateBackupId,
         servicesUpdated: this.state.servicesUpdated,
+        migrationsApplied: this.state.migrationsApplied,
         fencingToken: this.fencingToken,
       };
 
@@ -1704,6 +1729,17 @@ echo "Infrastructure files prepared successfully"
    * if this restarts the API, the new container sees 'completed' state.
    */
   private async applyStackDeploy(): Promise<void> {
+    // Flush all pending writes to disk before stack deploy restarts postgres.
+    // CHECKPOINT forces WAL flush — ensures no data loss if postgres restarts abruptly.
+    try {
+      this.appendLog('  Flushing database to disk (CHECKPOINT)...');
+      await db.execute(sql`CHECKPOINT`);
+      this.appendLog('  Database checkpoint completed.');
+    } catch (err) {
+      // Non-fatal for non-PG dialects (SQLite/MySQL don't need this)
+      this.appendLog(`  Database checkpoint skipped: ${errorToString(err)}`);
+    }
+
     const script = `
 set -e
 

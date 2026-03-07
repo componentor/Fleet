@@ -36,7 +36,18 @@ certificatesResolvers:
 log:
   level: INFO
 
-accessLog: {}
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+      names:
+        User-Agent: keep
+        Referer: keep
+        Accept-Language: keep
 
 metrics:
   prometheus:
