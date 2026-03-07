@@ -5,8 +5,10 @@ import {
   Box, Globe, HardDrive, DollarSign, Activity, Clock,
   Rocket, Sun, Moon, Sunset, CheckCircle, Wifi, Container,
   Sparkles, ArrowRight, Cpu, MemoryStick, ExternalLink, Shield,
+  Ship, Terminal, Plus, ArrowUpRight, Zap, ChevronRight,
+  LayoutGrid, TrendingUp,
 } from 'lucide-vue-next'
-import CompassSpinner from '@/components/CompassSpinner.vue'
+import SkeletonLoader from '@/components/SkeletonLoader.vue'
 import { useApi } from '@/composables/useApi'
 import { useServicesStore } from '@/stores/services'
 import { useAccount } from '@/composables/useAccount'
@@ -92,7 +94,7 @@ const allocatedMemoryMb = computed(() =>
   servicesStore.services.reduce((sum: number, s: any) => sum + ((s.memoryLimit || 0) * (s.replicas || 1)), 0)
 )
 
-// Resource gauges — always shown, 0% when no limit configured
+// Resource gauges
 function pctOf(used: number, limit: number | null | undefined): number {
   if (!limit || limit <= 0) return 0
   return Math.min(Math.round((used / limit) * 100), 100)
@@ -114,7 +116,6 @@ const gauges = computed(() => {
   const hb = healthBreakdown.value
 
   return [
-    // Services uptime
     {
       label: t('dashboard.servicesUptime'),
       value: hb.total > 0 ? Math.round((hb.running / hb.total) * 100) : 0,
@@ -122,35 +123,30 @@ const gauges = computed(() => {
       highIsGood: true,
       detail: `${hb.running} / ${hb.total}`,
     },
-    // Containers
     {
       label: t('dashboard.containers'),
       value: pctOf(usage?.runningContainers ?? 0, limits?.maxContainers),
       icon: Container,
       detail: detailStr(usage?.runningContainers ?? 0, limits?.maxContainers, ''),
     },
-    // CPU allocated
     {
       label: t('dashboard.cpuAllocated'),
       value: pctOf(allocatedCpu.value, limits?.maxTotalCpuCores),
       icon: Cpu,
       detail: detailStr(allocatedCpu.value, limits?.maxTotalCpuCores, 'cores'),
     },
-    // Memory allocated
     {
       label: t('dashboard.memoryAllocated'),
       value: pctOf(allocatedMemoryMb.value, limits?.maxTotalMemoryMb),
       icon: MemoryStick,
       detail: detailStr(allocatedMemoryMb.value, limits?.maxTotalMemoryMb, 'MB'),
     },
-    // Storage
     {
       label: t('dashboard.storage'),
       value: quota && quota.limitGb > 0 ? pctOf(quota.usedGb, quota.limitGb) : 0,
       icon: HardDrive,
       detail: detailStr(quota?.usedGb ?? 0, quota?.limitGb, 'GB'),
     },
-    // Bandwidth
     {
       label: t('dashboard.bandwidth'),
       value: pctOf(usage?.bandwidthGb ?? 0, limits?.maxBandwidthGb),
@@ -216,6 +212,19 @@ function formatTimestamp(ts: any) {
   return d.toLocaleString()
 }
 
+function relativeTime(ts: any) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const diff = Date.now() - d.getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return t('dashboard.justNow', 'just now')
+  if (mins < 60) return t('dashboard.minutesAgo', { n: mins })
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return t('dashboard.hoursAgo', { n: hours })
+  const days = Math.floor(hours / 24)
+  return t('dashboard.daysAgo', { n: days })
+}
+
 function eventBadgeClasses(eventType: string | null) {
   if (!eventType) return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
   if (eventType.includes('created') || eventType.includes('added') || eventType.includes('registered'))
@@ -240,14 +249,32 @@ function formatEventType(eventType: string | null) {
   return eventType.replace(/[._]/g, ' ')
 }
 
+function eventIcon(eventType: string | null) {
+  if (!eventType) return Zap
+  if (eventType.includes('deploy') || eventType.includes('started')) return Rocket
+  if (eventType.includes('created') || eventType.includes('added')) return Plus
+  if (eventType.includes('updated') || eventType.includes('changed')) return TrendingUp
+  return Zap
+}
+
 // Health bar segment width
 function healthWidth(count: number) {
   if (healthBreakdown.value.total === 0) return '0%'
   return `${(count / healthBreakdown.value.total) * 100}%`
 }
 
+// Quick actions
+const quickActions = computed(() => [
+  { label: t('dashboard.quickDeploy', 'Deploy Service'), icon: Ship, to: '/panel/deploy', color: 'text-primary-600 dark:text-primary-400', bg: 'bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100 dark:hover:bg-primary-900/30' },
+  { label: t('dashboard.quickDomain', 'Add Domain'), icon: Globe, to: '/panel/domains', color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-900/20 hover:bg-orange-100 dark:hover:bg-orange-900/30' },
+  { label: t('dashboard.quickMarketplace', 'Marketplace'), icon: LayoutGrid, to: '/panel/marketplace', color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/30' },
+  { label: t('dashboard.quickTerminal', 'Terminal'), icon: Terminal, to: '/panel/terminal', color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/30' },
+])
+
+// Has any data at all
+const hasData = computed(() => servicesStore.services.length > 0 || domainPicker.domains.value.length > 0)
+
 onMounted(async () => {
-  // Check for welcome flag (stays visible for the session)
   if (sessionStorage.getItem('fleet_just_logged_in')) {
     sessionStorage.removeItem('fleet_just_logged_in')
     showWelcome.value = true
@@ -261,13 +288,11 @@ onMounted(async () => {
       currentAccount.value?.id
         ? api.get<any>(`/accounts/${currentAccount.value.id}/activity?limit=20`)
             .then(data => {
-              // Only show semantic events (with eventType), not raw HTTP audit entries
               const entries = (data?.data ?? []) as any[]
               activityFeed.value = entries.filter((e: any) => e.eventType).slice(0, 10)
             })
             .catch(() => {})
         : Promise.resolve(),
-      // Real resource usage data
       api.get<{ usedGb: number; limitGb: number }>('/storage/volumes/quota')
         .then(data => { storageQuota.value = data })
         .catch(() => {}),
@@ -281,7 +306,6 @@ onMounted(async () => {
         .then(data => { resourceLimits.value = data })
         .catch(() => {}),
     ])
-    // Trigger count-up animations after data loads
     await nextTick()
     animateValue(animatedRunning, runningCount.value)
     animateValue(animatedDomains, domainPicker.domains.value.length, 900)
@@ -294,17 +318,46 @@ onMounted(async () => {
 </script>
 
 <template>
-  <!-- Full-page loading state -->
-  <div v-if="loading" class="flex flex-col items-center justify-center py-32">
-    <CompassSpinner size="w-10 h-10" />
-    <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">{{ $t('dashboard.loading', 'Getting bearings...') }}</p>
+  <!-- Skeleton loading state -->
+  <div v-if="loading" class="space-y-6">
+    <!-- Greeting skeleton -->
+    <div class="flex items-center gap-3 animate-pulse">
+      <div class="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-700" />
+      <div class="h-7 w-56 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+    </div>
+
+    <!-- Quick actions skeleton -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div v-for="i in 4" :key="i" class="h-[72px] rounded-xl bg-gray-100 dark:bg-gray-800 animate-pulse" />
+    </div>
+
+    <!-- Stat cards skeleton -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <SkeletonLoader type="stat" :count="4" />
+    </div>
+
+    <!-- Content skeletons side by side -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <SkeletonLoader type="list" :count="5" />
+      <SkeletonLoader type="list" :count="5" />
+    </div>
+
+    <!-- Gauges skeleton -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 animate-pulse">
+      <div class="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-6" />
+      <div class="grid grid-cols-3 sm:grid-cols-6 gap-6">
+        <SkeletonLoader type="gauge" :count="6" />
+      </div>
+    </div>
   </div>
 
   <div v-else class="stagger-children">
     <!-- Greeting -->
-    <div class="flex items-center gap-3 mb-6">
-      <component :is="greetingIcon" class="w-7 h-7 text-primary-600 dark:text-primary-400" />
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ greeting }}</h1>
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-3">
+        <component :is="greetingIcon" class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ greeting }}</h1>
+      </div>
     </div>
 
     <!-- Welcome banner -->
@@ -325,111 +378,125 @@ onMounted(async () => {
       </div>
     </Transition>
 
-      <!-- Empty state (no services and no domains) -->
-      <div v-if="servicesStore.services.length === 0 && domainPicker.domains.value.length === 0" class="text-center py-16">
-        <div class="mx-auto w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center mb-4">
-          <Globe class="w-8 h-8 text-primary-500" />
+    <!-- Quick Actions Bar -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <router-link
+        v-for="action in quickActions"
+        :key="action.to"
+        :to="action.to"
+        :class="[action.bg, 'flex items-center gap-3 px-4 py-3.5 rounded-xl border border-transparent transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md group']"
+      >
+        <div :class="[action.color, 'shrink-0']">
+          <component :is="action.icon" class="w-5 h-5" />
         </div>
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">{{ $t('dashboard.registerFirst', 'Register your first domain') }}</h2>
-        <p class="text-gray-500 dark:text-gray-400 text-sm mb-6 max-w-md mx-auto">{{ $t('dashboard.getStartedDomains', 'Start by registering a domain or deploying a service to bring your dashboard to life.') }}</p>
-        <div class="flex items-center justify-center gap-3">
-          <router-link
-            to="/panel/domains"
-            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors shadow-sm"
-          >
-            <Globe class="w-4 h-4" />
-            {{ $t('dashboard.addDomain') }}
-            <ArrowRight class="w-4 h-4" />
-          </router-link>
-          <router-link
-            to="/panel/deploy"
-            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors"
-          >
-            <Rocket class="w-4 h-4" />
-            {{ $t('services.deployNew') }}
-          </router-link>
-        </div>
+        <span :class="[action.color, 'text-sm font-semibold truncate']">{{ action.label }}</span>
+        <ArrowUpRight :class="[action.color, 'w-3.5 h-3.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity shrink-0']" />
+      </router-link>
+    </div>
+
+    <!-- Empty state (no services and no domains) -->
+    <div v-if="!hasData" class="text-center py-16">
+      <div class="mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-50 to-primary-100 dark:from-primary-900/20 dark:to-primary-800/20 flex items-center justify-center mb-6 shadow-sm">
+        <Rocket class="w-10 h-10 text-primary-500" />
+      </div>
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">{{ $t('dashboard.getStartedTitle', 'Ready to launch?') }}</h2>
+      <p class="text-gray-500 dark:text-gray-400 text-sm mb-8 max-w-md mx-auto">{{ $t('dashboard.getStartedDomains', 'Start by registering a domain or deploying a service to bring your dashboard to life.') }}</p>
+      <div class="flex items-center justify-center gap-3">
+        <router-link
+          to="/panel/domains"
+          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors shadow-sm hover:shadow-md"
+        >
+          <Globe class="w-4 h-4" />
+          {{ $t('dashboard.addDomain') }}
+        </router-link>
+        <router-link
+          to="/panel/deploy"
+          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium transition-colors"
+        >
+          <Rocket class="w-4 h-4" />
+          {{ $t('services.deployNew') }}
+        </router-link>
+      </div>
+    </div>
+
+    <template v-else>
+      <!-- Stat cards (clickable) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <router-link
+          v-for="stat in stats"
+          :key="stat.label"
+          :to="stat.to"
+          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-primary-200 dark:hover:border-primary-800 block group"
+        >
+          <div class="flex items-center gap-4">
+            <div :class="[stat.bg, 'p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow']">
+              <component :is="stat.icon" :class="[stat.color, 'w-5 h-5']" />
+            </div>
+            <div>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5">{{ stat.label }}</p>
+              <p class="text-xl font-bold text-gray-900 dark:text-white tabular-nums">{{ stat.value }}</p>
+            </div>
+          </div>
+        </router-link>
       </div>
 
-      <template v-else>
-        <!-- Stat cards (clickable) -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <router-link
-            v-for="stat in stats"
-            :key="stat.label"
-            :to="stat.to"
-            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-primary-200 dark:hover:border-primary-800 block"
-          >
-            <div class="flex items-center gap-4">
-              <div :class="[stat.bg, 'p-3 rounded-lg']">
-                <component :is="stat.icon" :class="[stat.color, 'w-6 h-6']" />
-              </div>
-              <div>
-                <p class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ stat.label }}</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">{{ stat.value }}</p>
-              </div>
-            </div>
-          </router-link>
-        </div>
-
+      <!-- Two-column layout: Domains + Services side by side -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <!-- My Domains -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8 transition-all duration-200 hover:shadow-md">
-          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md flex flex-col">
+          <div class="px-5 py-3.5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <Globe class="w-5 h-5 text-blue-500" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.myDomains', 'My Domains') }}</h2>
+              <Globe class="w-4.5 h-4.5 text-blue-500" />
+              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.myDomains', 'My Domains') }}</h2>
+              <span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">({{ domainPicker.domains.value.length }})</span>
             </div>
-            <router-link to="/panel/domains" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+            <router-link to="/panel/domains" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 font-medium">
               {{ $t('dashboard.viewAll') }}
-              <ArrowRight class="w-3 h-3" />
+              <ChevronRight class="w-3 h-3" />
             </router-link>
           </div>
-          <div v-if="myDomains.length === 0" class="px-6 py-10 text-center">
+          <div v-if="myDomains.length === 0" class="px-6 py-10 text-center flex-1 flex flex-col items-center justify-center">
             <Globe class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-            <p class="text-gray-500 dark:text-gray-400 text-sm mb-3">{{ $t('dashboard.noDomainsYet', 'No domains yet. Register your first domain to get started.') }}</p>
+            <p class="text-gray-500 dark:text-gray-400 text-sm mb-3">{{ $t('dashboard.noDomainsYet', 'No domains yet.') }}</p>
             <router-link
               to="/panel/domains"
-              class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+              class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors"
             >
-              <Globe class="w-4 h-4" />
+              <Globe class="w-3.5 h-3.5" />
               {{ $t('dashboard.addDomain') }}
             </router-link>
           </div>
-          <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
+          <div v-else class="divide-y divide-gray-100 dark:divide-gray-700/50 flex-1">
             <router-link
               v-for="d in myDomains"
               :key="d.domain"
               to="/panel/domains"
-              class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block"
+              class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block group/domain"
             >
-              <div class="flex items-center gap-3 min-w-0">
-                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
                   :class="d.type === 'purchased' ? 'bg-green-50 dark:bg-green-900/20' : d.type === 'external' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-purple-50 dark:bg-purple-900/20'"
                 >
-                  <Shield v-if="d.type === 'purchased'" class="w-4 h-4 text-green-500" />
-                  <ExternalLink v-else-if="d.type === 'external'" class="w-4 h-4 text-blue-500" />
-                  <Globe v-else class="w-4 h-4 text-purple-500" />
+                  <Shield v-if="d.type === 'purchased'" class="w-3.5 h-3.5 text-green-500" />
+                  <ExternalLink v-else-if="d.type === 'external'" class="w-3.5 h-3.5 text-blue-500" />
+                  <Globe v-else class="w-3.5 h-3.5 text-purple-500" />
                 </div>
                 <div class="min-w-0">
                   <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ d.domain }}</p>
-                  <p v-if="d.assignedServiceName" class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ d.assignedServiceName }}</p>
+                  <p v-if="d.assignedServiceName" class="text-[11px] text-gray-400 dark:text-gray-500 truncate">{{ d.assignedServiceName }}</p>
                 </div>
               </div>
-              <div class="flex items-center gap-2 shrink-0 ml-4">
-                <span :class="['inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold', domainTypeBadge(d.type)]">
-                  {{ domainTypeLabel(d.type) }}
-                </span>
+              <div class="flex items-center gap-2 shrink-0 ml-3">
                 <span
-                  :class="['w-2 h-2 rounded-full shrink-0', d.status === 'active' ? 'bg-green-500' : 'bg-yellow-500']"
-                  :title="d.status"
+                  :class="['w-1.5 h-1.5 rounded-full shrink-0', d.status === 'active' ? 'bg-green-500' : 'bg-yellow-500']"
                 ></span>
                 <button
                   v-if="d.status === 'active'"
                   @click.prevent="openDomain(d.domain)"
-                  class="ml-1 p-1 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  class="p-1 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors opacity-0 group-hover/domain:opacity-100"
                   :title="$t('domains.openInNewTab', 'Open site')"
                 >
-                  <ExternalLink class="w-3.5 h-3.5" />
+                  <ExternalLink class="w-3 h-3" />
                 </button>
               </div>
             </router-link>
@@ -437,59 +504,60 @@ onMounted(async () => {
         </div>
 
         <!-- My Services -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-8 transition-all duration-200 hover:shadow-md">
-          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md flex flex-col">
+          <div class="px-5 py-3.5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <Box class="w-5 h-5 text-green-500" />
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.myServices', 'My Services') }}</h2>
+              <Box class="w-4.5 h-4.5 text-green-500" />
+              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.myServices', 'My Services') }}</h2>
+              <span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">({{ servicesStore.services.length }})</span>
             </div>
-            <router-link to="/panel/services" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+            <router-link to="/panel/services" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 font-medium">
               {{ $t('dashboard.viewAll') }}
-              <ArrowRight class="w-3 h-3" />
+              <ChevronRight class="w-3 h-3" />
             </router-link>
           </div>
           <!-- Health bar (inline) -->
-          <div v-if="healthBreakdown.total > 0" class="px-6 pt-4 pb-2">
-            <div class="flex items-center justify-between mb-2">
+          <div v-if="healthBreakdown.total > 0" class="px-5 pt-3 pb-2">
+            <div class="flex items-center justify-between mb-1.5">
               <div class="flex flex-wrap gap-3">
                 <div v-if="healthBreakdown.running > 0" class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.running }} {{ $t('dashboard.running') }}</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                  <span class="text-[11px] text-gray-500 dark:text-gray-400">{{ healthBreakdown.running }} {{ $t('dashboard.running') }}</span>
                 </div>
                 <div v-if="healthBreakdown.deploying > 0" class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
-                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.deploying }} {{ $t('dashboard.deploying') }}</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>
+                  <span class="text-[11px] text-gray-500 dark:text-gray-400">{{ healthBreakdown.deploying }} {{ $t('dashboard.deploying') }}</span>
                 </div>
                 <div v-if="healthBreakdown.stopped > 0" class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-gray-400"></span>
-                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.stopped }} {{ $t('dashboard.stopped') }}</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+                  <span class="text-[11px] text-gray-500 dark:text-gray-400">{{ healthBreakdown.stopped }} {{ $t('dashboard.stopped') }}</span>
                 </div>
                 <div v-if="healthBreakdown.failed > 0" class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-red-500"></span>
-                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ healthBreakdown.failed }} {{ $t('dashboard.failed') }}</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                  <span class="text-[11px] text-gray-500 dark:text-gray-400">{{ healthBreakdown.failed }} {{ $t('dashboard.failed') }}</span>
                 </div>
               </div>
               <div v-if="allHealthy" class="flex items-center gap-1 text-green-600 dark:text-green-400">
-                <CheckCircle class="w-3.5 h-3.5" />
-                <span class="text-xs font-medium">{{ $t('dashboard.allHealthy') }}</span>
+                <CheckCircle class="w-3 h-3" />
+                <span class="text-[11px] font-medium">{{ $t('dashboard.allHealthy') }}</span>
               </div>
             </div>
-            <div class="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden flex">
+            <div class="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden flex">
               <div v-if="healthBreakdown.running > 0" class="bg-green-500 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.running) }" />
               <div v-if="healthBreakdown.deploying > 0" class="bg-yellow-500 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.deploying) }" />
               <div v-if="healthBreakdown.stopped > 0" class="bg-gray-400 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.stopped) }" />
               <div v-if="healthBreakdown.failed > 0" class="bg-red-500 transition-all duration-700" :style="{ width: healthWidth(healthBreakdown.failed) }" />
             </div>
           </div>
-          <div class="divide-y divide-gray-200 dark:divide-gray-700">
-            <div v-if="recentServices.length === 0" class="px-6 py-10 text-center">
+          <div class="divide-y divide-gray-100 dark:divide-gray-700/50 flex-1">
+            <div v-if="recentServices.length === 0" class="px-6 py-10 text-center flex-1 flex flex-col items-center justify-center">
               <Box class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
               <p class="text-gray-500 dark:text-gray-400 text-sm mb-3">{{ $t('dashboard.noServicesYet') }}</p>
               <router-link
                 to="/panel/deploy"
-                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium transition-colors"
               >
-                <Rocket class="w-4 h-4" />
+                <Rocket class="w-3.5 h-3.5" />
                 {{ $t('services.deployNew', 'Deploy') }}
               </router-link>
             </div>
@@ -497,118 +565,138 @@ onMounted(async () => {
               v-for="svc in recentServices"
               :key="svc.id"
               :to="`/panel/services/${svc.id}`"
-              class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block"
+              class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors block group/svc"
             >
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-2.5">
                 <span
                   :class="[
-                    'w-2.5 h-2.5 rounded-full shrink-0',
-                    svc.status === 'running' ? 'bg-green-500 animate-pulse' :
-                    svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
+                    'w-2 h-2 rounded-full shrink-0',
+                    svc.status === 'running' ? 'bg-green-500' :
+                    svc.status === 'deploying' ? 'bg-yellow-500 animate-pulse' :
+                    svc.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'
                   ]"
                 ></span>
                 <div class="min-w-0">
                   <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ svc.name }}</p>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ svc.image }}</p>
+                  <p class="text-[11px] text-gray-400 dark:text-gray-500 truncate font-mono">{{ svc.image }}</p>
                 </div>
               </div>
-              <div class="flex items-center gap-3 shrink-0 ml-4">
+              <div class="flex items-center gap-2.5 shrink-0 ml-3">
                 <span
                   :class="[
-                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+                    'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold',
                     svc.status === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-                    svc.status === 'stopped' || svc.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
-                    'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                    svc.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                    svc.status === 'deploying' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' :
+                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
                   ]"
                 >
                   {{ svc.status }}
                 </span>
-                <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{{ formatDate(svc.updatedAt || svc.createdAt) }}</span>
+                <ArrowRight class="w-3.5 h-3.5 opacity-0 group-hover/svc:opacity-100 transition-opacity text-gray-400" />
               </div>
             </router-link>
           </div>
         </div>
+      </div>
 
-        <!-- Resource usage gauges -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-8 transition-all duration-200 hover:shadow-md">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">{{ $t('dashboard.resourceUsage') }}</h3>
-          <div class="grid grid-cols-3 sm:grid-cols-6 gap-6">
-            <ResourceGauge
-              v-for="gauge in gauges"
-              :key="gauge.label"
-              :label="gauge.label"
-              :value="gauge.value"
-              :icon="gauge.icon"
-              :high-is-good="gauge.highIsGood"
-              :detail="gauge.detail"
-            />
-          </div>
+      <!-- Resource usage gauges -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-6 transition-all duration-200 hover:shadow-md">
+        <div class="flex items-center justify-between mb-5">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.resourceUsage') }}</h3>
+          <router-link to="/panel/billing" class="text-[11px] text-primary-600 dark:text-primary-400 hover:underline font-medium">{{ $t('dashboard.viewDetails', 'View details') }}</router-link>
         </div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-6">
+          <ResourceGauge
+            v-for="gauge in gauges"
+            :key="gauge.label"
+            :label="gauge.label"
+            :value="gauge.value"
+            :icon="gauge.icon"
+            :high-is-good="gauge.highIsGood"
+            :detail="gauge.detail"
+          />
+        </div>
+      </div>
 
-        <!-- Volume usage breakdown -->
-        <div v-if="volumesList.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-8 transition-all duration-200 hover:shadow-md">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.volumeUsage') }}</h3>
-            <router-link to="/panel/storage" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">{{ $t('dashboard.viewAll') }}</router-link>
-          </div>
-          <div class="space-y-3">
-            <div v-for="vol in volumesList" :key="vol.name" class="flex items-center gap-4">
-              <div class="w-28 sm:w-36 shrink-0 truncate">
-                <span class="text-sm font-mono text-gray-900 dark:text-white truncate">{{ vol.displayName || vol.name }}</span>
+      <!-- Volume usage breakdown -->
+      <div v-if="volumesList.length > 0" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 mb-6 transition-all duration-200 hover:shadow-md">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.volumeUsage') }}</h3>
+          <router-link to="/panel/storage" class="text-[11px] text-primary-600 dark:text-primary-400 hover:underline font-medium">{{ $t('dashboard.viewAll') }}</router-link>
+        </div>
+        <div class="space-y-3">
+          <div v-for="vol in volumesList" :key="vol.name" class="flex items-center gap-4">
+            <div class="w-28 sm:w-36 shrink-0 truncate">
+              <span class="text-sm font-mono text-gray-900 dark:text-white truncate">{{ vol.displayName || vol.name }}</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="h-1.5 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-700"
+                  :class="vol.sizeGb > 0 && (vol.usedGb ?? 0) / vol.sizeGb > 0.9
+                    ? 'bg-red-500'
+                    : vol.sizeGb > 0 && (vol.usedGb ?? 0) / vol.sizeGb > 0.7
+                      ? 'bg-amber-500'
+                      : 'bg-primary-500'"
+                  :style="{ width: vol.sizeGb > 0 ? `${Math.min(100, ((vol.usedGb ?? 0) / vol.sizeGb) * 100)}%` : '0%' }"
+                />
               </div>
-              <div class="flex-1 min-w-0">
-                <div class="h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
-                  <div
-                    class="h-full rounded-full transition-all duration-700"
-                    :class="vol.sizeGb > 0 && (vol.usedGb ?? 0) / vol.sizeGb > 0.9
-                      ? 'bg-red-500'
-                      : vol.sizeGb > 0 && (vol.usedGb ?? 0) / vol.sizeGb > 0.7
-                        ? 'bg-amber-500'
-                        : 'bg-primary-500'"
-                    :style="{ width: vol.sizeGb > 0 ? `${Math.min(100, ((vol.usedGb ?? 0) / vol.sizeGb) * 100)}%` : '0%' }"
-                  />
-                </div>
-              </div>
-              <div class="w-24 sm:w-28 text-right shrink-0">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ (vol.usedGb ?? 0).toFixed(1) }} / {{ vol.sizeGb }} GB</span>
-              </div>
+            </div>
+            <div class="w-24 sm:w-28 text-right shrink-0">
+              <span class="text-xs text-gray-500 dark:text-gray-400 tabular-nums">{{ (vol.usedGb ?? 0).toFixed(1) }} / {{ vol.sizeGb }} GB</span>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Recent Activity -->
-        <div class="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md">
-          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
-            <Clock class="w-5 h-5 text-gray-500 dark:text-gray-400" />
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.recentActivity') }}</h2>
+      <!-- Recent Activity -->
+      <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:shadow-md">
+        <div class="px-5 py-3.5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Clock class="w-4.5 h-4.5 text-gray-400 dark:text-gray-500" />
+            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('dashboard.recentActivity') }}</h2>
           </div>
-          <div class="divide-y divide-gray-200 dark:divide-gray-700">
-            <div v-if="activityFeed.length === 0" class="px-6 py-12 text-center">
-              <p class="text-gray-500 dark:text-gray-400 text-sm">{{ $t('dashboard.noActivity') }}</p>
-            </div>
-            <div
-              v-for="(entry, idx) in activityFeed"
-              :key="entry.id || idx"
-              class="px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+          <router-link to="/panel/activity" class="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 font-medium">
+            {{ $t('dashboard.viewAll') }}
+            <ChevronRight class="w-3 h-3" />
+          </router-link>
+        </div>
+        <div class="divide-y divide-gray-100 dark:divide-gray-700/50">
+          <div v-if="activityFeed.length === 0" class="px-6 py-12 text-center">
+            <Clock class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+            <p class="text-gray-500 dark:text-gray-400 text-sm">{{ $t('dashboard.noActivity') }}</p>
+          </div>
+          <div
+            v-for="(entry, idx) in activityFeed"
+            :key="entry.id || idx"
+            class="px-5 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+          >
+            <!-- Event icon -->
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+              :class="eventBadgeClasses(entry.eventType).replace('text-', 'bg-').split(' ').filter((c: string) => c.startsWith('bg-')).join(' ')"
+              style="opacity: 0.6;"
             >
-              <div class="flex items-center gap-3 min-w-0">
+              <component :is="eventIcon(entry.eventType)" class="w-3.5 h-3.5" :class="eventBadgeClasses(entry.eventType).split(' ').filter((c: string) => c.startsWith('text-')).join(' ')" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-gray-900 dark:text-white truncate">
+                <span class="font-medium">{{ entry.resourceName || entry.action }}</span>
+                <span v-if="entry.description" class="text-gray-500 dark:text-gray-400"> &mdash; {{ entry.description }}</span>
+              </p>
+              <div class="flex items-center gap-2 mt-0.5">
                 <span
-                  :class="[
-                    'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0',
-                    eventBadgeClasses(entry.eventType)
-                  ]"
+                  :class="['inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider', eventBadgeClasses(entry.eventType)]"
                 >
                   {{ formatEventType(entry.eventType) }}
                 </span>
-                <div class="min-w-0">
-                  <p class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ entry.resourceName || entry.description || entry.action }}</p>
-                  <p v-if="entry.actorEmail" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{{ entry.actorEmail }}</p>
-                </div>
+                <span v-if="entry.actorEmail" class="text-[11px] text-gray-400 dark:text-gray-500 truncate">{{ entry.actorEmail }}</span>
               </div>
-              <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap ml-4">{{ formatTimestamp(entry.createdAt) }}</span>
             </div>
+            <span class="text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap shrink-0">{{ relativeTime(entry.createdAt) }}</span>
           </div>
         </div>
-      </template>
+      </div>
+    </template>
   </div>
 </template>

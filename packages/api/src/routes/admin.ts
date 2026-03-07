@@ -1,7 +1,7 @@
 import { stream } from 'hono/streaming';
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { db, accounts, users, userAccounts, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, accountBillingOverrides, resourceLimits, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, isNotNull, desc, gte, lte, inArray } from '@fleet/db';
+import { db, accounts, users, userAccounts, oauthProviders, services, nodes, deployments, auditLog, errorLog, statusPosts, statusPostTranslations, platformSettings, adminRoles, accountBillingOverrides, resourceLimits, insertReturning, updateReturning, countSql, eq, and, or, like, isNull, isNotNull, desc, gte, lte, inArray } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { loadAdminPermissions, requireAdminPermission, requireSuperAdmin } from '../middleware/admin-permission.js';
 import type { AdminPermissions } from '../middleware/admin-permission.js';
@@ -80,6 +80,7 @@ const statsRoute = createRoute({
   tags: ['Admin'],
   summary: 'Get platform-wide statistics',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('dashboard', 'read')] as const,
   responses: {
     200: jsonContent(z.any(), 'Platform statistics'),
     ...standardErrors,
@@ -254,6 +255,7 @@ const listAccountsRoute = createRoute({
   tags: ['Admin'],
   summary: 'List all accounts (paginated)',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('accounts', 'read')] as const,
   request: {
     query: paginationQuerySchema,
   },
@@ -306,6 +308,7 @@ const getAccountDetailRoute = createRoute({
   tags: ['Admin'],
   summary: 'Get single account with services, users, billing overrides',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('accounts', 'read')] as const,
   request: {
     params: idParamSchema,
   },
@@ -360,6 +363,15 @@ adminRoutes.openapi(getAccountDetailRoute, (async (c: any) => {
   // Strip sensitive fields
   const { stripeCustomerId: _s, stripeConnectAccountId: _sc, ...safeAccount } = account as any;
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.ADMIN_ACCOUNT_VIEWED,
+    description: `Admin viewed account '${account.name}'`,
+    resourceType: 'account',
+    resourceId: id,
+    resourceName: account.name ?? undefined,
+  });
+
   return c.json({
     ...safeAccount,
     users: accountUsers,
@@ -378,6 +390,7 @@ const updateAccountRoute = createRoute({
   tags: ['Admin'],
   summary: 'Update account details',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('accounts', 'write')] as const,
   request: {
     params: idParamSchema,
     body: jsonBody(z.object({
@@ -410,14 +423,20 @@ adminRoutes.openapi(updateAccountRoute, (async (c: any) => {
 }) as any);
 
 // GET /users — list all users
+const usersQuerySchema = paginationQuerySchema.extend({
+  filter: z.enum(['all', 'admins']).optional().openapi({ description: 'Filter: all users or admins only' }),
+  search: z.string().optional().openapi({ description: 'Search by name or email' }),
+});
+
 const listUsersRoute = createRoute({
   method: 'get',
   path: '/users',
   tags: ['Admin'],
-  summary: 'List all users (paginated)',
+  summary: 'List all users (paginated, filterable)',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('users', 'read')] as const,
   request: {
-    query: paginationQuerySchema,
+    query: usersQuerySchema,
   },
   responses: {
     200: jsonContent(z.any(), 'Paginated users list'),
@@ -430,9 +449,27 @@ adminRoutes.openapi(listUsersRoute, (async (c: any) => {
   const page = Math.max(1, parseInt(query.page ?? '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(query.limit ?? '50', 10)));
   const offset = (page - 1) * limit;
+  const filter = query.filter ?? 'all';
+  const searchTerm = query.search?.trim();
+
+  // Build where conditions
+  const conditions: any[] = [isNull(users.deletedAt)];
+  if (filter === 'admins') {
+    conditions.push(or(eq(users.isSuper, true), isNotNull(users.adminRoleId)));
+  }
+  if (searchTerm) {
+    conditions.push(or(like(users.name, `%${searchTerm}%`), like(users.email, `%${searchTerm}%`)));
+  }
+
+  const whereClause = and(...conditions);
 
   const allUsers = await db.query.users.findMany({
-    where: isNull(users.deletedAt),
+    where: whereClause,
+    with: {
+      oauthProviders: {
+        columns: { provider: true },
+      },
+    },
     orderBy: (u: any, { desc: d }: any) => d(u.createdAt),
     limit,
     offset,
@@ -441,7 +478,7 @@ adminRoutes.openapi(listUsersRoute, (async (c: any) => {
   const [total] = await db
     .select({ count: countSql() })
     .from(users)
-    .where(isNull(users.deletedAt));
+    .where(whereClause);
 
   // Only expose safe fields — never return tokens, secrets, or hashes
   const sanitized = allUsers.map((u: any) => ({
@@ -452,6 +489,11 @@ adminRoutes.openapi(listUsersRoute, (async (c: any) => {
     adminRoleId: u.adminRoleId ?? null,
     emailVerified: u.emailVerified,
     twoFactorEnabled: u.twoFactorEnabled,
+    allowedLoginRegions: u.allowedLoginRegions ?? null,
+    loginMethods: [
+      ...(u.passwordHash ? ['password'] : []),
+      ...(u.oauthProviders?.map((p: any) => p.provider) ?? []),
+    ],
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
   }));
@@ -484,8 +526,14 @@ const toggleSuperRoute = createRoute({
 });
 
 adminRoutes.openapi(toggleSuperRoute, (async (c: any) => {
-  const { id: targetUserId } = c.req.valid('param');
   const authUser = c.get('user');
+
+  // Only super admins can toggle super status — prevent privilege escalation
+  if (!authUser.isSuper) {
+    return c.json({ error: 'Only super admins can modify super user status' }, 403);
+  }
+
+  const { id: targetUserId } = c.req.valid('param');
 
   if (targetUserId === authUser.userId) {
     return c.json({ error: 'Cannot modify your own super user status' }, 400);
@@ -520,6 +568,75 @@ adminRoutes.openapi(toggleSuperRoute, (async (c: any) => {
   });
 }) as any);
 
+// PATCH /users/:id/regions — update allowed login regions for an admin user
+const updateRegionsRoute = createRoute({
+  method: 'patch',
+  path: '/users/{id}/regions',
+  tags: ['Admin'],
+  summary: 'Update allowed login regions for an admin user',
+  security: bearerSecurity,
+  request: {
+    params: idParamSchema,
+    body: jsonBody(z.object({
+      allowedLoginRegions: z.array(z.string().length(2).toUpperCase()).nullable().openapi({ description: 'ISO 3166-1 alpha-2 country codes, or null to remove restrictions' }),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Updated user with new region restrictions'),
+    ...standardErrors,
+  },
+});
+
+adminRoutes.openapi(updateRegionsRoute, (async (c: any) => {
+  const authUser = c.get('user');
+  if (!authUser.isSuper) {
+    return c.json({ error: 'Only super admins can manage login regions' }, 403);
+  }
+
+  const { id: targetUserId } = c.req.valid('param');
+  const { allowedLoginRegions } = c.req.valid('json');
+
+  const targetUser = await db.query.users.findFirst({
+    where: and(eq(users.id, targetUserId), isNull(users.deletedAt)),
+  });
+
+  if (!targetUser) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  // Only allow setting regions on admin users (super or role-based)
+  if (!targetUser.isSuper && !(targetUser as any).adminRoleId) {
+    return c.json({ error: 'Region restrictions can only be set on admin users' }, 400);
+  }
+
+  const regions = allowedLoginRegions && allowedLoginRegions.length > 0 ? allowedLoginRegions : null;
+
+  const [updated] = await updateReturning(
+    users,
+    { allowedLoginRegions: regions, securityChangedAt: new Date(), updatedAt: new Date() },
+    eq(users.id, targetUserId),
+  );
+
+  logger.info({ targetUserId, allowedLoginRegions: regions, changedBy: authUser.userId }, 'Admin login regions updated');
+
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.USER_SETTINGS_CHANGED,
+    description: regions
+      ? `Set allowed login regions to ${regions.join(', ')} for ${targetUser.email}`
+      : `Removed login region restrictions for ${targetUser.email}`,
+    resourceType: 'user',
+    resourceId: targetUserId,
+    resourceName: targetUser.email ?? undefined,
+  });
+
+  return c.json({
+    id: updated!.id,
+    email: updated!.email,
+    allowedLoginRegions: (updated as any).allowedLoginRegions ?? null,
+  });
+}) as any);
+
 // GET /audit-log — platform-wide audit log with filtering
 const auditLogRoute = createRoute({
   method: 'get',
@@ -527,6 +644,7 @@ const auditLogRoute = createRoute({
   tags: ['Admin'],
   summary: 'List platform-wide audit log with filtering',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('events', 'read')] as const,
   request: {
     query: auditLogQuerySchema,
   },
@@ -606,6 +724,7 @@ const listServicesRoute = createRoute({
   tags: ['Admin'],
   summary: 'List all services across all accounts (paginated)',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('services', 'read')] as const,
   request: {
     query: paginationQuerySchema,
   },
@@ -659,6 +778,7 @@ const statusRoute = createRoute({
   tags: ['Admin'],
   summary: 'Get system health and status overview',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('status', 'read')] as const,
   request: {
     query: statusQuerySchema,
   },
@@ -896,6 +1016,7 @@ const listStatusPostsRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'List all status posts with translations (paginated)',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'read')] as const,
   request: {
     query: statusPostQuerySchema,
   },
@@ -959,6 +1080,7 @@ const createStatusPostRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'Create a new status post with initial translation',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'write')] as const,
   request: {
     body: jsonBody(createStatusPostSchema),
   },
@@ -998,6 +1120,7 @@ const updateStatusPostRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'Update status post metadata',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'write')] as const,
   request: {
     params: statusPostIdParamSchema,
     body: jsonBody(updateStatusPostSchema),
@@ -1043,6 +1166,7 @@ const deleteStatusPostRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'Delete a status post',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'write')] as const,
   request: {
     params: statusPostIdParamSchema,
   },
@@ -1075,6 +1199,7 @@ const upsertTranslationRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'Upsert a translation for a status post',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'write')] as const,
   request: {
     params: translationParamSchema,
     body: jsonBody(upsertTranslationSchema),
@@ -1129,6 +1254,7 @@ const deleteTranslationRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'Delete a specific translation for a status post',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'write')] as const,
   request: {
     params: translationParamSchema,
   },
@@ -1164,6 +1290,7 @@ const autoTranslateRoute = createRoute({
   tags: ['Admin', 'Status Posts'],
   summary: 'Auto-translate a status post using DeepL',
   security: bearerSecurity,
+  middleware: [requireAdminPermission('statusPosts', 'write')] as const,
   request: {
     params: statusPostIdParamSchema,
     body: jsonBody(autoTranslateSchema),

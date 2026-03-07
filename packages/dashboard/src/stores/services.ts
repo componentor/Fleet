@@ -60,7 +60,10 @@ export const useServicesStore = defineStore('services', () => {
     }
   }
 
-  async function deleteService(id: string, opts?: { deleteVolumeNames?: string[] }) {
+  const trashedServices = ref<any[]>([])
+  const trashLoading = ref(false)
+
+  async function deleteService(id: string, opts?: { deleteVolumeNames?: string[]; backupBeforeDelete?: boolean }) {
     // Optimistic: remove from local state immediately
     const previous = services.value
     services.value = services.value.filter((s) => s.id !== id)
@@ -70,6 +73,7 @@ export const useServicesStore = defineStore('services', () => {
     try {
       await api.del(`/services/${id}`, {
         deleteVolumeNames: opts?.deleteVolumeNames ?? [],
+        backupBeforeDelete: opts?.backupBeforeDelete ?? false,
       })
     } catch (err) {
       // Rollback on failure
@@ -78,7 +82,7 @@ export const useServicesStore = defineStore('services', () => {
     }
   }
 
-  async function deleteStack(stackId: string, opts?: { deleteVolumeNames?: string[] }) {
+  async function deleteStack(stackId: string, opts?: { deleteVolumeNames?: string[]; backupBeforeDelete?: boolean }) {
     // Optimistic: remove all services in this stack immediately
     const previous = services.value
     services.value = services.value.filter((s) => s.stackId !== stackId)
@@ -88,6 +92,7 @@ export const useServicesStore = defineStore('services', () => {
     try {
       await api.del(`/services/stack/${stackId}`, {
         deleteVolumeNames: opts?.deleteVolumeNames ?? [],
+        backupBeforeDelete: opts?.backupBeforeDelete ?? false,
       })
     } catch (err) {
       // Rollback on failure
@@ -96,15 +101,44 @@ export const useServicesStore = defineStore('services', () => {
     }
   }
 
+  async function fetchTrash() {
+    trashLoading.value = true
+    try {
+      const data = await api.get<any[]>('/services/trash')
+      trashedServices.value = data
+      return data
+    } finally {
+      trashLoading.value = false
+    }
+  }
+
+  async function restoreService(id: string) {
+    const data = await api.post<Service>(`/services/${id}/restore`, {})
+    // Remove from trash, add to active list
+    trashedServices.value = trashedServices.value.filter((s) => s.id !== id)
+    services.value.push(data)
+    return data
+  }
+
+  async function permanentlyDeleteService(id: string) {
+    await api.del(`/services/${id}/permanent`)
+    trashedServices.value = trashedServices.value.filter((s) => s.id !== id)
+  }
+
   return {
     services,
     currentService,
     loading,
+    trashedServices,
+    trashLoading,
     fetchServices,
     getService,
     createService,
     updateService,
     deleteService,
     deleteStack,
+    fetchTrash,
+    restoreService,
+    permanentlyDeleteService,
   }
 })

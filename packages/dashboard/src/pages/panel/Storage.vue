@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, Plus, Info, FolderOpen, RefreshCw, MapPin, Maximize2 } from 'lucide-vue-next'
+import { HardDrive, Plus, Info, FolderOpen, RefreshCw, MapPin, Maximize2, Activity, ArrowDown, ArrowUp } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
+import InteractiveChart from '@/components/InteractiveChart.vue'
 import { useApi } from '@/composables/useApi'
 import { useRole } from '@/composables/useRole'
 import FileExplorer from '@/components/FileExplorer.vue'
@@ -28,6 +29,12 @@ const resizingVolume = ref<any | null>(null)
 const resizeSize = ref(1)
 const resizing = ref(false)
 let syncInterval: ReturnType<typeof setInterval> | null = null
+
+// Volume analytics
+const analyticsVolumeName = ref<string | null>(null)
+const analyticsPeriod = ref<'24h' | '7d' | '30d'>('24h')
+const analyticsData = ref<any>(null)
+const analyticsLoading = ref(false)
 
 async function fetchVolumes(silent = false) {
   if (!silent) loading.value = true
@@ -159,6 +166,49 @@ async function resizeVolume() {
     resizing.value = false
   }
 }
+
+async function fetchVolumeAnalytics() {
+  if (!analyticsVolumeName.value) return
+  analyticsLoading.value = true
+  try {
+    analyticsData.value = await api.get<any>(
+      `/analytics/volumes/${encodeURIComponent(analyticsVolumeName.value)}?period=${analyticsPeriod.value}`
+    )
+  } catch {
+    analyticsData.value = null
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
+function openVolumeAnalytics(volumeName: string) {
+  analyticsVolumeName.value = volumeName
+  analyticsData.value = null
+  fetchVolumeAnalytics()
+}
+
+watch(analyticsPeriod, () => {
+  if (analyticsVolumeName.value) fetchVolumeAnalytics()
+})
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function formatTimeLabel(d: Date): string {
+  if (analyticsPeriod.value === '24h') {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+  return `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}`
+}
+
+const ioChartSeries = [
+  { key: 'ioReadBytes', label: 'Read', color: 'var(--color-primary-500, #3b82f6)' },
+  { key: 'ioWriteBytes', label: 'Write', color: 'var(--color-amber-500, #f59e0b)' },
+]
 
 function regionLabel(key: string | null | undefined) {
   if (!key) return '--'
@@ -385,6 +435,13 @@ onBeforeUnmount(() => {
               <td class="px-6 py-4 text-right">
                 <div class="flex items-center justify-end gap-3">
                   <button
+                    @click="openVolumeAnalytics(volume.name)"
+                    class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    <Activity class="w-3.5 h-3.5" />
+                    {{ t('storagePage.analytics', 'Analytics') }}
+                  </button>
+                  <button
                     @click="browsingVolumeName = volume.name"
                     class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline inline-flex items-center gap-1"
                   >
@@ -512,6 +569,125 @@ onBeforeUnmount(() => {
             </div>
             <div class="flex-1 overflow-y-auto p-6">
               <FileExplorer :volumeName="browsingVolumeName" />
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Volume Analytics Modal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="analyticsVolumeName" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" @click="analyticsVolumeName = null"></div>
+          <div class="relative w-full max-w-3xl max-h-[90vh] bg-white dark:bg-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between shrink-0">
+              <div class="flex items-center gap-3">
+                <Activity class="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                <div>
+                  <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('storagePage.volumeAnalytics', 'Volume Analytics') }}</h3>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-mono">{{ analyticsVolumeName }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <!-- Period selector -->
+                <div class="flex items-center gap-1 p-0.5 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                  <button
+                    v-for="p in (['24h', '7d', '30d'] as const)"
+                    :key="p"
+                    @click="analyticsPeriod = p"
+                    :class="[
+                      'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                      analyticsPeriod === p
+                        ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ]"
+                  >{{ p }}</button>
+                </div>
+                <button @click="analyticsVolumeName = null" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+              <!-- Loading -->
+              <div v-if="analyticsLoading" class="flex items-center justify-center py-12">
+                <CompassSpinner size="w-10 h-10" />
+              </div>
+
+              <template v-else-if="analyticsData">
+                <!-- Summary cards -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div class="p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <ArrowDown class="w-3.5 h-3.5 text-blue-500" />
+                      <p class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('storagePage.totalRead', 'Total Read') }}</p>
+                    </div>
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalReadBytes) }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <ArrowUp class="w-3.5 h-3.5 text-amber-500" />
+                      <p class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('storagePage.totalWrite', 'Total Write') }}</p>
+                    </div>
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.totalWriteBytes) }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <ArrowDown class="w-3.5 h-3.5 text-blue-500" />
+                      <p class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('storagePage.peakRead', 'Peak Read') }}</p>
+                    </div>
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.peakReadBytesPerInterval) }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <ArrowUp class="w-3.5 h-3.5 text-amber-500" />
+                      <p class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('storagePage.peakWrite', 'Peak Write') }}</p>
+                    </div>
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ formatBytes(analyticsData.summary.peakWriteBytesPerInterval) }}</p>
+                  </div>
+                </div>
+
+                <!-- I/O Chart -->
+                <div v-if="analyticsData.data.length > 0" class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                  <h4 class="text-sm font-medium text-gray-900 dark:text-white mb-3">{{ t('storagePage.ioOverTime', 'Read / Write over time') }}</h4>
+                  <InteractiveChart
+                    :data="analyticsData.data"
+                    :series="ioChartSeries"
+                    :format-bytes="true"
+                    :format-time="formatTimeLabel"
+                    :height="220"
+                  />
+                </div>
+                <div v-else class="text-center py-8">
+                  <Activity class="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                  <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('storagePage.noIoData', 'No I/O data for this period yet.') }}</p>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ t('storagePage.noIoDataHint', 'Data will appear once services using this volume generate disk activity.') }}</p>
+                </div>
+
+                <!-- Services using this volume -->
+                <div v-if="analyticsData.services.length > 0">
+                  <h4 class="text-sm font-medium text-gray-900 dark:text-white mb-2">{{ t('storagePage.usedByServices', 'Services using this volume') }}</h4>
+                  <div class="flex flex-wrap gap-2">
+                    <span
+                      v-for="svc in analyticsData.services"
+                      :key="svc.id"
+                      class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300"
+                    >
+                      {{ svc.name }}
+                    </span>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Error / no data -->
+              <div v-else class="text-center py-12">
+                <Activity class="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('storagePage.analyticsUnavailable', 'Analytics data is not available.') }}</p>
+              </div>
             </div>
           </div>
         </div>

@@ -108,6 +108,9 @@ class AnalyticsService {
         requests: Record<string, number>;
         bytesIn: number;
         bytesOut: number;
+        durationSum: number;
+        durationCount: number;
+        histogramBuckets: Map<number, number>; // le threshold → cumulative count
       }>();
 
       let unmatchedServices = 0;
@@ -137,7 +140,11 @@ class AnalyticsService {
         }
 
         if (!serviceCounters.has(dockerSvcName)) {
-          serviceCounters.set(dockerSvcName, { requests: {}, bytesIn: 0, bytesOut: 0 });
+          serviceCounters.set(dockerSvcName, {
+            requests: {}, bytesIn: 0, bytesOut: 0,
+            durationSum: 0, durationCount: 0,
+            histogramBuckets: new Map(),
+          });
         }
         const counters = serviceCounters.get(dockerSvcName)!;
 
@@ -149,6 +156,16 @@ class AnalyticsService {
           counters.bytesIn += value;
         } else if (metricName === 'traefik_service_responses_bytes_total') {
           counters.bytesOut += value;
+        } else if (metricName === 'traefik_service_request_duration_seconds_sum') {
+          counters.durationSum += value;
+        } else if (metricName === 'traefik_service_request_duration_seconds_count') {
+          counters.durationCount += value;
+        } else if (metricName === 'traefik_service_request_duration_seconds_bucket') {
+          const le = extractLabel(labels, 'le');
+          if (le && le !== '+Inf') {
+            const threshold = parseFloat(le);
+            counters.histogramBuckets.set(threshold, (counters.histogramBuckets.get(threshold) ?? 0) + value);
+          }
         }
       }
 
@@ -158,6 +175,9 @@ class AnalyticsService {
       }
 
       logger.info({ matchedServices: serviceCounters.size }, '[analytics] Matched services with metrics');
+
+      // 4b. Collect block I/O stats from Docker containers (parallel, best-effort)
+      const serviceIoStats = await this.collectBlockIoStats(serviceMap);
 
       // 5. Batch-read previous values from Valkey (single mget round-trip)
       const valkey = await getValkey();
@@ -193,12 +213,20 @@ class AnalyticsService {
         // Parse previous values
         const prevJson = prevValues[i];
         let prevRequests = 0, prevBytesIn = 0, prevBytesOut = 0;
+        let prevDurationSum = 0, prevDurationCount = 0;
+        let prevHistogram: Record<string, number> = {};
+        let prevIoRead = 0, prevIoWrite = 0;
         if (prevJson) {
           try {
             const prev = JSON.parse(prevJson);
             prevRequests = prev.requests ?? 0;
             prevBytesIn = prev.bytesIn ?? 0;
             prevBytesOut = prev.bytesOut ?? 0;
+            prevDurationSum = prev.durationSum ?? 0;
+            prevDurationCount = prev.durationCount ?? 0;
+            prevHistogram = prev.histogram ?? {};
+            prevIoRead = prev.ioRead ?? 0;
+            prevIoWrite = prev.ioWrite ?? 0;
           } catch { /* ignore */ }
         }
 
@@ -206,6 +234,29 @@ class AnalyticsService {
         const deltaRequests = totalRequests >= prevRequests ? totalRequests - prevRequests : totalRequests;
         const deltaBytesIn = counters.bytesIn >= prevBytesIn ? counters.bytesIn - prevBytesIn : counters.bytesIn;
         const deltaBytesOut = counters.bytesOut >= prevBytesOut ? counters.bytesOut - prevBytesOut : counters.bytesOut;
+
+        // Compute response time deltas
+        const deltaDurationSum = counters.durationSum >= prevDurationSum
+          ? counters.durationSum - prevDurationSum : counters.durationSum;
+        const deltaDurationCount = counters.durationCount >= prevDurationCount
+          ? counters.durationCount - prevDurationCount : counters.durationCount;
+
+        // Average response time in ms for this interval
+        const avgResponseTimeMs = deltaDurationCount > 0
+          ? Math.round((deltaDurationSum / deltaDurationCount) * 1000)
+          : 0;
+
+        // P95 from histogram bucket deltas
+        const p95ResponseTimeMs = this.computePercentileFromHistogram(
+          counters.histogramBuckets, prevHistogram, deltaDurationCount, 0.95,
+        );
+
+        // Compute block I/O deltas
+        const ioInfo = serviceIoStats.get(dockerSvcName);
+        const currentIoRead = ioInfo?.readBytes ?? 0;
+        const currentIoWrite = ioInfo?.writeBytes ?? 0;
+        const deltaIoRead = currentIoRead >= prevIoRead ? currentIoRead - prevIoRead : currentIoRead;
+        const deltaIoWrite = currentIoWrite >= prevIoWrite ? currentIoWrite - prevIoWrite : currentIoWrite;
 
         // Compute per-status deltas proportionally
         let d2xx = 0, d3xx = 0, d4xx = 0, d5xx = 0;
@@ -217,17 +268,28 @@ class AnalyticsService {
           d5xx = Math.round(((r['5xx'] ?? 0) / totalRequests) * deltaRequests);
         }
 
+        // Serialize histogram for next delta computation
+        const histogramObj: Record<string, number> = {};
+        for (const [le, count] of counters.histogramBuckets) {
+          histogramObj[String(le)] = count;
+        }
+
         // Queue Valkey SET in pipeline (single round-trip at the end)
         setPipeline.set(
           `${ANALYTICS_KEY_PREFIX}${dockerSvcName}`,
-          JSON.stringify({ requests: totalRequests, bytesIn: counters.bytesIn, bytesOut: counters.bytesOut }),
+          JSON.stringify({
+            requests: totalRequests, bytesIn: counters.bytesIn, bytesOut: counters.bytesOut,
+            durationSum: counters.durationSum, durationCount: counters.durationCount,
+            histogram: histogramObj,
+            ioRead: currentIoRead, ioWrite: currentIoWrite,
+          }),
           'EX', ANALYTICS_TTL,
         );
 
         // Only insert if there's actual data (skip first scrape — no previous values)
         if (!prevJson) {
           firstScrapeCount++;
-        } else if (deltaRequests === 0 && deltaBytesIn === 0 && deltaBytesOut === 0) {
+        } else if (deltaRequests === 0 && deltaBytesIn === 0 && deltaBytesOut === 0 && deltaIoRead === 0 && deltaIoWrite === 0) {
           zeroDeltaCount++;
         } else {
           insertBatch.push({
@@ -240,6 +302,10 @@ class AnalyticsService {
             requests5xx: d5xx,
             bytesIn: deltaBytesIn,
             bytesOut: deltaBytesOut,
+            avgResponseTimeMs,
+            p95ResponseTimeMs,
+            ioReadBytes: deltaIoRead,
+            ioWriteBytes: deltaIoWrite,
             period: '5m',
             recordedAt: now,
           });
@@ -410,6 +476,56 @@ class AnalyticsService {
   }
 
   /**
+   * Compute a percentile (e.g. 0.95 for p95) from Prometheus histogram bucket deltas.
+   * Uses linear interpolation within the bucket that contains the target count.
+   */
+  private computePercentileFromHistogram(
+    currentBuckets: Map<number, number>,
+    prevHistogram: Record<string, number>,
+    totalCount: number,
+    percentile: number,
+  ): number {
+    if (totalCount <= 0 || currentBuckets.size === 0) return 0;
+
+    // Compute delta buckets (current - previous) sorted by threshold
+    const sortedThresholds = [...currentBuckets.keys()].sort((a, b) => a - b);
+    const deltaBuckets: Array<{ le: number; count: number }> = [];
+
+    for (const le of sortedThresholds) {
+      const curr = currentBuckets.get(le) ?? 0;
+      const prev = Number(prevHistogram[String(le)] ?? 0);
+      const delta = curr >= prev ? curr - prev : curr;
+      deltaBuckets.push({ le, count: delta });
+    }
+
+    // Target count for the percentile
+    const target = totalCount * percentile;
+
+    // Walk through cumulative counts to find the bucket containing the percentile
+    let cumulative = 0;
+    for (let i = 0; i < deltaBuckets.length; i++) {
+      cumulative += deltaBuckets[i]!.count;
+      if (cumulative >= target) {
+        // Linear interpolation within this bucket
+        const prevCumulative = cumulative - deltaBuckets[i]!.count;
+        const bucketLower = i > 0 ? deltaBuckets[i - 1]!.le : 0;
+        const bucketUpper = deltaBuckets[i]!.le;
+        const bucketCount = deltaBuckets[i]!.count;
+
+        if (bucketCount === 0) return Math.round(bucketUpper * 1000);
+
+        const fraction = (target - prevCumulative) / bucketCount;
+        const estimatedSeconds = bucketLower + (bucketUpper - bucketLower) * fraction;
+        return Math.round(estimatedSeconds * 1000); // Convert to ms
+      }
+    }
+
+    // If we didn't find it, use the highest bucket
+    const lastBucket = deltaBuckets[deltaBuckets.length - 1];
+    return lastBucket ? Math.round(lastBucket.le * 1000) : 0;
+  }
+
+  /**
    * Fetch Prometheus metrics from all Traefik task instances.
    * Tries DNS-based fetch first (most reliable), then per-task IPs for full coverage.
    */
@@ -537,6 +653,97 @@ class AnalyticsService {
     }
 
     return { serviceMap, traefikNameToDockerName };
+  }
+
+  /**
+   * Collect block I/O stats from Docker containers for all tracked services.
+   * Aggregates across all running tasks/containers per service.
+   * Returns a map: Docker service name → { readBytes, writeBytes } (cumulative counters).
+   */
+  private async collectBlockIoStats(
+    serviceMap: Map<string, { serviceId: string; accountId: string }>,
+  ): Promise<Map<string, { readBytes: number; writeBytes: number }>> {
+    const result = new Map<string, { readBytes: number; writeBytes: number }>();
+    try {
+      // List running tasks for all tracked services
+      const tasks = await orchestrator.listTasks({
+        'desired-state': ['running'],
+      });
+
+      // Group running tasks by Docker service name
+      const tasksByService = new Map<string, { containerId: string; nodeId: string }[]>();
+      for (const task of tasks as any[]) {
+        const state = task.Status?.State;
+        if (state !== 'running') continue;
+        const containerId = task.Status?.ContainerStatus?.ContainerID;
+        if (!containerId) continue;
+
+        // Find the Docker service name from the task's ServiceID
+        const svcId = task.ServiceID;
+        if (!svcId) continue;
+
+        // We need to find the Docker service name that maps to this ServiceID
+        // The task's Spec.ContainerSpec.Labels should have fleet.service-id
+        const fleetServiceId = task.Spec?.ContainerSpec?.Labels?.['fleet.service-id'];
+        if (!fleetServiceId) continue;
+
+        // Find the Docker service name from our serviceMap
+        let dockerName: string | null = null;
+        for (const [name, info] of serviceMap) {
+          if (info.serviceId === fleetServiceId) {
+            dockerName = name;
+            break;
+          }
+        }
+        if (!dockerName) continue;
+
+        const group = tasksByService.get(dockerName) ?? [];
+        group.push({ containerId, nodeId: task.NodeID ?? '' });
+        tasksByService.set(dockerName, group);
+      }
+
+      // Fetch container stats in parallel (with 10s timeout per call, max 20 concurrent)
+      const IO_STATS_TIMEOUT = 10_000;
+      const entries = [...tasksByService.entries()];
+
+      // Process in batches of 20 to avoid overwhelming the Docker API
+      for (let i = 0; i < entries.length; i += 20) {
+        const batch = entries.slice(i, i + 20);
+        const batchResults = await Promise.all(
+          batch.map(async ([dockerName, containers]) => {
+            let totalRead = 0;
+            let totalWrite = 0;
+            for (const { containerId, nodeId } of containers) {
+              try {
+                const orch = orchestrator as any;
+                const stats = await Promise.race([
+                  typeof orch.nodeAwareGetContainerStats === 'function'
+                    ? orch.nodeAwareGetContainerStats(containerId, nodeId)
+                    : orchestrator.getContainerStats(containerId),
+                  new Promise<null>((resolve) => setTimeout(() => resolve(null), IO_STATS_TIMEOUT)),
+                ]);
+                if (stats) {
+                  totalRead += stats.blockReadBytes;
+                  totalWrite += stats.blockWriteBytes;
+                }
+              } catch {
+                // Individual container stat failure is non-fatal
+              }
+            }
+            return { dockerName, totalRead, totalWrite };
+          }),
+        );
+
+        for (const { dockerName, totalRead, totalWrite } of batchResults) {
+          result.set(dockerName, { readBytes: totalRead, writeBytes: totalWrite });
+        }
+      }
+
+      logger.info({ servicesWithIo: result.size }, '[analytics] Block I/O stats collected');
+    } catch (err) {
+      logger.warn({ err }, '[analytics] Block I/O collection failed (non-fatal)');
+    }
+    return result;
   }
 }
 

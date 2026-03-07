@@ -163,7 +163,13 @@ export function useApi() {
 
   return {
     get<T>(path: string): Promise<T> {
-      return request<T>('GET', path)
+      return request<T>('GET', path).catch((err) => {
+        if (err instanceof ApiError && err.status === 403) {
+          const body = err.body as Record<string, string> | undefined
+          toast.error(body?.error || 'Insufficient permissions')
+        }
+        throw err
+      })
     },
 
     post<T>(path: string, body: unknown): Promise<T> {

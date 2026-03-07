@@ -1,12 +1,134 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ShieldCheck, Plus, Trash2, Pencil, X, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { ShieldCheck, Plus, Trash2, Pencil, X, ChevronDown, ChevronRight, Zap, LifeBuoy, Shield, Calculator, Eye, Wrench } from 'lucide-vue-next'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useI18n } from 'vue-i18n'
 
 const api = useApi()
 const { t } = useI18n()
+
+interface RolePreset {
+  key: string
+  icon: any
+  color: string
+  permissions: Record<string, string[]>
+}
+
+const ROLE_PRESETS: RolePreset[] = [
+  {
+    key: 'customerSupport',
+    icon: LifeBuoy,
+    color: 'blue',
+    permissions: {
+      dashboard: ['read'],
+      accounts: ['read', 'impersonate'],
+      users: ['read'],
+      services: ['read'],
+      support: ['read', 'write'],
+      events: ['read'],
+      errors: ['read'],
+      statusPosts: ['read', 'write'],
+    },
+  },
+  {
+    key: 'securityAdmin',
+    icon: Shield,
+    color: 'red',
+    permissions: {
+      dashboard: ['read'],
+      users: ['read', 'write'],
+      accounts: ['read'],
+      events: ['read'],
+      errors: ['read'],
+      status: ['read'],
+      services: ['read'],
+      jobs: ['read'],
+    },
+  },
+  {
+    key: 'billingAdmin',
+    icon: Calculator,
+    color: 'green',
+    permissions: {
+      dashboard: ['read'],
+      accounts: ['read', 'write'],
+      billing: ['read', 'write'],
+      resellers: ['read', 'write'],
+      users: ['read'],
+    },
+  },
+  {
+    key: 'auditor',
+    icon: Eye,
+    color: 'purple',
+    permissions: {
+      dashboard: ['read'],
+      accounts: ['read'],
+      users: ['read'],
+      services: ['read'],
+      storage: ['read'],
+      events: ['read'],
+      errors: ['read'],
+      billing: ['read'],
+      jobs: ['read'],
+      support: ['read'],
+      status: ['read'],
+    },
+  },
+  {
+    key: 'platformOps',
+    icon: Wrench,
+    color: 'amber',
+    permissions: {
+      dashboard: ['read', 'write'],
+      nodes: ['read', 'write'],
+      status: ['read'],
+      statusPosts: ['read', 'write'],
+      services: ['read', 'write'],
+      storage: ['read', 'write'],
+      marketplace: ['read', 'write'],
+      sharedDomains: ['read', 'write'],
+      jobs: ['read', 'write'],
+      errors: ['read', 'write'],
+      updates: ['read', 'write'],
+    },
+  },
+]
+
+const presetColors: Record<string, string> = {
+  blue: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300',
+  red: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
+  green: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300',
+  purple: 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300',
+  amber: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300',
+}
+
+const creatingPreset = ref<string | null>(null)
+
+const availablePresets = computed(() => {
+  const existingNames = new Set(roles.value.map(r => r.name.toLowerCase()))
+  return ROLE_PRESETS.filter(p => !existingNames.has(t(`roles.presets.${p.key}.name`).toLowerCase()))
+})
+
+async function createFromPreset(preset: RolePreset) {
+  creatingPreset.value = preset.key
+  error.value = ''
+  success.value = ''
+  try {
+    await api.post('/admin/roles', {
+      name: t(`roles.presets.${preset.key}.name`),
+      description: t(`roles.presets.${preset.key}.description`),
+      permissions: preset.permissions,
+    })
+    success.value = t('roles.createSuccess')
+    await fetchRoles()
+  } catch (err: any) {
+    error.value = err?.body?.error || t('roles.createError')
+  } finally {
+    creatingPreset.value = null
+  }
+}
 
 interface Role {
   id: string
@@ -270,6 +392,32 @@ onMounted(() => {
           </button>
         </div>
       </form>
+    </div>
+
+    <!-- Quick-create presets -->
+    <div v-if="availablePresets.length > 0 && !loading" class="mb-6">
+      <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('roles.quickCreate') }}</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        <button
+          v-for="preset in availablePresets"
+          :key="preset.key"
+          @click="createFromPreset(preset)"
+          :disabled="creatingPreset !== null"
+          :class="[
+            'flex items-center gap-3 p-3.5 rounded-xl border text-left transition-all hover:shadow-sm disabled:opacity-50',
+            presetColors[preset.color],
+          ]"
+        >
+          <div class="shrink-0">
+            <CompassSpinner v-if="creatingPreset === preset.key" size="w-5 h-5" />
+            <component v-else :is="preset.icon" class="w-5 h-5" />
+          </div>
+          <div class="min-w-0">
+            <div class="text-sm font-medium truncate">{{ t(`roles.presets.${preset.key}.name`) }}</div>
+            <div class="text-xs opacity-75 truncate">{{ t(`roles.presets.${preset.key}.description`) }}</div>
+          </div>
+        </button>
+      </div>
     </div>
 
     <!-- Loading -->

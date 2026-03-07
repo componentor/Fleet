@@ -379,6 +379,27 @@
       "when": 1777200000000,
       "tag": "0053_add_visitor_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1777400000000,
+      "tag": "0054_add_response_time_and_countries",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1777600000000,
+      "tag": "0055_add_volume_io_analytics",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1777800000000,
+      "tag": "0056_add_allowed_login_regions",
+      "breakpoints": true
     }
   ]
 }

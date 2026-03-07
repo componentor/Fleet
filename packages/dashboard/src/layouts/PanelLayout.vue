@@ -48,8 +48,20 @@ import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useApi } from '@/composables/useApi'
 import { useBranding } from '@/composables/useBranding'
 import { useSidebarCollapse } from '@/composables/useSidebarCollapse'
+import { useServicesStore } from '@/stores/services'
 
 const commandPalette = useCommandPalette()
+const servicesStore = useServicesStore()
+
+// Badge counts for nav items
+const navBadges = computed<Record<string, { count: number; color: string }>>(() => {
+  const failed = servicesStore.services.filter((s: any) => s.status === 'failed').length
+  const deploying = servicesStore.services.filter((s: any) => s.status === 'deploying').length
+  const badges: Record<string, { count: number; color: string }> = {}
+  if (failed > 0) badges.services = { count: failed, color: 'bg-red-500 text-white' }
+  else if (deploying > 0) badges.services = { count: deploying, color: 'bg-yellow-500 text-white' }
+  return badges
+})
 const { brandTitle, logoSrc, setAccountName } = useBranding()
 const api = useApi()
 
@@ -118,6 +130,7 @@ interface NavItem {
   requireAdmin?: boolean
   requireOwner?: boolean
   requireSupport?: boolean
+  badgeKey?: string
 }
 
 interface NavGroup {
@@ -143,7 +156,7 @@ const allNavGroups: NavGroup[] = [
     labelKey: 'nav.group.hosting',
     items: [
       { nameKey: 'nav.domains', path: '/panel/domains', icon: Globe },
-      { nameKey: 'nav.services', path: '/panel/services', icon: Box },
+      { nameKey: 'nav.services', path: '/panel/services', icon: Box, badgeKey: 'services' },
       { nameKey: 'nav.storage', path: '/panel/storage', icon: HardDrive },
     ],
   },
@@ -312,7 +325,7 @@ function changeLocale(newLocale: string) {
               <RouterLink
                 :to="item.path"
                 :class="[
-                  'flex items-center rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px]',
+                  'flex items-center rounded-lg text-sm font-medium transition-all duration-150 border-l-[3px] relative',
                   collapsed
                     ? 'justify-center p-2.5 border-l-transparent'
                     : 'gap-3 px-3 py-2',
@@ -325,7 +338,18 @@ function changeLocale(newLocale: string) {
                 @click="sidebarOpen = false"
               >
                 <component :is="item.icon" class="w-5 h-5 shrink-0" />
-                <span v-if="!collapsed">{{ $t(item.nameKey) }}</span>
+                <span v-if="!collapsed" class="flex-1">{{ $t(item.nameKey) }}</span>
+                <!-- Badge (e.g. failed service count) -->
+                <span
+                  v-if="item.badgeKey && navBadges[item.badgeKey]"
+                  :class="[
+                    'inline-flex items-center justify-center text-[10px] font-bold rounded-full tabular-nums',
+                    navBadges[item.badgeKey!]!.color,
+                    collapsed ? 'absolute -top-0.5 -right-0.5 w-4 h-4' : 'ml-auto px-1.5 min-w-[20px] h-5',
+                  ]"
+                >
+                  {{ navBadges[item.badgeKey!]!.count }}
+                </span>
               </RouterLink>
             </SidebarTooltip>
           </div>

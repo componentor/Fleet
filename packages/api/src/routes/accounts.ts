@@ -878,6 +878,16 @@ accountRoutes.openapi(releaseChildRoute, (async (c: any) => {
     }
   });
 
+  eventService.log({
+    ...eventContext(c),
+    eventType: EventTypes.ACCOUNT_CHILD_RELEASED,
+    description: `Released child account '${child.name ?? child.slug}' from parent '${account.name}'`,
+    resourceType: 'account',
+    resourceId: child.id,
+    resourceName: child.name ?? child.slug ?? undefined,
+    details: { parentAccountId: account.id, parentAccountName: account.name },
+  });
+
   return c.json({ message: 'Child account released successfully' });
 }) as any);
 

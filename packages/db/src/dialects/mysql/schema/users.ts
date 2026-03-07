@@ -28,6 +28,7 @@ export const users = mysqlTable('users', {
   twoFactorSecret: varchar('two_factor_secret', { length: 255 }),
   twoFactorBackupCodes: json('two_factor_backup_codes').$type<string[] | null>(),
   disabledLoginMethods: json('disabled_login_methods').$type<string[]>(),
+  allowedLoginRegions: json('allowed_login_regions').$type<string[] | null>(),
   securityChangedAt: timestamp('security_changed_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

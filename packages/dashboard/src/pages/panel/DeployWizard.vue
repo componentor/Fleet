@@ -821,19 +821,19 @@ onUnmounted(() => {
             </div>
 
             <!-- Quick deploy for simple templates -->
-            <div v-if="isSimpleTemplate" class="mt-5 p-4 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800">
-              <div class="flex items-center justify-between gap-4">
-                <div class="flex items-start gap-2">
-                  <CheckCircle2 class="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+            <div v-if="isSimpleTemplate" class="mt-5 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 overflow-hidden">
+              <div class="p-5 flex items-center justify-between gap-4">
+                <div class="flex items-start gap-3">
+                  <CheckCircle2 class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
                   <div>
-                    <p class="text-sm font-medium text-green-800 dark:text-green-200">{{ t('deployWizard.readyForOneClick') }}</p>
+                    <p class="text-sm font-semibold text-green-800 dark:text-green-200">{{ t('deployWizard.readyForOneClick') }}</p>
                     <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">{{ t('deployWizard.noRequiredConfig') }}</p>
                   </div>
                 </div>
                 <button
                   @click="quickDeploy"
                   :disabled="deploying"
-                  class="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition-all hover:shadow-lg active:scale-[0.98]"
+                  class="shrink-0 flex items-center gap-2 px-6 py-3 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition-all hover:shadow-lg hover:shadow-green-600/25 active:scale-[0.98]"
                 >
                   <CompassSpinner v-if="deploying" size="w-4 h-4" />
                   <Rocket v-else class="w-4 h-4" />
@@ -841,30 +841,32 @@ onUnmounted(() => {
                 </button>
               </div>
               <!-- Quick deploy volume strategy -->
-              <div v-if="templateVolumes.length >= 2" class="mt-3 pt-3 border-t border-green-200 dark:border-green-800 flex items-center gap-3">
-                <span class="text-xs font-medium text-green-800 dark:text-green-200">{{ t('deployWizard.storage.label') }}:</span>
-                <div class="flex gap-1.5">
+              <div v-if="templateVolumes.length >= 2" class="px-5 pb-4 pt-0">
+                <p class="text-xs font-medium text-green-800 dark:text-green-200 mb-2">{{ t('deployWizard.storage.volumeStrategy') }}</p>
+                <div class="grid grid-cols-2 gap-2">
                   <button
                     @click="quickDeployVolumeStrategy = 'shared'"
                     :class="[
-                      'px-2.5 py-1 rounded text-xs font-medium transition-colors',
+                      'p-3 rounded-lg text-left border-2 transition-all',
                       quickDeployVolumeStrategy === 'shared'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
+                        ? 'border-green-500 bg-green-100 dark:bg-green-900/30'
+                        : 'border-green-200 dark:border-green-800 bg-white/50 dark:bg-gray-800/50 hover:border-green-400'
                     ]"
                   >
-                    {{ t('deployWizard.storage.sharedVolume') }}
+                    <p class="text-xs font-semibold" :class="quickDeployVolumeStrategy === 'shared' ? 'text-green-800 dark:text-green-200' : 'text-gray-700 dark:text-gray-300'">{{ t('deployWizard.storage.sharedVolume') }}</p>
+                    <p class="text-[11px] mt-0.5" :class="quickDeployVolumeStrategy === 'shared' ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">{{ t('deployWizard.storage.sharedVolumeDesc') }}</p>
                   </button>
                   <button
                     @click="quickDeployVolumeStrategy = 'split'"
                     :class="[
-                      'px-2.5 py-1 rounded text-xs font-medium transition-colors',
+                      'p-3 rounded-lg text-left border-2 transition-all',
                       quickDeployVolumeStrategy === 'split'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
+                        ? 'border-green-500 bg-green-100 dark:bg-green-900/30'
+                        : 'border-green-200 dark:border-green-800 bg-white/50 dark:bg-gray-800/50 hover:border-green-400'
                     ]"
                   >
-                    {{ t('deployWizard.storage.separateVolumes') }}
+                    <p class="text-xs font-semibold" :class="quickDeployVolumeStrategy === 'split' ? 'text-green-800 dark:text-green-200' : 'text-gray-700 dark:text-gray-300'">{{ t('deployWizard.storage.separateVolumes') }}</p>
+                    <p class="text-[11px] mt-0.5" :class="quickDeployVolumeStrategy === 'split' ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">{{ t('deployWizard.storage.separateVolumesDesc') }}</p>
                   </button>
                 </div>
               </div>
@@ -1074,64 +1076,60 @@ onUnmounted(() => {
             </div>
 
             <!-- Volume sharing toggle (when 2+ volumes) -->
-            <div v-if="templateVolumes.length >= 2" class="flex items-center gap-3">
-              <span class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('deployWizard.storage.volumeStrategy') }}:</span>
-              <div class="flex gap-1.5">
+            <div v-if="templateVolumes.length >= 2">
+              <p class="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">{{ t('deployWizard.storage.volumeStrategy') }}</p>
+              <div class="grid grid-cols-2 gap-2">
                 <button
                   @click="setAllShared(false)"
                   :class="[
-                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    'p-3 rounded-lg text-left border-2 transition-all',
                     Object.keys(volumeShareGroups).length === 0
-                      ? 'bg-primary-600 text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700'
                   ]"
                 >
-                  {{ t('deployWizard.storage.separateVolumes') }}
+                  <p class="text-xs font-semibold" :class="Object.keys(volumeShareGroups).length === 0 ? 'text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300'">{{ t('deployWizard.storage.separateVolumes') }}</p>
+                  <p class="text-[11px] mt-0.5" :class="Object.keys(volumeShareGroups).length === 0 ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400'">{{ t('deployWizard.storage.separateVolumesDesc') }}</p>
                 </button>
                 <button
                   @click="setAllShared(true)"
                   :class="[
-                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    'p-3 rounded-lg text-left border-2 transition-all',
                     Object.keys(volumeShareGroups).length > 0 && ungroupedVolumes.length === 0
-                      ? 'bg-primary-600 text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-primary-300 dark:hover:border-primary-700'
                   ]"
                 >
-                  {{ t('deployWizard.storage.sharedVolume') }}
+                  <p class="text-xs font-semibold" :class="Object.keys(volumeShareGroups).length > 0 && ungroupedVolumes.length === 0 ? 'text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300'">{{ t('deployWizard.storage.sharedVolume') }}</p>
+                  <p class="text-[11px] mt-0.5" :class="Object.keys(volumeShareGroups).length > 0 && ungroupedVolumes.length === 0 ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400'">{{ t('deployWizard.storage.sharedVolumeDesc') }}</p>
                 </button>
               </div>
             </div>
 
             <!-- Grouped volume cards -->
             <div v-for="(group, groupId) in volumeShareGroups" :key="groupId"
-              class="p-4 rounded-lg border-l-4 border-l-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10">
+              class="p-4 rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10">
               <div class="flex items-center justify-between mb-3">
                 <div>
                   <div class="flex items-center gap-2">
                     <Link2 class="w-4 h-4 text-blue-500" />
                     <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('deployWizard.storage.sharedVolume') }}</p>
                   </div>
-                  <div class="mt-1.5 space-y-1">
-                    <div v-for="svc in allServicesForGroup(group)" :key="svc.name + svc.volume"
-                      class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                      <span class="font-medium text-gray-700 dark:text-gray-300">{{ svc.name }}</span>
-                      <span class="text-gray-400">→</span>
-                      <span class="font-mono">{{ svc.target }}</span>
-                      <span class="text-gray-300 dark:text-gray-600">({{ svc.volume }})</span>
-                    </div>
-                  </div>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Shared by: <span v-for="(svc, i) in allServicesForGroup(group)" :key="svc.name + svc.volume"><span v-if="i > 0">, </span><span class="font-medium text-gray-700 dark:text-gray-300">{{ svc.name }}</span></span>
+                  </p>
                 </div>
               </div>
 
-              <!-- Members list with unlink -->
+              <!-- Members with separate buttons -->
               <div class="flex flex-wrap gap-1.5 mb-3">
                 <span v-for="vn in group.volumeNames" :key="vn"
-                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                   {{ vn }}
                   <button v-if="group.volumeNames.length > 1" @click="unlinkVolume(vn)"
-                    class="ml-0.5 p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+                    class="ml-0.5 p-0.5 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
                     :title="t('deployWizard.storage.unlink')">
-                    <X class="w-2.5 h-2.5" />
+                    <X class="w-3 h-3" />
                   </button>
                 </span>
               </div>
@@ -1218,7 +1216,7 @@ onUnmounted(() => {
                   <!-- Link dropdown -->
                   <div v-if="linkDropdownOpen === vol.name"
                     class="absolute right-0 top-full mt-1 z-10 w-48 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1">
-                    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ t('deployWizard.storage.linkWith') }}</p>
+                    <p class="px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('deployWizard.storage.linkWith') }}</p>
                     <button v-for="other in ungroupedVolumes.filter(v => v.name !== vol.name)" :key="other.name"
                       @click="linkVolumes(vol.name, other.name)"
                       class="w-full px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-mono transition-colors"
@@ -1301,7 +1299,7 @@ onUnmounted(() => {
               <Cpu class="w-5 h-5 text-primary-600 dark:text-primary-400" />
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Choose a Plan</h2>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Select a plan for this stack. Resource limits are determined by your chosen tier.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Pick a plan that fits your needs. This determines how much CPU, memory, and storage your services can use.</p>
           </div>
 
           <div class="p-6">
@@ -1333,7 +1331,7 @@ onUnmounted(() => {
             <div class="p-6 space-y-5">
               <!-- Services summary -->
               <div>
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.services') }}</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3">{{ t('deployWizard.review.services') }}</h3>
                 <div class="space-y-2">
                   <div v-for="svc in serviceDefinitions" :key="svc.name" class="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-750">
                     <component :is="getServiceIcon(svc)" class="w-4 h-4 text-gray-500 dark:text-gray-400" />
@@ -1347,7 +1345,7 @@ onUnmounted(() => {
 
               <!-- Storage summary -->
               <div v-if="hasVolumes">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.storage') }}</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3">{{ t('deployWizard.review.storage') }}</h3>
                 <div class="space-y-1.5">
                   <!-- Grouped (shared) volumes -->
                   <div v-for="(group, groupId) in volumeShareGroups" :key="groupId"
@@ -1383,7 +1381,7 @@ onUnmounted(() => {
 
               <!-- Config summary -->
               <div v-if="Object.keys(config).length > 0">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.configuration') }}</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3">{{ t('deployWizard.review.configuration') }}</h3>
                 <div class="space-y-1.5">
                   <div v-for="v in (template.variables ?? [])" :key="v.name" class="flex items-center justify-between py-1.5">
                     <span class="text-sm text-gray-600 dark:text-gray-400">{{ v.label }}</span>
@@ -1396,7 +1394,7 @@ onUnmounted(() => {
 
               <!-- Plan summary -->
               <div v-if="selectedPlan">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ t('deployWizard.review.plan', 'Service Plan') }}</h3>
+                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3">{{ t('deployWizard.review.plan', 'Service Plan') }}</h3>
                 <div class="p-4 rounded-lg border-2" :class="selectedPlan.isFree ? 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750' : 'border-primary-200 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20'">
                   <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-2">

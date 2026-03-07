@@ -84,150 +84,191 @@ const superRoutes: RouteRecordRaw[] = [
         path: '',
         name: 'super-dashboard',
         component: () => import('@/pages/super/Dashboard.vue'),
+        meta: { adminSection: 'dashboard' },
       },
       {
         path: 'nodes',
         name: 'super-nodes',
         component: () => import('@/pages/super/Nodes.vue'),
+        meta: { adminSection: 'nodes' },
       },
       {
         path: 'nodes/:id',
         name: 'super-node-detail',
         component: () => import('@/pages/super/NodeDetail.vue'),
         props: true,
+        meta: { adminSection: 'nodes' },
       },
       {
         path: 'accounts',
         name: 'super-accounts',
         component: () => import('@/pages/super/Accounts.vue'),
+        meta: { adminSection: 'accounts' },
       },
       {
         path: 'accounts/:id',
         name: 'super-account-detail',
         component: () => import('@/pages/super/AccountDetail.vue'),
         props: true,
+        meta: { adminSection: 'accounts' },
       },
       {
         path: 'users',
         name: 'super-users',
         component: () => import('@/pages/super/Users.vue'),
+        meta: { adminSection: 'users' },
       },
       {
         path: 'marketplace',
         name: 'super-marketplace',
         component: () => import('@/pages/super/Marketplace.vue'),
+        meta: { adminSection: 'marketplace' },
       },
       {
         path: 'events',
         name: 'super-events',
         component: () => import('@/pages/super/AuditLog.vue'),
+        meta: { adminSection: 'events' },
       },
       {
         path: 'settings',
         name: 'super-settings',
         component: () => import('@/pages/super/Settings.vue'),
+        meta: { adminSection: 'settings' },
       },
       {
         path: 'billing',
         name: 'super-billing',
         component: () => import('@/pages/super/Billing.vue'),
+        meta: { adminSection: 'billing' },
       },
       {
         path: 'status',
         name: 'super-status',
         component: () => import('@/pages/super/Status.vue'),
+        meta: { adminSection: 'status' },
       },
       {
         path: 'errors',
         name: 'super-errors',
         component: () => import('@/pages/super/Errors.vue'),
+        meta: { adminSection: 'errors' },
       },
       {
         path: 'logs',
         name: 'super-logs',
         component: () => import('@/pages/super/Logs.vue'),
+        meta: { adminSection: 'services' },
       },
       {
         path: 'updates',
         name: 'super-updates',
         component: () => import('@/pages/super/Updates.vue'),
+        meta: { adminSection: 'updates' },
       },
       {
         path: 'email-templates',
         name: 'super-email-templates',
         component: () => import('@/pages/super/EmailTemplates.vue'),
+        meta: { adminSection: 'emailTemplates' },
       },
       {
         path: 'services',
         name: 'super-services',
         component: () => import('@/pages/super/Services.vue'),
+        meta: { adminSection: 'services' },
       },
       {
         path: 'storage',
         name: 'super-storage',
         component: () => import('@/pages/super/StorageSetup.vue'),
+        meta: { adminSection: 'storage' },
       },
       {
         path: 'shared-domains',
         name: 'super-shared-domains',
         component: () => import('@/pages/super/SharedDomains.vue'),
+        meta: { adminSection: 'sharedDomains' },
       },
       {
         path: 'resellers',
         name: 'super-resellers',
         component: () => import('@/pages/super/Resellers.vue'),
+        meta: { adminSection: 'resellers' },
       },
       {
         path: 'jobs',
         name: 'super-jobs',
         component: () => import('@/pages/super/Jobs.vue'),
+        meta: { adminSection: 'jobs' },
       },
       {
         path: 'status-posts',
         name: 'super-status-posts',
         component: () => import('@/pages/super/StatusPosts.vue'),
+        meta: { adminSection: 'statusPosts' },
       },
       {
         path: 'jobs/:queue/:id',
         name: 'super-job-detail',
         component: () => import('@/pages/super/JobDetail.vue'),
         props: true,
+        meta: { adminSection: 'jobs' },
       },
       {
         path: 'translations',
         name: 'super-translations',
         component: () => import('@/pages/super/Translations.vue'),
+        meta: { superOnly: true },
       },
       {
         path: 'roles',
         name: 'super-roles',
         component: () => import('@/pages/super/Roles.vue'),
+        meta: { superOnly: true },
       },
       {
         path: 'self-healing',
         name: 'super-self-healing',
         component: () => import('@/pages/super/SelfHealing.vue'),
+        meta: { superOnly: true },
+      },
+      {
+        path: 'resources',
+        name: 'super-resources',
+        component: () => import('@/pages/super/Resources.vue'),
+        meta: { adminSection: 'nodes' },
       },
       {
         path: 'analytics',
         name: 'super-analytics',
         component: () => import('@/pages/super/PlatformAnalytics.vue'),
+        meta: { adminSection: 'dashboard' },
+      },
+      {
+        path: 'security',
+        name: 'super-security',
+        component: () => import('@/pages/super/Security.vue'),
+        meta: { adminSection: 'events' },
       },
       {
         path: 'database',
         name: 'super-database',
         component: () => import('@/pages/super/PlatformDatabase.vue'),
+        meta: { adminSection: 'database' },
       },
       {
         path: 'support',
         name: 'super-support',
         component: () => import('@/pages/super/Support.vue'),
+        meta: { adminSection: 'support' },
       },
       {
         path: 'support/:id',
         name: 'super-support-detail',
         component: () => import('@/pages/super/SupportDetail.vue'),
         props: true,
+        meta: { adminSection: 'support' },
       },
       {
         path: 'profile',
@@ -565,6 +606,25 @@ router.beforeEach(async (to) => {
   if (to.matched.some((record) => record.meta.requiresSuper)) {
     if (!authStore.isSuper && !authStore.user?.adminRoleId) {
       return { path: '/panel' }
+    }
+
+    // Super-only routes (roles, translations, self-healing)
+    const superOnlyRoute = to.matched.find((r) => r.meta.superOnly)
+    if (superOnlyRoute && !authStore.isSuper) {
+      return { path: '/admin' }
+    }
+
+    // Section-level permission check for role-based admins
+    const adminSection = to.meta.adminSection as string | undefined
+    if (adminSection && !authStore.isSuper) {
+      const { useAdminPermissions } = await import('@/composables/useAdminPermissions')
+      const adminPerms = useAdminPermissions()
+      if (!adminPerms.permissions.value) {
+        await adminPerms.fetch()
+      }
+      if (!adminPerms.can(adminSection as any, 'read')) {
+        return { path: '/admin' }
+      }
     }
   }
 

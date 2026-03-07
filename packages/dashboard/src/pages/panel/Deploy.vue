@@ -897,10 +897,10 @@ onMounted(() => {
               v-model="selectedRegion"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             >
-              <option :value="null">Auto (any region)</option>
-              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'node' : 'nodes' }})</option>
+              <option :value="null">Automatic (best available)</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'server' : 'servers' }})</option>
             </select>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Choose where your containers run for lower latency</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Pick a location closer to your users for better performance</p>
           </div>
 
           <!-- Environment Variables -->
@@ -1012,7 +1012,7 @@ onMounted(() => {
 
           <!-- Service Tier -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Plan</label>
             <TierSelector v-model="selectedPlanId" />
           </div>
 
@@ -1335,7 +1335,7 @@ onMounted(() => {
 
             <!-- Service Plan -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Plan</label>
               <TierSelector v-model="selectedPlanId" />
             </div>
 
@@ -1471,7 +1471,7 @@ onMounted(() => {
 
           <!-- Service Plan -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Plan</label>
             <TierSelector v-model="selectedPlanId" />
           </div>
 
@@ -1531,7 +1531,7 @@ onMounted(() => {
                 </option>
               </optgroup>
             </select>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Select a registry or leave as Docker Hub for public images</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Where your image is hosted. Docker Hub works for most public images.</p>
           </div>
 
           <!-- Custom registry URL -->
@@ -1544,7 +1544,7 @@ onMounted(() => {
               required
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm font-mono"
             />
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Enter your private registry hostname (e.g. registry.example.com)</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Your private registry address (e.g. registry.example.com)</p>
           </div>
 
           <!-- Image name & tag -->
@@ -1572,7 +1572,7 @@ onMounted(() => {
 
           <!-- Full image preview -->
           <div v-if="fullRegistryImage" class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700">
-            <p class="text-xs text-gray-500 dark:text-gray-400">Full image reference:</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Full image path:</p>
             <p class="text-sm font-mono text-gray-900 dark:text-white mt-0.5">{{ fullRegistryImage }}</p>
           </div>
 
@@ -1610,8 +1610,8 @@ onMounted(() => {
               v-model="selectedRegion"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             >
-              <option :value="null">Auto (any region)</option>
-              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'node' : 'nodes' }})</option>
+              <option :value="null">Automatic (best available)</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'server' : 'servers' }})</option>
             </select>
           </div>
 
@@ -1619,9 +1619,9 @@ onMounted(() => {
           <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
             <div class="flex items-center justify-between">
               <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Auto-deploy on push</label>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Auto-deploy</label>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  Automatically redeploy when a new image is pushed to the registry
+                  Automatically redeploy when a new version is pushed to the registry
                 </p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
@@ -1648,14 +1648,14 @@ onMounted(() => {
                   <option :value="900">Every 15 minutes</option>
                   <option :value="1800">Every 30 minutes</option>
                 </select>
-                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">How often to check for new image digests</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">How often to check for new versions</p>
               </div>
 
               <!-- Webhook URL info -->
               <div class="rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 p-3">
-                <p class="text-xs font-medium text-blue-800 dark:text-blue-200 mb-1">Webhook URL (available after deploy)</p>
+                <p class="text-xs font-medium text-blue-800 dark:text-blue-200 mb-1">Instant deploys via webhook</p>
                 <p class="text-xs text-blue-600 dark:text-blue-400">
-                  After deployment, a webhook URL will be generated for your service. You can configure your registry to send push notifications to this URL for instant deploys.
+                  After deployment, you'll get a webhook URL. Configure your registry to call it on push for instant deployments — no polling delay.
                 </p>
               </div>
             </div>
@@ -1686,7 +1686,7 @@ onMounted(() => {
 
           <!-- Service Plan -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Plan</label>
             <TierSelector v-model="selectedPlanId" />
           </div>
 
@@ -1809,8 +1809,8 @@ onMounted(() => {
               v-model="selectedRegion"
               class="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
             >
-              <option :value="null">Auto (any region)</option>
-              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'node' : 'nodes' }})</option>
+              <option :value="null">Automatic (best available)</option>
+              <option v-for="r in regions" :key="r.key" :value="r.key">{{ r.label }} ({{ r.nodeCount }} {{ r.nodeCount === 1 ? 'server' : 'servers' }})</option>
             </select>
           </div>
 
@@ -1893,147 +1893,159 @@ onMounted(() => {
         <div class="p-6 space-y-6">
           <!-- Step 1: Install -->
           <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">1</span>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.installTitle', 'Install the CLI') }}</h3>
+            <div class="flex items-center gap-3 mb-1">
+              <span class="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">1</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.installTitle') }}</h3>
             </div>
-            <div class="relative group">
-              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>npm install -g siglar</code></pre>
-              <button
-                @click="copyToClipboard('npm install -g siglar')"
-                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Copy class="w-3.5 h-3.5" />
-              </button>
+            <div class="ml-10">
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ $t('deploy.cli.installDesc') }}</p>
+              <div class="relative group">
+                <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>npm install -g siglar</code></pre>
+                <button
+                  @click="copyToClipboard('npm install -g siglar')"
+                  class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Copy class="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- Step 2: Login -->
           <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">2</span>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.loginTitle', 'Log in to your account') }}</h3>
+            <div class="flex items-center gap-3 mb-1">
+              <span class="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">2</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.loginTitle') }}</h3>
             </div>
-            <div class="relative group">
-              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>siglar login --url {{ windowOrigin }}</code></pre>
-              <button
-                @click="copyToClipboard(`siglar login --url ${windowOrigin}`)"
-                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Copy class="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ $t('deploy.cli.loginHint', 'Or use an API key:') }} <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono">siglar login --api-key YOUR_KEY --url {{ windowOrigin }}</code></p>
-
-            <!-- .env tip -->
-            <div class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
-              <p class="text-xs font-medium text-amber-800 dark:text-amber-200 mb-1.5">{{ $t('deploy.cli.envTipTitle', 'Tip: Skip login with a .env file') }}</p>
-              <p class="text-xs text-amber-700 dark:text-amber-300 mb-2">{{ $t('deploy.cli.envTipDesc', 'Add an API key to your project\'s .env file so the CLI authenticates automatically — no need to run login each time.') }}</p>
+            <div class="ml-10">
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ $t('deploy.cli.loginDesc') }}</p>
               <div class="relative group">
-                <pre class="px-3 py-2 rounded-md bg-gray-900 text-gray-100 text-xs font-mono overflow-x-auto"><code>SIGLAR_API_KEY=your_api_key_here
-SIGLAR_URL={{ windowOrigin }}</code></pre>
+                <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>siglar login --url {{ windowOrigin }}</code></pre>
                 <button
-                  @click="copyToClipboard(`SIGLAR_API_KEY=your_api_key_here\nSIGLAR_URL=${windowOrigin}`)"
-                  class="absolute top-1.5 right-1.5 p-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                  @click="copyToClipboard(`siglar login --url ${windowOrigin}`)"
+                  class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <Copy class="w-3 h-3" />
+                  <Copy class="w-3.5 h-3.5" />
                 </button>
               </div>
-              <p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">
-                {{ $t('deploy.cli.envTipApiKeys', 'You can create a long-lived API key from') }}
-                <RouterLink to="/panel/api-keys" class="underline hover:no-underline font-medium">{{ $t('deploy.cli.envTipApiKeysLink', 'Settings → API Keys') }}</RouterLink>.
-              </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">{{ $t('deploy.cli.loginHint') }} <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded font-mono">siglar login --api-key YOUR_KEY --url {{ windowOrigin }}</code></p>
+
+              <!-- .env tip -->
+              <div class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+                <p class="text-xs font-medium text-amber-800 dark:text-amber-200 mb-1.5">{{ $t('deploy.cli.envTipTitle') }}</p>
+                <p class="text-xs text-amber-700 dark:text-amber-300 mb-2">{{ $t('deploy.cli.envTipDesc') }}</p>
+                <div class="relative group">
+                  <pre class="px-3 py-2 rounded-md bg-gray-900 text-gray-100 text-xs font-mono overflow-x-auto"><code>SIGLAR_API_KEY=your_api_key_here
+SIGLAR_URL={{ windowOrigin }}</code></pre>
+                  <button
+                    @click="copyToClipboard(`SIGLAR_API_KEY=your_api_key_here\nSIGLAR_URL=${windowOrigin}`)"
+                    class="absolute top-1.5 right-1.5 p-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Copy class="w-3 h-3" />
+                  </button>
+                </div>
+                <p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">
+                  {{ $t('deploy.cli.envTipApiKeys') }}
+                  <RouterLink to="/panel/api-keys" class="underline hover:no-underline font-medium">{{ $t('deploy.cli.envTipApiKeysLink') }}</RouterLink>.
+                </p>
+              </div>
             </div>
           </div>
 
           <!-- Step 3: Init -->
           <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">3</span>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.initTitle', 'Initialize your project') }}</h3>
+            <div class="flex items-center gap-3 mb-1">
+              <span class="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">3</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.initTitle') }}</h3>
             </div>
-            <div class="relative group">
-              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>cd my-project
+            <div class="ml-10">
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ $t('deploy.cli.initDesc') }}</p>
+              <div class="relative group">
+                <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>cd my-project
 siglar init</code></pre>
-              <button
-                @click="copyToClipboard('cd my-project\nsiglar init')"
-                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Copy class="w-3.5 h-3.5" />
-              </button>
+                <button
+                  @click="copyToClipboard('cd my-project\nsiglar init')"
+                  class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Copy class="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ $t('deploy.cli.initHint') }}</p>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ $t('deploy.cli.initHint', 'This creates a siglar.yml config in your project directory.') }}</p>
           </div>
 
           <!-- Step 4: Deploy -->
           <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">4</span>
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.deployTitle', 'Deploy!') }}</h3>
+            <div class="flex items-center gap-3 mb-1">
+              <span class="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">4</span>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ $t('deploy.cli.deployTitle') }}</h3>
             </div>
-            <div class="relative group">
-              <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>siglar deploy</code></pre>
-              <button
-                @click="copyToClipboard('siglar deploy')"
-                class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Copy class="w-3.5 h-3.5" />
-              </button>
+            <div class="ml-10">
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ $t('deploy.cli.deployDesc') }}</p>
+              <div class="relative group">
+                <pre class="px-4 py-3 rounded-lg bg-gray-900 text-gray-100 text-sm font-mono overflow-x-auto"><code>siglar deploy</code></pre>
+                <button
+                  @click="copyToClipboard('siglar deploy')"
+                  class="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Copy class="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
 
-          <!-- Helpful commands -->
+          <!-- Common commands -->
           <div class="border-t border-gray-200 dark:border-gray-700 pt-5">
-            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ $t('deploy.cli.usefulCommands', 'Useful commands') }}</h3>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">{{ $t('deploy.cli.usefulCommands') }}</h3>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar services</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdList', 'List your services') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdList') }}</p>
               </div>
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar logs &lt;name&gt;</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdLogs', 'View service logs') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdLogs') }}</p>
               </div>
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar env set KEY=val</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdEnv', 'Set environment variables') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdEnv') }}</p>
               </div>
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar redeploy &lt;name&gt;</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdRedeploy', 'Redeploy a service') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdRedeploy') }}</p>
               </div>
             </div>
           </div>
 
           <!-- Managing existing services -->
           <div class="border-t border-gray-200 dark:border-gray-700 pt-5">
-            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ $t('deploy.cli.manageTitle', 'Updating existing services') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ $t('deploy.cli.manageDesc', 'Already have a running service? Use these commands to update it without redeploying from scratch.') }}</p>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-1">{{ $t('deploy.cli.manageTitle') }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">{{ $t('deploy.cli.manageDesc') }}</p>
             <div class="space-y-2">
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar deploy --service &lt;name&gt;</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdUpdate', 'Push an update to an existing service') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdUpdate') }}</p>
               </div>
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar scale &lt;name&gt; --replicas 3</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdScale', 'Scale a service up or down') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdScale') }}</p>
               </div>
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar domain set &lt;name&gt; app.example.com</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdDomain', 'Attach a custom domain') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdDomain') }}</p>
               </div>
-              <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+              <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                 <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar env set &lt;name&gt; KEY=val KEY2=val2</code>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdEnvUpdate', 'Update environment variables (auto-redeploys)') }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdEnvUpdate') }}</p>
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                   <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar stop &lt;name&gt;</code>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdStop', 'Stop a service') }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdStop') }}</p>
                 </div>
-                <div class="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-750">
+                <div class="px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700">
                   <code class="text-xs font-mono text-emerald-600 dark:text-emerald-400">siglar start &lt;name&gt;</code>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdStart', 'Start a stopped service') }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $t('deploy.cli.cmdStart') }}</p>
                 </div>
               </div>
             </div>
@@ -2053,18 +2065,18 @@ siglar init</code></pre>
                 <Rocket class="w-5 h-5 text-primary-600 dark:text-primary-400" />
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Confirm Deployment</h3>
-                <p class="text-sm text-gray-500 dark:text-gray-400">Review your configuration before deploying</p>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Ready to deploy</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Review your setup before going live</p>
               </div>
             </div>
           </div>
           <div class="px-6 py-4 space-y-3">
             <div class="flex items-center justify-between py-1.5">
-              <span class="text-sm text-gray-500 dark:text-gray-400">Method</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400">Deploy method</span>
               <span class="text-sm font-medium text-gray-900 dark:text-white">{{ confirmConfig.method }}</span>
             </div>
             <div class="flex items-center justify-between py-1.5">
-              <span class="text-sm text-gray-500 dark:text-gray-400">Service Name</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400">Name</span>
               <span class="text-sm font-medium text-gray-900 dark:text-white font-mono">{{ confirmConfig.name }}</span>
             </div>
             <div v-if="confirmConfig.image" class="flex items-center justify-between py-1.5">
@@ -2083,7 +2095,7 @@ siglar init</code></pre>
             <!-- Preview warnings -->
             <div v-if="previewLoading" class="flex items-center gap-2 py-2 text-xs text-gray-400">
               <CompassSpinner size="w-3.5 h-3.5" />
-              Checking configuration...
+              Checking your setup...
             </div>
             <div v-else-if="previewData?.warnings?.length" class="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 p-3 space-y-1.5">
               <div v-for="(warning, idx) in previewData.warnings" :key="idx" class="flex items-start gap-2">
@@ -2093,7 +2105,7 @@ siglar init</code></pre>
             </div>
             <div v-else-if="previewData?.valid" class="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
               <CheckCircle2 class="w-3.5 h-3.5" />
-              Configuration looks good
+              Everything looks good
             </div>
           </div>
           <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-3">

@@ -19,6 +19,7 @@ export const visitorAnalytics = sqliteTable('visitor_analytics', {
   topReferrers: text('top_referrers', { mode: 'json' }).default(sql`'[]'`).notNull(),
   browsers: text('browsers', { mode: 'json' }).default(sql`'{}'`).notNull(),
   devices: text('devices', { mode: 'json' }).default(sql`'{}'`).notNull(),
+  countries: text('countries', { mode: 'json' }).default(sql`'{}'`).notNull(),
   period: text('period').default('5m').notNull(),
   recordedAt: integer('recorded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`).notNull(),
 }, (table) => [

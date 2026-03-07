@@ -52,6 +52,9 @@ export const EventTypes = {
   ACCOUNT_DELETED: 'account.deleted',
   ACCOUNT_DELETION_SCHEDULED: 'account.deletion_scheduled',
   ACCOUNT_IMPERSONATED: 'account.impersonated',
+  ACCOUNT_IMPERSONATION_ENDED: 'account.impersonation_ended',
+  ACCOUNT_CHILD_RELEASED: 'account.child_released',
+  ADMIN_ACCOUNT_VIEWED: 'admin.account_viewed',
 
   // SSH Keys
   SSH_KEY_ADDED: 'ssh.key_added',
@@ -81,6 +84,23 @@ export const EventTypes = {
   SUPPORT_TICKET_CLOSED: 'support.ticket_closed',
   SUPPORT_TICKET_REOPENED: 'support.ticket_reopened',
   SUPPORT_MESSAGE_SENT: 'support.message_sent',
+
+  // Infrastructure
+  NODE_OFFLINE: 'infra.node_offline',
+  NODE_RECOVERED: 'infra.node_recovered',
+  INFRA_DOWN: 'infra.service_down',
+  INFRA_DEGRADED: 'infra.service_degraded',
+  INFRA_RECOVERED: 'infra.service_recovered',
+  SERVICE_CRASHED: 'service.crashed',
+
+  // Security
+  AUTH_LOGIN_FAILED: 'auth.login_failed',
+  AUTH_2FA_FAILED: 'auth.2fa_failed',
+  AUTH_REGION_BLOCKED: 'auth.region_blocked',
+  AUTH_BRUTE_FORCE_DETECTED: 'auth.brute_force_detected',
+  PERMISSION_DENIED: 'security.permission_denied',
+  ADMIN_PERMISSION_DENIED: 'security.admin_permission_denied',
+  USER_SETTINGS_CHANGED: 'user.settings_changed',
 } as const;
 
 export type EventType = (typeof EventTypes)[keyof typeof EventTypes];
@@ -95,15 +115,18 @@ export function eventContext(c: Context): {
   accountId: string | null;
   actorEmail: string | null;
   ipAddress: string;
+  impersonatingAccountId: string | null;
 } {
   let userId: string | null = null;
   let accountId: string | null = null;
   let actorEmail: string | null = null;
+  let impersonatingAccountId: string | null = null;
 
   try {
     const user = c.get('user') as any;
     userId = user?.userId ?? null;
     actorEmail = user?.email ?? null;
+    impersonatingAccountId = user?.impersonatingAccountId ?? null;
   } catch { /* not authenticated */ }
 
   try {
@@ -122,7 +145,7 @@ export function eventContext(c: Context): {
     } catch { /* conninfo unavailable */ }
   }
 
-  return { userId, accountId, actorEmail, ipAddress: ip ?? 'unknown' };
+  return { userId, accountId, actorEmail, ipAddress: ip ?? 'unknown', impersonatingAccountId };
 }
 
 // ── Event service ─────────────────────────────────────────────────
@@ -139,6 +162,7 @@ interface EventOptions {
   ipAddress?: string;
   source?: 'user' | 'system' | 'webhook' | 'api-key' | 'support';
   details?: Record<string, unknown>;
+  impersonatingAccountId?: string | null;
 }
 
 class EventService {
@@ -146,6 +170,12 @@ class EventService {
    * Log a semantic event. Fire-and-forget — never blocks the caller.
    */
   log(opts: EventOptions): void {
+    const details: Record<string, unknown> = { ...(opts.details ?? {}) };
+    if (opts.impersonatingAccountId) {
+      details.impersonating = true;
+      details.impersonatingAccountId = opts.impersonatingAccountId;
+    }
+
     db.insert(auditLog)
       .values({
         userId: opts.userId ?? null,
@@ -159,7 +189,7 @@ class EventService {
         actorEmail: opts.actorEmail ?? null,
         ipAddress: opts.ipAddress ?? null,
         source: opts.source ?? 'user',
-        details: opts.details ?? {},
+        details,
       })
       .catch((err) => {
         logger.error({ err, eventType: opts.eventType }, 'Failed to write event log');

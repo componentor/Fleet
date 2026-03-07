@@ -12,6 +12,7 @@ import {
 import { orchestrator } from './orchestrator.js';
 import { getValkey } from './valkey.service.js';
 import { logger } from './logger.js';
+import geoip from 'geoip-lite';
 
 const ACCESS_LOG_PATH = '/var/log/traefik/access.log';
 const OFFSET_KEY = 'fleet:visitor-analytics:log-offset';
@@ -59,6 +60,7 @@ interface ServiceCounters {
   referrerCounts: Map<string, number>;
   browserCounts: Record<string, number>;
   deviceCounts: Record<string, number>;
+  countryCounts: Record<string, number>;
 }
 
 class VisitorAnalyticsService {
@@ -137,6 +139,7 @@ class VisitorAnalyticsService {
                 referrerCounts: new Map(),
                 browserCounts: {},
                 deviceCounts: {},
+                countryCounts: {},
               });
             }
             const c = counters.get(dockerSvcName)!;
@@ -162,6 +165,13 @@ class VisitorAnalyticsService {
               c.browserCounts[browser] = (c.browserCounts[browser] ?? 0) + 1;
               const device = detectDevice(ua);
               c.deviceCounts[device] = (c.deviceCounts[device] ?? 0) + 1;
+            }
+
+            // GeoIP country detection
+            if (clientIp) {
+              const geo = geoip.lookup(clientIp);
+              const country = geo?.country ?? 'Unknown';
+              c.countryCounts[country] = (c.countryCounts[country] ?? 0) + 1;
             }
           } catch { /* skip malformed lines */ }
         });
@@ -209,6 +219,7 @@ class VisitorAnalyticsService {
           topReferrers: topReferrers as any,
           browsers: c.browserCounts as any,
           devices: c.deviceCounts as any,
+          countries: c.countryCounts as any,
           period: '5m',
           recordedAt: now,
         });
