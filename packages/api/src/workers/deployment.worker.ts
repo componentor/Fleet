@@ -92,20 +92,26 @@ async function getValkeyClient() {
   return cachedValkey;
 }
 
-async function publishProgress(deploymentId: string, status: string, log: string, step?: ProgressStep, logLine?: string) {
+async function publishProgress(deploymentId: string, status: string, log: string, step?: ProgressStep, logLine?: string, statusMessage?: string) {
   const valkey = await getValkeyClient();
   if (valkey) {
-    valkey.publish(`deploy:${deploymentId}`, JSON.stringify({ status, step, logLine })).catch((err) => {
+    valkey.publish(`deploy:${deploymentId}`, JSON.stringify({ status, step, logLine, statusMessage })).catch((err) => {
       logger.error({ err, deploymentId }, 'Failed to publish deployment progress');
     });
   }
 }
 
-async function setProgressStep(deploymentId: string, step: ProgressStep) {
+async function setProgressStep(deploymentId: string, step: ProgressStep, statusMessage?: string) {
   await db.update(deployments)
     .set({ progressStep: step })
     .where(eq(deployments.id, deploymentId));
-  await publishProgress(deploymentId, step === 'succeeded' ? 'succeeded' : step === 'failed' ? 'failed' : 'building', '', step);
+
+  const deployPhaseSteps: ProgressStep[] = ['deploying', 'health_check', 'succeeded', 'failed'];
+  const dbStatus = step === 'succeeded' ? 'succeeded'
+    : step === 'failed' ? 'failed'
+    : deployPhaseSteps.includes(step) ? 'deploying'
+    : 'building';
+  await publishProgress(deploymentId, dbStatus, '', step, undefined, statusMessage);
 }
 
 async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
@@ -140,6 +146,16 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
     .set({ startedAt: new Date(), progressStep: 'queued' })
     .where(eq(deployments.id, deploymentId));
 
+  // Notify any open service-events WebSocket clients that a new deployment started
+  const valkey = await getValkeyClient();
+  if (valkey) {
+    valkey.publish(`service:${serviceId}`, JSON.stringify({
+      type: 'deployment_started',
+      deploymentId,
+      serviceId,
+    })).catch(() => {});
+  }
+
   let buildInfo: { id: string; status: string; log: string; imageTag: string; finishedAt: Date | null; composeServices?: import('../services/build.service.js').ComposeServiceConfig[] } | undefined;
 
   try {
@@ -158,7 +174,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         return;
       }
 
-      await setProgressStep(deploymentId, 'building');
+      await setProgressStep(deploymentId, 'building', buildMethod === 'compose' ? 'Building services from compose file...' : 'Building image from Dockerfile...');
 
       if (buildMethod === 'compose') {
         buildInfo = await buildService.buildFromCompose({
@@ -177,7 +193,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       }
     } else if (svc.gitUrl) {
       // Generic Git build flow (GitLab, Bitbucket, Gitea, self-hosted, etc.)
-      await setProgressStep(deploymentId, 'cloning');
+      await setProgressStep(deploymentId, 'cloning', `Cloning ${svc.gitBranch || 'main'} branch...`);
       const branch = svc.gitBranch || 'main';
 
       // Build clone URL with optional token auth
@@ -214,7 +230,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to detect Dockerfiles — will try default Dockerfile');
       }
 
-      await setProgressStep(deploymentId, 'building');
+      await setProgressStep(deploymentId, 'building', dockerfile ? `Building with ${dockerfile}...` : 'Building image (auto-detected runtime)...');
       buildInfo = await buildService.buildImage({
         serviceId: svc.id,
         cloneUrl,
@@ -225,7 +241,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
       });
     } else {
       // GitHub build flow
-      await setProgressStep(deploymentId, 'cloning');
+      await setProgressStep(deploymentId, 'cloning', `Cloning ${svc.githubRepo} (${svc.githubBranch})...`);
       if (!svc.githubRepo || !svc.githubBranch) {
         await db.update(deployments)
           .set({ status: 'failed', log: 'Service has no GitHub repository configured' })
@@ -270,7 +286,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         logger.warn({ err, serviceId: svc.id }, 'Failed to detect Dockerfiles — will try default Dockerfile');
       }
 
-      await setProgressStep(deploymentId, 'building');
+      await setProgressStep(deploymentId, 'building', dockerfile ? `Building with ${dockerfile}...` : 'Building image (auto-detected runtime)...');
       buildInfo = await buildService.buildImage({
         serviceId: svc.id,
         cloneUrl,
@@ -314,10 +330,22 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
           lastDbWrite = Date.now();
         };
 
+        let lastBuildStep = '';
         const unsubscribe = buildService.onBuildUpdate(build.id, (info) => {
           // Extract new log content since last publish
           const newContent = info.log.slice(lastLogLength);
           lastLogLength = info.log.length;
+
+          // Map build service status to deployment progress steps
+          // This ensures the frontend stepper advances in real-time
+          if (info.status !== lastBuildStep) {
+            lastBuildStep = info.status;
+            if (info.status === 'pushing') {
+              setProgressStep(deploymentId, 'pushing', 'Pushing image to registry...');
+            } else if (info.status === 'cloning') {
+              setProgressStep(deploymentId, 'cloning', 'Cloning repository...');
+            }
+          }
 
           // Publish incremental line to Valkey immediately (for real-time WS streaming)
           publishProgress(deploymentId, info.status, '', undefined, newContent || undefined);
@@ -377,7 +405,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         .where(eq(deployments.id, deploymentId));
     }
 
-    await setProgressStep(deploymentId, 'deploying');
+    await setProgressStep(deploymentId, 'deploying', 'Deploying to Docker Swarm...');
     await db.update(deployments)
       .set({ status: 'deploying', imageTag: fullImageTag })
       .where(eq(deployments.id, deploymentId));
@@ -402,6 +430,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
 
       if (targetSvc.dockerServiceId) {
         // Update existing Docker service
+        await publishProgress(deploymentId, 'deploying', '', 'deploying', undefined, `Updating service ${targetSvc.name}...`);
         try {
           const pruned = await orchestrator.pruneServiceContainers(targetSvc.dockerServiceId);
           if (pruned > 0) logger.info({ serviceId: targetSvc.id, pruned }, 'Pruned dead containers before deploy');
@@ -426,6 +455,7 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
         }, deployRegistryAuth);
       } else {
         // Create new Docker service
+        await publishProgress(deploymentId, 'deploying', '', 'deploying', undefined, `Creating service ${targetSvc.name}...`);
         logger.info({ serviceId: targetSvc.id }, 'Creating Docker service for deploy');
 
         const constraints = [...((targetSvc.placementConstraints as string[]) ?? [])];
@@ -477,6 +507,33 @@ async function processDeployment(job: Job<DeploymentJobData>): Promise<void> {
 
         targetSvc.dockerServiceId = result.id;
         logger.info({ serviceId: targetSvc.id, dockerServiceId: result.id }, 'Docker service created');
+      }
+
+      // Health check: wait for at least one running task
+      await publishProgress(deploymentId, 'deploying', '', 'health_check', undefined, `Waiting for ${targetSvc.name} to become healthy...`);
+      await setProgressStep(deploymentId, 'health_check', `Waiting for ${targetSvc.name} to become healthy...`);
+
+      const HEALTH_CHECK_TIMEOUT_MS = 120_000; // 2 minutes
+      const HEALTH_CHECK_INTERVAL_MS = 3_000;
+      const healthStart = Date.now();
+      let healthy = false;
+      while (Date.now() - healthStart < HEALTH_CHECK_TIMEOUT_MS) {
+        try {
+          const tasks = await orchestrator.listTasks({ service: [targetSvc.dockerServiceId!] });
+          const runningCount = tasks.filter((t: any) => t.Status?.State === 'running').length;
+          if (runningCount > 0) {
+            healthy = true;
+            break;
+          }
+        } catch {
+          // ignore transient errors
+        }
+        await new Promise(r => setTimeout(r, HEALTH_CHECK_INTERVAL_MS));
+      }
+
+      if (!healthy) {
+        logger.warn({ serviceId: targetSvc.id }, 'Health check timed out — service may not be running');
+        await publishProgress(deploymentId, 'deploying', '', 'health_check', undefined, `Health check timed out for ${targetSvc.name}`);
       }
 
       // Update service image

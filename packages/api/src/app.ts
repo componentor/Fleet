@@ -679,8 +679,7 @@ function ensureSharedSubscriber(): Promise<boolean> {
   return subscriberInitPromise;
 }
 
-function addDeployListener(deploymentId: string, listener: DeployListener) {
-  const channel = `deploy:${deploymentId}`;
+function addChannelListener(channel: string, listener: DeployListener) {
   let listeners = deployChannelListeners.get(channel);
   const isNewChannel = !listeners || listeners.size === 0;
   if (!listeners) {
@@ -692,13 +691,12 @@ function addDeployListener(deploymentId: string, listener: DeployListener) {
   // Only subscribe to Valkey if this is the first listener for this channel
   if (isNewChannel && sharedDeploySubscriber) {
     sharedDeploySubscriber.subscribe(channel).catch((err) => {
-      logger.error({ err, deploymentId }, 'Failed to subscribe to deploy channel');
+      logger.error({ err, channel }, 'Failed to subscribe to channel');
     });
   }
 }
 
-function removeDeployListener(deploymentId: string, listener: DeployListener) {
-  const channel = `deploy:${deploymentId}`;
+function removeChannelListener(channel: string, listener: DeployListener) {
   const listeners = deployChannelListeners.get(channel);
   if (!listeners) return;
   listeners.delete(listener);
@@ -710,6 +708,14 @@ function removeDeployListener(deploymentId: string, listener: DeployListener) {
       sharedDeploySubscriber.unsubscribe(channel).catch(() => {});
     }
   }
+}
+
+function addDeployListener(deploymentId: string, listener: DeployListener) {
+  addChannelListener(`deploy:${deploymentId}`, listener);
+}
+
+function removeDeployListener(deploymentId: string, listener: DeployListener) {
+  removeChannelListener(`deploy:${deploymentId}`, listener);
 }
 
 // ── WebSocket: Live deployment log streaming ──
@@ -888,6 +894,96 @@ api.get(
         if (trackedAccountId) {
           releaseWsSlot('deploy', trackedAccountId, activeDeployStreams);
           trackedAccountId = null;
+        }
+      },
+    };
+  }),
+);
+
+// ── WebSocket: Service event stream (instant notification of new deploys, etc.) ──
+// Lightweight: reuses the shared Valkey subscriber, no polling, tiny payloads.
+// Channel: service:{serviceId} — published by deployment worker when a new deploy starts.
+api.get(
+  '/terminal/service/:serviceId/events',
+  upgradeWebSocket((c) => {
+    const serviceId = c.req.param('serviceId');
+    const token = extractWsToken(c);
+    const accountId = c.req.query('accountId');
+    let closed = false;
+    let activeListener: DeployListener | null = null;
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+    return {
+      async onOpen(_evt: Event, ws: { send: (data: string) => void; close: (code?: number, reason?: string) => void }) {
+        try {
+          if (!token || token.length > 4000 ||
+              !accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId) ||
+              !serviceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(serviceId)) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          const wsUser = await verifyWsToken(token);
+
+          const membership = await db.query.userAccounts.findFirst({
+            where: and(
+              eq(userAccounts.userId, wsUser.userId),
+              eq(userAccounts.accountId, accountId),
+            ),
+          });
+
+          if (!membership && !wsUser.isSuper) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          // Verify service belongs to this account
+          const svc = await db.query.services.findFirst({
+            where: and(eq(services.id, serviceId), eq(services.accountId, accountId), isNull(services.deletedAt)),
+            columns: { id: true },
+          });
+
+          if (!svc) {
+            ws.close(4003, 'Access denied');
+            return;
+          }
+
+          const hasValkey = await ensureSharedSubscriber();
+          if (hasValkey) {
+            const channel = `service:${serviceId}`;
+            activeListener = (message: string) => {
+              if (closed) return;
+              try { ws.send(message); } catch { /* closed */ }
+            };
+            addChannelListener(channel, activeListener);
+          } else {
+            // No Valkey — close immediately, frontend will fall back to polling
+            ws.close(1000, 'No pub/sub available');
+            return;
+          }
+
+          // Keepalive pings
+          const rawWs = (ws as any).raw;
+          if (rawWs?.ping) {
+            keepaliveTimer = setInterval(() => {
+              try { rawWs.ping(); } catch { /* closed */ }
+            }, 30_000);
+          }
+        } catch (err) {
+          logger.error({ err }, 'WS service-events auth failed');
+          ws.close(4003, 'Auth failed');
+        }
+      },
+
+      onClose() {
+        closed = true;
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
+        if (activeListener) {
+          removeChannelListener(`service:${serviceId}`, activeListener);
+          activeListener = null;
         }
       },
     };
