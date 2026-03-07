@@ -201,8 +201,7 @@
       "infrastructure": "Infrastruktur",
       "team": "Team",
       "other": "Annet"
-    },
-    "translations": "Oversettelser"
+    }
   },
   "stacks": {
     "title": "Stabler",
@@ -334,7 +333,21 @@
     "searchPlaceholder": "Søk etter tjenester...",
     "startAll": "Start alle",
     "stopAll": "Stopp alle",
-    "cancelDeploy": "Avbryt deploy"
+    "cancelDeploy": "Avbryt deploy",
+    "activeServices": "Tjenester",
+    "trash": "Papirkurv",
+    "trashEmpty": "Papirkurven er tom",
+    "trashEmptyDesc": "Slettede tjenester vises her i 30 dager for de blir permanent fjernet.",
+    "trashHint": "Disse tjenestene er slettet. Du kan gjenopprette dem eller slette dem permanent.",
+    "trashDaysLeft": "{days} dager igjen",
+    "trashExpiring": "Utloper snart",
+    "trashDeletedOn": "Slettet",
+    "restore": "Gjenopprett",
+    "deletePermanently": "Slett permanent",
+    "restoreSuccess": "Tjeneste gjenopprettet",
+    "restoreFailed": "Kunne ikke gjenopprette tjeneste",
+    "permanentDeleteSuccess": "Tjeneste permanent slettet",
+    "permanentDeleteFailed": "Kunne ikke slette tjeneste permanent"
   },
   "domains": {
     "title": "Domener",
@@ -540,7 +553,18 @@
     "actualUsed": "Faktisk brukt",
     "allocated": "Tildelt",
     "limit": "Grense",
-    "usage": "Bruk"
+    "usage": "Bruk",
+    "analytics": "Analyser",
+    "volumeAnalytics": "Volumanalyse",
+    "totalRead": "Totalt lest",
+    "totalWrite": "Totalt skrevet",
+    "peakRead": "Topp lesing",
+    "peakWrite": "Topp skriving",
+    "ioOverTime": "I/O over tid",
+    "noIoData": "Ingen I/O-data enda",
+    "noIoDataHint": "I/O-metrikker samles inn hvert 5. minutt. Data vises nar volumet er i aktiv bruk.",
+    "usedByServices": "Brukt av tjenester",
+    "analyticsUnavailable": "Analyser utilgjengelig"
   },
   "storageSetup": {
     "title": "Lagring",
@@ -807,7 +831,11 @@
     "confirmReset": "Tilbakestill all lagring",
     "resettingStorage": "Tilbakestiller...",
     "resetSuccess": "Lagringskonfigurasjon tilbakestilt",
-    "resetFailed": "Kunne ikke tilbakestille lagring"
+    "resetFailed": "Kunne ikke tilbakestille lagring",
+    "readyAutoConfigPending": "Klar — {auto} valgfrie port(er) konfigureres under oppsett",
+    "requiredPortsClosed": "{count} pakrevde port(er) kjorer ikke: {ports}",
+    "requiredNotRunning": "Pakrevd — installer denne tjenesten for du fortsetter",
+    "autoConfigured": "Automatisk konfigurert av Siglar under initialisering"
   },
   "backups": {
     "title": "Sikkerhetskopier",
@@ -1057,7 +1085,11 @@
       "cmdDomain": "Legg til et eget domene",
       "cmdEnvUpdate": "Oppdater miljøvariabler (redistribuerer automatisk)",
       "cmdStop": "Stopp en tjeneste",
-      "cmdStart": "Start en stoppet tjeneste"
+      "cmdStart": "Start en stoppet tjeneste",
+      "installDesc": "Kjor denne kommandoen for a installere Siglar CLI globalt:",
+      "loginDesc": "Autentiser CLI-en med kontoen din:",
+      "initDesc": "Naviger til prosjektmappen din og kjor:",
+      "deployDesc": "Distribuer prosjektet ditt med en enkelt kommando:"
     },
     "fromGit": "Distribuer fra Git",
     "fromGitDesc": "Distribuer fra et hvilket som helst Git-repositorium — GitLab, Bitbucket, Gitea eller en selvhostet leverandør",
@@ -1088,7 +1120,8 @@
       "days": "{n}d siden",
       "months": "{n}mnd siden",
       "years": "{n}år siden"
-    }
+    },
+    "deployService": "Distribuer"
   },
   "deployGh": {
     "title": "Distribuer fra GitHub",
@@ -1169,7 +1202,9 @@
       "selectVolume": "Velg et volum...",
       "usedBy": "Brukes av",
       "linkWithAnother": "Koble til et annet volum",
-      "linkWith": "Koble til"
+      "linkWith": "Koble til",
+      "separateVolumesDesc": "Hver tjeneste far sin egen isolerte lagringsdisk",
+      "sharedVolumeDesc": "Alle tjenester deler en disk — bruker mindre av kvoten din"
     },
     "resources": {
       "title": "Ressurstildeling",
@@ -1253,13 +1288,13 @@
     "saving": "Lagrer...",
     "robots": {
       "title": "Robots.txt",
-      "desc": "Kontroller hvordan webcrawlere f\u00e5r tilgang til denne tjenesten. Vises kun for tjenester med domene.",
+      "desc": "Kontroller hvordan webcrawlere får tilgang til denne tjenesten. Vises kun for tjenester med domene.",
       "useDefault": "Bruk plattformstandard",
       "useDefaultDesc": "Server plattformens standard robots.txt konfigurert av administrator.",
       "custom": "Egendefinert robots.txt",
       "customDesc": "Oppgi en tilpasset robots.txt for denne tjenesten.",
-      "disabled": "Deaktivert (tjenesten h\u00e5ndterer selv)",
-      "disabledDesc": "Ikke fang opp /robots.txt \u2014 la tjenestens container svare direkte.",
+      "disabled": "Deaktivert (tjenesten håndterer selv)",
+      "disabledDesc": "Ikke fang opp /robots.txt — la tjenestens container svare direkte.",
       "contentLabel": "Egendefinert robots.txt-innhold",
       "placeholder": "User-agent: *\nDisallow: /private/",
       "save": "Lagre Robots.txt",
@@ -1500,7 +1535,17 @@
     "deletePermanently": "Slett permanent",
     "deleting": "Sletter...",
     "accountDeleted": "Konto slettet",
-    "deleteFailed": "Kunne ikke slette konto"
+    "deleteFailed": "Kunne ikke slette konto",
+    "methodsReEnabled": "Innloggingsmetoder reaktivert for sikkerhet: {methods}",
+    "loginMethods": "Innloggingsmetoder",
+    "loginMethodsDesc": "Kontroller hvilke metoder som kan brukes til a logge inn pa kontoen din.",
+    "passwordLogin": "Passord",
+    "loginEnabled": "Aktivert",
+    "loginDisabled": "Deaktivert",
+    "loginMethodDisabled": "{method}-innlogging deaktivert",
+    "loginMethodEnabled": "{method}-innlogging aktivert",
+    "loginMethodUpdateFailed": "Kunne ikke oppdatere innloggingsmetode",
+    "cantDisableLast": "Kan ikke deaktivere — dette er din eneste innloggingsmetode"
   },
   "super": {
     "dashboard": {
@@ -1630,7 +1675,23 @@
       "noRole": "Ingen rolle tildelt",
       "noPermissions": "Ingen tillatelser konfigurert for denne rollen.",
       "superAdminAccess": "Full tilgang — superadminer omgår alle tillatelseskontroller.",
-      "subtitle": "Se og administrer alle plattformbrukere på tvers av kontoer"
+      "subtitle": "Se og administrer alle plattformbrukere på tvers av kontoer",
+      "allUsers": "Alle brukere",
+      "adminsOnly": "Kun administratorer",
+      "security": "Sikkerhet",
+      "loginMethods": "Innlogging",
+      "regions": "Regioner",
+      "no2fa": "Ingen 2FA",
+      "allRegions": "Alle regioner",
+      "passwordLogin": "Passord",
+      "loginRegions": "Regionbegrensninger for innlogging",
+      "noRegionRestrictions": "Ingen regionbegrensninger — administrator kan logge inn fra hvor som helst.",
+      "editRegions": "Rediger regioner",
+      "regionCodes": "Tillatte landkoder",
+      "regionPlaceholder": "NO, SE, US, DE",
+      "regionHint": "Kommaseparerte ISO 3166-1 alfa-2-koder. La sta tomt for a tillate alle regioner.",
+      "securityWarning": "Sikkerhetsadvarsel",
+      "adminsWithout2fa": "{count} administrator(er) har ikke tofaktorautentisering aktivert"
     },
     "marketplace": {
       "title": "Appmaler",
@@ -1884,14 +1945,14 @@
         "enableLabel": "Aktiver plattformdekkende robots.txt",
         "contentLabel": "Standard robots.txt-innhold",
         "placeholder": "User-agent: *\nAllow: /",
-        "hint": "Dette innholdet serveres p\u00e5 /robots.txt for plattformdomenet og alle tjenester som bruker standardmodus.",
+        "hint": "Dette innholdet serveres på /robots.txt for plattformdomenet og alle tjenester som bruker standardmodus.",
         "save": "Lagre",
         "saved": "Robots.txt-konfigurasjon lagret",
         "saveFailed": "Kunne ikke lagre robots.txt-konfigurasjon"
       },
       "env": {
-        "title": "Milj\u00f8variabler",
-        "desc": "Vis og administrer milj\u00f8variabler p\u00e5 serveren. Disse lagres i konfigurasjonsfilen og leses av alle plattformtjenester.",
+        "title": "Miljøvariabler",
+        "desc": "Vis og administrer miljøvariabler på serveren. Disse lagres i konfigurasjonsfilen og leses av alle plattformtjenester.",
         "addVariable": "Legg til variabel",
         "restartServices": "Start tjenester på nytt",
         "allCategories": "Alle",
@@ -2818,13 +2879,23 @@
     "message": "Er du sikker på at du vil slette",
     "titleStack": "Slett stack",
     "messageStack": "Er du sikker på at du vil slette stacken",
-    "cannotBeUndone": "Denne handlingen kan ikke angres.",
     "deleteVolumes": "Slett også tilknyttede lagringsvolumer",
-    "deleteVolumesHint": "Sletter permanent all data lagret i volumene",
     "deleteVolumesWarning": "Advarsel: All data i de tilknyttede volumene vil bli permanent slettet. Dette kan ikke gjenopprettes.",
     "cancel": "Avbryt",
     "deleting": "Sletter...",
-    "confirm": "Slett"
+    "recoveryTitle": "Du kan gjenopprette dette",
+    "recoveryDesc": "Dette flyttes til papirkurven. Du kan gjenopprette det innen {days} dager for det blir permanent slettet.",
+    "backupBeforeDelete": "Lag en sikkerhetskopi for sletting",
+    "backupBeforeDeleteDesc": "Lagrer et overblikk av dataene dine slik at du kan gjenopprette dem senere ved behov.",
+    "storageTitle": "Lagring",
+    "keepVolumes": "Behold alle disker",
+    "keepVolumesDesc": "Data forblir tilgjengelig for fremtidig bruk",
+    "deleteVolumesDesc": "Fjern valgte disker og alle deres data",
+    "selectVolumesToDelete": "Velg disker som skal slettes",
+    "selectAll": "Velg alle",
+    "deselectAll": "Fjern alle valg",
+    "volumeSelectionHint": "Avkryssede disker blir permanent slettet. Ikke-avkryssede disker beholdes.",
+    "moveToTrash": "Flytt til papirkurv"
   },
   "terminal": {
     "title": "Terminal",
@@ -2999,13 +3070,7 @@
     "registerDomain": "Registrer et domene",
     "registerDomainDesc": "Få et eget domene for tjenestene dine.",
     "domainsSaved": "Vi har lagret domenevalgene dine — du kan konfigurere dem under Domener.",
-    "skipToDashboard": "Gå til dokken",
-    "backToHome": "Tilbake til forsiden",
-    "cartSummary": "{count} domene(r) i handlekurven din",
-    "choosePlanCartDesc": "Velg en hostingplan for domenene dine",
-    "domainsReadyToRegister": "Domenene dine er klare til registrering!",
-    "completeRegistration": "Fullfør domeneregistrering",
-    "completeRegistrationDesc": "Fullfør registreringen av dine valgte domener"
+    "skipToDashboard": "Gå til dokken"
   },
   "subAccounts": {
     "title": "Underkontoer",
@@ -3988,6 +4053,29 @@
       "support": "Støtte",
       "roles": "Roller",
       "database": "Database"
+    },
+    "quickCreate": "Hurtigopprett fra mal",
+    "presets": {
+      "customerSupport": {
+        "name": "Kundestotte",
+        "description": "Se kontoer, handter henvendelser og statusinnlegg"
+      },
+      "securityAdmin": {
+        "name": "Sikkerhetsadministrator",
+        "description": "Overvak hendelser, handter brukere og gjennomga sikkerhetslogger"
+      },
+      "billingAdmin": {
+        "name": "Faktureringsadministrator",
+        "description": "Handter fakturering, kontoer og forhandlerforhold"
+      },
+      "auditor": {
+        "name": "Revisor",
+        "description": "Skrivebeskyttet tilgang til alle plattformdata for samsvar"
+      },
+      "platformOps": {
+        "name": "Plattformdrift",
+        "description": "Handter infrastruktur, tjenester, lagring og distribusjoner"
+      }
     }
   },
   "security": {

@@ -333,7 +333,21 @@
     "searchPlaceholder": "搜索服务...",
     "startAll": "全部启动",
     "stopAll": "全部停止",
-    "cancelDeploy": "取消部署"
+    "cancelDeploy": "取消部署",
+    "activeServices": "服务",
+    "trash": "回收站",
+    "trashEmpty": "回收站为空",
+    "trashEmptyDesc": "已删除的服务将在此显示30天，之后将被永久移除。",
+    "trashHint": "这些服务已被删除。您可以恢复它们或永久删除它们。",
+    "trashDaysLeft": "剩余 {days} 天",
+    "trashExpiring": "即将过期",
+    "trashDeletedOn": "已删除",
+    "restore": "恢复",
+    "deletePermanently": "永久删除",
+    "restoreSuccess": "服务已恢复",
+    "restoreFailed": "恢复服务失败",
+    "permanentDeleteSuccess": "服务已永久删除",
+    "permanentDeleteFailed": "永久删除服务失败"
   },
   "domains": {
     "title": "域名",
@@ -539,7 +553,18 @@
     "actualUsed": "实际使用",
     "allocated": "已分配",
     "limit": "上限",
-    "usage": "用量"
+    "usage": "用量",
+    "analytics": "分析",
+    "volumeAnalytics": "卷分析",
+    "totalRead": "总读取量",
+    "totalWrite": "总写入量",
+    "peakRead": "峰值读取",
+    "peakWrite": "峰值写入",
+    "ioOverTime": "I/O 随时间变化",
+    "noIoData": "暂无 I/O 数据",
+    "noIoDataHint": "I/O 指标每5分钟采集一次。卷被活跃使用后将显示数据。",
+    "usedByServices": "被服务使用",
+    "analyticsUnavailable": "分析不可用"
   },
   "storageSetup": {
     "title": "存储",
@@ -806,7 +831,11 @@
     "confirmReset": "重置所有存储",
     "resettingStorage": "正在重置...",
     "resetSuccess": "存储配置已成功重置",
-    "resetFailed": "存储重置失败"
+    "resetFailed": "存储重置失败",
+    "readyAutoConfigPending": "就绪 — {auto} 个可选端口将在安装过程中配置",
+    "requiredPortsClosed": "{count} 个必需端口未运行: {ports}",
+    "requiredNotRunning": "必需 — 请先安装此服务再继续",
+    "autoConfigured": "由 Siglar 在初始化时自动配置"
   },
   "backups": {
     "title": "备份",
@@ -1056,7 +1085,11 @@
       "cmdDomain": "绑定自定义域名",
       "cmdEnvUpdate": "更新环境变量（自动重新部署）",
       "cmdStop": "停止服务",
-      "cmdStart": "启动已停止的服务"
+      "cmdStart": "启动已停止的服务",
+      "installDesc": "运行此命令全局安装 Siglar CLI：",
+      "loginDesc": "使用您的账户验证 CLI：",
+      "initDesc": "导航到项目文件夹并运行：",
+      "deployDesc": "使用一条命令部署您的项目："
     },
     "fromGit": "从 Git 部署",
     "fromGitDesc": "从任何 Git 仓库部署 — GitLab、Bitbucket、Gitea 或任何自托管提供商",
@@ -1087,7 +1120,8 @@
       "days": "{n}天前",
       "months": "{n}个月前",
       "years": "{n}年前"
-    }
+    },
+    "deployService": "部署"
   },
   "deployGh": {
     "title": "从 GitHub 部署",
@@ -1168,7 +1202,9 @@
       "selectVolume": "选择卷...",
       "usedBy": "使用者",
       "linkWithAnother": "与其他卷关联",
-      "linkWith": "关联"
+      "linkWith": "关联",
+      "separateVolumesDesc": "每个服务获得自己的独立存储磁盘",
+      "sharedVolumeDesc": "所有服务共享一个磁盘 — 使用更少的配额"
     },
     "resources": {
       "title": "资源分配",
@@ -1248,22 +1284,22 @@
     "webhookStatus": "Webhook",
     "webhookRegistered": "已注册",
     "webhookNotRegistered": "未注册",
-    "saveGithubSettings": "\u4fdd\u5b58 GitHub \u8bbe\u7f6e",
-    "saving": "\u4fdd\u5b58\u4e2d...",
+    "saveGithubSettings": "保存 GitHub 设置",
+    "saving": "保存中...",
     "robots": {
       "title": "Robots.txt",
-      "desc": "\u63a7\u5236\u7f51\u7edc\u722c\u866b\u5982\u4f55\u8bbf\u95ee\u6b64\u670d\u52a1\u3002\u4ec5\u5bf9\u5177\u6709\u57df\u540d\u7684\u670d\u52a1\u663e\u793a\u3002",
-      "useDefault": "\u4f7f\u7528\u5e73\u53f0\u9ed8\u8ba4\u503c",
-      "useDefaultDesc": "\u63d0\u4f9b\u7ba1\u7406\u5458\u914d\u7f6e\u7684\u5e73\u53f0\u7ea7 robots.txt\u3002",
-      "custom": "\u81ea\u5b9a\u4e49 robots.txt",
-      "customDesc": "\u4e3a\u6b64\u670d\u52a1\u63d0\u4f9b\u81ea\u5b9a\u4e49\u7684 robots.txt\u3002",
-      "disabled": "\u7981\u7528\uff08\u670d\u52a1\u81ea\u884c\u5904\u7406\uff09",
-      "disabledDesc": "\u4e0d\u62e6\u622a /robots.txt \u2014 \u8ba9\u670d\u52a1\u5bb9\u5668\u76f4\u63a5\u54cd\u5e94\u3002",
-      "contentLabel": "\u81ea\u5b9a\u4e49 robots.txt \u5185\u5bb9",
+      "desc": "控制网络爬虫如何访问此服务。仅对具有域名的服务显示。",
+      "useDefault": "使用平台默认值",
+      "useDefaultDesc": "提供管理员配置的平台级 robots.txt。",
+      "custom": "自定义 robots.txt",
+      "customDesc": "为此服务提供自定义的 robots.txt。",
+      "disabled": "禁用（服务自行处理）",
+      "disabledDesc": "不拦截 /robots.txt — 让服务容器直接响应。",
+      "contentLabel": "自定义 robots.txt 内容",
       "placeholder": "User-agent: *\nDisallow: /private/",
-      "save": "\u4fdd\u5b58 Robots.txt",
-      "saved": "Robots.txt \u8bbe\u7f6e\u5df2\u4fdd\u5b58",
-      "saveFailed": "\u4fdd\u5b58 robots.txt \u8bbe\u7f6e\u5931\u8d25"
+      "save": "保存 Robots.txt",
+      "saved": "Robots.txt 设置已保存",
+      "saveFailed": "保存 robots.txt 设置失败"
     }
   },
   "billing": {
@@ -1499,7 +1535,17 @@
     "deletePermanently": "永久删除",
     "deleting": "删除中...",
     "accountDeleted": "账户已删除",
-    "deleteFailed": "账户删除失败"
+    "deleteFailed": "账户删除失败",
+    "methodsReEnabled": "为安全起见已重新启用登录方式: {methods}",
+    "loginMethods": "登录方式",
+    "loginMethodsDesc": "控制可以使用哪些方式登录您的账户。",
+    "passwordLogin": "密码",
+    "loginEnabled": "已启用",
+    "loginDisabled": "已禁用",
+    "loginMethodDisabled": "{method} 登录已禁用",
+    "loginMethodEnabled": "{method} 登录已启用",
+    "loginMethodUpdateFailed": "更新登录方式失败",
+    "cantDisableLast": "无法禁用 — 这是您唯一的登录方式"
   },
   "super": {
     "dashboard": {
@@ -1629,7 +1675,23 @@
       "noRole": "未分配角色",
       "noPermissions": "此角色未配置任何权限。",
       "superAdminAccess": "完全访问权限 — 超级管理员绕过所有权限检查。",
-      "subtitle": "跨账户查看和管理所有平台用户"
+      "subtitle": "跨账户查看和管理所有平台用户",
+      "allUsers": "所有用户",
+      "adminsOnly": "仅管理员",
+      "security": "安全",
+      "loginMethods": "登录",
+      "regions": "区域",
+      "no2fa": "未启用双因素认证",
+      "allRegions": "所有区域",
+      "passwordLogin": "密码",
+      "loginRegions": "登录区域限制",
+      "noRegionRestrictions": "无区域限制 — 管理员可以从任何地方登录。",
+      "editRegions": "编辑区域",
+      "regionCodes": "允许的国家代码",
+      "regionPlaceholder": "NO, SE, US, DE",
+      "regionHint": "以逗号分隔的 ISO 3166-1 alpha-2 代码。留空以允许所有区域。",
+      "securityWarning": "安全警告",
+      "adminsWithout2fa": "{count} 位管理员未启用双因素认证"
     },
     "marketplace": {
       "title": "应用模板",
@@ -1876,56 +1938,56 @@
         "migrateToLocalDesc": "将数据库迁移回特定管理节点上的本地卷。数据库将被固定到所选节点。",
         "refresh": "刷新状态",
         "loadError": "无法加载数据库状态，请检查 API 是否可访问。"
+      },
+      "robots": {
+        "title": "Robots.txt",
+        "desc": "配置为所有服务提供的默认 robots.txt。各服务可单独覆盖或禁用。",
+        "enableLabel": "启用平台级 robots.txt",
+        "contentLabel": "默认 robots.txt 内容",
+        "placeholder": "User-agent: *\nAllow: /",
+        "hint": "此内容将在平台域名和所有使用默认模式的服务的 /robots.txt 上提供。",
+        "save": "保存",
+        "saved": "Robots.txt 配置已保存",
+        "saveFailed": "无法保存 robots.txt 配置"
+      },
+      "env": {
+        "title": "环境",
+        "desc": "查看和管理服务器环境变量。这些变量存储在配置文件中，由所有平台服务读取。",
+        "addVariable": "添加变量",
+        "restartServices": "重启服务",
+        "allCategories": "全部",
+        "keyPlaceholder": "VARIABLE_NAME",
+        "valuePlaceholder": "值",
+        "save": "保存",
+        "cancel": "取消",
+        "edit": "编辑",
+        "delete": "删除",
+        "restart": "需要重启",
+        "dangerous": "关键",
+        "enterNewValue": "输入新值",
+        "confirmDangerous": "我了解更改此关键变量可能会破坏平台",
+        "noVars": "未找到环境变量",
+        "refresh": "刷新",
+        "filePath": "/opt/fleet/config/env"
+      },
+      "registration": {
+        "title": "注册管理",
+        "desc": "控制新用户是否可以在平台上注册。",
+        "currentAccounts": "已注册 {count} 个账户",
+        "modeLabel": "注册模式",
+        "modeOpen": "开放",
+        "modeOpenDesc": "任何人都可以创建新账户。",
+        "modeLimited": "限制",
+        "modeLimitedDesc": "允许注册到最大账户数。达到限制时通知管理员。",
+        "modeClosed": "关闭",
+        "modeClosedDesc": "无法创建新账户。现有用户仍可登录。",
+        "maxAccountsLabel": "最大账户数",
+        "maxAccountsHint": "达到此限制后，新注册将被阻止。",
+        "closedMessageLabel": "访客自定义消息",
+        "closedMessagePlaceholder": "我们目前不接受新注册。请稍后再来！",
+        "save": "保存",
+        "saved": "注册设置已保存"
       }
-    },
-    "robots": {
-      "title": "Robots.txt",
-      "desc": "\u914d\u7f6e\u4e3a\u6240\u6709\u670d\u52a1\u63d0\u4f9b\u7684\u9ed8\u8ba4 robots.txt\u3002\u5404\u670d\u52a1\u53ef\u5355\u72ec\u8986\u76d6\u6216\u7981\u7528\u3002",
-      "enableLabel": "\u542f\u7528\u5e73\u53f0\u7ea7 robots.txt",
-      "contentLabel": "\u9ed8\u8ba4 robots.txt \u5185\u5bb9",
-      "placeholder": "User-agent: *\nAllow: /",
-      "hint": "\u6b64\u5185\u5bb9\u5c06\u5728\u5e73\u53f0\u57df\u540d\u548c\u6240\u6709\u4f7f\u7528\u9ed8\u8ba4\u6a21\u5f0f\u7684\u670d\u52a1\u7684 /robots.txt \u4e0a\u63d0\u4f9b\u3002",
-      "save": "\u4fdd\u5b58",
-      "saved": "Robots.txt \u914d\u7f6e\u5df2\u4fdd\u5b58",
-      "saveFailed": "\u65e0\u6cd5\u4fdd\u5b58 robots.txt \u914d\u7f6e"
-    },
-    "env": {
-      "title": "\u73af\u5883",
-      "desc": "\u67e5\u770b\u548c\u7ba1\u7406\u670d\u52a1\u5668\u73af\u5883\u53d8\u91cf\u3002\u8fd9\u4e9b\u53d8\u91cf\u5b58\u50a8\u5728\u914d\u7f6e\u6587\u4ef6\u4e2d\uff0c\u7531\u6240\u6709\u5e73\u53f0\u670d\u52a1\u8bfb\u53d6\u3002",
-      "addVariable": "\u6dfb\u52a0\u53d8\u91cf",
-      "restartServices": "重启服务",
-      "allCategories": "全部",
-      "keyPlaceholder": "VARIABLE_NAME",
-      "valuePlaceholder": "值",
-      "save": "保存",
-      "cancel": "取消",
-      "edit": "编辑",
-      "delete": "删除",
-      "restart": "需要重启",
-      "dangerous": "关键",
-      "enterNewValue": "输入新值",
-      "confirmDangerous": "我了解更改此关键变量可能会破坏平台",
-      "noVars": "未找到环境变量",
-      "refresh": "刷新",
-      "filePath": "/opt/fleet/config/env"
-    },
-    "registration": {
-      "title": "注册管理",
-      "desc": "控制新用户是否可以在平台上注册。",
-      "currentAccounts": "已注册 {count} 个账户",
-      "modeLabel": "注册模式",
-      "modeOpen": "开放",
-      "modeOpenDesc": "任何人都可以创建新账户。",
-      "modeLimited": "限制",
-      "modeLimitedDesc": "允许注册到最大账户数。达到限制时通知管理员。",
-      "modeClosed": "关闭",
-      "modeClosedDesc": "无法创建新账户。现有用户仍可登录。",
-      "maxAccountsLabel": "最大账户数",
-      "maxAccountsHint": "达到此限制后，新注册将被阻止。",
-      "closedMessageLabel": "访客自定义消息",
-      "closedMessagePlaceholder": "我们目前不接受新注册。请稍后再来！",
-      "save": "保存",
-      "saved": "注册设置已保存"
     },
     "billing": {
       "title": "计费配置",
@@ -2817,13 +2879,23 @@
     "message": "您确定要删除",
     "titleStack": "删除堆栈",
     "messageStack": "您确定要删除堆栈",
-    "cannotBeUndone": "此操作无法撤消。",
     "deleteVolumes": "同时删除关联的存储卷",
-    "deleteVolumesHint": "将永久删除存储卷中的所有数据",
     "deleteVolumesWarning": "警告：关联存储卷中的所有数据将被永久删除，无法恢复。",
     "cancel": "取消",
     "deleting": "删除中...",
-    "confirm": "删除"
+    "recoveryTitle": "您可以恢复此项",
+    "recoveryDesc": "此项将移至回收站。您可以在 {days} 天内恢复，之后将被永久删除。",
+    "backupBeforeDelete": "删除前创建备份",
+    "backupBeforeDeleteDesc": "保存数据快照，以便在需要时恢复。",
+    "storageTitle": "存储",
+    "keepVolumes": "保留所有磁盘",
+    "keepVolumesDesc": "数据保持可用以供将来使用",
+    "deleteVolumesDesc": "移除选中的磁盘及其所有数据",
+    "selectVolumesToDelete": "选择要删除的磁盘",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "volumeSelectionHint": "勾选的磁盘将被永久删除。未勾选的磁盘将被保留。",
+    "moveToTrash": "移至回收站"
   },
   "terminal": {
     "title": "终端",
@@ -3981,7 +4053,30 @@
     },
     "presetConfirmTitle": "从模板创建角色",
     "presetConfirmMessage": "这将创建一个名为\"{name}\"的新角色，并带有预配置的权限。",
-    "presetConfirmPermissions": "包含的权限："
+    "presetConfirmPermissions": "包含的权限：",
+    "quickCreate": "从模板快速创建",
+    "presets": {
+      "customerSupport": {
+        "name": "客户支持",
+        "description": "查看账户，管理支持工单和状态公告"
+      },
+      "securityAdmin": {
+        "name": "安全管理员",
+        "description": "监控事件，管理用户和审查安全日志"
+      },
+      "billingAdmin": {
+        "name": "计费管理员",
+        "description": "管理计费、账户和经销商关系"
+      },
+      "auditor": {
+        "name": "审计员",
+        "description": "对所有平台数据的只读访问，用于合规审计"
+      },
+      "platformOps": {
+        "name": "平台运维",
+        "description": "管理基础设施、服务、存储和部署"
+      }
+    }
   },
   "security": {
     "title": "安全监控",

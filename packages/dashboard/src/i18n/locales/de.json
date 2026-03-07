@@ -333,7 +333,21 @@
     "searchPlaceholder": "Dienste suchen...",
     "startAll": "Alle starten",
     "stopAll": "Alle stoppen",
-    "cancelDeploy": "Deploy abbrechen"
+    "cancelDeploy": "Deploy abbrechen",
+    "activeServices": "Dienste",
+    "trash": "Papierkorb",
+    "trashEmpty": "Papierkorb ist leer",
+    "trashEmptyDesc": "Gelöschte Dienste erscheinen hier 30 Tage lang, bevor sie endgültig entfernt werden.",
+    "trashHint": "Diese Dienste wurden gelöscht. Sie können sie wiederherstellen oder endgültig löschen.",
+    "trashDaysLeft": "{days} Tage verbleibend",
+    "trashExpiring": "Läuft bald ab",
+    "trashDeletedOn": "Gelöscht",
+    "restore": "Wiederherstellen",
+    "deletePermanently": "Endgültig löschen",
+    "restoreSuccess": "Dienst wiederhergestellt",
+    "restoreFailed": "Dienst konnte nicht wiederhergestellt werden",
+    "permanentDeleteSuccess": "Dienst endgültig gelöscht",
+    "permanentDeleteFailed": "Dienst konnte nicht endgültig gelöscht werden"
   },
   "domains": {
     "title": "Domains",
@@ -539,7 +553,18 @@
     "actualUsed": "Tatsächlich genutzt",
     "allocated": "Zugewiesen",
     "limit": "Limit",
-    "usage": "Nutzung"
+    "usage": "Nutzung",
+    "analytics": "Analysen",
+    "volumeAnalytics": "Volume-Analysen",
+    "totalRead": "Gesamt gelesen",
+    "totalWrite": "Gesamt geschrieben",
+    "peakRead": "Spitze Lesen",
+    "peakWrite": "Spitze Schreiben",
+    "ioOverTime": "I/O im Zeitverlauf",
+    "noIoData": "Noch keine I/O-Daten",
+    "noIoDataHint": "I/O-Metriken werden alle 5 Minuten erfasst. Daten erscheinen, sobald das Volume aktiv genutzt wird.",
+    "usedByServices": "Von Diensten genutzt",
+    "analyticsUnavailable": "Analysen nicht verfügbar"
   },
   "storageSetup": {
     "title": "Speicher",
@@ -806,7 +831,11 @@
     "confirmReset": "Gesamten Speicher zurücksetzen",
     "resettingStorage": "Wird zurückgesetzt...",
     "resetSuccess": "Speicherkonfiguration erfolgreich zurückgesetzt",
-    "resetFailed": "Speicher konnte nicht zurückgesetzt werden"
+    "resetFailed": "Speicher konnte nicht zurückgesetzt werden",
+    "readyAutoConfigPending": "Bereit — {auto} optionale Port(s) werden beim Setup konfiguriert",
+    "requiredPortsClosed": "{count} erforderliche Port(s) nicht aktiv: {ports}",
+    "requiredNotRunning": "Erforderlich — installieren Sie diesen Dienst, bevor Sie fortfahren",
+    "autoConfigured": "Automatisch von Siglar bei der Initialisierung konfiguriert"
   },
   "backups": {
     "title": "Backups",
@@ -1056,7 +1085,11 @@
       "cmdDomain": "Eigene Domain hinzufügen",
       "cmdEnvUpdate": "Umgebungsvariablen aktualisieren (automatisches Redeployment)",
       "cmdStop": "Dienst stoppen",
-      "cmdStart": "Gestoppten Dienst starten"
+      "cmdStart": "Gestoppten Dienst starten",
+      "installDesc": "Führen Sie diesen Befehl aus, um die Siglar CLI global zu installieren:",
+      "loginDesc": "Authentifizieren Sie die CLI mit Ihrem Konto:",
+      "initDesc": "Navigieren Sie zu Ihrem Projektordner und führen Sie aus:",
+      "deployDesc": "Stellen Sie Ihr Projekt mit einem einzigen Befehl bereit:"
     },
     "fromGit": "Von Git bereitstellen",
     "fromGitDesc": "Aus jedem Git-Repository bereitstellen — GitLab, Bitbucket, Gitea oder jeder selbst gehostete Anbieter",
@@ -1087,7 +1120,8 @@
       "days": "vor {n}T",
       "months": "vor {n}Mo",
       "years": "vor {n}J"
-    }
+    },
+    "deployService": "Bereitstellen"
   },
   "deployGh": {
     "title": "Von GitHub bereitstellen",
@@ -1168,7 +1202,9 @@
       "selectVolume": "Volume auswählen...",
       "usedBy": "Verwendet von",
       "linkWithAnother": "Mit einem anderen Volume verknüpfen",
-      "linkWith": "Verknüpfen mit"
+      "linkWith": "Verknüpfen mit",
+      "separateVolumesDesc": "Jeder Dienst erhält seine eigene isolierte Speicherplatte",
+      "sharedVolumeDesc": "Alle Dienste teilen sich eine Platte — verbraucht weniger Ihres Kontingents"
     },
     "resources": {
       "title": "Ressourcenzuweisung",
@@ -1252,13 +1288,13 @@
     "saving": "Wird gespeichert...",
     "robots": {
       "title": "Robots.txt",
-      "desc": "Steuern Sie, wie Webcrawler auf diesen Dienst zugreifen. Wird nur f\u00fcr Dienste mit Domain angezeigt.",
+      "desc": "Steuern Sie, wie Webcrawler auf diesen Dienst zugreifen. Wird nur für Dienste mit Domain angezeigt.",
       "useDefault": "Plattform-Standard verwenden",
       "useDefaultDesc": "Die vom Administrator konfigurierte plattformweite robots.txt bereitstellen.",
       "custom": "Benutzerdefinierte robots.txt",
-      "customDesc": "Eine benutzerdefinierte robots.txt f\u00fcr diesen Dienst bereitstellen.",
+      "customDesc": "Eine benutzerdefinierte robots.txt für diesen Dienst bereitstellen.",
       "disabled": "Deaktiviert (Dienst verwaltet selbst)",
-      "disabledDesc": "/robots.txt nicht abfangen \u2014 der Dienst-Container antwortet direkt.",
+      "disabledDesc": "/robots.txt nicht abfangen — der Dienst-Container antwortet direkt.",
       "contentLabel": "Benutzerdefinierter robots.txt-Inhalt",
       "placeholder": "User-agent: *\nDisallow: /private/",
       "save": "Robots.txt speichern",
@@ -1499,7 +1535,17 @@
     "deletePermanently": "Dauerhaft löschen",
     "deleting": "Wird gelöscht...",
     "accountDeleted": "Konto gelöscht",
-    "deleteFailed": "Konto konnte nicht gelöscht werden"
+    "deleteFailed": "Konto konnte nicht gelöscht werden",
+    "methodsReEnabled": "Anmeldemethoden aus Sicherheitsgründen reaktiviert: {methods}",
+    "loginMethods": "Anmeldemethoden",
+    "loginMethodsDesc": "Legen Sie fest, welche Methoden zur Anmeldung verwendet werden können.",
+    "passwordLogin": "Passwort",
+    "loginEnabled": "Aktiviert",
+    "loginDisabled": "Deaktiviert",
+    "loginMethodDisabled": "{method}-Anmeldung deaktiviert",
+    "loginMethodEnabled": "{method}-Anmeldung aktiviert",
+    "loginMethodUpdateFailed": "Anmeldemethode konnte nicht aktualisiert werden",
+    "cantDisableLast": "Kann nicht deaktiviert werden — dies ist Ihre einzige Anmeldemethode"
   },
   "super": {
     "dashboard": {
@@ -1629,7 +1675,23 @@
       "noRole": "Keine Rolle zugewiesen",
       "noPermissions": "Keine Berechtigungen für diese Rolle konfiguriert.",
       "superAdminAccess": "Vollzugriff — Super-Admins umgehen alle Berechtigungsprüfungen.",
-      "subtitle": "Alle Plattformbenutzer kontoübergreifend anzeigen und verwalten"
+      "subtitle": "Alle Plattformbenutzer kontoübergreifend anzeigen und verwalten",
+      "allUsers": "Alle Benutzer",
+      "adminsOnly": "Nur Administratoren",
+      "security": "Sicherheit",
+      "loginMethods": "Anmeldung",
+      "regions": "Regionen",
+      "no2fa": "Kein 2FA",
+      "allRegions": "Alle Regionen",
+      "passwordLogin": "Passwort",
+      "loginRegions": "Regionale Anmeldebeschränkungen",
+      "noRegionRestrictions": "Keine Regionsbeschränkungen — Administrator kann sich von überall anmelden.",
+      "editRegions": "Regionen bearbeiten",
+      "regionCodes": "Erlaubte Ländercodes",
+      "regionPlaceholder": "NO, SE, US, DE",
+      "regionHint": "Kommagetrennte ISO-3166-1-Alpha-2-Codes. Leer lassen, um alle Regionen zuzulassen.",
+      "securityWarning": "Sicherheitswarnung",
+      "adminsWithout2fa": "{count} Administrator(en) haben keine Zwei-Faktor-Authentifizierung aktiviert"
     },
     "marketplace": {
       "title": "App-Vorlagen",
@@ -1879,11 +1941,11 @@
       },
       "robots": {
         "title": "Robots.txt",
-        "desc": "Konfigurieren Sie die Standard-robots.txt f\u00fcr alle Dienste. Einzelne Dienste k\u00f6nnen dies \u00fcberschreiben oder deaktivieren.",
+        "desc": "Konfigurieren Sie die Standard-robots.txt für alle Dienste. Einzelne Dienste können dies überschreiben oder deaktivieren.",
         "enableLabel": "Plattformweite robots.txt aktivieren",
         "contentLabel": "Standard robots.txt-Inhalt",
         "placeholder": "User-agent: *\nAllow: /",
-        "hint": "Dieser Inhalt wird unter /robots.txt f\u00fcr die Plattform-Domain und alle Dienste im Standardmodus bereitgestellt.",
+        "hint": "Dieser Inhalt wird unter /robots.txt für die Plattform-Domain und alle Dienste im Standardmodus bereitgestellt.",
         "save": "Speichern",
         "saved": "Robots.txt-Konfiguration gespeichert",
         "saveFailed": "Robots.txt-Konfiguration konnte nicht gespeichert werden"
@@ -1891,7 +1953,7 @@
       "env": {
         "title": "Umgebung",
         "desc": "Anzeigen und Verwalten von Server-Umgebungsvariablen. Diese werden in der Konfigurationsdatei gespeichert und von allen Plattformdiensten gelesen.",
-        "addVariable": "Variable hinzuf\u00fcgen",
+        "addVariable": "Variable hinzufügen",
         "restartServices": "Dienste neu starten",
         "allCategories": "Alle",
         "keyPlaceholder": "VARIABLE_NAME",
@@ -2817,13 +2879,23 @@
     "message": "Sind Sie sicher, dass Sie löschen möchten",
     "titleStack": "Stack löschen",
     "messageStack": "Sind Sie sicher, dass Sie den Stack löschen möchten",
-    "cannotBeUndone": "Diese Aktion kann nicht rückgängig gemacht werden.",
     "deleteVolumes": "Zugehörige Speichervolumes ebenfalls löschen",
-    "deleteVolumesHint": "Löscht dauerhaft alle in den Volumes gespeicherten Daten",
     "deleteVolumesWarning": "Warnung: Alle Daten in den zugehörigen Volumes werden dauerhaft gelöscht. Dies kann nicht wiederhergestellt werden.",
     "cancel": "Abbrechen",
     "deleting": "Wird gelöscht...",
-    "confirm": "Löschen"
+    "recoveryTitle": "Sie können dies wiederherstellen",
+    "recoveryDesc": "Dies wird in den Papierkorb verschoben. Sie können es innerhalb von {days} Tagen wiederherstellen, bevor es endgültig gelöscht wird.",
+    "backupBeforeDelete": "Sicherungskopie vor dem Löschen erstellen",
+    "backupBeforeDeleteDesc": "Speichert einen Schnappschuss Ihrer Daten, damit Sie sie bei Bedarf später wiederherstellen können.",
+    "storageTitle": "Speicher",
+    "keepVolumes": "Alle Platten behalten",
+    "keepVolumesDesc": "Daten bleiben für zukünftige Nutzung verfügbar",
+    "deleteVolumesDesc": "Ausgewählte Platten und alle Daten entfernen",
+    "selectVolumesToDelete": "Zu löschende Platten auswählen",
+    "selectAll": "Alle auswählen",
+    "deselectAll": "Alle abwählen",
+    "volumeSelectionHint": "Markierte Platten werden endgültig gelöscht. Nicht markierte Platten werden behalten.",
+    "moveToTrash": "In den Papierkorb verschieben"
   },
   "terminal": {
     "title": "Terminal",
@@ -3981,6 +4053,29 @@
       "support": "Support",
       "roles": "Rollen",
       "database": "Datenbank"
+    },
+    "quickCreate": "Schnellerstellung aus Vorlage",
+    "presets": {
+      "customerSupport": {
+        "name": "Kundensupport",
+        "description": "Konten anzeigen, Support-Tickets und Statusbeiträge verwalten"
+      },
+      "securityAdmin": {
+        "name": "Sicherheitsadministrator",
+        "description": "Ereignisse überwachen, Benutzer verwalten und Sicherheitsprotokolle prüfen"
+      },
+      "billingAdmin": {
+        "name": "Abrechnungsadministrator",
+        "description": "Abrechnung, Konten und Wiederverkäuferbeziehungen verwalten"
+      },
+      "auditor": {
+        "name": "Prüfer",
+        "description": "Lesezugriff auf alle Plattformdaten für Compliance"
+      },
+      "platformOps": {
+        "name": "Plattformbetrieb",
+        "description": "Infrastruktur, Dienste, Speicher und Bereitstellungen verwalten"
+      }
     }
   },
   "security": {
