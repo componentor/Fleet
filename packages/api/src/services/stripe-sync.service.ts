@@ -381,7 +381,7 @@ class StripeSyncService {
       with: { prices: true },
     });
     if (!plan) throw new Error('Plan not found');
-    if (plan.isFree) throw new Error('Free plans do not require checkout');
+    if (plan.isFree || plan.priceCents === 0) throw new Error('Free plans do not require checkout');
 
     // Calculate price: use per-currency/per-cycle fixed price if available
     const config = await db.query.billingConfig.findFirst();

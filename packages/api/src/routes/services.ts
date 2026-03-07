@@ -1294,7 +1294,7 @@ serviceRoutes.openapi(createServiceRoute, (async (c: any) => {
     const plan = await db.query.billingPlans.findFirst({
       where: eq(billingPlans.id, data.planId),
     });
-    if (plan && !plan.isFree) {
+    if (plan && !plan.isFree && plan.priceCents > 0) {
       // Set service to pending_payment — deployment happens after checkout completes
       await db.update(services).set({ status: 'pending_payment', updatedAt: new Date() }).where(eq(services.id, svc.id));
 
