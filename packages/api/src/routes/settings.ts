@@ -1908,12 +1908,13 @@ settings.post('/orchestrator/install-k3s-agents', authMiddleware, requireAdmin a
 
       // Step 2: Install on all worker nodes
       await step(2, TOTAL, 'Installing k3s agent on all worker nodes...');
-      const escapedToken = joinToken.replace(/'/g, "'\\''");
-      const escapedUrl = serverUrl.replace(/'/g, "'\\''");
+      // Use double quotes — runOnAllNodesPrivileged wraps in single quotes internally
+      const escapedToken = joinToken.replace(/"/g, '\\"');
+      const escapedUrl = serverUrl.replace(/"/g, '\\"');
 
-      const result = await orchestrator.runOnAllNodes(
+      const result = await orchestrator.runOnAllNodesPrivileged(
         `if command -v k3s >/dev/null 2>&1; then echo "k3s already installed"; ` +
-        `else curl -sfL https://get.k3s.io | K3S_URL='${escapedUrl}' K3S_TOKEN='${escapedToken}' sh - 2>&1; fi`,
+        `else curl -sfL https://get.k3s.io | K3S_URL="${escapedUrl}" K3S_TOKEN="${escapedToken}" sh - 2>&1; fi`,
         { timeoutMs: 300000 },
       );
 
