@@ -21,6 +21,7 @@ import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
 import TierSelector from '@/components/TierSelector.vue'
 import { useServiceBilling, usePlanLocale, type ServiceSubscription, type ResourceConflict } from '@/composables/useServiceBilling'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 import '@xterm/xterm/css/xterm.css'
 
 const route = useRoute()
@@ -37,6 +38,7 @@ const { fetchDomains: fetchAccountDomains } = useDomainPicker()
 const volumeManager = useVolumeManager()
 const serviceBilling = useServiceBilling()
 const { planName } = usePlanLocale()
+const authStore = useAuthStore()
 
 const activeTab = ref('overview')
 const tabs = computed(() => {
@@ -320,6 +322,37 @@ const statusBarSegments = computed(() => {
     { key: '5xx', pct: ((b['5xx'] ?? 0) / total) * 100, color: '#ef4444', label: '5xx' },
   ].filter(s => s.pct > 0)
 })
+
+// ── Analytics diagnostics (admin only) ──
+const analyticsDiag = ref<any>(null)
+const analyticsDiagLoading = ref(false)
+const analyticsCollecting = ref(false)
+const analyticsCollectMsg = ref('')
+
+async function fetchAnalyticsDiag() {
+  analyticsDiagLoading.value = true
+  try {
+    analyticsDiag.value = await api.get<any>('/admin/analytics/diagnostics')
+  } catch {
+    analyticsDiag.value = null
+  } finally {
+    analyticsDiagLoading.value = false
+  }
+}
+
+async function forceAnalyticsCollect() {
+  analyticsCollecting.value = true
+  analyticsCollectMsg.value = ''
+  try {
+    await api.post<any>('/admin/analytics/collect', {})
+    analyticsCollectMsg.value = 'Collection complete — refresh analytics to see data'
+    await fetchAnalytics()
+  } catch {
+    analyticsCollectMsg.value = 'Collection failed'
+  } finally {
+    analyticsCollecting.value = false
+  }
+}
 
 // Service stats (health dashboard)
 const serviceStats = ref<any>(null)
@@ -2545,6 +2578,54 @@ onUnmounted(() => {
                   </span>
                 </div>
               </template>
+            </div>
+
+            <!-- Admin diagnostics panel (only for super admins when data is empty) -->
+            <div v-if="authStore.isSuper && analyticsData.summary.totalRequests === 0" class="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800/50 rounded-xl p-5">
+              <div class="flex items-start gap-3">
+                <Activity class="w-5 h-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-yellow-800 dark:text-yellow-300">No analytics data collected yet</p>
+                  <p class="text-xs text-yellow-700 dark:text-yellow-400 mt-1">Analytics are scraped from Traefik metrics every 5 minutes. If this service has traffic but shows no data, the pipeline may need troubleshooting.</p>
+                  <div class="flex flex-wrap items-center gap-2 mt-3">
+                    <button
+                      @click="forceAnalyticsCollect"
+                      :disabled="analyticsCollecting"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                      <CompassSpinner v-if="analyticsCollecting" size="w-3 h-3" />
+                      <Play v-else class="w-3 h-3" />
+                      {{ analyticsCollecting ? 'Collecting...' : 'Force Collection' }}
+                    </button>
+                    <button
+                      @click="fetchAnalyticsDiag"
+                      :disabled="analyticsDiagLoading"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 text-xs font-medium hover:bg-yellow-100 dark:hover:bg-yellow-900/20 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCcw :class="['w-3 h-3', analyticsDiagLoading && 'animate-spin']" />
+                      Run Diagnostics
+                    </button>
+                    <router-link
+                      to="/admin/analytics"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 text-xs font-medium hover:bg-yellow-100 dark:hover:bg-yellow-900/20 transition-colors"
+                    >
+                      Full Diagnostics
+                    </router-link>
+                    <span v-if="analyticsCollectMsg" class="text-xs text-yellow-700 dark:text-yellow-400">{{ analyticsCollectMsg }}</span>
+                  </div>
+                  <!-- Inline diagnostics result -->
+                  <div v-if="analyticsDiag" class="mt-3 text-xs space-y-1.5">
+                    <div v-for="(step, key) in analyticsDiag.steps" :key="key" class="flex items-center gap-2">
+                      <span :class="step.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" class="font-medium">{{ step.ok ? 'OK' : 'FAIL' }}</span>
+                      <span class="text-yellow-800 dark:text-yellow-300">{{ key }}</span>
+                      <span v-if="step.error" class="text-red-600 dark:text-red-400 truncate">— {{ step.error }}</span>
+                      <span v-else-if="step.count !== undefined" class="text-yellow-600 dark:text-yellow-500">({{ step.count }})</span>
+                      <span v-else-if="step.totalRows !== undefined" class="text-yellow-600 dark:text-yellow-500">({{ step.totalRows }} rows)</span>
+                      <span v-else-if="step.analyticsKeyCount !== undefined" class="text-yellow-600 dark:text-yellow-500">({{ step.analyticsKeyCount }} keys)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
 
