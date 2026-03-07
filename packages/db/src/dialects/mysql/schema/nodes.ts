@@ -4,10 +4,10 @@ import {
   varchar,
   boolean,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 
 export const nodes = mysqlTable('nodes', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -20,9 +20,9 @@ export const nodes = mysqlTable('nodes', {
   location: varchar('location', { length: 255 }),
   nfsServer: boolean('nfs_server').default(false),
   sshAllowedIps: json('ssh_allowed_ips'),
-  lastHeartbeat: timestamp('last_heartbeat'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  lastHeartbeat: datetime('last_heartbeat'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_nodes_last_heartbeat').on(table.lastHeartbeat),
 ]);

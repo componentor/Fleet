@@ -6,10 +6,10 @@ import {
   boolean,
   int,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 
 export const accounts = mysqlTable('accounts', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -24,11 +24,11 @@ export const accounts = mysqlTable('accounts', {
   currency: varchar('currency', { length: 3 }).default('USD'),
   plan: json('plan'),
   status: varchar('status', { length: 255 }).default('active'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  suspendedAt: timestamp('suspended_at'),
-  scheduledDeletionAt: timestamp('scheduled_deletion_at'),
-  deletedAt: timestamp('deleted_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
+  suspendedAt: datetime('suspended_at'),
+  scheduledDeletionAt: datetime('scheduled_deletion_at'),
+  deletedAt: datetime('deleted_at'),
 }, (table) => [
   index('idx_accounts_deleted_at').on(table.deletedAt),
   index('idx_accounts_scheduled_deletion').on(table.scheduledDeletionAt),

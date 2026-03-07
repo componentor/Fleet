@@ -6,9 +6,10 @@ import {
   int,
   boolean,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
+import { sql } from 'drizzle-orm';
 
 export const errorLog = mysqlTable('error_log', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -25,7 +26,7 @@ export const errorLog = mysqlTable('error_log', {
   resolved: boolean('resolved').default(false),
   status: varchar('status', { length: 50 }).default('open'),
   selfHealingJobId: varchar('self_healing_job_id', { length: 36 }),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 }, (table) => [
   index('idx_error_log_created_at').on(table.createdAt),
   index('idx_error_log_level').on(table.level),

@@ -3,11 +3,11 @@ import {
   mysqlTable,
   varchar,
   boolean,
-  timestamp,
+  datetime,
   uniqueIndex,
   json,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { adminRoles } from './admin-roles';
 
@@ -21,18 +21,18 @@ export const users = mysqlTable('users', {
   adminRoleId: varchar('admin_role_id', { length: 36 }).references(() => adminRoles.id, { onDelete: 'set null' }),
   emailVerified: boolean('email_verified').default(false),
   emailVerifyToken: varchar('email_verify_token', { length: 255 }),
-  emailVerifyExpires: timestamp('email_verify_expires'),
+  emailVerifyExpires: datetime('email_verify_expires'),
   passwordResetToken: varchar('password_reset_token', { length: 255 }),
-  passwordResetExpires: timestamp('password_reset_expires'),
+  passwordResetExpires: datetime('password_reset_expires'),
   twoFactorEnabled: boolean('two_factor_enabled').default(false),
   twoFactorSecret: varchar('two_factor_secret', { length: 255 }),
   twoFactorBackupCodes: json('two_factor_backup_codes').$type<string[] | null>(),
   disabledLoginMethods: json('disabled_login_methods').$type<string[]>(),
   allowedLoginRegions: json('allowed_login_regions').$type<string[] | null>(),
-  securityChangedAt: timestamp('security_changed_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  deletedAt: timestamp('deleted_at'),
+  securityChangedAt: datetime('security_changed_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
+  deletedAt: datetime('deleted_at'),
 });
 
 export const userAccounts = mysqlTable(
@@ -46,7 +46,7 @@ export const userAccounts = mysqlTable(
       .references(() => accounts.id, { onDelete: 'cascade' })
       .notNull(),
     role: varchar('role', { length: 255 }).default('member'),
-    createdAt: timestamp('created_at').defaultNow(),
+    createdAt: datetime('created_at').default(sql`(now())`),
   },
   (table) => [
     uniqueIndex('user_accounts_user_account_idx').on(
@@ -66,7 +66,7 @@ export const oauthProviders = mysqlTable(
     provider: varchar('provider', { length: 255 }).notNull(),
     providerUserId: varchar('provider_user_id', { length: 255 }).notNull(),
     accessToken: varchar('access_token', { length: 255 }),
-    createdAt: timestamp('created_at').defaultNow(),
+    createdAt: datetime('created_at').default(sql`(now())`),
   },
   (table) => [
     uniqueIndex('oauth_provider_user_idx').on(

@@ -3,10 +3,10 @@ import {
   mysqlTable,
   varchar,
   bigint,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { services } from './services';
 import { accounts } from './accounts';
 
@@ -26,7 +26,7 @@ export const serviceAnalytics = mysqlTable('service_analytics', {
   ioReadBytes: bigint('io_read_bytes', { mode: 'number' }).default(0).notNull(),
   ioWriteBytes: bigint('io_write_bytes', { mode: 'number' }).default(0).notNull(),
   period: varchar('period', { length: 10 }).default('5m').notNull(),
-  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+  recordedAt: datetime('recorded_at').default(sql`(now())`).notNull(),
 }, (table) => [
   index('idx_service_analytics_service_recorded').on(table.serviceId, table.recordedAt),
   index('idx_service_analytics_account_recorded').on(table.accountId, table.recordedAt),

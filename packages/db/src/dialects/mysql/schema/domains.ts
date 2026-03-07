@@ -5,11 +5,11 @@ import {
   boolean,
   int,
   json,
-  timestamp,
+  datetime,
   index,
   uniqueIndex,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { users } from './users';
 import { services } from './services';
@@ -23,8 +23,8 @@ export const dnsZones = mysqlTable('dns_zones', {
   verified: boolean('verified').default(false),
   verificationToken: varchar('verification_token', { length: 255 }),
   nameservers: json('nameservers').$default(() => ([])),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_dns_zones_account_id').on(table.accountId),
 ]);
@@ -39,8 +39,8 @@ export const dnsRecords = mysqlTable('dns_records', {
   content: varchar('content', { length: 16384 }).notNull(),
   ttl: int('ttl').default(3600),
   priority: int('priority'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_dns_records_zone_id').on(table.zoneId),
 ]);
@@ -54,7 +54,7 @@ export const domainRegistrars = mysqlTable('domain_registrars', {
   enabled: boolean('enabled').default(true),
   createdBy: varchar('created_by', { length: 36 })
     .references(() => users.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 });
 
 export const domainRegistrations = mysqlTable('domain_registrations', {
@@ -66,12 +66,12 @@ export const domainRegistrations = mysqlTable('domain_registrations', {
     .references(() => domainRegistrars.id, { onDelete: 'set null' }),
   domain: varchar('domain', { length: 255 }).notNull(),
   status: varchar('status', { length: 255 }).default('pending'),
-  registeredAt: timestamp('registered_at'),
-  expiresAt: timestamp('expires_at'),
+  registeredAt: datetime('registered_at'),
+  expiresAt: datetime('expires_at'),
   autoRenew: boolean('auto_renew').default(true),
   registrarDomainId: varchar('registrar_domain_id', { length: 255 }),
   stripePaymentId: varchar('stripe_payment_id', { length: 255 }),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 }, (table) => [
   index('idx_domain_registrations_account_id').on(table.accountId),
   index('idx_domain_registrations_registrar_id').on(table.registrarId),
@@ -90,8 +90,8 @@ export const domainTldPricing = mysqlTable('domain_tld_pricing', {
   sellRenewalPrice: int('sell_renewal_price').notNull(),
   enabled: boolean('enabled').default(true),
   currency: varchar('currency', { length: 3 }).notNull().default('USD'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const domainTldCurrencyPrices = mysqlTable('domain_tld_currency_prices', {
@@ -102,8 +102,8 @@ export const domainTldCurrencyPrices = mysqlTable('domain_tld_currency_prices', 
   currency: varchar('currency', { length: 3 }).notNull(),
   sellRegistrationPrice: int('sell_registration_price').notNull(),
   sellRenewalPrice: int('sell_renewal_price').notNull(),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   uniqueIndex('idx_tld_currency_prices_tld_currency').on(table.tldPricingId, table.currency),
 ]);
@@ -118,8 +118,8 @@ export const sharedDomains = mysqlTable('shared_domains', {
   maxPerAccount: int('max_per_account').notNull().default(0),
   createdBy: varchar('created_by', { length: 36 })
     .references(() => users.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const subdomainClaims = mysqlTable('subdomain_claims', {
@@ -136,8 +136,8 @@ export const subdomainClaims = mysqlTable('subdomain_claims', {
   status: varchar('status', { length: 20 }).notNull().default('active'),
   stripePaymentId: varchar('stripe_payment_id', { length: 255 }),
   stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_subdomain_claims_shared_domain_id').on(table.sharedDomainId),
   index('idx_subdomain_claims_account_id').on(table.accountId),

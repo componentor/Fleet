@@ -6,10 +6,10 @@ import {
   boolean,
   int,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { billingPlans } from './billing';
 
@@ -63,10 +63,10 @@ export const services = mysqlTable('services', {
   stackId: varchar('stack_id', { length: 36 }),
   planId: varchar('plan_id', { length: 36 })
     .references(() => billingPlans.id, { onDelete: 'set null' }),
-  stoppedAt: timestamp('stopped_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  deletedAt: timestamp('deleted_at'),
+  stoppedAt: datetime('stopped_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
+  deletedAt: datetime('deleted_at'),
 }, (table) => [
   index('idx_services_account_id').on(table.accountId),
   index('idx_services_status').on(table.status),
@@ -88,9 +88,9 @@ export const deployments = mysqlTable('deployments', {
   notes: text('notes'),
   progressStep: varchar('progress_step', { length: 50 }),
   trigger: varchar('trigger', { length: 20 }),
-  startedAt: timestamp('started_at'),
-  completedAt: timestamp('completed_at'),
-  createdAt: timestamp('created_at').defaultNow(),
+  startedAt: datetime('started_at'),
+  completedAt: datetime('completed_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
 }, (table) => [
   index('idx_deployments_service_id').on(table.serviceId),
   index('idx_deployments_status').on(table.status),

@@ -5,8 +5,9 @@ import {
   text,
   boolean,
   json,
-  timestamp,
+  datetime,
 } from 'drizzle-orm/mysql-core';
+import { sql } from 'drizzle-orm';
 import { accounts } from './accounts';
 
 export const appTemplates = mysqlTable('app_templates', {
@@ -20,6 +21,6 @@ export const appTemplates = mysqlTable('app_templates', {
   variables: json('variables').$default(() => ([])),
   isBuiltin: boolean('is_builtin').default(false),
   accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
