@@ -86,9 +86,9 @@ const idAndChildIdParamSchema = z.object({
 
 const createSubAccountSchema = z.object({
   name: z.string().min(1).max(255),
-  planId: z.string().uuid(),
-  billingCycle: z.string().min(1),
-  inheritBilling: z.boolean(),
+  planId: z.string().uuid().optional(),
+  billingCycle: z.string().min(1).optional(),
+  inheritBilling: z.boolean().optional(),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
 }).openapi('CreateSubAccountRequest');
@@ -1313,41 +1313,6 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
     return c.json({ error: 'Parent account not found' }, 404);
   }
 
-  // Look up the selected plan
-  const plan = await db.query.billingPlans.findFirst({
-    where: eq(billingPlans.id, planId),
-  });
-  if (!plan) {
-    return c.json({ error: 'Plan not found' }, 404);
-  }
-
-  // Validate billing cycle against config
-  const bConfig = await db.query.billingConfig.findFirst();
-  const allowedCycles = (bConfig?.allowedCycles ?? ['monthly', 'yearly']) as string[];
-  if (!allowedCycles.includes(billingCycle)) {
-    return c.json({ error: 'Invalid billing cycle' }, 400);
-  }
-
-  // If inherit billing, verify parent has an active subscription with stripeCustomerId
-  if (inheritBilling && !plan.isFree) {
-    if (!parent.stripeCustomerId) {
-      return c.json({ error: 'Parent account has no payment method on file. Set up billing on the parent account first.' }, 400);
-    }
-    const parentSub = await db.query.subscriptions.findFirst({
-      where: and(eq(subscriptions.accountId, parentId), eq(subscriptions.status, 'active')),
-    });
-    if (!parentSub) {
-      return c.json({ error: 'Parent account has no active subscription. Set up billing on the parent account first.' }, 400);
-    }
-  }
-
-  // If own billing for a paid plan, require redirect URLs
-  if (!inheritBilling && !plan.isFree) {
-    if (!successUrl || !cancelUrl) {
-      return c.json({ error: 'successUrl and cancelUrl are required for paid plans with own billing' }, 400);
-    }
-  }
-
   // Create the sub-account
   const parentPath = parent.path ?? parent.slug ?? '';
   const depth = (parent.depth ?? 0) + 1;
@@ -1361,10 +1326,82 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
     return c.json({ error: 'Account slug already exists' }, 409);
   }
 
+  // No plan selected — just create the account without a subscription
+  if (!planId) {
+    let account: any;
+    await safeTransaction(async (tx) => {
+      [account] = await tx.insert(accounts).values({
+        name,
+        slug: childSlug,
+        parentId,
+        path: childPath,
+        depth,
+        status: 'active',
+      }).returning();
+
+      if (!account) throw new Error('Failed to create account');
+
+      await tx.insert(userAccounts).values({
+        userId: user.userId,
+        accountId: account.id,
+        role: 'owner',
+      });
+    });
+
+    eventService.log({
+      ...eventContext(c),
+      eventType: EventTypes.ACCOUNT_CREATED,
+      description: `Created sub-account '${name}'`,
+      resourceType: 'account',
+      resourceId: account.id,
+      resourceName: name,
+    });
+
+    return c.json({ account }, 201);
+  }
+
+  // Plan-based flow — look up the selected plan
+  const plan = await db.query.billingPlans.findFirst({
+    where: eq(billingPlans.id, planId),
+  });
+  if (!plan) {
+    return c.json({ error: 'Plan not found' }, 404);
+  }
+
+  const effectiveCycle = billingCycle ?? 'monthly';
+  const effectiveInherit = inheritBilling ?? true;
+
+  // Validate billing cycle against config
+  const bConfig = await db.query.billingConfig.findFirst();
+  const allowedCycles = (bConfig?.allowedCycles ?? ['monthly', 'yearly']) as string[];
+  if (!allowedCycles.includes(effectiveCycle)) {
+    return c.json({ error: 'Invalid billing cycle' }, 400);
+  }
+
+  // If inherit billing, verify parent has an active subscription with stripeCustomerId
+  if (effectiveInherit && !plan.isFree) {
+    if (!parent.stripeCustomerId) {
+      return c.json({ error: 'Parent account has no payment method on file. Set up billing on the parent account first.' }, 400);
+    }
+    const parentSub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.accountId, parentId), eq(subscriptions.status, 'active')),
+    });
+    if (!parentSub) {
+      return c.json({ error: 'Parent account has no active subscription. Set up billing on the parent account first.' }, 400);
+    }
+  }
+
+  // If own billing for a paid plan, require redirect URLs
+  if (!effectiveInherit && !plan.isFree) {
+    if (!successUrl || !cancelUrl) {
+      return c.json({ error: 'successUrl and cancelUrl are required for paid plans with own billing' }, 400);
+    }
+  }
+
   let account: any;
   let subscription: any;
 
-  if (inheritBilling) {
+  if (effectiveInherit) {
     // Parent pays for child
     await safeTransaction(async (tx) => {
       [account] = await tx.insert(accounts).values({
@@ -1391,15 +1428,15 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
           accountId: account.id,
           planId,
           billingModel: 'fixed',
-          billingCycle,
+          billingCycle: effectiveCycle,
           status: 'active',
         }).returning();
       } else {
         // Get Stripe price ID for the cycle
         const priceIds = (plan.stripePriceIds ?? {}) as Record<string, string>;
-        const priceId = priceIds[billingCycle];
+        const priceId = priceIds[effectiveCycle];
         if (!priceId) {
-          throw new Error(`No Stripe price configured for ${billingCycle} cycle`);
+          throw new Error(`No Stripe price configured for ${effectiveCycle} cycle`);
         }
 
         // Create Stripe subscription on parent's customer
@@ -1411,7 +1448,7 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
             accountId: account.id,
             billedByAccountId: parentId,
             billingModel: 'fixed',
-            billingCycle,
+            billingCycle: effectiveCycle,
             planId,
           },
         });
@@ -1420,7 +1457,7 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
           accountId: account.id,
           planId,
           billingModel: 'fixed',
-          billingCycle,
+          billingCycle: effectiveCycle,
           stripeSubscriptionId: stripeSub.id,
           stripeCustomerId: parent.stripeCustomerId,
           billedByAccountId: parentId,
@@ -1465,7 +1502,7 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
         accountId: account.id,
         planId,
         billingModel: 'fixed',
-        billingCycle,
+        billingCycle: effectiveCycle,
         status: 'active',
       }).returning();
     }
@@ -1500,7 +1537,7 @@ accountRoutes.openapi(createSubAccountRoute, (async (c: any) => {
   const result = await stripeSyncService.createCheckoutSession({
     accountId: account.id,
     billingModel: 'fixed',
-    billingCycle,
+    billingCycle: effectiveCycle,
     planId,
     stripeCustomerId: childStripeCustomerId,
     successUrl: successUrl!,
