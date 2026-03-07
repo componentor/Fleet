@@ -3273,4 +3273,57 @@ serviceRoutes.openapi(resetNginxConfigRoute, (async (c: any) => {
   return c.json({ message: 'Nginx config reset to default' });
 }) as any);
 
+// POST /services/analyze-volumes — pre-deploy volume analysis
+const analyzeVolumesRoute = createRoute({
+  method: 'post',
+  path: '/services/analyze-volumes',
+  tags: ['Services'],
+  summary: 'Analyze what volumes a deployment will need (pre-deploy validation)',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(z.object({
+      image: z.string().optional(),
+      volumes: z.array(z.object({
+        source: z.string(),
+        target: z.string(),
+        readonly: z.boolean().optional().default(false),
+      })).optional().default([]),
+      dockerfile: z.string().nullable().optional(),
+      composeConfig: z.object({
+        name: z.string(),
+        imageTag: z.string(),
+        ports: z.array(z.any()).optional(),
+        volumes: z.array(z.object({
+          source: z.string(),
+          target: z.string(),
+          readonly: z.boolean().optional().default(false),
+        })).optional(),
+        env: z.record(z.string(), z.string()).optional(),
+      }).nullable().optional(),
+    })),
+  },
+  responses: {
+    200: jsonContent(z.any(), 'Volume analysis result'),
+    ...standardErrors,
+  },
+  middleware: [requireMember],
+});
+
+serviceRoutes.openapi(analyzeVolumesRoute, (async (c: any) => {
+  const accountId = c.get('accountId');
+  if (!accountId) return c.json({ error: 'Account context required' }, 400);
+
+  const body = c.req.valid('json');
+  const { analyzeVolumes } = await import('../services/deploy-reconciler.service.js');
+
+  const result = await analyzeVolumes({
+    accountId,
+    userVolumes: body.volumes ?? [],
+    composeConfig: body.composeConfig ?? null,
+    dockerfile: body.dockerfile ?? null,
+  });
+
+  return c.json(result);
+}) as any);
+
 export default serviceRoutes;

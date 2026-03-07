@@ -17,7 +17,7 @@ import { useServiceEvents } from '@/composables/useServiceEvents'
 import { useTerminal } from '@/composables/useTerminal'
 import { useToast } from '@/composables/useToast'
 import { useVolumeManager } from '@/composables/useVolumeManager'
-import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
+import VolumeConfigurator, { type VolumeEntry } from '@/components/VolumeConfigurator.vue'
 import TierSelector from '@/components/TierSelector.vue'
 import { useServiceBilling, usePlanLocale, type ServiceSubscription, type ResourceConflict } from '@/composables/useServiceBilling'
 import { useI18n } from 'vue-i18n'
@@ -444,7 +444,7 @@ const robotsContent = ref('')
 const robotsLoading = ref(false)
 
 // Volume settings
-const configVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
+const configVolumes = ref<VolumeEntry[]>([])
 const volumeLoading = ref(false)
 const migrationFailures = ref<Array<{ source: string; target: string; mountPath: string; error: string }>>([])
 const migrateRetryLoading = ref(false)
@@ -1437,8 +1437,10 @@ async function saveVolumes() {
   volumeLoading.value = true
   migrationFailures.value = []
   try {
-    // Filter out incomplete volume entries
-    const validVolumes = configVolumes.value.filter(v => v.source && v.target)
+    // Filter out incomplete volume entries and map to API format
+    const validVolumes = configVolumes.value
+      .filter(v => v.source && v.target)
+      .map(v => ({ source: v.source, target: v.target, readonly: v.readonly }))
     const result = await api.patch(`/services/${serviceId}`, {
       volumes: validVolumes,
     }) as any
@@ -1475,22 +1477,7 @@ async function retryVolumeMigration(failure: { source: string; target: string; m
   }
 }
 
-function addVolume() {
-  configVolumes.value.push({ source: '', target: '', readonly: false })
-}
-
-function removeVolume(index: number) {
-  configVolumes.value.splice(index, 1)
-}
-
-async function handleVolumeCreated(index: number, vol: { name: string; displayName: string; sizeGb: number }) {
-  try {
-    const created = await volumeManager.createVolume(vol.name, vol.sizeGb)
-    configVolumes.value[index]!.source = created.name
-  } catch {
-    // Toast already shown by useApi
-  }
-}
+// VolumeConfigurator handles add/remove/create internally
 
 async function saveAutoDeploy() {
   autoDeployLoading.value = true
@@ -1661,7 +1648,10 @@ async function onTabChange(tabId: string) {
     configVolumes.value = ((service.value.volumes as any[]) ?? []).map((v: any) => ({
       source: v.source ?? '',
       target: v.target ?? '',
+      sizeGb: 0,
       readonly: v.readonly ?? false,
+      mode: 'existing' as const,
+      displayName: (v.source ?? '').replace(/^vol-[a-f0-9-]+-/, ''),
     }))
     // Fetch account volumes for the dropdown
     volumeManager.fetchAll()
@@ -3705,55 +3695,14 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- DB without volume warning -->
-          <div
-            v-if="service?.image && volumeManager.isDatabaseImage(service.image) && configVolumes.length === 0"
-            class="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800"
-          >
-            <div class="flex items-start gap-2">
-              <svg class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
-              <div>
-                <p class="text-sm font-medium text-amber-800 dark:text-amber-200">{{ $t('deploy.dbWithoutVolume') }}</p>
-                <p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{{ $t('deploy.dbWithoutVolumeDesc', { path: volumeManager.suggestedVolumePath(service.image) }) }}</p>
-              </div>
-            </div>
-          </div>
-
           <!-- Volumes -->
           <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <div>
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volumes</h3>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Attach persistent storage volumes to this service</p>
-              </div>
-              <div class="flex items-center gap-3">
-                <span v-if="volumeManager.storageQuota.value" class="text-xs text-gray-400 dark:text-gray-500">
-                  {{ volumeManager.storageQuota.value.usedGb }} / {{ volumeManager.storageQuota.value.limitGb }} GB used
-                </span>
-                <button @click="addVolume" class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition-colors">
-                  + Add Volume
-                </button>
-              </div>
-            </div>
             <div class="p-6">
-              <div v-if="configVolumes.length === 0" class="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
-                No volumes attached. Click "Add Volume" to mount a storage volume.
-              </div>
-              <div v-else class="space-y-3">
-                <InlineVolumeCreator
-                  v-for="(vol, idx) in configVolumes"
-                  :key="idx"
-                  :model-value="vol"
-                  :account-volumes="volumeManager.accountVolumes.value"
-                  :storage-quota="volumeManager.storageQuota.value"
-                  :create-loading="volumeManager.createLoading.value"
-                  :suggested-target="service?.image ? volumeManager.suggestedVolumePath(service.image) ?? undefined : undefined"
-                  @update:model-value="configVolumes[idx] = $event"
-                  @volume-created="handleVolumeCreated(idx, $event)"
-                  @remove="removeVolume(idx)"
-                  @browse="browsingVolumeName = $event"
-                />
-              </div>
+              <VolumeConfigurator
+                v-model="configVolumes"
+                :service-name="service?.name"
+                :image="service?.image"
+              />
             </div>
             <!-- Migration failure banner -->
             <div v-if="migrationFailures.length > 0" class="px-6 py-4 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">

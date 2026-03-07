@@ -11,6 +11,7 @@
  *   3. Compose/Dockerfile-only volumes get auto-created as Fleet storage volumes
  *   4. Env vars are merged (user overrides compose/Dockerfile defaults)
  *   5. Ports are merged by target port
+ *   6. Quota-aware: auto-created volumes share remaining space evenly
  */
 
 import { db, storageVolumes, eq, and } from '@fleet/db';
@@ -60,6 +61,22 @@ export interface ReconcileResult {
   log: string[];
 }
 
+/** Exported for frontend volume analysis (pre-deploy validation) */
+export interface VolumeAnalysis {
+  /** Volumes the user already configured (with Fleet sources) */
+  userVolumes: VolumeMount[];
+  /** Volumes defined in compose/Dockerfile that need Fleet volumes */
+  uncoveredVolumes: Array<{ target: string; composeSource: string | null; suggestedSizeGb: number }>;
+  /** Remaining quota in GB after accounting for user volumes */
+  remainingQuotaGb: number;
+  /** Total quota limit */
+  quotaLimitGb: number;
+  /** Current usage */
+  quotaUsedGb: number;
+  /** Whether all uncovered volumes can fit within quota */
+  canFitAll: boolean;
+}
+
 // ── Dockerfile parsing ─────────────────────────────────────────────────────
 
 interface DockerfileHints {
@@ -68,7 +85,7 @@ interface DockerfileHints {
   env: Record<string, string>;
 }
 
-function parseDockerfileHints(dockerfile: string): DockerfileHints {
+export function parseDockerfileHints(dockerfile: string): DockerfileHints {
   const hints: DockerfileHints = { exposePorts: [], volumes: [], env: {} };
 
   for (const line of dockerfile.split('\n')) {
@@ -91,7 +108,6 @@ function parseDockerfileHints(dockerfile: string): DockerfileHints {
           const parsed = JSON.parse(rest) as string[];
           hints.volumes.push(...parsed);
         } catch {
-          // Fall back to splitting
           hints.volumes.push(...rest.replace(/[\[\]"',]/g, '').split(/\s+/).filter(Boolean));
         }
       } else {
@@ -104,7 +120,6 @@ function parseDockerfileHints(dockerfile: string): DockerfileHints {
       const rest = trimmed.slice(4).trim();
       const eqIdx = rest.indexOf('=');
       if (eqIdx > 0) {
-        // ENV KEY=value KEY2=value2
         const pairs = rest.match(/(\w+)=("[^"]*"|'[^']*'|\S+)/g);
         if (pairs) {
           for (const pair of pairs) {
@@ -114,7 +129,6 @@ function parseDockerfileHints(dockerfile: string): DockerfileHints {
           }
         }
       } else {
-        // Legacy: ENV KEY value
         const spaceIdx = rest.indexOf(' ');
         if (spaceIdx > 0) {
           hints.env[rest.slice(0, spaceIdx)] = rest.slice(spaceIdx + 1).trim();
@@ -126,29 +140,86 @@ function parseDockerfileHints(dockerfile: string): DockerfileHints {
   return hints;
 }
 
+// ── Volume analysis (for pre-deploy validation) ────────────────────────────
+
+/**
+ * Analyze what volumes a deployment needs without creating anything.
+ * Used by the frontend to show the volume configurator before deploy.
+ */
+export async function analyzeVolumes(input: {
+  accountId: string;
+  userVolumes: VolumeMount[];
+  composeConfig?: ComposeServiceConfig | null;
+  dockerfile?: string | null;
+}): Promise<VolumeAnalysis> {
+  const dockerHints = input.dockerfile ? parseDockerfileHints(input.dockerfile) : null;
+
+  // What the user already covers
+  const coveredTargets = new Set(input.userVolumes.map(v => v.target));
+
+  // Collect uncovered volumes from compose + Dockerfile
+  const uncovered: VolumeAnalysis['uncoveredVolumes'] = [];
+
+  for (const cv of input.composeConfig?.volumes ?? []) {
+    if (!coveredTargets.has(cv.target)) {
+      coveredTargets.add(cv.target); // prevent duplicates
+      uncovered.push({ target: cv.target, composeSource: cv.source, suggestedSizeGb: 5 });
+    }
+  }
+
+  for (const dv of dockerHints?.volumes ?? []) {
+    if (!coveredTargets.has(dv)) {
+      coveredTargets.add(dv);
+      uncovered.push({ target: dv, composeSource: null, suggestedSizeGb: 5 });
+    }
+  }
+
+  // Fetch quota
+  const [usedGb, limitGb] = await Promise.all([
+    storageManager.getAccountStorageUsage(input.accountId),
+    storageManager.getAccountStorageLimit(input.accountId),
+  ]);
+  const remainingGb = Math.max(0, limitGb - usedGb);
+
+  // Distribute remaining space evenly across uncovered volumes
+  if (uncovered.length > 0) {
+    const perVolume = Math.floor(remainingGb / uncovered.length);
+    const sizeEach = Math.max(1, Math.min(perVolume, 5)); // 1-5 GB default, capped at fair share
+    for (const u of uncovered) {
+      u.suggestedSizeGb = sizeEach;
+    }
+  }
+
+  const totalNeeded = uncovered.reduce((s, u) => s + u.suggestedSizeGb, 0);
+
+  return {
+    userVolumes: input.userVolumes,
+    uncoveredVolumes: uncovered,
+    remainingQuotaGb: remainingGb,
+    quotaLimitGb: limitGb,
+    quotaUsedGb: usedGb,
+    canFitAll: totalNeeded <= remainingGb,
+  };
+}
+
 // ── Reconciler ─────────────────────────────────────────────────────────────
 
 export async function reconcileDeployConfig(input: ReconcileInput): Promise<ReconcileResult> {
   const log: string[] = [];
   const createdVolumes: string[] = [];
 
-  // Parse Dockerfile hints
   const dockerHints = input.dockerfile ? parseDockerfileHints(input.dockerfile) : null;
 
-  // ── Reconcile volumes ──────────────────────────────────────────────────
+  // ── Reconcile volumes (quota-aware) ────────────────────────────────────
 
-  // Build a map of user volumes by mount target
   const userByTarget = new Map<string, VolumeMount>();
   for (const v of input.userVolumes) {
     userByTarget.set(v.target, v);
   }
 
-  // Collect compose volumes
   const composeVolumes: VolumeMount[] = input.composeConfig?.volumes ?? [];
-  // Collect Dockerfile VOLUME directives
   const dockerfileVolumes: string[] = dockerHints?.volumes ?? [];
 
-  // Merge: user config wins, compose fills gaps, Dockerfile fills remaining gaps
   const finalVolumes = new Map<string, VolumeMount>();
 
   // 1. User volumes always go in first
@@ -156,36 +227,71 @@ export async function reconcileDeployConfig(input: ReconcileInput): Promise<Reco
     finalVolumes.set(v.target, v);
   }
 
-  // 2. Compose volumes — only add if target not already covered by user
+  // 2. Collect all volumes that need auto-creation (compose + Dockerfile)
+  const pendingAutoCreate: Array<{ target: string; composeSource: string | null; readonly: boolean }> = [];
+
   for (const cv of composeVolumes) {
     if (finalVolumes.has(cv.target)) {
       log.push(`Volume mount ${cv.target}: using user-configured source "${finalVolumes.get(cv.target)!.source}" (overrides compose source "${cv.source}")`);
       continue;
     }
-    // Auto-create a Fleet volume for this compose-defined mount
-    const autoSource = await autoCreateVolume(input.accountId, input.serviceName, cv.target, cv.source);
-    if (autoSource) {
-      finalVolumes.set(cv.target, { source: autoSource, target: cv.target, readonly: cv.readonly });
-      createdVolumes.push(autoSource);
-      log.push(`Volume mount ${cv.target}: auto-created Fleet volume "${autoSource}" (from compose source "${cv.source}")`);
-    } else {
-      // Couldn't auto-create — use compose source as-is (named volume)
-      finalVolumes.set(cv.target, cv);
-      log.push(`Volume mount ${cv.target}: using compose source "${cv.source}" as-is`);
-    }
+    pendingAutoCreate.push({ target: cv.target, composeSource: cv.source, readonly: cv.readonly });
   }
 
-  // 3. Dockerfile VOLUME directives — only add if target not already covered
   for (const dv of dockerfileVolumes) {
-    if (finalVolumes.has(dv)) {
-      log.push(`Dockerfile VOLUME ${dv}: already covered by ${finalVolumes.get(dv)!.source}`);
+    if (finalVolumes.has(dv) || pendingAutoCreate.some(p => p.target === dv)) {
+      if (finalVolumes.has(dv)) {
+        log.push(`Dockerfile VOLUME ${dv}: already covered by ${finalVolumes.get(dv)!.source}`);
+      }
       continue;
     }
-    const autoSource = await autoCreateVolume(input.accountId, input.serviceName, dv, null);
-    if (autoSource) {
-      finalVolumes.set(dv, { source: autoSource, target: dv, readonly: false });
-      createdVolumes.push(autoSource);
-      log.push(`Dockerfile VOLUME ${dv}: auto-created Fleet volume "${autoSource}"`);
+    pendingAutoCreate.push({ target: dv, composeSource: null, readonly: false });
+  }
+
+  // 3. Quota-aware auto-creation: distribute remaining space evenly
+  if (pendingAutoCreate.length > 0) {
+    let remainingGb: number;
+    try {
+      const [usedGb, limitGb] = await Promise.all([
+        storageManager.getAccountStorageUsage(input.accountId),
+        storageManager.getAccountStorageLimit(input.accountId),
+      ]);
+      remainingGb = Math.max(0, limitGb - usedGb);
+    } catch {
+      remainingGb = 100; // fallback if quota check fails
+    }
+
+    // Share remaining space: min 1 GB, max 5 GB each, capped at fair share
+    const perVolume = pendingAutoCreate.length > 0
+      ? Math.floor(remainingGb / pendingAutoCreate.length)
+      : 0;
+    const sizeEach = Math.max(1, Math.min(perVolume, 5));
+
+    if (remainingGb < pendingAutoCreate.length) {
+      log.push(`WARNING: Only ${remainingGb} GB remaining — not enough for ${pendingAutoCreate.length} volume(s). Some volumes may fail to create.`);
+    } else {
+      log.push(`Auto-creating ${pendingAutoCreate.length} volume(s) at ${sizeEach} GB each (${remainingGb} GB available)`);
+    }
+
+    for (const pending of pendingAutoCreate) {
+      const autoSource = await autoCreateVolume(
+        input.accountId,
+        input.serviceName,
+        pending.target,
+        pending.composeSource,
+        sizeEach,
+      );
+      if (autoSource) {
+        finalVolumes.set(pending.target, { source: autoSource, target: pending.target, readonly: pending.readonly });
+        createdVolumes.push(autoSource);
+        log.push(`Volume mount ${pending.target}: auto-created "${autoSource}" (${sizeEach} GB)`);
+      } else {
+        // Use compose source as-is if auto-create failed
+        if (pending.composeSource) {
+          finalVolumes.set(pending.target, { source: pending.composeSource, target: pending.target, readonly: pending.readonly });
+          log.push(`Volume mount ${pending.target}: using compose source "${pending.composeSource}" as-is (auto-create failed)`);
+        }
+      }
     }
   }
 
@@ -193,17 +299,14 @@ export async function reconcileDeployConfig(input: ReconcileInput): Promise<Reco
 
   const finalEnv: Record<string, string> = {};
 
-  // Dockerfile ENV as base defaults
   if (dockerHints?.env) {
     Object.assign(finalEnv, dockerHints.env);
   }
 
-  // Compose env overlays Dockerfile defaults
   if (input.composeConfig?.env) {
     Object.assign(finalEnv, input.composeConfig.env);
   }
 
-  // User env wins over everything
   Object.assign(finalEnv, input.userEnv);
 
   if (Object.keys(finalEnv).length > Object.keys(input.userEnv).length) {
@@ -217,12 +320,10 @@ export async function reconcileDeployConfig(input: ReconcileInput): Promise<Reco
 
   const portByTarget = new Map<number, PortMapping>();
 
-  // User ports first
   for (const p of input.userPorts) {
     portByTarget.set(p.target, p);
   }
 
-  // Compose ports fill gaps
   if (input.composeConfig?.ports) {
     for (const cp of input.composeConfig.ports) {
       if (!portByTarget.has(cp.target)) {
@@ -232,7 +333,6 @@ export async function reconcileDeployConfig(input: ReconcileInput): Promise<Reco
     }
   }
 
-  // Dockerfile EXPOSE fills remaining gaps
   if (dockerHints?.exposePorts) {
     for (const ep of dockerHints.exposePorts) {
       if (!portByTarget.has(ep)) {
@@ -253,20 +353,14 @@ export async function reconcileDeployConfig(input: ReconcileInput): Promise<Reco
 
 // ── Auto-create Fleet storage volume ───────────────────────────────────────
 
-/**
- * Creates a Fleet storage volume for a compose/Dockerfile-defined mount point.
- * Uses a deterministic naming scheme: vol-<accountId>-<serviceName>-<sanitized-path>
- *
- * Returns the volume name if created (or already exists), null on failure.
- */
 async function autoCreateVolume(
   accountId: string,
   serviceName: string,
   mountTarget: string,
   composeSource: string | null,
+  sizeGb: number,
 ): Promise<string | null> {
   try {
-    // Derive a clean name from the mount path or compose source
     const baseName = composeSource
       ? composeSource.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').toLowerCase()
       : mountTarget.replace(/^\//, '').replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').toLowerCase();
@@ -287,9 +381,9 @@ async function autoCreateVolume(
       return volumeName;
     }
 
-    // Create the volume (default 5 GB for auto-created volumes)
-    await storageManager.createVolume(accountId, volumeName, displayName, 5, undefined, null);
-    logger.info({ volumeName, mountTarget, accountId }, 'Reconciler: auto-created volume');
+    // skipQuotaCheck: we already calculated per-volume sizing above
+    await storageManager.createVolume(accountId, volumeName, displayName, sizeGb, undefined, null, { skipQuotaCheck: true });
+    logger.info({ volumeName, mountTarget, sizeGb, accountId }, 'Reconciler: auto-created volume');
     return volumeName;
   } catch (err) {
     logger.error({ err, accountId, mountTarget }, 'Reconciler: failed to auto-create volume');

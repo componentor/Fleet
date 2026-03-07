@@ -34,7 +34,7 @@ import { useServicesStore } from '@/stores/services'
 import { useAuthStore } from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
 import { useVolumeManager } from '@/composables/useVolumeManager'
-import InlineVolumeCreator from '@/components/InlineVolumeCreator.vue'
+import VolumeConfigurator, { type VolumeEntry } from '@/components/VolumeConfigurator.vue'
 import DomainPicker from '@/components/DomainPicker.vue'
 import TierSelector from '@/components/TierSelector.vue'
 import { useServiceBilling } from '@/composables/useServiceBilling'
@@ -353,35 +353,12 @@ function copyToClipboard(text: string) {
 }
 
 // Volume state (shared across deploy methods)
-const deployVolumes = ref<Array<{ source: string; target: string; readonly: boolean }>>([])
-
-function addDeployVolume() {
-  deployVolumes.value.push({ source: '', target: '', readonly: false })
-}
-
-function removeDeployVolume(index: number) {
-  deployVolumes.value.splice(index, 1)
-}
-
-async function handleDeployVolumeCreated(index: number, vol: { name: string; displayName: string; sizeGb: number }) {
-  try {
-    const created = await volumeManager.createVolume(vol.name, vol.sizeGb)
-    deployVolumes.value[index]!.source = created.name
-  } catch {
-    // Toast already shown by useApi
-  }
-}
+const deployVolumes = ref<VolumeEntry[]>([])
 
 function buildVolumesPayload(): Array<{ source: string; target: string; readonly: boolean }> | undefined {
   const valid = deployVolumes.value.filter((v) => v.source && v.target)
-  return valid.length > 0 ? valid : undefined
+  return valid.length > 0 ? valid.map(v => ({ source: v.source, target: v.target, readonly: v.readonly })) : undefined
 }
-
-const showDbWarning = computed(() => {
-  if (!dockerImage.value) return false
-  if (!volumeManager.isDatabaseImage(dockerImage.value)) return false
-  return deployVolumes.value.filter((v) => v.source && v.target).length === 0
-})
 
 function onUploadFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
@@ -671,14 +648,7 @@ watch(
   },
 )
 
-// Auto-suggest volume for database images
-watch(dockerImage, (newImage) => {
-  if (!newImage) return
-  const path = volumeManager.suggestedVolumePath(newImage)
-  if (path && deployVolumes.value.length === 0) {
-    deployVolumes.value.push({ source: '', target: path, readonly: false })
-  }
-})
+// VolumeConfigurator handles auto-detection for database images
 
 // Handle OAuth return — token is now in URL fragment (#) to prevent server-side leakage
 onMounted(() => {
@@ -1034,56 +1004,16 @@ onMounted(() => {
           </div>
 
           <!-- Persistent Storage -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span class="inline-flex items-center gap-1.5">
-                  <HardDrive class="w-3.5 h-3.5" />
-                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
-                </span>
-              </label>
-              <button
-                type="button"
-                @click="addDeployVolume"
-                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-              >
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-if="deployVolumes.length > 0" class="space-y-2">
-              <InlineVolumeCreator
-                v-for="(vol, i) in deployVolumes"
-                :key="i"
-                :model-value="vol"
-                :account-volumes="volumeManager.accountVolumes.value"
-                :storage-quota="volumeManager.storageQuota.value"
-                :create-loading="volumeManager.createLoading.value"
-                :suggested-name="serviceName ? volumeManager.suggestedVolumeName(serviceName) : undefined"
-                @update:model-value="deployVolumes[i] = $event"
-                @volume-created="handleDeployVolumeCreated(i, $event)"
-                @remove="removeDeployVolume(i)"
-              />
-            </div>
-            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
-              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
-            </p>
-          </div>
+          <VolumeConfigurator
+            v-model="deployVolumes"
+            :service-name="serviceName"
+            :image="dockerImage"
+          />
 
           <!-- Service Tier -->
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Plan</label>
             <TierSelector v-model="selectedPlanId" />
-          </div>
-
-          <!-- DB without volume warning -->
-          <div v-if="showDbWarning" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
-            <div class="flex items-start gap-2">
-              <AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <div>
-                <p class="text-sm font-medium text-amber-800 dark:text-amber-200">{{ $t('deploy.dbWithoutVolume') || 'Database without persistent storage' }}</p>
-                <p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{{ $t('deploy.dbWithoutVolumeDesc', { path: volumeManager.suggestedVolumePath(dockerImage) }) || 'Data will be lost when the container restarts.' }}</p>
-              </div>
-            </div>
           </div>
 
           <div class="pt-2 flex justify-end">
@@ -1397,40 +1327,11 @@ onMounted(() => {
             </div>
 
             <!-- Persistent Storage -->
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <span class="inline-flex items-center gap-1.5">
-                    <HardDrive class="w-3.5 h-3.5" />
-                    {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
-                  </span>
-                </label>
-                <button
-                  type="button"
-                  @click="addDeployVolume"
-                  class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-                >
-                  <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-                </button>
-              </div>
-              <div v-if="deployVolumes.length > 0" class="space-y-2">
-                <InlineVolumeCreator
-                  v-for="(vol, i) in deployVolumes"
-                  :key="i"
-                  :model-value="vol"
-                  :account-volumes="volumeManager.accountVolumes.value"
-                  :storage-quota="volumeManager.storageQuota.value"
-                  :create-loading="volumeManager.createLoading.value"
-                  :suggested-name="ghServiceName ? volumeManager.suggestedVolumeName(ghServiceName) : undefined"
-                  @update:model-value="deployVolumes[i] = $event"
-                  @volume-created="handleDeployVolumeCreated(i, $event)"
-                  @remove="removeDeployVolume(i)"
-                />
-              </div>
-              <p v-else class="text-xs text-gray-400 dark:text-gray-500">
-                {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
-              </p>
-            </div>
+            <VolumeConfigurator
+              v-model="deployVolumes"
+              :service-name="ghServiceName"
+              compact
+            />
 
             <!-- Service Plan -->
             <div>
@@ -1562,40 +1463,11 @@ onMounted(() => {
           </div>
 
           <!-- Persistent Storage -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span class="inline-flex items-center gap-1.5">
-                  <HardDrive class="w-3.5 h-3.5" />
-                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
-                </span>
-              </label>
-              <button
-                type="button"
-                @click="addDeployVolume"
-                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-              >
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-if="deployVolumes.length > 0" class="space-y-2">
-              <InlineVolumeCreator
-                v-for="(vol, i) in deployVolumes"
-                :key="i"
-                :model-value="vol"
-                :account-volumes="volumeManager.accountVolumes.value"
-                :storage-quota="volumeManager.storageQuota.value"
-                :create-loading="volumeManager.createLoading.value"
-                :suggested-name="uploadServiceName ? volumeManager.suggestedVolumeName(uploadServiceName) : undefined"
-                @update:model-value="deployVolumes[i] = $event"
-                @volume-created="handleDeployVolumeCreated(i, $event)"
-                @remove="removeDeployVolume(i)"
-              />
-            </div>
-            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
-              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
-            </p>
-          </div>
+          <!-- Persistent Storage -->
+          <VolumeConfigurator
+            v-model="deployVolumes"
+            :service-name="uploadServiceName"
+          />
 
           <!-- Service Plan -->
           <div>
@@ -1806,36 +1678,11 @@ onMounted(() => {
           </div>
 
           <!-- Persistent Storage -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span class="inline-flex items-center gap-1.5">
-                  <HardDrive class="w-3.5 h-3.5" />
-                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
-                </span>
-              </label>
-              <button type="button" @click="addDeployVolume" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-if="deployVolumes.length > 0" class="space-y-2">
-              <InlineVolumeCreator
-                v-for="(vol, i) in deployVolumes"
-                :key="i"
-                :model-value="vol"
-                :account-volumes="volumeManager.accountVolumes.value"
-                :storage-quota="volumeManager.storageQuota.value"
-                :create-loading="volumeManager.createLoading.value"
-                :suggested-name="registryServiceName ? volumeManager.suggestedVolumeName(registryServiceName) : undefined"
-                @update:model-value="deployVolumes[i] = $event"
-                @volume-created="handleDeployVolumeCreated(i, $event)"
-                @remove="removeDeployVolume(i)"
-              />
-            </div>
-            <p v-else class="text-xs text-gray-400 dark:text-gray-500">
-              {{ $t('deploy.noVolumes') || 'No volumes. Add one to persist data across restarts.' }}
-            </p>
-          </div>
+          <VolumeConfigurator
+            v-model="deployVolumes"
+            :service-name="registryServiceName"
+            :image="registryImage"
+          />
 
           <!-- Service Plan -->
           <div>
@@ -2004,38 +1851,10 @@ onMounted(() => {
           </div>
 
           <!-- Persistent Storage -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                <span class="inline-flex items-center gap-1.5">
-                  <HardDrive class="w-3.5 h-3.5" />
-                  {{ $t('deploy.persistentStorage') || 'Persistent Storage' }}
-                </span>
-              </label>
-              <button
-                type="button"
-                @click="addDeployVolume"
-                class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-              >
-                <Plus class="w-3.5 h-3.5" /> {{ $t('deploy.add') }}
-              </button>
-            </div>
-            <div v-if="deployVolumes.length > 0" class="space-y-2">
-              <InlineVolumeCreator
-                v-for="(vol, i) in deployVolumes"
-                :key="i"
-                :model-value="vol"
-                :account-volumes="volumeManager.accountVolumes.value"
-                :storage-quota="volumeManager.storageQuota.value"
-                :create-loading="volumeManager.createLoading.value"
-                :suggested-name="gitServiceName ? volumeManager.suggestedVolumeName(gitServiceName) : undefined"
-                @update:model-value="deployVolumes[i] = $event"
-                @remove="removeDeployVolume(i)"
-                @create-volume="handleDeployVolumeCreated(i, $event)"
-              />
-            </div>
-            <p v-if="deployVolumes.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ $t('deploy.noVolumes') || 'No volumes configured' }}</p>
-          </div>
+          <VolumeConfigurator
+            v-model="deployVolumes"
+            :service-name="gitServiceName"
+          />
 
           <!-- Plan/Tier -->
           <TierSelector v-model="selectedPlanId" />
