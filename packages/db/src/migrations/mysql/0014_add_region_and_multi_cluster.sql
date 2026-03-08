@@ -13,9 +13,6 @@ ALTER TABLE `storage_volumes` ADD COLUMN `cluster_id` varchar(36);
 --> statement-breakpoint
 ALTER TABLE `storage_volumes` ADD CONSTRAINT `storage_volumes_cluster_id_fk` FOREIGN KEY (`cluster_id`) REFERENCES `storage_clusters`(`id`) ON DELETE SET NULL;
 --> statement-breakpoint
--- Add index for last_health_check on storage_nodes
-CREATE INDEX `idx_storage_nodes_last_health_check` ON `storage_nodes` (`last_health_check`);
---> statement-breakpoint
 -- Add index for deleted_at on storage_volumes
 CREATE INDEX `idx_storage_volumes_deleted_at` ON `storage_volumes` (`deleted_at`);
 --> statement-breakpoint
