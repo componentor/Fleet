@@ -1,5 +1,3 @@
-ALTER TABLE `resource_limits` ADD COLUMN `max_container_disk_mb` int;
---> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `storage_clusters` (
 	`id` varchar(36) PRIMARY KEY NOT NULL,
 	`provider` varchar(50) DEFAULT 'local' NOT NULL,
