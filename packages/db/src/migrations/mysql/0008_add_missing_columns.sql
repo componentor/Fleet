@@ -26,6 +26,4 @@ CREATE INDEX `idx_notifications_user_id` ON `notifications` (`user_id`);--> stat
 CREATE INDEX `idx_ssh_keys_user_id` ON `ssh_keys` (`user_id`);--> statement-breakpoint
 CREATE INDEX `idx_ssh_access_rules_service_id` ON `ssh_access_rules` (`service_id`);--> statement-breakpoint
 CREATE INDEX `idx_email_log_status` ON `email_log` (`status`);--> statement-breakpoint
-CREATE INDEX `idx_error_log_level` ON `error_log` (`level`);--> statement-breakpoint
-CREATE INDEX `idx_error_log_resolved` ON `error_log` (`resolved`);--> statement-breakpoint
 CREATE INDEX `idx_node_metrics_node_recorded` ON `node_metrics` (`node_id`, `recorded_at`);
