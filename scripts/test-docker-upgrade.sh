@@ -688,10 +688,13 @@ main() {
   local has_main="false"
   if prepare_main_worktree; then
     # Use current branch's Docker build config (Dockerfile, tsup, entrypoint)
-    # so State A builds with the latest build pipeline but main's source code
+    # and package.json + lockfile so State A builds with the latest build
+    # pipeline and correct dependency declarations but main's source code
     cp -f "${ROOT_DIR}/docker/Dockerfile.api" "${WORKTREE_DIR}/docker/Dockerfile.api"
     cp -f "${ROOT_DIR}/docker/tsup.docker.ts" "${WORKTREE_DIR}/docker/tsup.docker.ts"
     cp -f "${ROOT_DIR}/docker/entrypoint-api.sh" "${WORKTREE_DIR}/docker/entrypoint-api.sh"
+    cp -f "${ROOT_DIR}/packages/api/package.json" "${WORKTREE_DIR}/packages/api/package.json"
+    cp -f "${ROOT_DIR}/pnpm-lock.yaml" "${WORKTREE_DIR}/pnpm-lock.yaml"
 
     if build_api_image "$WORKTREE_DIR" "$TAG_A" "State A (main branch)"; then
       has_main="true"
