@@ -252,6 +252,7 @@ run_api() {
     $db_env \
     -e NODE_ENV=production \
     -e JWT_SECRET=test-jwt-secret-for-upgrade-simulation \
+    -e ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
     -e VALKEY_URL="redis://:${VALKEY_PASSWORD}@host.docker.internal:${VALKEY_PORT}" \
     -e PLATFORM_DOMAIN=localhost \
     -e LOG_LEVEL=warn \
