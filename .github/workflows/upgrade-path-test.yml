@@ -33,7 +33,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Rebuild better-sqlite3 native bindings
-        run: npm rebuild better-sqlite3
+        run: |
+          BS3_DIR=$(find node_modules/.pnpm -type d -name better-sqlite3 -path '*/node_modules/better-sqlite3' | head -1)
+          cd "$BS3_DIR" && npx --yes prebuild-install || npx --yes node-gyp rebuild
 
       - name: Run upgrade path test (SQLite)
         run: pnpm test:upgrade -- sqlite
