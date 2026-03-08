@@ -687,14 +687,18 @@ main() {
   # ── Build State A image (from main branch) ─────────────────────
   local has_main="false"
   if prepare_main_worktree; then
-    # Use current branch's Docker build config (Dockerfile, tsup, entrypoint)
-    # and package.json + lockfile so State A builds with the latest build
-    # pipeline and correct dependency declarations but main's source code
+    # Use current branch's Docker build config and dependency declarations
+    # so State A builds with the latest build pipeline but main's source code.
+    # All package.json files referenced by the Dockerfile must match the lockfile.
     cp -f "${ROOT_DIR}/docker/Dockerfile.api" "${WORKTREE_DIR}/docker/Dockerfile.api"
     cp -f "${ROOT_DIR}/docker/tsup.docker.ts" "${WORKTREE_DIR}/docker/tsup.docker.ts"
     cp -f "${ROOT_DIR}/docker/entrypoint-api.sh" "${WORKTREE_DIR}/docker/entrypoint-api.sh"
-    cp -f "${ROOT_DIR}/packages/api/package.json" "${WORKTREE_DIR}/packages/api/package.json"
     cp -f "${ROOT_DIR}/pnpm-lock.yaml" "${WORKTREE_DIR}/pnpm-lock.yaml"
+    cp -f "${ROOT_DIR}/package.json" "${WORKTREE_DIR}/package.json"
+    cp -f "${ROOT_DIR}/pnpm-workspace.yaml" "${WORKTREE_DIR}/pnpm-workspace.yaml"
+    cp -f "${ROOT_DIR}/packages/api/package.json" "${WORKTREE_DIR}/packages/api/package.json"
+    cp -f "${ROOT_DIR}/packages/db/package.json" "${WORKTREE_DIR}/packages/db/package.json"
+    cp -f "${ROOT_DIR}/packages/types/package.json" "${WORKTREE_DIR}/packages/types/package.json"
 
     if build_api_image "$WORKTREE_DIR" "$TAG_A" "State A (main branch)"; then
       has_main="true"

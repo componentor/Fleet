@@ -3,6 +3,7 @@ RUN corepack enable && corepack prepare pnpm@10.4.1 --activate
 WORKDIR /app
 
 FROM base AS build
+RUN apk add --no-cache python3 make g++
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/types/package.json ./packages/types/
 COPY packages/db/package.json ./packages/db/
