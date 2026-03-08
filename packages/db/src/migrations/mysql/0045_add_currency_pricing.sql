@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS `billing_plan_prices` (
   UNIQUE INDEX `idx_billing_plan_prices_plan_currency` (`plan_id`, `currency`)
 );
 
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `domain_tld_currency_prices` (
   `id` varchar(36) PRIMARY KEY,
   `tld_pricing_id` varchar(36) NOT NULL,
