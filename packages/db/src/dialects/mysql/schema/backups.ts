@@ -6,7 +6,7 @@ import {
   int,
   bigint,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
 import { relations, sql } from 'drizzle-orm';
@@ -28,8 +28,8 @@ export const backups = mysqlTable('backups', {
   storageBackend: varchar('storage_backend', { length: 255 }).default('nfs'),
   sizeBytes: bigint('size_bytes', { mode: 'number' }).default(sql`0`),
   contents: json('contents').$default(() => ([])),
-  createdAt: timestamp('created_at').defaultNow(),
-  expiresAt: timestamp('expires_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  expiresAt: datetime('expires_at'),
 }, (table) => [
   index('idx_backups_account_id').on(table.accountId),
   index('idx_backups_service_id').on(table.serviceId),
@@ -48,9 +48,9 @@ export const backupSchedules = mysqlTable('backup_schedules', {
   retentionCount: int('retention_count').default(10),
   storageBackend: varchar('storage_backend', { length: 255 }).default('nfs'),
   enabled: boolean('enabled').default(true),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  lastRunAt: timestamp('last_run_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
+  lastRunAt: datetime('last_run_at'),
 }, (table) => [
   index('idx_backup_schedules_account_id').on(table.accountId),
   index('idx_backup_schedules_service_id').on(table.serviceId),

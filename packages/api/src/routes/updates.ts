@@ -3,6 +3,7 @@ import { z } from '@hono/zod-openapi';
 import { db, platformSettings, upsert, eq } from '@fleet/db';
 import { authMiddleware, type AuthUser } from '../middleware/auth.js';
 import { updateService } from '../services/update.service.js';
+import { checkUpgradeReadiness } from '../services/upgrade-guard.service.js';
 import { runMigrations, verifyDatabase } from '@fleet/db/migrate';
 import { runSeeders } from '@fleet/db/seed';
 import { logger, logToErrorTable } from '../services/logger.js';
@@ -236,6 +237,36 @@ const dbStatusRoute = createRoute({
   responses: {
     200: jsonContent(dbStatusSchema, 'Database is reachable'),
     ...standardErrors,
+  },
+});
+
+const readinessRoute = createRoute({
+  method: 'get',
+  path: '/readiness',
+  tags: ['Updates'],
+  summary: 'Pre-flight readiness check — run BEFORE upgrading to see if all prerequisites are met',
+  security: bearerSecurity,
+  responses: {
+    200: jsonContent(z.any(), 'Readiness report'),
+    ...standardErrors,
+  },
+});
+
+const emergencyUpgradeRoute = createRoute({
+  method: 'post',
+  path: '/emergency-upgrade',
+  tags: ['Updates'],
+  summary: 'Emergency upgrade — minimal path that skips backup, checksums, infrastructure, seeders, and health checks',
+  security: bearerSecurity,
+  request: {
+    body: jsonBody(performUpdateBodySchema),
+  },
+  responses: {
+    ...standardErrors,
+    202: jsonContent(z.object({
+      message: z.string(),
+      status: z.string(),
+    }), 'Emergency upgrade started'),
   },
 });
 
@@ -576,6 +607,48 @@ updateRoutes.openapi(resetRoute, (async (c: any) => {
 updateRoutes.openapi(dbStatusRoute, (async (c: any) => {
   const result = await verifyDatabase();
   return c.json(result, result.ok ? 200 : 500);
+}) as any);
+
+// GET /readiness — pre-flight readiness check
+// Run this BEFORE starting an upgrade to see what's ready and what's not.
+// Shows: DB connectivity, Docker Swarm access, backup system, GitHub access,
+// disk space, update lock status, and all Fleet services.
+updateRoutes.openapi(readinessRoute, (async (c: any) => {
+  try {
+    const report = await checkUpgradeReadiness();
+    return c.json(report);
+  } catch (err) {
+    logger.error({ err }, 'Readiness check failed');
+    return c.json({ error: `Readiness check failed: ${String(err)}` }, 500);
+  }
+}) as any);
+
+// POST /emergency-upgrade — break-glass minimal upgrade path
+// Use ONLY when the normal upgrade keeps failing. Skips backup, checksums,
+// infrastructure files, seeders, and health checks. Just runs migrations
+// and updates Docker service images.
+updateRoutes.openapi(emergencyUpgradeRoute, (async (c: any) => {
+  const { version } = c.req.valid('json');
+
+  // Minimal pre-flight: just check DB
+  const dbCheck = await verifyDatabase();
+  if (!dbCheck.ok) {
+    return c.json({ error: `Database pre-flight failed: ${dbCheck.error}` }, 500);
+  }
+
+  updateService
+    .emergencyUpgrade(
+      version,
+      () => runMigrations(),
+    )
+    .catch((err: any) => {
+      logger.error({ err }, 'Emergency upgrade failed');
+    });
+
+  return c.json({
+    message: `Emergency upgrade to ${version} started. Poll GET /api/v1/updates/status for progress.`,
+    status: 'started',
+  }, 202);
 }) as any);
 
 export default updateRoutes;

@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import {
   mysqlTable,
   varchar,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 
 export const stacks = mysqlTable('stacks', {
@@ -16,9 +16,9 @@ export const stacks = mysqlTable('stacks', {
   name: varchar('name', { length: 255 }),
   templateSlug: varchar('template_slug', { length: 255 }),
   status: varchar('status', { length: 255 }).default('active'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  deletedAt: timestamp('deleted_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
+  deletedAt: datetime('deleted_at'),
 }, (table) => [
   index('idx_stacks_account_id').on(table.accountId),
   index('idx_stacks_deleted_at').on(table.deletedAt),

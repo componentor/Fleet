@@ -31,7 +31,11 @@
     "typecheck": "turbo run typecheck",
     "db:generate": "pnpm --filter @fleet/db generate",
     "db:migrate": "pnpm --filter @fleet/db migrate",
-    "db:push": "pnpm --filter @fleet/db push"
+    "db:push": "pnpm --filter @fleet/db push",
+    "test:upgrade": "node --experimental-strip-types --no-warnings scripts/test-upgrade-path.ts",
+    "test:docker-upgrade": "bash scripts/test-docker-upgrade.sh",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "devDependencies": {
     "turbo": "^2.8.9",

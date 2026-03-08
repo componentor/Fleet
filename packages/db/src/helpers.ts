@@ -42,18 +42,22 @@ export async function safeTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T
  * Insert a row and return the inserted record.
  * - PG + SQLite: uses native RETURNING clause
  * - MySQL: generates UUID app-side, inserts, then SELECTs back
+ *
+ * Pass a `tx` (transaction context) as the optional third argument
+ * to run inside a transaction.
  */
-export async function insertReturning(table: any, values: Record<string, unknown>): Promise<any[]> {
+export async function insertReturning(table: any, values: Record<string, unknown>, tx?: any): Promise<any[]> {
   const dialect = getDialect();
+  const d = tx ?? _db;
 
   if (dialect === 'mysql') {
     const id = values['id'] as string ?? crypto.randomUUID();
     const row = { ...values, id };
-    await _db.insert(table).values(row);
-    return _db.select().from(table).where(eq(table.id, id));
+    await d.insert(table).values(row);
+    return d.select().from(table).where(eq(table.id, id));
   }
 
-  return _db.insert(table).values(values).returning();
+  return d.insert(table).values(values).returning();
 }
 
 /**

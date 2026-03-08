@@ -3,10 +3,10 @@ import {
   mysqlTable,
   varchar,
   text,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 
 export const registryCredentials = mysqlTable('registry_credentials', {
@@ -15,8 +15,8 @@ export const registryCredentials = mysqlTable('registry_credentials', {
   registry: varchar('registry', { length: 255 }).notNull(),
   username: varchar('username', { length: 255 }).notNull(),
   password: text('password').notNull(),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_registry_credentials_account_id').on(table.accountId),
 ]);

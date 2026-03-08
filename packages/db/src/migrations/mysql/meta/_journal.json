@@ -400,6 +400,20 @@
       "when": 1777800000000,
       "tag": "0056_add_allowed_login_regions",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1778000000000,
+      "tag": "0057_add_missing_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0058_y2038_timestamp_to_datetime",
+      "breakpoints": true
     }
   ]
 }

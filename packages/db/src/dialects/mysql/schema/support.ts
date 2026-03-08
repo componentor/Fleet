@@ -4,10 +4,10 @@ import {
   varchar,
   text,
   boolean,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { users } from './users';
 import { accounts } from './accounts';
 
@@ -24,9 +24,9 @@ export const supportTickets = mysqlTable('support_tickets', {
     .notNull(),
   assignedTo: varchar('assigned_to', { length: 36 })
     .references(() => users.id, { onDelete: 'set null' }),
-  closedAt: timestamp('closed_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  closedAt: datetime('closed_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_support_tickets_account_id').on(table.accountId),
   index('idx_support_tickets_status').on(table.status),
@@ -45,8 +45,8 @@ export const supportTicketMessages = mysqlTable('support_ticket_messages', {
   body: text('body').notNull(),
   senderRole: varchar('sender_role', { length: 50 }).default('customer').notNull(),
   isInternal: boolean('is_internal').default(false),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_support_ticket_messages_ticket_id').on(table.ticketId),
 ]);

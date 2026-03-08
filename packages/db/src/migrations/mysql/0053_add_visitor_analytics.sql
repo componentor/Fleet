@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS `visitor_analytics` (
   FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE CASCADE
 );
 
+--> statement-breakpoint
 CREATE INDEX `idx_visitor_analytics_service_recorded` ON `visitor_analytics` (`service_id`, `recorded_at`);
+--> statement-breakpoint
 CREATE INDEX `idx_visitor_analytics_account_recorded` ON `visitor_analytics` (`account_id`, `recorded_at`);
+--> statement-breakpoint
 CREATE INDEX `idx_visitor_analytics_recorded_at` ON `visitor_analytics` (`recorded_at`);

@@ -7,7 +7,7 @@ import {
   int,
   bigint,
   json,
-  timestamp,
+  datetime,
   index,
   uniqueIndex,
 } from 'drizzle-orm/mysql-core';
@@ -38,8 +38,8 @@ export const billingPlans = mysqlTable('billing_plans', {
   descriptionTranslations: json('description_translations').$default(() => ({})),
   scope: varchar('scope', { length: 255 }).default('service'),
   volumeIncludedGb: int('volume_included_gb').default(0),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const subscriptions = mysqlTable('subscriptions', {
@@ -54,18 +54,18 @@ export const subscriptions = mysqlTable('subscriptions', {
   stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
   billingCycle: varchar('billing_cycle', { length: 255 }).default('monthly'),
   status: varchar('status', { length: 255 }).default('active'),
-  trialEndsAt: timestamp('trial_ends_at'),
-  currentPeriodStart: timestamp('current_period_start'),
-  currentPeriodEnd: timestamp('current_period_end'),
-  cancelledAt: timestamp('cancelled_at'),
+  trialEndsAt: datetime('trial_ends_at'),
+  currentPeriodStart: datetime('current_period_start'),
+  currentPeriodEnd: datetime('current_period_end'),
+  cancelledAt: datetime('cancelled_at'),
   serviceId: varchar('service_id', { length: 36 }),
   stackId: varchar('stack_id', { length: 36 })
     .references(() => stacks.id, { onDelete: 'set null' }),
   paymentContactName: varchar('payment_contact_name', { length: 255 }),
   paymentContactEmail: varchar('payment_contact_email', { length: 255 }),
-  pastDueSince: timestamp('past_due_since'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  pastDueSince: datetime('past_due_since'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_subscriptions_account_id').on(table.accountId),
   index('idx_subscriptions_status').on(table.status),
@@ -79,8 +79,8 @@ export const usageRecords = mysqlTable('usage_records', {
   accountId: varchar('account_id', { length: 36 })
     .references(() => accounts.id, { onDelete: 'cascade' })
     .notNull(),
-  periodStart: timestamp('period_start'),
-  periodEnd: timestamp('period_end'),
+  periodStart: datetime('period_start'),
+  periodEnd: datetime('period_end'),
   containers: int('containers').default(0),
   cpuSeconds: bigint('cpu_seconds', { mode: 'number' }).default(sql`0`),
   memoryMbHours: bigint('memory_mb_hours', { mode: 'number' }).default(sql`0`),
@@ -88,7 +88,7 @@ export const usageRecords = mysqlTable('usage_records', {
   bandwidthGb: int('bandwidth_gb').default(0),
   serviceId: varchar('service_id', { length: 36 }),
   stackId: varchar('stack_id', { length: 36 }),
-  recordedAt: timestamp('recorded_at').defaultNow(),
+  recordedAt: datetime('recorded_at').default(sql`(now())`),
 }, (table) => [
   index('idx_usage_records_account_id').on(table.accountId),
   index('idx_usage_records_service_id').on(table.serviceId),
@@ -105,7 +105,7 @@ export const pricingConfig = mysqlTable('pricing_config', {
   domainMarkupPercent: int('domain_markup_percent').default(0),
   backupStorageCentsPerGb: int('backup_storage_cents_per_gb').default(0),
   locationPricingEnabled: boolean('location_pricing_enabled').default(false),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const locationMultipliers = mysqlTable('location_multipliers', {
@@ -113,7 +113,7 @@ export const locationMultipliers = mysqlTable('location_multipliers', {
   locationKey: varchar('location_key', { length: 255 }).unique().notNull(),
   label: varchar('label', { length: 255 }).notNull(),
   multiplier: int('multiplier').default(100),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 });
 
 export const billingConfig = mysqlTable('billing_config', {
@@ -136,7 +136,7 @@ export const billingConfig = mysqlTable('billing_config', {
   deletionBillingPolicy: varchar('deletion_billing_policy', { length: 20 }).default('end_of_period').notNull(),
   maxFreeServicesPerAccount: int('max_free_services_per_account'),
   domainMaxYears: int('domain_max_years').default(10),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const resourceLimits = mysqlTable('resource_limits', {
@@ -154,7 +154,7 @@ export const resourceLimits = mysqlTable('resource_limits', {
   maxTotalMemoryMb: int('max_total_memory_mb'),
   maxBackupStorageGb: int('max_backup_storage_gb'), // Separate backup quota
   backupClusterId: varchar('backup_cluster_id', { length: 36 }), // Account-level backup cluster override
-  updatedAt: timestamp('updated_at').defaultNow(),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_resource_limits_account_id').on(table.accountId),
 ]);
@@ -182,17 +182,17 @@ export const accountBillingOverrides = mysqlTable('account_billing_overrides', {
   boostMemoryLimit: int('boost_memory_limit'),
   boostContainerLimit: int('boost_container_limit'),
   boostStorageLimit: int('boost_storage_limit'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const webhookEvents = mysqlTable('webhook_events', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   stripeEventId: varchar('stripe_event_id', { length: 255 }).unique().notNull(),
   eventType: varchar('event_type', { length: 255 }).notNull(),
-  processedAt: timestamp('processed_at').defaultNow(),
+  processedAt: datetime('processed_at').default(sql`(now())`),
   payload: json('payload').$type<Record<string, unknown> | null>(),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 });
 
 export const billingPlanPrices = mysqlTable('billing_plan_prices', {
@@ -203,8 +203,8 @@ export const billingPlanPrices = mysqlTable('billing_plan_prices', {
   currency: varchar('currency', { length: 3 }).notNull(),
   priceCents: int('price_cents').notNull(),
   cycle: varchar('cycle', { length: 20 }).notNull().default('monthly'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   uniqueIndex('idx_billing_plan_prices_plan_currency_cycle').on(table.planId, table.currency, table.cycle),
 ]);
@@ -270,7 +270,7 @@ export const resellerConfig = mysqlTable('reseller_config', {
   defaultDiscountType: varchar('default_discount_type', { length: 255 }).default('percentage'),
   defaultDiscountPercent: int('default_discount_percent').default(0),
   defaultDiscountFixed: int('default_discount_fixed').default(0),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const resellerAccounts = mysqlTable('reseller_accounts', {
@@ -297,10 +297,10 @@ export const resellerAccounts = mysqlTable('reseller_accounts', {
   brandLogoUrl: varchar('brand_logo_url', { length: 1024 }),
   brandPrimaryColor: varchar('brand_primary_color', { length: 20 }),
   brandDescription: text('brand_description'),
-  approvedAt: timestamp('approved_at'),
+  approvedAt: datetime('approved_at'),
   approvedBy: varchar('approved_by', { length: 36 }),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_reseller_accounts_status').on(table.status),
 ]);
@@ -313,9 +313,9 @@ export const resellerApplications = mysqlTable('reseller_applications', {
   message: text('message'),
   status: varchar('status', { length: 255 }).default('pending'),
   reviewedBy: varchar('reviewed_by', { length: 36 }),
-  reviewedAt: timestamp('reviewed_at'),
+  reviewedAt: datetime('reviewed_at'),
   reviewNote: text('review_note'),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 }, (table) => [
   index('idx_reseller_applications_account_id').on(table.accountId),
   index('idx_reseller_applications_status').on(table.status),

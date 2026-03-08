@@ -523,7 +523,7 @@ onUnmounted(() => {
         "
       >
         <!-- Status header -->
-        <div class="px-6 py-4 flex items-center gap-3" :class="
+        <div class="px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3" :class="
           updateState.status === 'failed' ? 'bg-red-50 dark:bg-red-900/20' :
           updateState.status === 'completed' ? 'bg-green-50 dark:bg-green-900/20' :
           'bg-blue-50 dark:bg-blue-900/20'
@@ -543,39 +543,39 @@ onUnmounted(() => {
               {{ t('updates.versionTransition') }}: {{ updateState.currentVersion }} &rarr; {{ updateState.targetVersion }}
             </p>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="flex items-center gap-2 shrink-0 flex-wrap">
             <button
               v-if="updateState.status === 'completed' || updateState.status === 'failed'"
               @click="dismissState"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
               :class="updateState.status === 'failed'
                 ? 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30'
                 : 'border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/30'"
             >
               <XCircle class="w-3.5 h-3.5" />
-              {{ t('updates.dismiss') }}
+              <span class="hidden sm:inline">{{ t('updates.dismiss') }}</span>
             </button>
             <button
               v-if="updateState.status === 'failed' || isActiveState(updateState.status)"
               @click="resetUpdateState"
               :disabled="resetting"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+              class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
               :class="updateState.status === 'failed'
                 ? 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30'
                 : 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'"
             >
               <CompassSpinner v-if="resetting" size="w-3.5 h-3.5" />
               <XCircle v-else class="w-3.5 h-3.5" />
-              {{ t('updates.reset') }}
+              <span class="hidden sm:inline">{{ t('updates.reset') }}</span>
             </button>
           </div>
         </div>
 
-        <!-- Progress stepper -->
-        <div class="px-6 py-5">
-          <div class="flex items-start justify-between">
+        <!-- Progress stepper — horizontal on desktop, vertical on mobile -->
+        <div class="px-4 sm:px-6 py-4 sm:py-5">
+          <!-- Desktop: horizontal stepper -->
+          <div class="hidden sm:flex items-start justify-between">
             <div v-for="(step, idx) in PROGRESS_STEPS" :key="step.key" class="flex flex-col items-center flex-1 relative">
-              <!-- Connecting line (before circle, except first step) -->
               <div v-if="idx > 0" class="absolute top-3.5 right-1/2 w-full h-0.5 -translate-y-1/2"
                 :class="
                   updateState.status === 'completed' ? 'bg-green-400 dark:bg-green-500' :
@@ -587,7 +587,6 @@ onUnmounted(() => {
                   'bg-gray-200 dark:bg-gray-700'
                 "
               ></div>
-              <!-- Circle -->
               <div class="relative z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border-2 transition-all duration-300"
                 :class="
                   updateState.status === 'completed' ? 'bg-green-100 dark:bg-green-900/40 border-green-400 dark:border-green-500 text-green-700 dark:text-green-300' :
@@ -604,8 +603,41 @@ onUnmounted(() => {
                 <CompassSpinner v-else-if="idx === currentStepIndex && isActiveState(updateState.status)" size="w-6 h-6" />
                 <span v-else>{{ idx + 1 }}</span>
               </div>
-              <!-- Label -->
               <span class="mt-2 text-xs text-center leading-tight px-1"
+                :class="
+                  idx === currentStepIndex ? 'text-gray-900 dark:text-white font-medium' :
+                  idx < currentStepIndex || updateState.status === 'completed' ? 'text-green-700 dark:text-green-300' :
+                  'text-gray-500 dark:text-gray-400'
+                "
+              >
+                {{ t(step.label) }}
+              </span>
+            </div>
+          </div>
+          <!-- Mobile: vertical stepper -->
+          <div class="sm:hidden space-y-1">
+            <div v-for="(step, idx) in PROGRESS_STEPS" :key="step.key" class="flex items-center gap-3">
+              <!-- Vertical line + circle -->
+              <div class="flex flex-col items-center">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold border-2 shrink-0 transition-all duration-300"
+                  :class="
+                    updateState.status === 'completed' ? 'bg-green-100 dark:bg-green-900/40 border-green-400 dark:border-green-500 text-green-700 dark:text-green-300' :
+                    updateState.status === 'rolling-back' ? 'bg-red-100 dark:bg-red-900/40 border-red-400 dark:border-red-500 text-red-700 dark:text-red-300' :
+                    updateState.status === 'failed' && step.key === updateState.failedAt ? 'bg-red-100 dark:bg-red-900/40 border-red-400 dark:border-red-500 text-red-700 dark:text-red-300' :
+                    idx < currentStepIndex ? 'bg-green-100 dark:bg-green-900/40 border-green-400 dark:border-green-500 text-green-700 dark:text-green-300' :
+                    idx === currentStepIndex ? 'bg-primary-100 dark:bg-primary-900/40 border-primary-400 dark:border-primary-500 text-primary-700 dark:text-primary-300 ring-2 ring-primary-100 dark:ring-primary-900/30' :
+                    'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400'
+                  "
+                >
+                  <Check v-if="updateState.status === 'completed' || (idx < currentStepIndex && updateState.status !== 'rolling-back' && updateState.status !== 'failed')" class="w-3 h-3" />
+                  <X v-else-if="updateState.status === 'failed' && step.key === updateState.failedAt" class="w-3 h-3" />
+                  <AlertTriangle v-else-if="updateState.status === 'rolling-back'" class="w-2.5 h-2.5" />
+                  <CompassSpinner v-else-if="idx === currentStepIndex && isActiveState(updateState.status)" size="w-5 h-5" />
+                  <span v-else class="text-[10px]">{{ idx + 1 }}</span>
+                </div>
+              </div>
+              <!-- Label -->
+              <span class="text-sm leading-tight py-1"
                 :class="
                   idx === currentStepIndex ? 'text-gray-900 dark:text-white font-medium' :
                   idx < currentStepIndex || updateState.status === 'completed' ? 'text-green-700 dark:text-green-300' :
@@ -639,10 +671,10 @@ onUnmounted(() => {
             </div>
           </button>
           <div v-if="showLogExpanded">
-            <div ref="logContainer" class="bg-gray-900 dark:bg-gray-950 px-4 py-3 max-h-80 overflow-y-auto">
-              <div v-for="(line, idx) in (updateState.log || '').split('\n')" :key="idx" class="flex gap-3 font-mono text-xs leading-relaxed">
-                <span class="text-gray-600 dark:text-gray-500 select-none w-8 text-right shrink-0">{{ idx + 1 }}</span>
-                <span class="text-gray-300 dark:text-gray-400 whitespace-pre-wrap break-words">{{ line }}</span>
+            <div ref="logContainer" class="bg-gray-900 dark:bg-gray-950 px-2 sm:px-4 py-3 max-h-80 overflow-y-auto overflow-x-hidden">
+              <div v-for="(line, idx) in (updateState.log || '').split('\n')" :key="idx" class="flex gap-2 sm:gap-3 font-mono text-[11px] sm:text-xs leading-relaxed">
+                <span class="text-gray-600 dark:text-gray-500 select-none w-6 sm:w-8 text-right shrink-0">{{ idx + 1 }}</span>
+                <span class="text-gray-300 dark:text-gray-400 whitespace-pre-wrap break-all sm:break-words min-w-0">{{ line }}</span>
               </div>
             </div>
           </div>
@@ -651,8 +683,8 @@ onUnmounted(() => {
 
       <!-- 3b. Restart waiting banner -->
       <div v-if="waitingForRestart" class="bg-white dark:bg-gray-800 rounded-xl border border-amber-300 dark:border-amber-700 shadow-sm overflow-hidden">
-        <div class="px-6 py-5 bg-amber-50 dark:bg-amber-900/10">
-          <div class="flex items-center gap-4">
+        <div class="px-4 sm:px-6 py-4 sm:py-5 bg-amber-50 dark:bg-amber-900/10">
+          <div class="flex items-center gap-3 sm:gap-4">
             <div class="shrink-0">
               <CompassSpinner color="text-amber-600 dark:text-amber-400" />
             </div>
@@ -713,7 +745,8 @@ onUnmounted(() => {
         </div>
 
         <div v-else>
-          <table class="w-full">
+          <!-- Desktop: table layout -->
+          <table class="w-full hidden sm:table">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tag</th>
@@ -750,6 +783,31 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
+          <!-- Mobile: card layout -->
+          <div class="sm:hidden divide-y divide-gray-200 dark:divide-gray-700">
+            <div v-for="release in releases" :key="release.tag" class="px-4 py-3 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ release.tag }}</span>
+                  <span v-if="release.prerelease" class="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-medium">
+                    {{ t('updates.rc') }}
+                  </span>
+                  <span v-if="release.tag === currentVersion" class="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded font-medium">
+                    {{ t('updates.current') }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ new Date(release.publishedAt).toLocaleDateString() }}</p>
+              </div>
+              <button
+                v-if="release.tag !== currentVersion"
+                @click="performUpdate(release.tag)"
+                :disabled="updating"
+                class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 disabled:opacity-50 transition-colors shrink-0"
+              >
+                {{ t('updates.install') }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

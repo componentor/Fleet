@@ -5,9 +5,10 @@ import {
   text,
   boolean,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
+import { sql } from 'drizzle-orm';
 import { accounts } from './accounts';
 
 export const emailTemplates = mysqlTable('email_templates', {
@@ -18,7 +19,7 @@ export const emailTemplates = mysqlTable('email_templates', {
   variables: json('variables').$default(() => ([])),
   accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'set null' }),
   enabled: boolean('enabled').default(true),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const emailLog = mysqlTable('email_log', {
@@ -28,9 +29,9 @@ export const emailLog = mysqlTable('email_log', {
   subject: varchar('subject', { length: 255 }).notNull(),
   accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'set null' }),
   status: varchar('status', { length: 255 }).default('queued'),
-  sentAt: timestamp('sent_at'),
+  sentAt: datetime('sent_at'),
   error: text('error'),
-  createdAt: timestamp('created_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
 }, (table) => [
   index('idx_email_log_account_id').on(table.accountId),
   index('idx_email_log_status').on(table.status),

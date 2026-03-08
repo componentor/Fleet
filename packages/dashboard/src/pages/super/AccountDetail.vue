@@ -3,10 +3,11 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowLeft, Users, Box, Shield, DollarSign, Activity, UserCog,
+  Users, Box, Shield, DollarSign, Activity, UserCog,
   Cpu, MemoryStick, HardDrive, Container, Zap, Ban, CheckCircle, Clock,
   Save, Trash2, ExternalLink,
 } from 'lucide-vue-next'
+import AdminBreadcrumb from '@/components/AdminBreadcrumb.vue'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
@@ -285,12 +286,14 @@ watch(accountId, () => fetchAccount())
 
 <template>
   <div>
+    <AdminBreadcrumb :items="[
+      { label: t('super.accounts.title'), to: '/admin/accounts' },
+      { label: account?.name ?? t('common.loading') },
+    ]" />
+
     <!-- Header -->
     <div class="flex flex-wrap items-center justify-between gap-y-3 mb-6">
       <div class="flex items-center gap-3">
-        <button @click="router.push({ name: 'super-accounts' })" class="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-          <ArrowLeft class="w-5 h-5" />
-        </button>
         <Shield class="w-7 h-7 text-primary-600 dark:text-primary-400" />
         <div>
           <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ account?.name ?? 'Account' }}</h1>

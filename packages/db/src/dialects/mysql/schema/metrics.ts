@@ -4,10 +4,10 @@ import {
   varchar,
   int,
   bigint,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { nodes } from './nodes';
 
 export const nodeMetrics = mysqlTable('node_metrics', {
@@ -23,7 +23,7 @@ export const nodeMetrics = mysqlTable('node_metrics', {
   diskUsed: bigint('disk_used', { mode: 'number' }).default(0).notNull(),
   diskFree: bigint('disk_free', { mode: 'number' }).default(0).notNull(),
   diskType: varchar('disk_type', { length: 20 }).default('unknown').notNull(),
-  recordedAt: timestamp('recorded_at').defaultNow(),
+  recordedAt: datetime('recorded_at').default(sql`(now())`),
 }, (table) => [
   index('idx_node_metrics_node_id').on(table.nodeId),
   index('idx_node_metrics_node_recorded').on(table.nodeId, table.recordedAt),

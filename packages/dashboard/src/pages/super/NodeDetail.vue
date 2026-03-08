@@ -2,11 +2,12 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Server, ArrowLeft, Cpu, MemoryStick, HardDrive, Container,
+  Server, Cpu, MemoryStick, HardDrive, Container,
   SquareTerminal, Activity, RefreshCw, MapPin, BarChart3,
   Play, Pause, Trash2, Network, Crown, Shield, X,
   KeyRound, Copy, Check, Plus, ShieldCheck, Globe
 } from 'lucide-vue-next'
+import AdminBreadcrumb from '@/components/AdminBreadcrumb.vue'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 import { useApi } from '@/composables/useApi'
 import { useTerminal } from '@/composables/useTerminal'
@@ -496,13 +497,10 @@ onUnmounted(() => {
     <template v-else-if="node">
       <!-- Header -->
       <div class="mb-6">
-        <button
-          @click="router.push({ name: 'super-nodes' })"
-          class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors mb-4"
-        >
-          <ArrowLeft class="w-4 h-4" />
-          Back to Nodes
-        </button>
+        <AdminBreadcrumb :items="[
+          { label: t('super.nodes.title'), to: '/admin/nodes' },
+          { label: node?.hostname ?? t('common.loading') },
+        ]" />
 
         <div class="flex flex-wrap items-center justify-between gap-y-3">
           <div class="flex items-center gap-3">

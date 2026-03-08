@@ -3,10 +3,10 @@ import {
   mysqlTable,
   varchar,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { users } from './users';
 
@@ -18,9 +18,9 @@ export const apiKeys = mysqlTable('api_keys', {
   keyPrefix: varchar('key_prefix', { length: 16 }).notNull(),
   keyHash: varchar('key_hash', { length: 255 }).notNull().unique(),
   scopes: json('scopes').$default(() => ['*']),
-  lastUsedAt: timestamp('last_used_at'),
-  expiresAt: timestamp('expires_at'),
-  createdAt: timestamp('created_at').defaultNow(),
+  lastUsedAt: datetime('last_used_at'),
+  expiresAt: datetime('expires_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
 }, (table) => [
   index('idx_api_keys_account_id').on(table.accountId),
 ]);

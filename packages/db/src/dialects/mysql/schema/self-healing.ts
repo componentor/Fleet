@@ -5,10 +5,10 @@ import {
   text,
   int,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { users } from './users';
 
 export const selfHealingJobs = mysqlTable('self_healing_jobs', {
@@ -29,10 +29,10 @@ export const selfHealingJobs = mysqlTable('self_healing_jobs', {
   error: text('error'),
   createdBy: varchar('created_by', { length: 36 })
     .references(() => users.id, { onDelete: 'set null' }),
-  startedAt: timestamp('started_at'),
-  completedAt: timestamp('completed_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  startedAt: datetime('started_at'),
+  completedAt: datetime('completed_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('idx_self_healing_jobs_status').on(table.status),
   index('idx_self_healing_jobs_created_by').on(table.createdBy),

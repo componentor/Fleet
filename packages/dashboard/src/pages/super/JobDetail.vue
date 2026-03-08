@@ -5,7 +5,6 @@ import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 import {
-  ArrowLeft,
   Clock,
   PlayCircle,
   CheckCircle2,
@@ -15,6 +14,7 @@ import {
   Trash2,
   FastForward,
 } from 'lucide-vue-next'
+import AdminBreadcrumb from '@/components/AdminBreadcrumb.vue'
 import CompassSpinner from '@/components/CompassSpinner.vue'
 
 const props = defineProps<{
@@ -129,16 +129,10 @@ onMounted(() => {
 
 <template>
   <div>
-    <!-- Back button and header -->
-    <div class="flex items-center gap-4 mb-6">
-      <button
-        @click="router.push({ name: 'super-jobs' })"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-      >
-        <ArrowLeft class="w-4 h-4" />
-        {{ t('jobs.backToJobs') }}
-      </button>
-    </div>
+    <AdminBreadcrumb :items="[
+      { label: t('jobs.title'), to: '/admin/jobs' },
+      { label: job ? `${props.queue} #${props.id}` : t('common.loading') },
+    ]" />
 
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-20">

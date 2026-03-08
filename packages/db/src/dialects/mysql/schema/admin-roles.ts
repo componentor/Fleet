@@ -4,9 +4,10 @@ import {
   varchar,
   boolean,
   json,
-  timestamp,
+  datetime,
   uniqueIndex,
 } from 'drizzle-orm/mysql-core';
+import { sql } from 'drizzle-orm';
 
 export const adminRoles = mysqlTable('admin_roles', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -14,8 +15,8 @@ export const adminRoles = mysqlTable('admin_roles', {
   description: varchar('description', { length: 255 }),
   permissions: json('permissions').notNull().default({}),
   isBuiltin: boolean('is_builtin').default(false),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   uniqueIndex('admin_roles_name_idx').on(table.name),
 ]);

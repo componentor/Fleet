@@ -7,10 +7,10 @@ import {
   boolean,
   text,
   json,
-  timestamp,
+  datetime,
   index,
 } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { accounts } from './accounts';
 import { nodes } from './nodes';
 
@@ -27,8 +27,8 @@ export const storageClusters = mysqlTable('storage_clusters', {
   allowBackups: boolean('allow_backups').default(true).notNull(),
   config: json('config').$default(() => ({})),
   objectConfig: json('object_config').$default(() => ({})),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 });
 
 export const storageClustersRelations = relations(storageClusters, ({ many }) => ({
@@ -46,9 +46,9 @@ export const storageNodes = mysqlTable('storage_nodes', {
   storagePathRoot: varchar('storage_path_root', { length: 255 }).default('/srv/fleet-storage'),
   capacityGb: int('capacity_gb'),
   usedGb: int('used_gb').default(0),
-  lastHealthCheck: timestamp('last_health_check'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  lastHealthCheck: datetime('last_health_check'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
 }, (table) => [
   index('storage_nodes_cluster_idx').on(table.clusterId),
   index('idx_storage_nodes_last_health_check').on(table.lastHealthCheck),
@@ -81,9 +81,9 @@ export const storageVolumes = mysqlTable('storage_volumes', {
   serviceId: varchar('service_id', { length: 36 }),
   stackId: varchar('stack_id', { length: 36 }),
   isUnbound: boolean('is_unbound').default(false),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-  deletedAt: timestamp('deleted_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
+  updatedAt: datetime('updated_at').default(sql`(now())`),
+  deletedAt: datetime('deleted_at'),
 }, (table) => [
   index('storage_volumes_account_idx').on(table.accountId),
   index('idx_storage_volumes_deleted_at').on(table.deletedAt),
@@ -112,9 +112,9 @@ export const storageMigrations = mysqlTable('storage_migrations', {
   migratedBytes: bigint('migrated_bytes', { mode: 'number' }).default(0),
   currentItem: varchar('current_item', { length: 255 }),
   log: text('log'),
-  startedAt: timestamp('started_at'),
-  completedAt: timestamp('completed_at'),
-  createdAt: timestamp('created_at').defaultNow(),
+  startedAt: datetime('started_at'),
+  completedAt: datetime('completed_at'),
+  createdAt: datetime('created_at').default(sql`(now())`),
 });
 
 export const storageMigrationsRelations = relations(storageMigrations, () => ({}));

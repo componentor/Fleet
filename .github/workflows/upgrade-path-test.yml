@@ -1,0 +1,115 @@
+name: Upgrade Path Test
+
+# This test MUST pass before merging to main.
+# It simulates A (main) → B (PR branch) → C (synthetic future)
+# across all 3 database dialects to ensure upgrades never break.
+
+on:
+  push:
+    branches: [next, main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: upgrade-path-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upgrade-path-sqlite:
+    name: "Upgrade Path — SQLite"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to access main branch
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Rebuild better-sqlite3 native bindings
+        run: |
+          BS3_DIR=$(find node_modules/.pnpm -type d -name better-sqlite3 -path '*/node_modules/better-sqlite3' | head -1)
+          cd "$BS3_DIR" && npx --yes prebuild-install || npx --yes node-gyp rebuild
+
+      - name: Run upgrade path test (SQLite)
+        run: pnpm test:upgrade -- sqlite
+
+  upgrade-path-postgres:
+    name: "Upgrade Path — PostgreSQL"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: fleet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run upgrade path test (PostgreSQL)
+        run: pnpm test:upgrade -- pg
+        env:
+          # The test script starts its own PG container via Docker,
+          # but in CI we can also use the service container.
+          CI: true
+
+  upgrade-path-mysql:
+    name: "Upgrade Path — MySQL"
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: fleet_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ptestpass --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run upgrade path test (MySQL)
+        run: pnpm test:upgrade -- mysql
+        env:
+          CI: true
