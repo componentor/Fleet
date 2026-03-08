@@ -624,6 +624,9 @@ test_dialect() {
     pass "State C: Registration endpoint reachable (HTTP ${reg_status})"
   else
     fail "State C: Registration endpoint returned server error (HTTP ${reg_status})" "$reg_body"
+    echo "--- API container logs (last 50 lines) ---"
+    docker logs "$API_CONTAINER" 2>&1 | tail -50
+    echo "--- end API logs ---"
   fi
 
   # C.6: Container stability
