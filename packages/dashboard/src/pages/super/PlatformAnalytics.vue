@@ -835,56 +835,39 @@ const deviceSegments = computed(() => {
               </div>
             </div>
 
-            <!-- Metrics Fetch (DNS) -->
+            <!-- Metrics Fetch -->
             <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
               <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">3. Metrics Fetch (DNS)</h3>
-                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.metricsFetchDns?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
-                  <CheckCircle v-if="diagnostics.steps.metricsFetchDns?.ok" class="w-3 h-3" />
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">3. Metrics Fetch</h3>
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.metricsFetch?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
+                  <CheckCircle v-if="diagnostics.steps.metricsFetch?.ok" class="w-3 h-3" />
                   <XCircle v-else class="w-3 h-3" />
-                  {{ diagnostics.steps.metricsFetchDns?.ok ? 'OK' : 'FAIL' }}
+                  {{ diagnostics.steps.metricsFetch?.ok ? 'OK' : 'FAIL' }}
                 </span>
               </div>
-              <div v-if="diagnostics.steps.metricsFetchDns?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.metricsFetchDns.error }}</div>
+              <div v-if="diagnostics.steps.metricsFetch?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.metricsFetch.error }}</div>
               <div v-else class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                <p>HTTP {{ diagnostics.steps.metricsFetchDns?.status }} — {{ ((diagnostics.steps.metricsFetchDns?.totalBytes ?? 0) / 1024).toFixed(1) }} KB</p>
-                <p>Service request metric lines: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.metricsFetchDns?.serviceRequestLines ?? 0 }}</span></p>
-                <div v-if="diagnostics.steps.metricsFetchDns?.uniqueServiceNames?.length">
+                <p>Instances scraped: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.metricsFetch?.instanceCount ?? 0 }}</span></p>
+                <p>Total data: {{ ((diagnostics.steps.metricsFetch?.totalBytes ?? 0) / 1024).toFixed(1) }} KB</p>
+                <div v-if="diagnostics.steps.metricsFetch?.uniqueServiceNames?.length">
                   <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Services in Prometheus metrics:</p>
                   <div class="flex flex-wrap gap-1">
-                    <span v-for="name in diagnostics.steps.metricsFetchDns.uniqueServiceNames" :key="name" class="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded font-mono">{{ name }}</span>
+                    <span v-for="name in diagnostics.steps.metricsFetch.uniqueServiceNames" :key="name" class="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded font-mono">{{ name }}</span>
                   </div>
                 </div>
-                <div v-if="diagnostics.steps.metricsFetchDns?.sampleLines?.length" class="mt-2">
+                <div v-if="diagnostics.steps.metricsFetch?.sampleLines?.length" class="mt-2">
                   <p class="text-xs text-gray-500 dark:text-gray-500 mb-1">Sample lines:</p>
                   <div class="text-xs font-mono bg-gray-50 dark:bg-gray-750 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto space-y-0.5">
-                    <p v-for="(line, i) in diagnostics.steps.metricsFetchDns.sampleLines" :key="i" class="text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ line }}</p>
+                    <p v-for="(line, i) in diagnostics.steps.metricsFetch.sampleLines" :key="i" class="text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ line }}</p>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <!-- Metrics Fetch (Task IPs) -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">4. Metrics Fetch (Task IPs)</h3>
-                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.metricsFetchTaskIp?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
-                  <CheckCircle v-if="diagnostics.steps.metricsFetchTaskIp?.ok" class="w-3 h-3" />
-                  <XCircle v-else class="w-3 h-3" />
-                  {{ diagnostics.steps.metricsFetchTaskIp?.ok ? 'OK' : 'FAIL' }}
-                </span>
-              </div>
-              <div v-if="diagnostics.steps.metricsFetchTaskIp?.error" class="text-sm text-red-600 dark:text-red-400">{{ diagnostics.steps.metricsFetchTaskIp.error }}</div>
-              <div v-else class="text-sm text-gray-600 dark:text-gray-400">
-                <p>Instances scraped: <span class="font-medium text-gray-900 dark:text-white">{{ diagnostics.steps.metricsFetchTaskIp?.instanceCount ?? 0 }}</span></p>
-                <p>Total data: {{ ((diagnostics.steps.metricsFetchTaskIp?.totalBytes ?? 0) / 1024).toFixed(1) }} KB</p>
               </div>
             </div>
 
             <!-- Valkey State -->
             <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
               <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">5. Valkey (Previous Values)</h3>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">4. Valkey</h3>
                 <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.valkey?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
                   <CheckCircle v-if="diagnostics.steps.valkey?.ok" class="w-3 h-3" />
                   <XCircle v-else class="w-3 h-3" />
@@ -909,7 +892,7 @@ const deviceSegments = computed(() => {
             <!-- Database -->
             <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
               <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">6. Database</h3>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">5. Database</h3>
                 <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', diagnostics.steps.database?.ok ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300']">
                   <CheckCircle v-if="diagnostics.steps.database?.ok" class="w-3 h-3" />
                   <XCircle v-else class="w-3 h-3" />

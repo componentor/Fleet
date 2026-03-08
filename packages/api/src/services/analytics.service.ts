@@ -387,40 +387,29 @@ class AnalyticsService {
       diag.steps.traefikTasks = { ok: false, error: String(err) };
     }
 
-    // Step 3: Metrics fetch via DNS (most reliable)
-    try {
-      const resp = await fetch('http://fleet_traefik:9100/metrics', {
-        signal: AbortSignal.timeout(5000),
-      });
-      const text = await resp.text();
-      const serviceMetricLines = text.split('\n').filter(l => l.startsWith('traefik_service_requests_total'));
-      const uniqueServices = new Set<string>();
-      for (const line of serviceMetricLines) {
-        const m = line.match(/service="([^"]*)"/);
-        if (m) uniqueServices.add(m[1]!);
-      }
-      diag.steps.metricsFetchDns = {
-        ok: resp.ok,
-        status: resp.status,
-        totalBytes: text.length,
-        serviceRequestLines: serviceMetricLines.length,
-        uniqueServiceNames: [...uniqueServices],
-        sampleLines: serviceMetricLines.slice(0, 5),
-      };
-    } catch (err) {
-      diag.steps.metricsFetchDns = { ok: false, error: String(err) };
-    }
-
-    // Step 4: Metrics fetch via task IPs
+    // Step 3: Metrics fetch via task IPs (primary method)
     try {
       const texts = await this.fetchTraefikMetrics();
-      diag.steps.metricsFetchTaskIp = {
+      let uniqueServices = new Set<string>();
+      let sampleLines: string[] = [];
+      if (texts.length > 0) {
+        const allText = texts.join('\n');
+        const serviceMetricLines = allText.split('\n').filter(l => l.startsWith('traefik_service_requests_total'));
+        for (const line of serviceMetricLines) {
+          const m = line.match(/service="([^"]*)"/);
+          if (m) uniqueServices.add(m[1]!);
+        }
+        sampleLines = serviceMetricLines.slice(0, 5);
+      }
+      diag.steps.metricsFetch = {
         ok: texts.length > 0,
         instanceCount: texts.length,
         totalBytes: texts.reduce((a, t) => a + t.length, 0),
+        uniqueServiceNames: [...uniqueServices],
+        sampleLines,
       };
     } catch (err) {
-      diag.steps.metricsFetchTaskIp = { ok: false, error: String(err) };
+      diag.steps.metricsFetch = { ok: false, error: String(err) };
     }
 
     // Step 5: Valkey state
@@ -532,24 +521,9 @@ class AnalyticsService {
   private async fetchTraefikMetrics(): Promise<string[]> {
     const results: string[] = [];
 
-    // Primary: DNS-based fetch (resolves to service VIP, load-balanced across tasks)
-    // This is more reliable than task IP lookups which depend on NetworksAttachments parsing
-    try {
-      const resp = await fetch('http://fleet_traefik:9100/metrics', {
-        signal: AbortSignal.timeout(5000),
-      });
-      if (resp.ok) {
-        results.push(await resp.text());
-        logger.debug('[analytics] Fetched metrics via DNS (fleet_traefik:9100)');
-      } else {
-        logger.warn({ status: resp.status }, '[analytics] DNS metrics fetch returned non-OK');
-      }
-    } catch (err) {
-      logger.warn({ err: String(err) }, '[analytics] DNS metrics fetch failed, trying task IPs');
-    }
-
-    // Secondary: try per-task IPs for additional instances (global mode = one per node)
-    // Each instance has independent counters, so we want all of them for accurate totals
+    // Fetch from all Traefik task instances directly via task IPs.
+    // Traefik runs in global mode (one per manager node), each with independent counters.
+    // We need all instances for accurate totals.
     try {
       const tasks = await orchestrator.listTasks({
         service: ['fleet_traefik'],
@@ -558,14 +532,22 @@ class AnalyticsService {
 
       for (const task of tasks) {
         const networks: any[] = (task as any).NetworksAttachments ?? [];
-        const internalNet = networks.find((n: any) =>
+        // Try fleet_internal first, then fall back to any overlay network with an IP
+        const preferredNet = networks.find((n: any) =>
           n.Network?.Spec?.Name?.includes('internal')
         );
-        const ip = internalNet?.Addresses?.[0]?.split('/')[0];
+        const anyNet = networks.find((n: any) =>
+          n.Addresses?.length > 0
+        );
+        const net = preferredNet ?? anyNet;
+        const ip = net?.Addresses?.[0]?.split('/')[0];
 
         if (!ip) {
-          logger.debug({ taskId: (task as any).ID?.substring(0, 12), networkCount: networks.length },
-            '[analytics] Task has no internal network IP');
+          logger.debug({
+            taskId: (task as any).ID?.substring(0, 12),
+            networkCount: networks.length,
+            networkNames: networks.map((n: any) => n.Network?.Spec?.Name),
+          }, '[analytics] Task has no usable network IP');
           continue;
         }
 
@@ -575,15 +557,31 @@ class AnalyticsService {
           });
           if (resp.ok) {
             results.push(await resp.text());
+            logger.debug({ ip }, '[analytics] Fetched metrics from Traefik task');
           } else {
             logger.debug({ ip, status: resp.status }, '[analytics] Task metrics returned non-OK');
           }
-        } catch {
-          logger.debug({ ip }, '[analytics] Failed to fetch metrics from Traefik task');
+        } catch (fetchErr) {
+          logger.debug({ ip, err: String(fetchErr) }, '[analytics] Failed to fetch metrics from Traefik task');
         }
       }
     } catch (err) {
-      logger.debug({ err: String(err) }, '[analytics] Task enumeration failed');
+      logger.warn({ err: String(err) }, '[analytics] Task enumeration failed');
+    }
+
+    // Fallback: try DNS-based fetch if no task IPs worked
+    if (results.length === 0) {
+      try {
+        const resp = await fetch('http://fleet_traefik:9100/metrics', {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (resp.ok) {
+          results.push(await resp.text());
+          logger.debug('[analytics] Fetched metrics via DNS fallback (fleet_traefik:9100)');
+        }
+      } catch (err) {
+        logger.debug({ err: String(err) }, '[analytics] DNS fallback also failed');
+      }
     }
 
     if (results.length === 0) {

@@ -503,10 +503,16 @@ export class UpdateService {
       const latest = candidates[0]!;
       const isNewer = this.isNewerVersion(latest.tag, this.state.currentVersion);
 
+      // Verify Docker images are actually available before marking as ready
+      let imagesReady = true;
+      if (isNewer) {
+        imagesReady = await this.checkImagesExist(latest.tag);
+      }
+
       if (statusBefore === 'idle') this.state.status = 'idle';
 
       this.cachedNotification = {
-        available: isNewer,
+        available: isNewer && imagesReady,
         current: this.state.currentVersion,
         latest,
         checkedAt: new Date().toISOString(),
@@ -1587,6 +1593,51 @@ export class UpdateService {
     }
 
     return false;
+  }
+
+  /**
+   * Check if Docker images for a release tag exist on the container registry.
+   * Only checks fleet-api (the primary image) — if it's pushed, all images are ready.
+   * Returns true if the image exists, false if not or on network error.
+   */
+  private async checkImagesExist(tag: string): Promise<boolean> {
+    const version = tag.replace(/^v/, '');
+    const image = `fleet-api`;
+    // Parse registry from IMAGE_PREFIX (e.g. "ghcr.io/componentor" → registry=ghcr.io, namespace=componentor)
+    const prefixParts = IMAGE_PREFIX.replace(/\/$/, '').split('/');
+    const registry = prefixParts[0]!; // e.g. "ghcr.io"
+    const namespace = prefixParts.slice(1).join('/'); // e.g. "componentor"
+    const repo = namespace ? `${namespace}/${image}` : image;
+
+    try {
+      const headers: Record<string, string> = {
+        Accept: 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json',
+      };
+
+      // GHCR requires a token even for public images — fetch one via the token endpoint
+      try {
+        const tokenRes = await fetch(
+          `https://${registry}/token?scope=repository:${repo}:pull`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (tokenRes.ok) {
+          const tokenData = (await tokenRes.json()) as Record<string, unknown>;
+          const token = tokenData['token'] as string;
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+        }
+      } catch {
+        // Token fetch failed — try without auth (may work for public repos)
+      }
+
+      const res = await fetch(
+        `https://${registry}/v2/${repo}/manifests/${version}`,
+        { method: 'HEAD', headers, signal: AbortSignal.timeout(10_000) },
+      );
+      return res.ok;
+    } catch {
+      // Network error — don't block the notification, assume images exist
+      return true;
+    }
   }
 
   private async fetchGitHubReleases(limit = 10): Promise<ReleaseInfo[]> {

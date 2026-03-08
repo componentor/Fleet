@@ -20,7 +20,7 @@ RUN cd /app/production && npm rebuild better-sqlite3 2>/dev/null || true
 
 FROM base AS runner
 ENV NODE_ENV=production
-RUN apk add --no-cache su-exec docker-cli docker-cli-buildx git
+RUN apk add --no-cache su-exec docker-cli docker-cli-buildx docker-cli-compose git
 RUN addgroup -S fleet && adduser -S fleet -G fleet
 COPY --from=build /app/production ./
 COPY --from=build /app/packages/api/dist ./dist
