@@ -255,6 +255,8 @@ run_api() {
     -e ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
     -e VALKEY_URL="redis://:${VALKEY_PASSWORD}@host.docker.internal:${VALKEY_PORT}" \
     -e PLATFORM_DOMAIN=localhost \
+    -e CORS_ORIGIN=http://localhost:3000 \
+    -e APP_URL=http://localhost:3000 \
     -e LOG_LEVEL=warn \
     --add-host=host.docker.internal:host-gateway \
     $extra_args \
@@ -685,6 +687,12 @@ main() {
   # ── Build State A image (from main branch) ─────────────────────
   local has_main="false"
   if prepare_main_worktree; then
+    # Use current branch's Docker build config (Dockerfile, tsup, entrypoint)
+    # so State A builds with the latest build pipeline but main's source code
+    cp -f "${ROOT_DIR}/docker/Dockerfile.api" "${WORKTREE_DIR}/docker/Dockerfile.api"
+    cp -f "${ROOT_DIR}/docker/tsup.docker.ts" "${WORKTREE_DIR}/docker/tsup.docker.ts"
+    cp -f "${ROOT_DIR}/docker/entrypoint-api.sh" "${WORKTREE_DIR}/docker/entrypoint-api.sh"
+
     if build_api_image "$WORKTREE_DIR" "$TAG_A" "State A (main branch)"; then
       has_main="true"
     else
