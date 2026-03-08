@@ -620,8 +620,7 @@ test_dialect() {
   if [ "$reg_status" -ge 200 ] && [ "$reg_status" -lt 500 ]; then
     pass "State C: Registration endpoint reachable (HTTP ${reg_status})"
   else
-    log "${YELLOW}WARN: Registration returned HTTP ${reg_status} — ${reg_body}${RESET}"
-    log "${YELLOW}(This tests app logic, not upgrade safety — treating as non-fatal)${RESET}"
+    fail "State C: Registration endpoint returned server error (HTTP ${reg_status})" "$reg_body"
   fi
 
   # C.6: Container stability

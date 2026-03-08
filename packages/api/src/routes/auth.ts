@@ -313,7 +313,7 @@ auth.openapi(registerRoute, (async (c: any) => {
   let user: any;
   let account: any;
   await safeTransaction(async (tx) => {
-    [user] = await tx.insert(users).values({
+    [user] = await insertReturning(users, {
       email,
       passwordHash,
       name,
@@ -321,21 +321,21 @@ auth.openapi(registerRoute, (async (c: any) => {
       emailVerified: false,
       emailVerifyToken: verifyToken.hashed,
       emailVerifyExpires: new Date(Date.now() + 4 * 60 * 60 * 1000), // 4h
-    }).returning();
+    }, tx);
 
     if (!user) {
       throw new Error('Failed to create user');
     }
 
     const slug = slugify(name) + '-' + user.id.slice(0, 8);
-    [account] = await tx.insert(accounts).values({
+    [account] = await insertReturning(accounts, {
       name: `${name}'s Account`,
       slug,
       parentId: null,
       path: slug,
       depth: 0,
       status: 'active',
-    }).returning();
+    }, tx);
 
     if (account) {
       await tx.insert(userAccounts).values({
@@ -1534,24 +1534,24 @@ auth.get('/github/callback', oauthRateLimit, async (c) => {
 
         // Create new user, account, and link in a single transaction (OAuth = email already verified)
         await safeTransaction(async (tx) => {
-          const [newUser] = await tx.insert(users).values({
+          const [newUser] = await insertReturning(users, {
             email,
             name: githubUser.name ?? githubUser.login,
             avatarUrl: githubUser.avatar_url,
             isSuper: false,
             emailVerified: true,
-          }).returning();
+          }, tx);
           if (!newUser) throw new Error('Failed to create user');
           user = newUser;
 
           const slug = slugify(newUser.name ?? newUser.email!) + '-' + newUser.id.slice(0, 8);
-          const [account] = await tx.insert(accounts).values({
+          const [account] = await insertReturning(accounts, {
             name: `${newUser.name ?? newUser.email}'s Account`,
             slug,
             path: slug,
             depth: 0,
             status: 'active',
-          }).returning();
+          }, tx);
 
           if (account) {
             await tx.insert(userAccounts).values({
@@ -1854,24 +1854,24 @@ auth.get('/google/callback', oauthRateLimit, async (c) => {
 
         // Create new user, account, and link in a single transaction
         await safeTransaction(async (tx) => {
-          const [newUser] = await tx.insert(users).values({
+          const [newUser] = await insertReturning(users, {
             email: googleUser.email,
             name: googleUser.name,
             avatarUrl: googleUser.picture,
             isSuper: false,
             emailVerified: true,
-          }).returning();
+          }, tx);
           if (!newUser) throw new Error('Failed to create user');
           user = newUser;
 
           const slug = slugify(newUser.name ?? newUser.email!) + '-' + newUser.id.slice(0, 8);
-          const [account] = await tx.insert(accounts).values({
+          const [account] = await insertReturning(accounts, {
             name: `${newUser.name ?? newUser.email}'s Account`,
             slug,
             path: slug,
             depth: 0,
             status: 'active',
-          }).returning();
+          }, tx);
 
           if (account) {
             await tx.insert(userAccounts).values({
