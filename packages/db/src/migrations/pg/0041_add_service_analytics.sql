@@ -9,8 +9,6 @@ CREATE TABLE IF NOT EXISTS "service_analytics" (
   "period" varchar(10) NOT NULL DEFAULT '5m',
   "recorded_at" timestamp NOT NULL DEFAULT now()
 );
---> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS "idx_service_analytics_service_recorded" ON "service_analytics" ("service_id", "recorded_at");
---> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_service_analytics_account_recorded" ON "service_analytics" ("account_id", "recorded_at");
